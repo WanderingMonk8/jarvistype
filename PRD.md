@@ -14,7 +14,7 @@ This document defines the agreed product behavior. When implementation details, 
 
 ## 2. Problem statement
 
-Conventional speech-to-text tools produce a single transcript with limited awareness of the conversation in which it will be used. They often struggle with proper nouns, domain-specific terms, punctuation, and corrections to longer drafts. They also tend to require either manual keyboard editing or a complete re-recording when recognition is inaccurate.
+Conventional speech-to-text tools produce a single transcript with limited awareness of the conversation in which it will be used. They often struggle with proper nouns, domain-specific terms, homophones, explicit spelling, punctuation, and corrections to longer drafts. They also tend to require either manual keyboard editing or a complete re-recording when recognition is inaccurate.
 
 JarvisType should make voice composition practical for complex Lumiverse messages by providing:
 
@@ -23,7 +23,9 @@ JarvisType should make voice composition practical for complex Lumiverse message
 - Conversational editing through dedicated voice instructions.
 - Precise paragraph and sentence references.
 - Visible diffs, undo, and explicit final approval.
-- Persistent support for preferred proper-noun spellings.
+- A personal spelling glossary for preferred spellings, capitalization, pronunciation cues, and references.
+- Explicit letter-by-letter spelling for difficult words.
+- Referential disambiguation for homophones and other easily confused words.
 - Reliable punctuation handling.
 
 ## 3. Product principles
@@ -46,7 +48,9 @@ Important use cases include:
 - Correcting a misheard phrase without touching the keyboard.
 - Inserting or moving content by referring to a numbered paragraph.
 - Dictating punctuation explicitly.
-- Teaching JarvisType the preferred spelling of a fictional, personal, or technical proper noun.
+- Teaching JarvisType the preferred spelling of an ordinary word, name, acronym, technical term, or fictional term.
+- Spelling a word letter by letter when its written form matters.
+- Correcting a homophone by naming the intended word and giving a familiar reference.
 
 ## 5. Scope
 
@@ -65,7 +69,10 @@ Important use cases include:
 - Undo for recorded additions and automated edits.
 - Manual keyboard editing of the working draft.
 - Automatic and explicitly dictated punctuation.
-- A persistent per-user proper-noun glossary.
+- Explicit letter-by-letter word spelling.
+- Spoken capitalization transformations during editing.
+- Referential disambiguation for names, homophones, homonyms, and near-homophones.
+- A persistent per-user personal spelling glossary.
 - Explicit confirmation before sending.
 - Direct addition of the approved message to the active Lumiverse chat.
 
@@ -106,14 +113,15 @@ The user is not required to dictate a complete message in one session.
 
 1. The user selects **Record Edit**.
 2. JarvisType records a bounded spoken instruction.
-3. JarvisType transcribes the instruction as a command, not message content.
-4. The command parser evaluates the instruction against the current draft and its stable paragraph identifiers.
-5. JarvisType produces one or more constrained edit operations.
-6. The operations are validated before application.
-7. High-confidence, unambiguous changes may be applied immediately and remain undoable.
-8. Ambiguous or low-confidence changes are displayed as proposals and require approval.
-9. The editor displays the complete updated draft and the latest diff.
-10. The user may record further message segments, issue further edit instructions, type manually, undo, or send.
+3. JarvisType transcribes the audio into an auditable instruction transcript that is never appended as message content.
+4. A semantic command interpreter evaluates the natural-language instruction against the current draft and its stable paragraph identifiers.
+5. JarvisType produces one or more constrained edit operations in the supported command schema.
+6. A deterministic target resolver and validator verify the operations against the current draft version.
+7. Only the deterministic patch engine applies validated operations to the draft.
+8. High-confidence, unambiguous changes may be applied immediately and remain undoable.
+9. Ambiguous or low-confidence changes are displayed as proposals and require approval.
+10. The editor displays the instruction transcript, interpreted operation, complete updated draft, and latest diff.
+11. The user may record further message segments, issue further edit instructions, type manually, undo, or send.
 
 ### 6.4 Confirmation and sending
 
@@ -158,7 +166,7 @@ The user is not required to dictate a complete message in one session.
 
 **FR-CTX-005:** The current unsent draft shall be supplied as separate continuity context and shall not count against the configured recent-message number.
 
-**FR-CTX-006:** The user's proper-noun glossary shall be supplied as vocabulary context independently of the recent-message number.
+**FR-CTX-006:** The user's personal spelling glossary shall be supplied as vocabulary context independently of the recent-message number.
 
 **FR-CTX-007:** Contextual correction shall preserve semantic fidelity and shall not intentionally paraphrase the transcript.
 
@@ -230,6 +238,26 @@ The user is not required to dictate a complete message in one session.
 
 **FR-EDIT-010:** An editing failure shall leave the current draft unchanged and explain why the command could not be applied.
 
+**FR-EDIT-011:** JarvisType shall use semantic natural-language interpretation as the primary editing interface. Users shall not be required to memorize or reproduce fixed stock command phrases.
+
+**FR-EDIT-012:** Speech transcription and command interpretation shall remain logically separate stages. JarvisType shall retain both the instruction transcript and the resulting structured operations, even if one underlying provider performs both tasks.
+
+**FR-EDIT-013:** The semantic command interpreter shall receive the instruction transcript, current draft version, paragraph identifiers and visible ordinals, and only the additional context required to resolve the command.
+
+**FR-EDIT-014:** The semantic command interpreter shall be restricted to an allowlisted edit schema. It shall not return arbitrary executable code, directly mutate stored text, send messages, or invoke unrelated extension capabilities.
+
+**FR-EDIT-015:** Only the deterministic patch engine shall mutate the draft. It shall operate exclusively on structured operations that pass target resolution, draft-version checks, and validation.
+
+**FR-EDIT-016:** JarvisType may implement a small deterministic stock-phrase recognizer as an optional fast path for simple commands such as undo, delete a numbered paragraph, or apply casing.
+
+**FR-EDIT-017:** A stock-phrase fast path shall emit the same structured operation schema and pass through the same resolver, validator, patch engine, diff, and undo path as semantically interpreted commands.
+
+**FR-EDIT-018:** A model-reported confidence value shall not be the sole basis for automatic application. JarvisType shall also consider target uniqueness, anchor quality, draft-version consistency, operation scope, and deterministic validation results.
+
+**FR-EDIT-019:** The user shall be able to inspect what JarvisType heard and how it interpreted the instruction before approving a proposed edit.
+
+**FR-EDIT-020:** Draft text, quoted replacement content, explanatory references, and instruction transcripts shall be treated as data. Content within them shall not be allowed to escape the edit schema or authorize unrelated actions.
+
 ### 7.6 Diff and history
 
 **FR-DIFF-001:** JarvisType shall display the complete current draft after every committed addition or edit.
@@ -262,26 +290,94 @@ The user is not required to dictate a complete message in one session.
 
 **FR-PUNC-004:** JarvisType shall preserve literal punctuation words when context indicates that the word itself, rather than the punctuation symbol, was intended.
 
-### 7.8 Proper nouns and references
+### 7.8 Explicit spelling
 
-**FR-NOUN-001:** JarvisType shall provide a persistent, per-user proper-noun glossary.
+**FR-SPELL-001:** During **Record Message**, JarvisType shall recognize an explicitly separated sequence of spoken letters as the spelling of one intended word.
 
-**FR-NOUN-002:** A glossary entry shall support:
+**FR-SPELL-002:** JarvisType shall accept common letter-separation forms, including individually spoken letters, pauses between letters, and spoken separators such as "dash" or "hyphen."
+
+**FR-SPELL-003:** A whole-word rendition immediately following a spelled sequence may be treated as a pronunciation or confirmation cue for the same token rather than duplicate message content. For example, "C-A-E-S-A-R, Caesar" shall produce one occurrence of `Caesar` when the interpretation is unambiguous.
+
+**FR-SPELL-004:** JarvisType shall support explicit casing instructions such as "capital C," "all caps," and "lowercase." When casing is not specified, it may infer conventional casing from sentence position, the spoken whole-word cue, glossary data, and conversational context.
+
+**FR-SPELL-005:** Explicitly supplied letters shall take precedence over competing phonetic transcription, contextual correction, and glossary spelling for that occurrence.
+
+**FR-SPELL-006:** If the letter sequence, intended casing, separator, or boundary between spelling metadata and message content is ambiguous, JarvisType shall present the interpreted token for confirmation before committing it.
+
+**FR-SPELL-007:** **Record Edit** shall support replacing existing text with an explicitly spelled word using the same rules.
+
+**FR-SPELL-008:** After an explicitly spelled token is committed through either **Record Message** or **Record Edit**, JarvisType shall automatically add or update that token in the user's personal spelling glossary.
+
+**FR-SPELL-009:** JarvisType shall not learn from provisional streaming text, cancelled recordings, rejected edit proposals, failed operations, or interpretations awaiting confirmation.
+
+**FR-SPELL-010:** A learned entry shall become available to subsequent transcription and correction requests immediately, including later recordings in the same draft session.
+
+**FR-SPELL-011:** Automatic learning shall upsert an existing matching entry rather than create a duplicate. JarvisType may update usage count, last-used time, and newly observed spoken or recognized variants.
+
+**FR-SPELL-012:** Automatic learning shall preserve the committed canonical spelling, capitalization, and hyphenation. A trailing whole-word rendition or explicit reference may be stored as a pronunciation or disambiguation cue when present.
+
+**FR-SPELL-013:** If an automatically learned spelling conflicts with an existing canonical entry or alias, JarvisType shall not silently overwrite either entry. It shall ask the user whether to keep both, replace the existing mapping, or cancel the new glossary change.
+
+**FR-SPELL-014:** After automatic learning, JarvisType shall display a reversible notification such as `Added "Caesar" to your glossary — Undo`.
+
+**FR-SPELL-015:** Undoing an automatic glossary update shall restore the glossary to its prior state without undoing the associated draft content.
+
+### 7.9 Capitalization editing commands
+
+**FR-CASE-001:** **Record Edit** shall recognize explicit capitalization commands that target a uniquely identifiable word, phrase, sentence, paragraph, or the complete draft.
+
+**FR-CASE-002:** The initial capitalization command set shall include:
+
+- **Capitalize**: uppercase the first alphabetic character of the targeted word while preserving the remaining characters unless the user supplies an explicit replacement.
+- **All caps** or **uppercase**: convert all cased letters in the target to uppercase.
+- **Lowercase**: convert all cased letters in the target to lowercase.
+
+**FR-CASE-003:** JarvisType shall accept natural variants such as "make it all caps," "put that in uppercase," "change this to lower case," and "capitalize Caesar."
+
+**FR-CASE-004:** Capitalization commands shall use the same targeting methods as other editing commands, including paragraph number, sentence position, exact quoted text, approximate unique text, and semantic reference.
+
+**FR-CASE-005:** A capitalization transformation shall preserve the target's punctuation, whitespace, paragraph position, and non-letter characters.
+
+**FR-CASE-006:** JarvisType shall show the capitalization change in the latest diff and make it undoable.
+
+**FR-CASE-007:** If the target or requested capitalization scope is ambiguous, JarvisType shall present the proposed interpretation for confirmation and leave the draft unchanged until confirmed.
+
+**FR-CASE-008:** Explicitly dictated casing and explicit capitalization edit commands shall take precedence over automatic casing inferred from context or a glossary for that occurrence.
+
+### 7.10 Personal spelling glossary and referential disambiguation
+
+**FR-GLOSS-001:** JarvisType shall provide a persistent, per-user personal spelling glossary for ordinary words, proper nouns, acronyms, technical terms, fictional terms, and other user-defined vocabulary.
+
+**FR-GLOSS-002:** A glossary entry shall support:
 
 - Canonical spelling.
 - Preferred capitalization and hyphenation.
-- Common phonetic or transcription variants.
+- Spoken, phonetic, or transcription variants when available.
 - Optional explanatory hint or reference.
+- Entry source, such as explicit spelling or manual creation.
+- Usage metadata sufficient for deduplication and maintenance.
 
-**FR-NOUN-003:** JarvisType shall use glossary entries during transcription and contextual correction.
+**FR-GLOSS-003:** JarvisType shall use glossary entries during transcription and contextual correction.
 
-**FR-NOUN-004:** JarvisType shall support explanatory speech that disambiguates a term without necessarily inserting the explanation into the final message.
+**FR-GLOSS-004:** JarvisType shall support explanatory speech that disambiguates a term without necessarily inserting the explanation into the final message.
 
-**FR-NOUN-005:** When it is unclear whether an explanation is intended content or metadata, JarvisType shall request confirmation rather than silently remove it.
+**FR-GLOSS-005:** When it is unclear whether an explanation is intended content or metadata, JarvisType shall request confirmation rather than silently remove it.
 
-**FR-NOUN-006:** The user shall be able to add, edit, and delete glossary entries.
+**FR-GLOSS-006:** The user shall be able to inspect, add, edit, delete, and undo automatic changes to glossary entries.
 
-### 7.9 Sending
+**FR-REF-001:** JarvisType shall support one-time explanatory references for any intended word or phrase, not only proper nouns.
+
+**FR-REF-002:** Referential disambiguation shall support homophones, homonyms, near-homophones, names, and other phonetically confusable terms.
+
+**FR-REF-003:** During **Record Edit**, the user may identify the existing phrase, state the intended replacement, and provide a reference. For example: "In the sentence where I say 'can the worker,' I meant 'Ken the worker,' as in Barbie and Ken."
+
+**FR-REF-004:** When the command is unambiguous, JarvisType shall apply only the intended lexical replacement. The explanatory reference shall not be inserted into the draft unless the user explicitly asks to include it.
+
+**FR-REF-005:** A one-time reference shall remain session-scoped by default. JarvisType shall persist it in the user's glossary only after an explicit request to remember it.
+
+**FR-REF-006:** If the reference does not resolve the intended spelling or target uniquely, JarvisType shall present the proposed interpretation for confirmation and leave the draft unchanged until confirmed.
+
+### 7.11 Sending
 
 **FR-SEND-001:** JarvisType shall not add any draft content to the Lumiverse chat before explicit user confirmation.
 
@@ -299,18 +395,42 @@ The user is not required to dictate a complete message in one session.
 
 ## 8. Editing command model
 
-The exact schema may change during implementation, but the editing boundary must remain structured. A representative operation is:
+The editing subsystem uses the following logical pipeline:
+
+```text
+Editing audio
+  -> Speech transcription
+  -> Auditable instruction transcript
+  -> Semantic command interpreter
+  -> Allowlisted structured operations
+  -> Deterministic target resolver
+  -> Draft-version and operation validator
+  -> Deterministic patch engine
+  -> Updated draft, diff, and undo record
+```
+
+A stock-phrase recognizer may bypass the semantic interpreter for a small set of exact, simple commands, but it must rejoin the pipeline at the structured-operation boundary. It must not maintain a separate text-mutation path.
+
+The semantic interpreter supplies flexibility in how users phrase commands. The structured schema, resolver, validator, and patch engine supply predictability and safety. The model is never the component that directly changes draft text.
+
+The exact schema may change during implementation, but this editing boundary must remain structured. A representative interpretation is:
 
 ```json
 {
-  "operation": "replace",
-  "target": {
-    "paragraphId": "paragraph-2",
-    "paragraphNumberAtRequest": 2,
-    "exactText": "couging up a stomp"
-  },
-  "replacement": "coughing up a storm",
-  "confidence": 0.97
+  "instructionTranscript": "In the second paragraph, where I talk about hiking, change coughing up a stomp to coughing up a storm.",
+  "draftVersion": 7,
+  "operations": [
+    {
+      "operation": "replace",
+      "target": {
+        "paragraphId": "paragraph-2",
+        "paragraphNumberAtRequest": 2,
+        "semanticReference": "the passage about hiking",
+        "exactText": "coughing up a stomp"
+      },
+      "replacement": "coughing up a storm"
+    }
+  ]
 }
 ```
 
@@ -320,9 +440,11 @@ Validation must confirm that:
 - The paragraph still exists.
 - The target text or range resolves uniquely.
 - The replacement does not affect text outside the requested range.
+- Every operation belongs to the allowlisted command schema.
+- Multiple operations are independently valid and have no unintended overlap.
 - The operation produces a valid new draft.
 
-The original draft version, parsed operation, resulting draft version, and diff should be retained in transient history for undo and inspection.
+Model confidence may be recorded as diagnostic input, but it cannot substitute for these checks. The original instruction transcript, draft version, interpreted operations, validation result, resulting draft version, and diff should be retained in transient history for undo and inspection.
 
 ## 9. Draft representation
 
@@ -364,6 +486,7 @@ The primary surface must contain:
 - **Record Edit** and recording-stop/cancel controls.
 - A visible recording and processing indicator.
 - A provisional transcript area or provisional styling.
+- The latest editing-instruction transcript and its interpreted operation.
 - A latest-change diff.
 - Approve/reject controls for proposed edits.
 - Undo for committed voice additions and automated edits.
@@ -387,7 +510,9 @@ Ready
 Ready
   -> Recording Edit
   -> Transcribing Instruction
-  -> Parsing Edit
+  -> Interpreting Intent
+  -> Resolving Targets
+  -> Validating Patch
   -> Applying Edit | Awaiting Edit Approval
   -> Ready
 
@@ -410,7 +535,7 @@ JarvisType is expected to use the following Spindle capabilities:
 - `spindle.chat.getMessages(chatId)` for recent context.
 - `spindle.chat.appendMessage(...)` for confirmed submission.
 - Secure Enclave for external API credentials.
-- User-scoped storage for settings and the proper-noun glossary.
+- User-scoped storage for settings and the personal spelling glossary.
 - Lumiverse generation APIs if the configured Lumiverse LLM performs edit parsing.
 - The CORS proxy if transcription or editing uses an external compatible endpoint.
 
@@ -441,7 +566,7 @@ JarvisType shall degrade with a clear explanation when a required permission is 
 
 **PRIV-007:** The extension shall not log raw audio, complete message context, API keys, or full private drafts in normal operational logs.
 
-**PRIV-008:** Proper-noun glossary entries and preferences shall be isolated per user.
+**PRIV-008:** Personal spelling glossary entries and preferences shall be isolated per user.
 
 ## 14. Reliability and error handling
 
@@ -454,7 +579,9 @@ JarvisType must handle:
 - Upload failure or timeout.
 - Transcription-provider failure.
 - Missing partial-result support.
-- Edit-parser failure or malformed operations.
+- Speech-transcription failure for an editing instruction.
+- Semantic-interpreter failure or malformed operations.
+- A stock-phrase fast path that cannot resolve its target.
 - An edit target that changed before application.
 - Ambiguous paragraph or sentence references.
 - Active-chat changes during composition.
@@ -497,7 +624,10 @@ Initial product evaluation should measure:
 - Undo rate after automatically applied edits.
 - Transcription and edit-processing latency.
 - Send failure and duplicate-send rates.
-- Proper-noun recognition improvement after a glossary entry is added.
+- Recognition improvement after a personal spelling glossary entry is added.
+- Automatic glossary-learning success and conflict rates.
+- First-attempt accuracy for explicitly spelled words.
+- First-attempt success rate for referential disambiguation edits.
 - Draft abandonment rate.
 
 No analytics collection is implied by this section; any telemetry implementation must be separately approved and disclosed.
@@ -535,14 +665,41 @@ No analytics collection is implied by this section; any telemetry implementation
 4. The UI presents the possible targets or asks the user to refine the instruction.
 5. The draft remains unchanged until the ambiguity is resolved.
 
-### Scenario E: Proper noun
+### Scenario E: Personal glossary recognition
 
 1. The glossary contains `Pip-Boy` with the hint “wrist-mounted device from Fallout.”
 2. The user dictates a sentence containing a pronunciation recognized initially as “pip boy.”
 3. JarvisType uses the glossary to produce `Pip-Boy` in the committed segment.
 4. The surrounding sentence is otherwise preserved.
 
-### Scenario F: Safe sending
+### Scenario F: Explicitly spelled word
+
+1. The user dictates: "We named him C-A-E-S-A-R, Caesar."
+2. JarvisType recognizes the separated letters as the authoritative spelling of one word.
+3. The trailing whole-word rendition is treated as a pronunciation cue rather than duplicate content.
+4. The committed sentence reads: "We named him Caesar."
+5. JarvisType automatically upserts `Caesar` in the user's personal spelling glossary.
+6. JarvisType displays a notification that lets the user undo the glossary update independently of the draft addition.
+7. A later recording can use the new glossary entry immediately.
+
+### Scenario G: Referential homophone correction
+
+1. The draft contains the phrase `can the worker`.
+2. The user records an edit: "In the sentence where I say 'can the worker,' I meant 'Ken the worker,' as in Barbie and Ken."
+3. JarvisType uses the reference to resolve `Ken` as the intended spelling.
+4. Only `can the worker` is replaced with `Ken the worker`.
+5. The words `as in Barbie and Ken` are not inserted into the draft.
+6. The correction remains session-scoped unless the user explicitly asks JarvisType to remember it.
+
+### Scenario H: Capitalization edit
+
+1. The draft contains `We contacted nasa after the launch.`
+2. The user records an edit: "In the first sentence, make NASA all caps."
+3. JarvisType uniquely resolves `nasa` as the target and transforms it to `NASA`.
+4. The resulting sentence reads `We contacted NASA after the launch.`
+5. The latest diff shows only the casing change, and the operation can be undone.
+
+### Scenario I: Safe sending
 
 1. The user has an unsent numbered draft and visible diff.
 2. No message appears in Lumiverse before **Confirm & Send** is selected.

@@ -24,17 +24,20 @@ Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `LOCAL-PENDI
 
 ## Probe scope and safety
 
-Probe version: `0.1.0`
+Current probe version: `0.2.0`
 
-The first remote probe:
+The remote probe:
 
 - Requests no gated permissions.
 - Does not read or modify chats.
 - Does not call an STT or LLM provider.
 - Retains a recorded sample only in frontend memory for the current page lifecycle.
-- Uploads only after a second explicit user action.
+- Uploads recorded audio only after a second explicit user action; the synthetic lifecycle upload also requires its own explicit button action.
 - Computes a non-cryptographic integrity hash solely to compare transferred bytes.
 - Explicitly deletes every completed staged upload after backend verification.
+- Stores at most four sanitized teardown receipts in the current browser tab's `sessionStorage`; receipts contain only timestamps and cleanup booleans.
+- Provides a paced 2 MiB synthetic upload for reload/disable testing. Completed test uploads are verified and deleted; interrupted partial uploads rely on the documented 30-minute inactivity expiry.
+- Counts active setup instances and drawer/input-action activations, and can audit the visible drawer for horizontal overflow, accessible control names, and negative tab stops.
 - Exports no audio or credentials in its result JSON.
 
 ## Remote installation tests
@@ -81,16 +84,16 @@ The first remote probe:
 | ID | Test | Pass condition | Status | Evidence |
 |---|---|---|---|---|
 | L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | PASS | R-001: health response proves frontend and backend loaded; manifest permissions are empty. |
-| L-02 | UI placement | Input-bar action activates exactly one drawer; command palette can also open it; reload creates no duplicates. | PARTIAL | R-001 proves the drawer rendered. Input-action, command-palette, and reload/duplication checks were not recorded. |
+| L-02 | UI placement | Input-bar action activates exactly one drawer; command palette can also open it; reload creates no duplicates. | PARTIAL | R-001 proves the drawer rendered. Probe 0.2.0 adds activation counters and active-instance evidence; input-action, command-palette, and post-reload checks remain pending on the VPS. |
 | L-03 | Version and lifecycle | Backend/frontend versions appear and readiness APIs are reported. | PASS | R-001: versions `1.2.4` / `1.2.4`; both readiness APIs available. |
 | L-04 | Microphone availability | Page is secure, permission prompt appears after the button action, and a non-empty sample is produced. | PASS | R-001: secure context; 75,280-byte recording. |
 | L-05 | MIME negotiation | Supported candidate MIME types and the selected type are recorded in exported JSON. | PASS | R-001: WebM/Opus, WebM, and Ogg/Opus reported; WebM/Opus selected. |
 | L-06 | Recording cleanup | Stop and cancel both leave every acquired media track in `ended` state. | PASS | R-001 verified normal stop; R-002 verified cancellation; both reported all tracks stopped. |
 | L-07 | Staged upload round trip | Browser upload completes, backend size/hash match, and explicit deletion returns true. | PASS | R-001 and R-003: eight completed round trips matched; each reported `deleted: true`. |
 | L-08 | Upload cancellation | The browser request stops cleanly; incomplete server data is left only to documented host expiry behavior. | PASS | R-003: active tus upload aborted locally without error; partial server data has no deletion receipt and relies on documented expiry. |
-| L-09 | Disable/unload cleanup | Disabling or reloading during recording stops media tracks and aborts the active upload. | READY | Pending VPS run |
-| L-10 | Narrow layout and keyboard | Drawer remains usable at the narrowest supported width and every control is keyboard reachable. | READY | Pending VPS run |
-| L-11 | Cross-user upload isolation | A second user cannot retrieve the first user's upload. A dedicated follow-up probe is required. | LOCAL-PENDING | Not included in probe 0.1.0 |
+| L-09 | Disable/unload cleanup | Disabling or reloading during recording stops media tracks and aborts the active upload. | READY | Probe 0.2.0 persists bounded cleanup receipts and supplies a paced active upload; VPS recording and upload teardown runs are pending. |
+| L-10 | Narrow layout and keyboard | Drawer remains usable at the narrowest supported width and every control is keyboard reachable. | READY | Probe 0.2.0 adds responsive container rules and an overflow/name/tab-stop self-check; narrow-width and manual keyboard passes are pending. |
+| L-11 | Cross-user upload isolation | A second user cannot retrieve the first user's upload. A dedicated follow-up probe is required. | LOCAL-PENDING | Not included in probe 0.2.0 |
 | L-12 | Host audio conversion | Conversion succeeds only if later selected provider formats require it. | PROVIDER-PENDING | Not included in probe 0.1.0 |
 | L-13 | Genuine provider partials | Provider partials arrive incrementally and reconcile with final text; cancellation rejects late updates. | PROVIDER-PENDING | Not included in probe 0.1.0 |
 | L-14 | Chat/send permission behavior | Append-only and append-with-generation behavior match the documented permission model. | LOCAL-PENDING | Deferred to a disposable-chat probe |

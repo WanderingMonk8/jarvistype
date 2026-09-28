@@ -11,6 +11,32 @@ import {
 } from './shared'
 
 const MAX_RECORDING_MS = 60_000
+const CLEANUP_STORAGE_KEY = 'jarvistype.phase0.cleanup.v1'
+const MAX_CLEANUP_RECEIPTS = 4
+const LIFECYCLE_UPLOAD_BYTES = 2 * 1024 * 1024
+const LIFECYCLE_UPLOAD_CHUNK_BYTES = 64 * 1024
+const LIFECYCLE_UPLOAD_DELAY_MS = 400
+
+interface CleanupReceipt {
+  at: string
+  trigger: 'pagehide' | 'extension-teardown'
+  recordingWasActive: boolean
+  uploadWasActive: boolean
+  tracksStopped: boolean
+  uploadAbortRequested: boolean
+  passed: boolean
+}
+
+interface UiSelfCheck {
+  at: string
+  widthPx: number
+  scrollWidthPx: number
+  horizontalOverflow: boolean
+  enabledControlCount: number
+  unnamedControlCount: number
+  negativeTabIndexCount: number
+  passed: boolean
+}
 
 interface ProbeEvent {
   at: string
@@ -30,7 +56,12 @@ interface ProbeReport {
   lifecycle: {
     deferReadyAvailable: boolean
     readyAvailable: boolean
+    activeSetupInstances: number
+    drawerActivationCount: number
+    inputActionActivationCount: number
+    cleanupReceipts: CleanupReceipt[]
   }
+  ui?: UiSelfCheck
   media: {
     mediaDevicesAvailable: boolean
     mediaRecorderAvailable: boolean
@@ -70,6 +101,8 @@ type LifecycleContext = SpindleFrontendContext & {
 export function setup(ctx: SpindleFrontendContext): () => void {
   const lifecycle = ctx as LifecycleContext
   lifecycle.deferReady?.()
+  const activeSetupInstances = changeActiveInstanceCount(1)
+  const cleanupReceipts = loadCleanupReceipts()
 
   const supportedMimeTypes =
     typeof MediaRecorder === 'undefined'
@@ -88,6 +121,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     lifecycle: {
       deferReadyAvailable: typeof lifecycle.deferReady === 'function',
       readyAvailable: typeof lifecycle.ready === 'function',
+      activeSetupInstances,
+      drawerActivationCount: 0,
+      inputActionActivationCount: 0,
+      cleanupReceipts,
     },
     media: {
       mediaDevicesAvailable: Boolean(navigator.mediaDevices?.getUserMedia),
@@ -119,19 +156,24 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   tab.root.innerHTML = `
     <style>
-      .jt-probe { box-sizing: border-box; display: grid; gap: 16px; padding: 16px; max-width: 900px; }
+      .jt-probe { box-sizing: border-box; container-type: inline-size; display: grid; gap: 16px; padding: 16px; max-width: 900px; min-width: 0; width: 100%; }
       .jt-probe * { box-sizing: border-box; }
       .jt-probe h2, .jt-probe h3, .jt-probe p { margin: 0; }
-      .jt-probe-card { border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 10px; padding: 14px; display: grid; gap: 10px; }
-      .jt-probe-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+      .jt-probe-card { border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 10px; padding: 14px; display: grid; gap: 10px; min-width: 0; }
+      .jt-probe-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
       .jt-probe button { min-height: 36px; padding: 7px 12px; cursor: pointer; }
       .jt-probe button:disabled { cursor: not-allowed; opacity: 0.55; }
       .jt-probe-status { font-weight: 600; }
-      .jt-probe-grid { display: grid; grid-template-columns: minmax(150px, auto) 1fr; gap: 6px 12px; }
+      .jt-probe-grid { display: grid; grid-template-columns: minmax(150px, auto) minmax(0, 1fr); gap: 6px 12px; min-width: 0; }
       .jt-probe-grid dt { font-weight: 600; }
       .jt-probe-grid dd { margin: 0; overflow-wrap: anywhere; }
       .jt-probe-log { margin: 0; max-height: 280px; overflow: auto; white-space: pre-wrap; font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
       .jt-probe-note { opacity: 0.8; font-size: 0.92em; }
+      @container (max-width: 420px) {
+        .jt-probe-grid { grid-template-columns: minmax(0, 1fr); }
+        .jt-probe-grid dd { margin-bottom: 6px; }
+        .jt-probe-actions button { flex: 1 1 100%; width: 100%; }
+      }
     </style>
     <section class="jt-probe" aria-labelledby="jt-probe-title">
       <div>
@@ -141,7 +183,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       <section class="jt-probe-card" aria-labelledby="jt-host-title">
         <h3 id="jt-host-title">Host and lifecycle</h3>
         <dl class="jt-probe-grid" data-host-facts></dl>
-        <div class="jt-probe-actions"><button type="button" data-refresh-host>Refresh host check</button></div>
+        <div class="jt-probe-actions">
+          <button type="button" data-refresh-host>Refresh host check</button>
+          <button type="button" data-lifecycle-upload>Start paced teardown upload</button>
+          <button type="button" data-ui-check>Run UI self-check</button>
+        </div>
+        <p class="jt-probe-status" role="status" aria-live="polite" data-lifecycle-status>Use the paced upload immediately before reloading or disabling the extension.</p>
       </section>
       <section class="jt-probe-card" aria-labelledby="jt-media-title">
         <h3 id="jt-media-title">Microphone recording</h3>
@@ -167,17 +214,20 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           <button type="button" data-copy-results>Copy JSON</button>
           <button type="button" data-download-results>Download JSON</button>
         </div>
-        <pre class="jt-probe-log" tabindex="0" data-results-log></pre>
+        <pre class="jt-probe-log" tabindex="0" aria-label="Sanitized probe results" data-results-log></pre>
       </section>
     </section>
   `
 
   const hostFacts = requireElement<HTMLElement>(tab.root, '[data-host-facts]')
   const mediaFacts = requireElement<HTMLElement>(tab.root, '[data-media-facts]')
+  const lifecycleStatus = requireElement<HTMLElement>(tab.root, '[data-lifecycle-status]')
   const recordingStatus = requireElement<HTMLElement>(tab.root, '[data-recording-status]')
   const uploadStatus = requireElement<HTMLElement>(tab.root, '[data-upload-status]')
   const resultsLog = requireElement<HTMLElement>(tab.root, '[data-results-log]')
   const refreshHostButton = requireElement<HTMLButtonElement>(tab.root, '[data-refresh-host]')
+  const lifecycleUploadButton = requireElement<HTMLButtonElement>(tab.root, '[data-lifecycle-upload]')
+  const uiCheckButton = requireElement<HTMLButtonElement>(tab.root, '[data-ui-check]')
   const startButton = requireElement<HTMLButtonElement>(tab.root, '[data-start-recording]')
   const stopButton = requireElement<HTMLButtonElement>(tab.root, '[data-stop-recording]')
   const cancelRecordingButton = requireElement<HTMLButtonElement>(tab.root, '[data-cancel-recording]')
@@ -194,8 +244,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   let recordingTimer: number | null = null
   let recordedBlob: Blob | null = null
   let activeUpload: tus.Upload | null = null
+  let uploadResultTarget: 'recording' | 'lifecycle' | null = null
   let activeUploadRequestId: string | null = null
   let healthRequestId: string | null = null
+  let cleanupPerformed = false
 
   const addEvent = (
     level: ProbeEvent['level'],
@@ -212,6 +264,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       ['Origin', report.page.origin],
       ['deferReady()', yesNo(report.lifecycle.deferReadyAvailable)],
       ['ready()', yesNo(report.lifecycle.readyAvailable)],
+      ['Active probe instances', String(report.lifecycle.activeSetupInstances)],
+      ['Drawer activations', String(report.lifecycle.drawerActivationCount)],
+      ['Input-action activations', String(report.lifecycle.inputActionActivationCount)],
+      ['Saved cleanup receipts', String(report.lifecycle.cleanupReceipts.length)],
       ['Backend version', report.lumiverse?.backendVersion ?? 'Pending'],
       ['Frontend version', report.lumiverse?.frontendVersion ?? 'Pending'],
     ])
@@ -262,18 +318,25 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         ...(payload.error ? { error: payload.error } : {}),
       }
       if (payload.deleted) {
+        const resultTarget = uploadResultTarget
         activeUploadRequestId = null
-        uploadStatus.textContent = payload.ok
+        uploadResultTarget = null
+        const resultStatus = resultTarget === 'lifecycle' ? lifecycleStatus : uploadStatus
+        resultStatus.textContent = payload.ok
           ? 'Passed: bytes matched and staged upload deletion was confirmed.'
           : `Failed: ${payload.error ?? 'byte verification did not match.'}`
         uploadButton.disabled = recordedBlob === null
+        lifecycleUploadButton.disabled = false
         addEvent(payload.ok ? 'pass' : 'fail', 'Staged upload verification finished', {
+          target: resultTarget ?? 'unknown',
           bytesMatched:
             payload.expectedSize === payload.actualSize && payload.expectedHash === payload.actualHash,
           deleted: payload.deleted,
         })
       } else {
-        uploadStatus.textContent = 'Backend verified the staged bytes; awaiting deletion confirmation.'
+        const resultStatus =
+          uploadResultTarget === 'lifecycle' ? lifecycleStatus : uploadStatus
+        resultStatus.textContent = 'Backend verified the staged bytes; awaiting deletion confirmation.'
       }
       render()
       return
@@ -415,12 +478,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const uploadRecording = async () => {
     if (!recordedBlob || activeUpload) return
     uploadButton.disabled = true
+    lifecycleUploadButton.disabled = true
     cancelUploadButton.disabled = false
     uploadStatus.textContent = 'Preparing staged upload…'
 
     const bytes = new Uint8Array(await recordedBlob.arrayBuffer())
     if (bytes.byteLength > MAX_PROBE_AUDIO_BYTES) {
       uploadButton.disabled = false
+      lifecycleUploadButton.disabled = false
       cancelUploadButton.disabled = true
       uploadStatus.textContent = `Sample is too large for this probe (${bytes.byteLength} bytes).`
       addEvent('fail', 'Recorded sample exceeded the probe upload limit', {
@@ -449,6 +514,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         activeUpload = null
         cancelUploadButton.disabled = true
         uploadButton.disabled = false
+        lifecycleUploadButton.disabled = false
         uploadStatus.textContent = `Upload failed: ${error.message}`
         addEvent('fail', 'Staged upload failed', { error: error.message })
       },
@@ -458,12 +524,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         cancelUploadButton.disabled = true
         if (!uploadId) {
           uploadButton.disabled = false
+          lifecycleUploadButton.disabled = false
           uploadStatus.textContent = 'Upload finished without an upload ID.'
           addEvent('fail', 'Staged upload returned no upload ID')
           return
         }
 
         activeUploadRequestId = makeRequestId()
+        uploadResultTarget = 'recording'
         uploadStatus.textContent = 'Upload complete; backend is verifying bytes and deleting the staged file…'
         const request: ProbeRequest = {
           protocolVersion: PROTOCOL_VERSION,
@@ -493,8 +561,143 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     await upload.abort()
     cancelUploadButton.disabled = true
     uploadButton.disabled = recordedBlob === null
+    lifecycleUploadButton.disabled = false
     uploadStatus.textContent = 'Upload cancelled. An incomplete staged upload will expire according to host policy.'
     addEvent('pass', 'Staged upload cancelled locally')
+  }
+
+  const startLifecycleUpload = () => {
+    if (activeUpload || activeUploadRequestId) return
+
+    lifecycleUploadButton.disabled = true
+    uploadButton.disabled = true
+    lifecycleStatus.textContent =
+      'Paced upload active. Reload or disable the extension now, then re-enable it and export the receipt.'
+
+    const bytes = new Uint8Array(LIFECYCLE_UPLOAD_BYTES)
+    const file = new File([bytes], `jarvistype-lifecycle-${Date.now()}.bin`, {
+      type: 'application/octet-stream',
+    })
+    const expectedHash = hashBytes(bytes)
+    const upload = new tus.Upload(file, {
+      endpoint: '/api/v1/spindle-uploads',
+      chunkSize: LIFECYCLE_UPLOAD_CHUNK_BYTES,
+      retryDelays: [0, 1000, 3000],
+      removeFingerprintOnSuccess: true,
+      metadata: { filename: file.name, extension: 'jarvistype' },
+      onBeforeRequest: async (request) => {
+        if (request.getMethod() === 'PATCH') await delay(LIFECYCLE_UPLOAD_DELAY_MS)
+      },
+      onProgress: (uploaded, total) => {
+        const percent = total > 0 ? Math.round((uploaded / total) * 100) : 0
+        lifecycleStatus.textContent =
+          `Paced upload active (${percent}%). Reload or disable the extension now.`
+      },
+      onError: (error) => {
+        if (disposed) return
+        activeUpload = null
+        lifecycleUploadButton.disabled = false
+        uploadButton.disabled = recordedBlob === null
+        lifecycleStatus.textContent = `Lifecycle upload failed: ${error.message}`
+        addEvent('fail', 'Paced lifecycle upload failed', { error: error.message })
+      },
+      onSuccess: () => {
+        const uploadId = upload.url?.split('/').filter(Boolean).pop()
+        activeUpload = null
+        if (!uploadId) {
+          lifecycleUploadButton.disabled = false
+          uploadButton.disabled = recordedBlob === null
+          lifecycleStatus.textContent = 'Lifecycle upload finished without an upload ID.'
+          addEvent('fail', 'Paced lifecycle upload returned no upload ID')
+          return
+        }
+
+        activeUploadRequestId = makeRequestId()
+        uploadResultTarget = 'lifecycle'
+        lifecycleStatus.textContent =
+          'Paced upload completed; backend is verifying and deleting the staged file.'
+        const request: ProbeRequest = {
+          protocolVersion: PROTOCOL_VERSION,
+          type: 'probe.upload.verify',
+          requestId: activeUploadRequestId,
+          uploadId,
+          expectedSize: file.size,
+          expectedHash,
+          reportedMimeType: file.type,
+        }
+        ctx.sendToBackend(request)
+        addEvent('info', 'Paced lifecycle upload completed before teardown', {
+          sizeBytes: file.size,
+        })
+      },
+    })
+
+    activeUpload = upload
+    addEvent('info', 'Started paced lifecycle upload', {
+      sizeBytes: file.size,
+      chunkBytes: LIFECYCLE_UPLOAD_CHUNK_BYTES,
+      delayMsPerPatch: LIFECYCLE_UPLOAD_DELAY_MS,
+    })
+    upload.start()
+  }
+
+  const runUiSelfCheck = () => {
+    const root = requireElement<HTMLElement>(tab.root, '.jt-probe')
+    const enabledControls = Array.from(
+      root.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]'),
+    )
+    const unnamedControls = enabledControls.filter((control) => !accessibleName(control))
+    const negativeTabIndexControls = enabledControls.filter((control) => control.tabIndex < 0)
+    const horizontalOverflow = root.scrollWidth > root.clientWidth + 1
+    report.ui = {
+      at: new Date().toISOString(),
+      widthPx: root.clientWidth,
+      scrollWidthPx: root.scrollWidth,
+      horizontalOverflow,
+      enabledControlCount: enabledControls.length,
+      unnamedControlCount: unnamedControls.length,
+      negativeTabIndexCount: negativeTabIndexControls.length,
+      passed:
+        !horizontalOverflow && unnamedControls.length === 0 && negativeTabIndexControls.length === 0,
+    }
+    lifecycleStatus.textContent = report.ui.passed
+      ? `UI self-check passed at ${report.ui.widthPx}px. Complete one manual Tab-key pass.`
+      : 'UI self-check found overflow or a keyboard/accessibility issue.'
+    addEvent(report.ui.passed ? 'pass' : 'fail', 'UI self-check finished', {
+      widthPx: report.ui.widthPx,
+      horizontalOverflow,
+      enabledControlCount: enabledControls.length,
+      unnamedControlCount: unnamedControls.length,
+      negativeTabIndexCount: negativeTabIndexControls.length,
+    })
+  }
+
+  const cleanupResources = (trigger: CleanupReceipt['trigger']) => {
+    if (cleanupPerformed) return
+    cleanupPerformed = true
+    disposed = true
+    clearRecordingTimer()
+    keepRecording = false
+
+    const recordingWasActive =
+      Boolean(activeStream) || Boolean(activeRecorder && activeRecorder.state !== 'inactive')
+    const uploadWasActive = activeUpload !== null
+    if (activeRecorder && activeRecorder.state !== 'inactive') activeRecorder.stop()
+    const tracksStopped = stopTracks()
+    const upload = activeUpload
+    activeUpload = null
+    const uploadAbortRequested = upload !== null
+    if (upload) void upload.abort().catch(() => undefined)
+
+    saveCleanupReceipt({
+      at: new Date().toISOString(),
+      trigger,
+      recordingWasActive,
+      uploadWasActive,
+      tracksStopped,
+      uploadAbortRequested,
+      passed: tracksStopped && (!uploadWasActive || uploadAbortRequested),
+    })
   }
 
   const copyResults = async () => {
@@ -519,8 +722,24 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     addEvent('pass', 'Downloaded sanitized probe results')
   }
 
-  const detachInputAction = inputAction.onClick(() => tab.activate())
+  const detachTabActivation = tab.onActivate(() => {
+    report.lifecycle.drawerActivationCount += 1
+    addEvent('pass', 'Drawer activated', {
+      activationCount: report.lifecycle.drawerActivationCount,
+    })
+  })
+  const detachInputAction = inputAction.onClick(() => {
+    report.lifecycle.inputActionActivationCount += 1
+    addEvent('pass', 'Input-bar action activated the probe', {
+      activationCount: report.lifecycle.inputActionActivationCount,
+    })
+    tab.activate()
+  })
+  const handlePageHide = () => cleanupResources('pagehide')
+  window.addEventListener('pagehide', handlePageHide, { once: true })
   refreshHostButton.addEventListener('click', requestHealth)
+  lifecycleUploadButton.addEventListener('click', startLifecycleUpload)
+  uiCheckButton.addEventListener('click', runUiSelfCheck)
   startButton.addEventListener('click', () => void startRecording())
   stopButton.addEventListener('click', () => stopRecording(true))
   cancelRecordingButton.addEventListener('click', () => stopRecording(false))
@@ -529,22 +748,31 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   copyButton.addEventListener('click', () => void copyResults())
   downloadButton.addEventListener('click', downloadResults)
 
-  addEvent('info', 'Frontend capability probe initialized')
+  addEvent(activeSetupInstances === 1 ? 'pass' : 'fail', 'Frontend capability probe initialized', {
+    activeSetupInstances,
+  })
+  for (const receipt of cleanupReceipts) {
+    addEvent(receipt.passed ? 'pass' : 'fail', 'Recovered cleanup receipt', {
+      trigger: receipt.trigger,
+      recordingWasActive: receipt.recordingWasActive,
+      uploadWasActive: receipt.uploadWasActive,
+      tracksStopped: receipt.tracksStopped,
+      uploadAbortRequested: receipt.uploadAbortRequested,
+    })
+  }
   render()
   lifecycle.ready?.()
   requestHealth()
 
   return () => {
-    disposed = true
-    clearRecordingTimer()
-    keepRecording = false
-    if (activeRecorder && activeRecorder.state !== 'inactive') activeRecorder.stop()
-    stopTracks()
-    if (activeUpload) void activeUpload.abort()
+    window.removeEventListener('pagehide', handlePageHide)
+    cleanupResources('extension-teardown')
     unsubscribeBackend()
+    detachTabActivation()
     detachInputAction()
     inputAction.destroy()
     tab.destroy()
+    changeActiveInstanceCount(-1)
   }
 }
 
@@ -558,6 +786,72 @@ function requireElement<T extends Element>(root: ParentNode, selector: string): 
   const element = root.querySelector<T>(selector)
   if (!element) throw new Error(`JarvisType probe could not find ${selector}`)
   return element
+}
+
+function accessibleName(element: HTMLElement): string {
+  const ariaLabel = element.getAttribute('aria-label')?.trim()
+  if (ariaLabel) return ariaLabel
+
+  const labelledBy = element.getAttribute('aria-labelledby')
+  if (labelledBy) {
+    const label = labelledBy
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent?.trim() ?? '')
+      .filter(Boolean)
+      .join(' ')
+    if (label) return label
+  }
+
+  return element.getAttribute('title')?.trim() || element.textContent?.trim() || ''
+}
+
+function changeActiveInstanceCount(delta: 1 | -1): number {
+  const key = '__jarvistypePhase0ActiveInstances'
+  const state = window as unknown as Record<string, unknown>
+  const current = typeof state[key] === 'number' ? state[key] : 0
+  const next = Math.max(0, current + delta)
+  state[key] = next
+  return next
+}
+
+function loadCleanupReceipts(): CleanupReceipt[] {
+  try {
+    const value = window.sessionStorage.getItem(CLEANUP_STORAGE_KEY)
+    if (!value) return []
+    const parsed: unknown = JSON.parse(value)
+    return Array.isArray(parsed)
+      ? parsed.filter(isCleanupReceipt).slice(-MAX_CLEANUP_RECEIPTS)
+      : []
+  } catch {
+    return []
+  }
+}
+
+function saveCleanupReceipt(receipt: CleanupReceipt): void {
+  try {
+    const receipts = [...loadCleanupReceipts(), receipt].slice(-MAX_CLEANUP_RECEIPTS)
+    window.sessionStorage.setItem(CLEANUP_STORAGE_KEY, JSON.stringify(receipts))
+  } catch {
+    // A blocked sessionStorage should never prevent resource cleanup.
+  }
+}
+
+function isCleanupReceipt(value: unknown): value is CleanupReceipt {
+  if (typeof value !== 'object' || value === null) return false
+  const receipt = value as Record<string, unknown>
+  return (
+    typeof receipt.at === 'string' &&
+    (receipt.trigger === 'pagehide' || receipt.trigger === 'extension-teardown') &&
+    typeof receipt.recordingWasActive === 'boolean' &&
+    typeof receipt.uploadWasActive === 'boolean' &&
+    typeof receipt.tracksStopped === 'boolean' &&
+    typeof receipt.uploadAbortRequested === 'boolean' &&
+    typeof receipt.passed === 'boolean'
+  )
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
 function yesNo(value: boolean): string {

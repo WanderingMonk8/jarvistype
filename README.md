@@ -129,6 +129,8 @@ The current `development` branch builds an installable diagnostic extension. It 
 - Resumable staged upload from the browser.
 - Backend byte-size and hash verification.
 - Explicit deletion of the completed staged upload.
+- Reload/disable cleanup receipts for active recording and upload resources.
+- Drawer activation counters and a responsive-layout/accessibility self-check.
 - Sanitized JSON evidence export.
 
 The probe requests no gated Lumiverse permissions, does not read or modify chats, does not call an external provider, and does not retain recorded audio after the page or extension is unloaded.
@@ -146,14 +148,16 @@ The compiled `dist/backend.js` and `dist/frontend.js` files are committed so the
 
 1. Install or update the extension from the `development` branch using the VPS deployment workflow.
 2. Enable **JarvisType Phase 0 Probe**. It should request no gated permissions.
-3. Open **JarvisType Probe** from the chat input-bar Extras menu. The same drawer should also be discoverable through the Lumiverse command palette.
-4. Confirm that the backend and frontend Lumiverse versions appear in **Host and lifecycle**.
-5. Select **Start recording**, grant microphone permission, speak briefly, and select **Stop and keep sample**.
-6. Confirm that the sample is non-empty and **Tracks stopped** reports **Yes**.
-7. Select **Upload and verify sample**.
-8. Confirm the final status says the bytes matched and staged-upload deletion was confirmed.
-9. Select **Download JSON** and retain the resulting evidence file. It contains environment and result metadata, but no audio or credentials.
-10. Repeat once with **Cancel recording** and once with **Cancel upload**.
+3. Open **JarvisType Probe** from the chat input-bar Extras menu. Confirm that **Input-action activations** and **Drawer activations** increase once, then open the same drawer through `Ctrl+K` and confirm only the drawer count increases.
+4. Reload Lumiverse. Confirm there is exactly one JarvisType sidebar entry, one Extras action, one command-palette result, and **Active probe instances** is `1`.
+5. Confirm that the backend and frontend Lumiverse versions appear in **Host and lifecycle**.
+6. Select **Start recording**, grant microphone permission, speak briefly, and select **Stop and keep sample**. Confirm the sample is non-empty and **Tracks stopped** reports **Yes**.
+7. Select **Upload and verify sample**. Confirm the final status says the bytes matched and staged-upload deletion was confirmed.
+8. Repeat once with **Cancel recording** and once with **Cancel upload**.
+9. Start a recording and, while it is active, reload the page or disable then re-enable the extension. Reopen the probe and confirm a cleanup receipt has `recordingWasActive: true`, `tracksStopped: true`, and `passed: true`.
+10. Select **Start paced teardown upload** and immediately reload or disable/re-enable the extension while its percentage is still advancing. Confirm a cleanup receipt has `uploadWasActive: true`, `uploadAbortRequested: true`, and `passed: true`. Any interrupted partial upload expires under Lumiverse's staged-upload policy.
+11. Make the drawer as narrow as the host permits, select **Run UI self-check**, and confirm it passes with no horizontal overflow. Then use only `Tab`, `Shift+Tab`, `Enter`, and `Space` to reach and operate each enabled control.
+12. Select **Download JSON** and retain the resulting evidence file. It contains environment and result metadata, cleanup booleans, and counters, but no audio or credentials.
 
 Do not post the complete JSON report publicly without reviewing its `origin` and `userAgent` fields. Neither field is a credential, but both describe the test environment.
 

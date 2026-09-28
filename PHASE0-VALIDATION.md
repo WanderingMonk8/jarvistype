@@ -4,7 +4,7 @@
 
 This register separates facts guaranteed by published documentation from behavior that must be demonstrated on the hosted Lumiverse installation or against a selected provider. The PRD remains the product source of truth.
 
-Status values are `DOCUMENTED`, `READY`, `PASS`, `FAIL`, `LOCAL-PENDING`, `PROVIDER-PENDING`, and `PRODUCT-PENDING`.
+Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `LOCAL-PENDING`, `PROVIDER-PENDING`, and `PRODUCT-PENDING`.
 
 ## Documentation-settled facts
 
@@ -39,15 +39,30 @@ The first remote probe:
 
 ## Remote installation tests
 
+### Recorded run R-001
+
+- Test date: 2026-09-28.
+- Probe version: `0.1.0` (the exported report does not embed a Git commit hash).
+- Environment: Windows 10 x64, Firefox 156, secure HTTPS context.
+- Lumiverse backend/frontend: `1.2.4` / `1.2.4`.
+- Readiness API: `deferReady()` and `ready()` both available.
+- Media APIs: `getUserMedia()` and `MediaRecorder` available.
+- Supported candidates: `audio/webm;codecs=opus`, `audio/webm`, and `audio/ogg;codecs=opus`.
+- Selected/actual format: `audio/webm;codecs=opus`.
+- Recording result: 5,384 ms, 75,280 bytes, all media tracks stopped.
+- Upload result: expected and backend sizes both 75,280 bytes; FNV-1a hashes both `9c04c4e0`; explicit deletion confirmed.
+- Event result: no failure event was reported.
+- Data handling: only this sanitized summary is committed; the host origin and complete user-agent report remain outside the repository.
+
 | ID | Test | Pass condition | Status | Evidence |
 |---|---|---|---|---|
-| L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | READY | Pending VPS run |
-| L-02 | UI placement | Input-bar action activates exactly one drawer; command palette can also open it; reload creates no duplicates. | READY | Pending VPS run |
-| L-03 | Version and lifecycle | Backend/frontend versions appear and readiness APIs are reported. | READY | Pending VPS run |
-| L-04 | Microphone availability | Page is secure, permission prompt appears after the button action, and a non-empty sample is produced. | READY | Pending VPS run |
-| L-05 | MIME negotiation | Supported candidate MIME types and the selected type are recorded in exported JSON. | READY | Pending VPS run |
-| L-06 | Recording cleanup | Stop and cancel both leave every acquired media track in `ended` state. | READY | Pending VPS run |
-| L-07 | Staged upload round trip | Browser upload completes, backend size/hash match, and explicit deletion returns true. | READY | Pending VPS run |
+| L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | PASS | R-001: health response proves frontend and backend loaded; manifest permissions are empty. |
+| L-02 | UI placement | Input-bar action activates exactly one drawer; command palette can also open it; reload creates no duplicates. | PARTIAL | R-001 proves the drawer rendered. Input-action, command-palette, and reload/duplication checks were not recorded. |
+| L-03 | Version and lifecycle | Backend/frontend versions appear and readiness APIs are reported. | PASS | R-001: versions `1.2.4` / `1.2.4`; both readiness APIs available. |
+| L-04 | Microphone availability | Page is secure, permission prompt appears after the button action, and a non-empty sample is produced. | PASS | R-001: secure context; 75,280-byte recording. |
+| L-05 | MIME negotiation | Supported candidate MIME types and the selected type are recorded in exported JSON. | PASS | R-001: WebM/Opus, WebM, and Ogg/Opus reported; WebM/Opus selected. |
+| L-06 | Recording cleanup | Stop and cancel both leave every acquired media track in `ended` state. | PARTIAL | R-001: normal stop ended all tracks. Cancel path remains untested. |
+| L-07 | Staged upload round trip | Browser upload completes, backend size/hash match, and explicit deletion returns true. | PASS | R-001: size/hash matched and `deleted: true`. |
 | L-08 | Upload cancellation | The browser request stops cleanly; incomplete server data is left only to documented host expiry behavior. | READY | Pending VPS run |
 | L-09 | Disable/unload cleanup | Disabling or reloading during recording stops media tracks and aborts the active upload. | READY | Pending VPS run |
 | L-10 | Narrow layout and keyboard | Drawer remains usable at the narrowest supported width and every control is keyboard reachable. | READY | Pending VPS run |
@@ -71,7 +86,7 @@ The first remote probe:
 | P-08 | Product telemetry | Off unless separately approved and disclosed. | PRODUCT-PENDING |
 | P-09 | Initial STT provider | No provider selected. | PROVIDER-PENDING |
 | P-10 | Semantic interpreter | Compare configured Lumiverse generation with a dedicated adapter. | PROVIDER-PENDING |
-| P-11 | Supported platforms and minimum version | No release claim until the compatibility matrix has evidence. | LOCAL-PENDING |
+| P-11 | Supported platforms and minimum version | Lumiverse 1.2.4 with Firefox 156 on Windows 10 is known-good; minimum and other release targets remain unproven. | LOCAL-PENDING |
 
 ## Evidence submission
 

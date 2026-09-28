@@ -1,0 +1,87 @@
+# Phase 0 Validation Register
+
+## Purpose
+
+This register separates facts guaranteed by published documentation from behavior that must be demonstrated on the hosted Lumiverse installation or against a selected provider. The PRD remains the product source of truth.
+
+Status values are `DOCUMENTED`, `READY`, `PASS`, `FAIL`, `LOCAL-PENDING`, `PROVIDER-PENDING`, and `PRODUCT-PENDING`.
+
+## Documentation-settled facts
+
+| ID | Fact | Status | Reference |
+|---|---|---|---|
+| D-01 | Drawer tabs and input-bar actions do not require `ui_panels`. | DOCUMENTED | <https://docs.lumiverse.chat/frontend-api/ui-placement/> |
+| D-02 | Drawer tabs expose `activate()` and automatically appear in the command palette. | DOCUMENTED | <https://docs.lumiverse.chat/frontend-api/ui-placement/> |
+| D-03 | Staged uploads use tus, are scoped by user and extension, have a documented 1 GB maximum, and expire after 30 minutes of inactivity. | DOCUMENTED | <https://docs.lumiverse.chat/backend-api/uploads/> |
+| D-04 | The staged-upload identifier, rather than audio bytes, should cross ordinary frontend/backend messaging. | DOCUMENTED | <https://docs.lumiverse.chat/backend-api/uploads/> |
+| D-05 | Host audio conversion requires `media` and host FFmpeg. | DOCUMENTED | <https://docs.lumiverse.chat/backend-api/media/> |
+| D-06 | CORS proxy request bodies are strings; binary multipart and incremental response streaming cannot be assumed. | DOCUMENTED | <https://docs.lumiverse.chat/backend-api/cors-proxy/> |
+| D-07 | Secure Enclave provides per-user encrypted secret storage. | DOCUMENTED | <https://docs.lumiverse.chat/backend-api/secure-enclave/> |
+| D-08 | `spindle.userStorage` provides per-user extension-scoped persistence. | DOCUMENTED | <https://docs.lumiverse.chat/backend-api/storage/> |
+| D-09 | Appending requires `chat_mutation`; triggering normal response generation additionally requires `generation`. | DOCUMENTED | <https://docs.lumiverse.chat/backend-api/chat-mutation/> |
+| D-10 | Backend and frontend Lumiverse versions can be read independently without permission. | DOCUMENTED | <https://docs.lumiverse.chat/backend-api/version/> |
+| D-11 | Browser microphone capture requires a secure context and explicit permission. | DOCUMENTED | <https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia> |
+
+## Probe scope and safety
+
+Probe version: `0.1.0`
+
+The first remote probe:
+
+- Requests no gated permissions.
+- Does not read or modify chats.
+- Does not call an STT or LLM provider.
+- Retains a recorded sample only in frontend memory for the current page lifecycle.
+- Uploads only after a second explicit user action.
+- Computes a non-cryptographic integrity hash solely to compare transferred bytes.
+- Explicitly deletes every completed staged upload after backend verification.
+- Exports no audio or credentials in its result JSON.
+
+## Remote installation tests
+
+| ID | Test | Pass condition | Status | Evidence |
+|---|---|---|---|---|
+| L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | READY | Pending VPS run |
+| L-02 | UI placement | Input-bar action activates exactly one drawer; command palette can also open it; reload creates no duplicates. | READY | Pending VPS run |
+| L-03 | Version and lifecycle | Backend/frontend versions appear and readiness APIs are reported. | READY | Pending VPS run |
+| L-04 | Microphone availability | Page is secure, permission prompt appears after the button action, and a non-empty sample is produced. | READY | Pending VPS run |
+| L-05 | MIME negotiation | Supported candidate MIME types and the selected type are recorded in exported JSON. | READY | Pending VPS run |
+| L-06 | Recording cleanup | Stop and cancel both leave every acquired media track in `ended` state. | READY | Pending VPS run |
+| L-07 | Staged upload round trip | Browser upload completes, backend size/hash match, and explicit deletion returns true. | READY | Pending VPS run |
+| L-08 | Upload cancellation | The browser request stops cleanly; incomplete server data is left only to documented host expiry behavior. | READY | Pending VPS run |
+| L-09 | Disable/unload cleanup | Disabling or reloading during recording stops media tracks and aborts the active upload. | READY | Pending VPS run |
+| L-10 | Narrow layout and keyboard | Drawer remains usable at the narrowest supported width and every control is keyboard reachable. | READY | Pending VPS run |
+| L-11 | Cross-user upload isolation | A second user cannot retrieve the first user's upload. A dedicated follow-up probe is required. | LOCAL-PENDING | Not included in probe 0.1.0 |
+| L-12 | Host audio conversion | Conversion succeeds only if later selected provider formats require it. | PROVIDER-PENDING | Not included in probe 0.1.0 |
+| L-13 | Genuine provider partials | Provider partials arrive incrementally and reconcile with final text; cancellation rejects late updates. | PROVIDER-PENDING | Not included in probe 0.1.0 |
+| L-14 | Chat/send permission behavior | Append-only and append-with-generation behavior match the documented permission model. | LOCAL-PENDING | Deferred to a disposable-chat probe |
+| L-15 | Semantic interpreter corpus | Structured output validates or returns typed failure; unsafe cases never mutate the draft. | PROVIDER-PENDING | Not included in probe 0.1.0 |
+
+## Product and provider decisions
+
+| ID | Decision | Current baseline | Status |
+|---|---|---|---|
+| P-01 | Primary composition placement | Drawer tab opened by input-bar action; command palette is alternate entry. | PRODUCT-PENDING |
+| P-02 | Context range | Default is fixed at `5`; proposed configurable range is `0–20`. | PRODUCT-PENDING |
+| P-03 | Hard context ceiling | Application ceiling plus any lower provider-adapter limit. | PROVIDER-PENDING |
+| P-04 | Initial languages | Proposed initial release is English. | PRODUCT-PENDING |
+| P-05 | Draft persistence | Restore the owning-chat draft across approved lifecycle paths; expiry and chat-switch UX remain open. | PRODUCT-PENDING |
+| P-06 | Semantic auto-application | Proposal-first until evaluation supports narrower automatic classes. | PRODUCT-PENDING |
+| P-07 | Send without generation | Normal response generation remains default; append-only fallback remains open. | PRODUCT-PENDING |
+| P-08 | Product telemetry | Off unless separately approved and disclosed. | PRODUCT-PENDING |
+| P-09 | Initial STT provider | No provider selected. | PROVIDER-PENDING |
+| P-10 | Semantic interpreter | Compare configured Lumiverse generation with a dedicated adapter. | PROVIDER-PENDING |
+| P-11 | Supported platforms and minimum version | No release claim until the compatibility matrix has evidence. | LOCAL-PENDING |
+
+## Evidence submission
+
+For each VPS/device run, retain:
+
+- The downloaded sanitized JSON result.
+- JarvisType commit hash.
+- Test date and tester.
+- Client/browser, operating system, and device.
+- Expected result, actual result, and any sanitized screenshots or server log excerpts.
+- Confirmation that recording tracks stopped and completed staged uploads were deleted.
+
+Never include credentials, raw audio, full private chats, or unrelated server logs.

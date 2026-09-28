@@ -2,7 +2,7 @@
 
 JarvisType is a planned [Lumiverse](https://lumiverse.chat/) extension for composing chat messages by voice. It provides a private working draft where users can dictate a message in multiple recordings, make corrections through separate spoken editing commands, inspect every change, and approve the final text before it is sent.
 
-> **Project status:** Specification stage. The product requirements are defined; implementation has not started.
+> **Project status:** Phase 0 feasibility validation. The product requirements are defined, and the `development` branch contains a permission-free Lumiverse capability probe for remote testing.
 
 ## What JarvisType is designed to do
 
@@ -93,6 +93,8 @@ Paragraph numbers, diff markers, segment metadata, and editing history are never
 
 The [Product Requirements Document](./PRD.md) is the source of truth for product behavior, scope, acceptance scenarios, platform constraints, privacy requirements, and unresolved decisions.
 
+The [Phase 0 Validation Register](./PHASE0-VALIDATION.md) records documentation-settled facts, remote test cases, expected results, and evidence still required before Phase 1.
+
 Lumiverse extension development references:
 
 - [Spindle Extension Developer Guide](https://docs.lumiverse.chat/)
@@ -115,6 +117,46 @@ The current design expects to use:
 
 The exact transcription provider, editor placement, context ceiling, supported languages, and draft-persistence policy remain open product decisions documented in the PRD.
 
+## Phase 0 remote capability probe
+
+The current `development` branch builds an installable diagnostic extension. It does not transcribe audio yet. It verifies the platform path that transcription will depend on:
+
+- Drawer-tab registration and input-bar activation.
+- Frontend/backend messaging and Lumiverse version discovery.
+- Secure-context and browser media API availability.
+- Runtime `MediaRecorder` MIME support.
+- Bounded microphone recording, cancellation, and media-track cleanup.
+- Resumable staged upload from the browser.
+- Backend byte-size and hash verification.
+- Explicit deletion of the completed staged upload.
+- Sanitized JSON evidence export.
+
+The probe requests no gated Lumiverse permissions, does not read or modify chats, does not call an external provider, and does not retain recorded audio after the page or extension is unloaded.
+
+### Build verification
+
+```bash
+npm ci
+npm test
+```
+
+The compiled `dist/backend.js` and `dist/frontend.js` files are committed so the VPS can install the branch without relying on its extension builder.
+
+### Remote test procedure
+
+1. Install or update the extension from the `development` branch using the VPS deployment workflow.
+2. Enable **JarvisType Phase 0 Probe**. It should request no gated permissions.
+3. Open **JarvisType Probe** from the chat input-bar Extras menu. The same drawer should also be discoverable through the Lumiverse command palette.
+4. Confirm that the backend and frontend Lumiverse versions appear in **Host and lifecycle**.
+5. Select **Start recording**, grant microphone permission, speak briefly, and select **Stop and keep sample**.
+6. Confirm that the sample is non-empty and **Tracks stopped** reports **Yes**.
+7. Select **Upload and verify sample**.
+8. Confirm the final status says the bytes matched and staged-upload deletion was confirmed.
+9. Select **Download JSON** and retain the resulting evidence file. It contains environment and result metadata, but no audio or credentials.
+10. Repeat once with **Cancel recording** and once with **Cancel upload**.
+
+Do not post the complete JSON report publicly without reviewing its `origin` and `userAgent` fields. Neither field is a credential, but both describe the test environment.
+
 ## Contributing
 
-Development conventions and build instructions will be added with the initial project scaffold. Until then, proposed product changes should begin with an update to `PRD.md` so implementation and documentation remain aligned.
+Proposed product changes should begin with an update to `PRD.md` so implementation and documentation remain aligned. Phase 0 implementation evidence belongs in `PHASE0-VALIDATION.md`.

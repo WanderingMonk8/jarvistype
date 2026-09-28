@@ -119,7 +119,9 @@ Resolve open decisions and platform risks that could invalidate the architecture
 - Verify `getUserMedia` and `MediaRecorder` on intended browser, desktop, and mobile targets.
 - Record available MIME types and codecs.
 - Test stop, cancel, permission denial, absent device, silence, route change, and extension unload.
+- Test backgrounding, tab suspension, device disconnection, corrupt or zero-byte output, and repeated stop/cancel actions.
 - Confirm that every media track closes on every terminal path.
+- Set maximum recording duration, encoded size, provider timeout, upload timeout, and retry limits.
 - Determine whether server-side conversion is needed.
 
 #### Audio transport
@@ -127,6 +129,8 @@ Resolve open decisions and platform risks that could invalidate the architecture
 - Test Lumiverse staged upload using a programmatically created recording file.
 - Verify user/extension isolation, authentication, size limits, retry, expiry, and deletion.
 - Test the selected provider against CORS proxy body constraints.
+- Verify the end-to-end path for genuine partial results, including ordering, cancellation, late-result rejection, and final-result reconciliation.
+- Keep audio bytes out of ordinary frontend/backend JSON messages; only upload identifiers and bounded metadata may cross that channel.
 - If multipart or streaming is unsupported, choose a compatible endpoint, JarvisType relay, or upstream requirement.
 
 #### Provider selection
@@ -162,6 +166,7 @@ Resolve open decisions and platform risks that could invalidate the architecture
 
 - Architecture decisions for UI, STT, semantic interpreter, context, persistence, languages, and send modes.
 - Audio/platform compatibility matrix.
+- Completed `PHASE0-VALIDATION.md` evidence register.
 - Provider comparison and selected adapter contracts.
 - Audio transport prototype and findings.
 - Security/privacy data-flow diagram.
@@ -171,7 +176,10 @@ Resolve open decisions and platform risks that could invalidate the architecture
 
 - A real recording reaches the selected provider through the proposed production transport.
 - A transcript appears in an extension-owned Lumiverse surface.
+- Partial text is proven to originate from the provider and reach the frontend incrementally, or the provider is explicitly classified as batch-only.
+- Cancelling recording or processing stops local capture, transport, and acceptance of late results.
 - A free-form edit produces a structured operation without changing the draft directly.
+- The staged upload is retrieved only by the owning extension/user and is explicitly deleted after the test.
 - Temporary spike audio is deleted.
 - Target-platform limitations are explicitly documented.
 

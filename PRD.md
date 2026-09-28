@@ -543,7 +543,7 @@ Expected gated permissions are:
 
 - `chats`
 - `chat_mutation`
-- `generation` when Lumiverse generation is used for edit parsing or correction
+- `generation` when Lumiverse generation is used for edit parsing or correction, and when **Confirm & Send** triggers the normal Lumiverse response-generation flow
 - `cors_proxy` when an external service is used
 - `ui_panels` if the selected UI placement requires it
 - `media` only if server-side audio conversion is required
@@ -728,6 +728,7 @@ The following decisions remain open and must be resolved through deliberate PRD 
 
 - Lumiverse does not currently document a public API for setting the unsent native chat-composer draft. JarvisType therefore uses its own editing surface and submits only after approval.
 - The documented Lumiverse CORS proxy uses a string request body. Transcription providers that require binary multipart uploads may need a compatible JSON/base64 endpoint, a JarvisType relay, or future Lumiverse proxy support.
+- The documented Lumiverse CORS proxy does not expose an incremental response-stream contract. Genuine partial transcription therefore requires a separately verified provider-to-extension transport rather than an assumption that the CORS proxy can relay streaming results.
 - Browser microphone access depends on secure-context behavior, user permission, and the runtime environment. Compatibility must be validated before release commitments are made.
 - Progressive display depends on the selected provider returning partial results. Batch-only providers cannot supply genuine interim recognition.
 - Semantic editing can be probabilistic. Structured operations, target validation, confidence gating, diffs, and undo are mandatory safeguards.

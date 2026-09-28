@@ -1,0 +1,20 @@
+{
+  "name": "jarvistype",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:backend && npm run build:frontend && npm run validate:package",
+    "build:backend": "esbuild src/backend.ts --bundle --platform=node --format=esm --target=esnext --outfile=dist/backend.js",
+    "build:frontend": "esbuild src/frontend.ts --bundle --platform=browser --format=esm --target=es2022 --outfile=dist/frontend.js",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && npm run build",
+    "validate:package": "node scripts/validate-package.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9",
+    "lumiverse-spindle-types": "^0.6.36",
+    "tus-js-client": "^4.3.1",
+    "typescript": "^5.9.2"
+  }
+}

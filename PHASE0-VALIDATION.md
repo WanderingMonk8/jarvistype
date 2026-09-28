@@ -54,6 +54,17 @@ The first remote probe:
 - Event result: no failure event was reported.
 - Data handling: only this sanitized summary is committed; the host origin and complete user-agent report remain outside the repository.
 
+### Recorded run R-002
+
+- Test date: 2026-09-28.
+- Probe version: `0.1.0` (the exported report does not embed a Git commit hash).
+- Environment: Windows 10 x64, Firefox 156, secure HTTPS context.
+- Lumiverse backend/frontend: `1.2.4` / `1.2.4`.
+- Recording action: microphone access was followed by cancellation after approximately one second.
+- Cleanup result: the probe reported `tracksStopped: true` and retained no recording sample.
+- Event result: no failure event was reported.
+- Data handling: only this sanitized summary is committed; the host origin and complete user-agent report remain outside the repository.
+
 | ID | Test | Pass condition | Status | Evidence |
 |---|---|---|---|---|
 | L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | PASS | R-001: health response proves frontend and backend loaded; manifest permissions are empty. |
@@ -61,7 +72,7 @@ The first remote probe:
 | L-03 | Version and lifecycle | Backend/frontend versions appear and readiness APIs are reported. | PASS | R-001: versions `1.2.4` / `1.2.4`; both readiness APIs available. |
 | L-04 | Microphone availability | Page is secure, permission prompt appears after the button action, and a non-empty sample is produced. | PASS | R-001: secure context; 75,280-byte recording. |
 | L-05 | MIME negotiation | Supported candidate MIME types and the selected type are recorded in exported JSON. | PASS | R-001: WebM/Opus, WebM, and Ogg/Opus reported; WebM/Opus selected. |
-| L-06 | Recording cleanup | Stop and cancel both leave every acquired media track in `ended` state. | PARTIAL | R-001: normal stop ended all tracks. Cancel path remains untested. |
+| L-06 | Recording cleanup | Stop and cancel both leave every acquired media track in `ended` state. | PASS | R-001 verified normal stop; R-002 verified cancellation; both reported all tracks stopped. |
 | L-07 | Staged upload round trip | Browser upload completes, backend size/hash match, and explicit deletion returns true. | PASS | R-001: size/hash matched and `deleted: true`. |
 | L-08 | Upload cancellation | The browser request stops cleanly; incomplete server data is left only to documented host expiry behavior. | READY | Pending VPS run |
 | L-09 | Disable/unload cleanup | Disabling or reloading during recording stops media tracks and aborts the active upload. | READY | Pending VPS run |

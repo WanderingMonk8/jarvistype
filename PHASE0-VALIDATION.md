@@ -81,18 +81,33 @@ The remote probe:
 - Cancellation limitation: probe `0.1.0` does not receive a deletion receipt for an incomplete tus upload; any partial server data relies on the host's documented inactivity expiry.
 - Data handling: only this sanitized summary is committed; the host origin and complete user-agent report remain outside the repository.
 
+### Recorded run R-004
+
+- Test date: 2026-09-29.
+- Probe version: `0.2.0` (the exported report does not embed a Git commit hash).
+- Environment: Windows 10 x64, Firefox 156, secure HTTPS context.
+- Lumiverse backend/frontend: `1.2.4` / `1.2.4`; the final setup reported exactly one active probe instance.
+- UI placement: the tester manually confirmed one sidebar entry, one input-bar action, one command-palette result, correct activation behavior, and no duplicates after reload.
+- Narrow layout and keyboard: the tester manually confirmed the narrow-layout and keyboard-access procedure. The final JSON was exported after later reload tests, so it does not retain the earlier run's optional `ui` snapshot.
+- Recording teardown: a `pagehide` receipt captured `recordingWasActive: true`, `tracksStopped: true`, and `passed: true` at `2026-09-29T06:26:52.877Z`.
+- Upload teardown: a `pagehide` receipt captured `uploadWasActive: true`, `uploadAbortRequested: true`, and `passed: true` at `2026-09-29T06:34:05.190Z`.
+- Upload teardown limitation: the receipt proves that teardown invoked the tus abort path; it does not provide immediate server-side deletion confirmation for partial upload data, which remains subject to documented expiry.
+- Additional round trip: a 5,179 ms / 71,187-byte WebM/Opus recording matched hash `93f0159e` after upload and was explicitly deleted.
+- Event result: no failure event was reported.
+- Data handling: only this sanitized summary is committed; the host origin and complete user-agent report remain outside the repository.
+
 | ID | Test | Pass condition | Status | Evidence |
 |---|---|---|---|---|
 | L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | PASS | R-001: health response proves frontend and backend loaded; manifest permissions are empty. |
-| L-02 | UI placement | Input-bar action activates exactly one drawer; command palette can also open it; reload creates no duplicates. | PARTIAL | R-001 proves the drawer rendered. Probe 0.2.0 adds activation counters and active-instance evidence; input-action, command-palette, and post-reload checks remain pending on the VPS. |
+| L-02 | UI placement | Input-bar action activates exactly one drawer; command palette can also open it; reload creates no duplicates. | PASS | R-004: tester confirmed both activation paths, exactly one entry in each placement, no post-reload duplicates, and one active setup instance. |
 | L-03 | Version and lifecycle | Backend/frontend versions appear and readiness APIs are reported. | PASS | R-001: versions `1.2.4` / `1.2.4`; both readiness APIs available. |
 | L-04 | Microphone availability | Page is secure, permission prompt appears after the button action, and a non-empty sample is produced. | PASS | R-001: secure context; 75,280-byte recording. |
 | L-05 | MIME negotiation | Supported candidate MIME types and the selected type are recorded in exported JSON. | PASS | R-001: WebM/Opus, WebM, and Ogg/Opus reported; WebM/Opus selected. |
 | L-06 | Recording cleanup | Stop and cancel both leave every acquired media track in `ended` state. | PASS | R-001 verified normal stop; R-002 verified cancellation; both reported all tracks stopped. |
 | L-07 | Staged upload round trip | Browser upload completes, backend size/hash match, and explicit deletion returns true. | PASS | R-001 and R-003: eight completed round trips matched; each reported `deleted: true`. |
 | L-08 | Upload cancellation | The browser request stops cleanly; incomplete server data is left only to documented host expiry behavior. | PASS | R-003: active tus upload aborted locally without error; partial server data has no deletion receipt and relies on documented expiry. |
-| L-09 | Disable/unload cleanup | Disabling or reloading during recording stops media tracks and aborts the active upload. | READY | Probe 0.2.0 persists bounded cleanup receipts and supplies a paced active upload; VPS recording and upload teardown runs are pending. |
-| L-10 | Narrow layout and keyboard | Drawer remains usable at the narrowest supported width and every control is keyboard reachable. | READY | Probe 0.2.0 adds responsive container rules and an overflow/name/tab-stop self-check; narrow-width and manual keyboard passes are pending. |
+| L-09 | Disable/unload cleanup | Disabling or reloading during recording stops media tracks and aborts the active upload. | PASS | R-004: recording teardown stopped all tracks; upload teardown invoked the tus abort path. R-003 separately verified that awaiting that abort path completes cleanly. Partial server data still relies on documented expiry. |
+| L-10 | Narrow layout and keyboard | Drawer remains usable at the narrowest supported width and every control is keyboard reachable. | PASS | R-004: tester manually confirmed the narrow-layout and keyboard procedure; the final post-reload export did not retain the earlier optional UI snapshot. |
 | L-11 | Cross-user upload isolation | A second user cannot retrieve the first user's upload. A dedicated follow-up probe is required. | LOCAL-PENDING | Not included in probe 0.2.0 |
 | L-12 | Host audio conversion | Conversion succeeds only if later selected provider formats require it. | PROVIDER-PENDING | Not included in probe 0.1.0 |
 | L-13 | Genuine provider partials | Provider partials arrive incrementally and reconcile with final text; cancellation rejects late updates. | PROVIDER-PENDING | Not included in probe 0.1.0 |

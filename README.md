@@ -134,9 +134,10 @@ The current `development` branch builds an installable diagnostic extension. It 
 - Reload/disable cleanup receipts for active recording and upload resources.
 - Drawer activation counters and a responsive-layout/accessibility self-check.
 - Sanitized discovery of any host API capable of invoking Lumiverse's configured STT connection.
+- Forward-compatible conformance testing for the proposed `stt-invocation-v1` API.
 - Sanitized JSON evidence export.
 
-The probe requests no gated Lumiverse permissions, does not read or modify chats, does not call an external provider, does not read connection identifiers or credentials, and does not retain recorded audio after the page or extension is unloaded.
+The probe installs without gated Lumiverse permissions, does not read or modify chats, and does not read connection identifiers or credentials. It requests the proposed `stt` permission only after detecting `stt-invocation-v1` and the user explicitly starts a transcription test. Recorded audio is not retained after the page or extension is unloaded, and a completed conformance upload is deleted by the backend in `finally`.
 
 ### Build verification
 
@@ -162,7 +163,11 @@ The compiled `dist/backend.js` and `dist/frontend.js` files are committed so the
 11. Make the drawer as narrow as the host permits, select **Run UI self-check**, and confirm it passes with no horizontal overflow. Then use only `Tab`, `Shift+Tab`, `Enter`, and `Space` to reach and operate each enabled control.
 12. Select **Inspect host STT surface**. This inspects API names and capability flags only; it does not send audio or invoke the configured provider.
 13. Record the displayed conclusion. **Candidate STT invocation API found** means the exported report contains one or more callable candidate paths. **Only provider-registration surfaces were found** means the host lets extensions supply an STT engine but exposes no callable route to the user's configured engine.
-14. Select **Download JSON** and retain the resulting evidence file. It contains environment and result metadata, cleanup booleans, counters, and sanitized API member names, but no audio, connection identifiers, settings, or credentials.
+14. Select **Check proposed API**. On Lumiverse 1.2.4, confirm it reports capability version `0`, lists the five missing methods, and does not show a permission prompt.
+15. On a host implementing the proposal, record yourself saying “JarvisType uses a Pip-Boy,” select **Check proposed API**, and then select **Grant permission and transcribe sample**. Approve only the `stt` permission.
+16. Confirm genuine partials appear incrementally when supported, the final transcript is authoritative, applied/unsupported features are reported, and staged-upload deletion is confirmed. The visible transcript is not included verbatim in exported JSON.
+17. Repeat with a longer sample and select **Cancel STT test** after provider processing starts. Confirm the result is aborted, no late text is accepted, and upload deletion is confirmed.
+18. Select **Download JSON** and retain the resulting evidence file. It contains environment and result metadata, cleanup booleans, counters, sanitized API names, and transcript length/hash, but no audio, transcript text, connection identifiers, settings, or credentials.
 
 Do not post the complete JSON report publicly without reviewing its `origin` and `userAgent` fields. Neither field is a credential, but both describe the test environment.
 

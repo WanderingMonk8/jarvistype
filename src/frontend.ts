@@ -97,6 +97,31 @@ interface ProbeReport {
     frontend: SttApiSurface
     backend: SttApiSurface
   }
+  sttConformance?: {
+    checkedAt: string
+    hostCapabilityVersion: number
+    permissionGranted: boolean
+    availableMethods: string[]
+    missingMethods: string[]
+    supported: boolean
+    run?: {
+      completedAt: string
+      passed: boolean
+      connectionCount: number
+      providerCount: number
+      partialCount: number
+      finalSegmentCount: number
+      finalTextLength: number | null
+      finalTextHash: string | null
+      appliedFeatures: string[]
+      unsupportedOptionalFeatures: string[]
+      uploadDeleted: boolean
+      aborted: boolean
+      lateEventCount: number
+      errorCode?: string
+      error?: string
+    }
+  }
   events: ProbeEvent[]
 }
 
@@ -185,7 +210,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     <section class="jt-probe" aria-labelledby="jt-probe-title">
       <div>
         <h2 id="jt-probe-title">JarvisType Phase 0 Capability Probe</h2>
-        <p class="jt-probe-note">This probe requests no gated Lumiverse permissions, sends no chat messages, and deletes each completed staged upload after verification.</p>
+        <p class="jt-probe-note">This probe installs without gated permissions. It requests the proposed stt permission only after capability detection and an explicit test action. It sends no chat messages and deletes completed staged uploads.</p>
       </div>
       <section class="jt-probe-card" aria-labelledby="jt-host-title">
         <h3 id="jt-host-title">Host and lifecycle</h3>
@@ -222,6 +247,15 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           <button type="button" data-inspect-stt>Inspect host STT surface</button>
         </div>
         <p class="jt-probe-status" role="status" aria-live="polite" data-stt-status>Not tested.</p>
+        <h3>Proposed API conformance</h3>
+        <p class="jt-probe-note">First check for <code>stt-invocation-v1</code>. If supported, record yourself saying “JarvisType uses a Pip-Boy,” then run the test. The transcript is displayed here but the JSON export retains only its length and hash.</p>
+        <div class="jt-probe-actions">
+          <button type="button" data-check-stt-api>Check proposed API</button>
+          <button type="button" data-run-stt-api disabled>Grant permission and transcribe sample</button>
+          <button type="button" data-cancel-stt-api disabled>Cancel STT test</button>
+        </div>
+        <p class="jt-probe-status" role="status" aria-live="polite" data-stt-conformance-status>Not checked.</p>
+        <pre class="jt-probe-log" tabindex="0" aria-label="Live STT conformance transcript" data-stt-transcript>No transcript.</pre>
       </section>
       <section class="jt-probe-card" aria-labelledby="jt-results-title">
         <h3 id="jt-results-title">Sanitized results</h3>
@@ -240,6 +274,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const recordingStatus = requireElement<HTMLElement>(tab.root, '[data-recording-status]')
   const uploadStatus = requireElement<HTMLElement>(tab.root, '[data-upload-status]')
   const sttStatus = requireElement<HTMLElement>(tab.root, '[data-stt-status]')
+  const sttConformanceStatus = requireElement<HTMLElement>(tab.root, '[data-stt-conformance-status]')
+  const sttTranscript = requireElement<HTMLElement>(tab.root, '[data-stt-transcript]')
   const resultsLog = requireElement<HTMLElement>(tab.root, '[data-results-log]')
   const refreshHostButton = requireElement<HTMLButtonElement>(tab.root, '[data-refresh-host]')
   const lifecycleUploadButton = requireElement<HTMLButtonElement>(tab.root, '[data-lifecycle-upload]')
@@ -250,6 +286,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const uploadButton = requireElement<HTMLButtonElement>(tab.root, '[data-upload]')
   const cancelUploadButton = requireElement<HTMLButtonElement>(tab.root, '[data-cancel-upload]')
   const inspectSttButton = requireElement<HTMLButtonElement>(tab.root, '[data-inspect-stt]')
+  const checkSttApiButton = requireElement<HTMLButtonElement>(tab.root, '[data-check-stt-api]')
+  const runSttApiButton = requireElement<HTMLButtonElement>(tab.root, '[data-run-stt-api]')
+  const cancelSttApiButton = requireElement<HTMLButtonElement>(tab.root, '[data-cancel-stt-api]')
   const copyButton = requireElement<HTMLButtonElement>(tab.root, '[data-copy-results]')
   const downloadButton = requireElement<HTMLButtonElement>(tab.root, '[data-download-results]')
 
@@ -265,6 +304,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   let activeUploadRequestId: string | null = null
   let healthRequestId: string | null = null
   let sttSurfaceRequestId: string | null = null
+  let sttCapabilityRequestId: string | null = null
+  let sttRunRequestId: string | null = null
+  let sttUpload: tus.Upload | null = null
+  const sttSegments = new Map<string, { sequence: number; text: string }>()
+  let sttCancellationRequested = false
+  let sttLateEventCount = 0
   let cleanupPerformed = false
 
   const addEvent = (
@@ -383,6 +428,109 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       return
     }
 
+    if (
+      payload.type === 'probe.stt.conformance.capability.result' &&
+      payload.requestId === sttCapabilityRequestId
+    ) {
+      sttCapabilityRequestId = null
+      checkSttApiButton.disabled = false
+      report.sttConformance = {
+        checkedAt: new Date().toISOString(),
+        hostCapabilityVersion: payload.hostCapabilityVersion,
+        permissionGranted: payload.permissionGranted,
+        availableMethods: payload.availableMethods,
+        missingMethods: payload.missingMethods,
+        supported: payload.supported,
+      }
+      runSttApiButton.disabled = !payload.supported || recordedBlob === null
+      sttConformanceStatus.textContent = payload.supported
+        ? payload.permissionGranted
+          ? 'Supported and permission already granted. Record or reuse a sample, then run the test.'
+          : 'Supported. Running the test will request the stt permission.'
+        : `Unavailable: capability version ${payload.hostCapabilityVersion}; missing ${payload.missingMethods.join(', ') || 'host capability flag'}.`
+      addEvent(payload.supported ? 'pass' : 'info', 'Proposed STT API capability check finished', {
+        hostCapabilityVersion: payload.hostCapabilityVersion,
+        permissionGranted: payload.permissionGranted,
+        availableMethods: payload.availableMethods,
+        missingMethods: payload.missingMethods,
+        supported: payload.supported,
+      })
+      return
+    }
+
+    if (payload.type === 'probe.stt.conformance.event' && payload.requestId === sttRunRequestId) {
+      if (sttCancellationRequested) {
+        sttLateEventCount += 1
+        return
+      }
+      if (payload.eventType === 'started') {
+        sttConformanceStatus.textContent = 'Provider transcription started…'
+      } else if (payload.text !== null) {
+        const segmentKey = payload.segmentId ?? `sequence-${payload.sequence ?? sttSegments.size}`
+        const existing = sttSegments.get(segmentKey)
+        sttSegments.set(segmentKey, {
+          sequence: existing?.sequence ?? payload.sequence ?? sttSegments.size,
+          text: payload.text,
+        })
+        sttTranscript.textContent = [...sttSegments.values()]
+          .sort((left, right) => left.sequence - right.sequence)
+          .map((segment) => segment.text)
+          .join(' ')
+      }
+      return
+    }
+
+    if (payload.type === 'probe.stt.conformance.result' && payload.requestId === sttRunRequestId) {
+      sttRunRequestId = null
+      sttUpload = null
+      cancelSttApiButton.disabled = true
+      checkSttApiButton.disabled = false
+      runSttApiButton.disabled = !report.sttConformance?.supported || recordedBlob === null
+      if (payload.finalText !== null) sttTranscript.textContent = payload.finalText
+      const finalBytes =
+        payload.finalText === null ? null : new TextEncoder().encode(payload.finalText)
+      if (report.sttConformance) {
+        report.sttConformance.run = {
+          completedAt: new Date().toISOString(),
+          passed: payload.ok,
+          connectionCount: payload.connectionCount,
+          providerCount: payload.providerCount,
+          partialCount: payload.partialCount,
+          finalSegmentCount: payload.finalSegmentCount,
+          finalTextLength: payload.finalText?.length ?? null,
+          finalTextHash: finalBytes ? hashBytes(finalBytes) : null,
+          appliedFeatures: payload.appliedFeatures,
+          unsupportedOptionalFeatures: payload.unsupportedOptionalFeatures,
+          uploadDeleted: payload.uploadDeleted,
+          aborted: payload.aborted,
+          lateEventCount: sttLateEventCount,
+          ...(payload.errorCode ? { errorCode: payload.errorCode } : {}),
+          ...(payload.error ? { error: payload.error } : {}),
+        }
+      }
+      sttConformanceStatus.textContent = payload.ok
+        ? `Passed: final transcript received; ${payload.partialCount} genuine partial event(s); upload deleted.`
+        : payload.aborted
+          ? `Cancelled; upload deletion ${payload.uploadDeleted ? 'confirmed' : 'not confirmed'}.`
+          : `Failed: ${payload.errorCode ?? 'unknown error'} — ${payload.error ?? 'no details'}`
+      addEvent(payload.ok ? 'pass' : payload.aborted ? 'info' : 'fail', 'Proposed STT API conformance run finished', {
+        passed: payload.ok,
+        connectionCount: payload.connectionCount,
+        providerCount: payload.providerCount,
+        partialCount: payload.partialCount,
+        finalSegmentCount: payload.finalSegmentCount,
+        finalTextLength: payload.finalText?.length ?? null,
+        appliedFeatures: payload.appliedFeatures,
+        unsupportedOptionalFeatures: payload.unsupportedOptionalFeatures,
+        uploadDeleted: payload.uploadDeleted,
+        aborted: payload.aborted,
+        lateEventCount: sttLateEventCount,
+        ...(payload.errorCode ? { errorCode: payload.errorCode } : {}),
+      })
+      sttCancellationRequested = false
+      return
+    }
+
     if (payload.type === 'probe.error') {
       addEvent('fail', 'Backend probe error', { error: payload.error })
     }
@@ -411,6 +559,157 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     addEvent('info', 'Requested sanitized host STT API surface inspection')
   }
 
+  const checkProposedSttApi = () => {
+    if (sttCapabilityRequestId || sttRunRequestId || sttUpload) return
+    sttCapabilityRequestId = makeRequestId()
+    checkSttApiButton.disabled = true
+    runSttApiButton.disabled = true
+    sttConformanceStatus.textContent = 'Checking stt-invocation-v1 and required methods…'
+    const request: ProbeRequest = {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'probe.stt.conformance.capability',
+      requestId: sttCapabilityRequestId,
+    }
+    ctx.sendToBackend(request)
+    addEvent('info', 'Requested proposed STT API capability check')
+  }
+
+  const runProposedSttApi = async () => {
+    if (
+      !report.sttConformance?.supported ||
+      !recordedBlob ||
+      sttRunRequestId ||
+      sttUpload ||
+      activeUpload
+    ) {
+      return
+    }
+
+    runSttApiButton.disabled = true
+    checkSttApiButton.disabled = true
+    cancelSttApiButton.disabled = false
+    sttConformanceStatus.textContent = 'Checking the proposed stt permission…'
+
+    try {
+      const granted = await ctx.permissions.getGranted()
+      if (!granted.includes('stt')) {
+        const updated = await ctx.permissions.request(['stt'], {
+          reason:
+            'Run the explicit JarvisType conformance test through your configured Lumiverse STT connection.',
+        })
+        if (!updated.includes('stt')) throw new Error('The stt permission was not granted')
+      }
+      report.sttConformance.permissionGranted = true
+    } catch (error) {
+      checkSttApiButton.disabled = false
+      runSttApiButton.disabled = false
+      cancelSttApiButton.disabled = true
+      sttConformanceStatus.textContent = `Permission was not granted: ${describeError(error)}`
+      addEvent('fail', 'Could not obtain proposed stt permission', {
+        error: describeError(error),
+      })
+      return
+    }
+
+    const blob = recordedBlob
+    if (blob.size > MAX_PROBE_AUDIO_BYTES) {
+      checkSttApiButton.disabled = false
+      runSttApiButton.disabled = false
+      cancelSttApiButton.disabled = true
+      sttConformanceStatus.textContent = 'Recorded sample exceeds the conformance-test limit.'
+      return
+    }
+
+    sttSegments.clear()
+    sttCancellationRequested = false
+    sttLateEventCount = 0
+    sttTranscript.textContent = 'Waiting for provider transcript…'
+    sttRunRequestId = makeRequestId()
+    const extension = extensionForMime(blob.type)
+    const file = new File([blob], `jarvistype-stt-conformance-${Date.now()}.${extension}`, {
+      type: blob.type || 'application/octet-stream',
+    })
+    const upload = new tus.Upload(file, {
+      endpoint: '/api/v1/spindle-uploads',
+      chunkSize: 16 * 1024 * 1024,
+      retryDelays: [0, 1000, 3000, 5000],
+      removeFingerprintOnSuccess: true,
+      metadata: { filename: file.name, extension: 'jarvistype' },
+      onProgress: (uploaded, total) => {
+        const percent = total > 0 ? Math.round((uploaded / total) * 100) : 0
+        sttConformanceStatus.textContent = `Staging conformance audio… ${percent}%`
+      },
+      onError: (error) => {
+        sttUpload = null
+        sttRunRequestId = null
+        checkSttApiButton.disabled = false
+        runSttApiButton.disabled = false
+        cancelSttApiButton.disabled = true
+        sttConformanceStatus.textContent = `STT test upload failed: ${error.message}`
+        addEvent('fail', 'STT conformance upload failed', { error: error.message })
+      },
+      onSuccess: () => {
+        const uploadId = upload.url?.split('/').filter(Boolean).pop()
+        sttUpload = null
+        if (!uploadId || !sttRunRequestId) {
+          sttRunRequestId = null
+          checkSttApiButton.disabled = false
+          runSttApiButton.disabled = false
+          cancelSttApiButton.disabled = true
+          sttConformanceStatus.textContent = 'STT test upload finished without an upload ID.'
+          addEvent('fail', 'STT conformance upload returned no upload ID')
+          return
+        }
+
+        sttConformanceStatus.textContent = 'Audio staged; invoking the configured STT connection…'
+        const request: ProbeRequest = {
+          protocolVersion: PROTOCOL_VERSION,
+          type: 'probe.stt.conformance.run',
+          requestId: sttRunRequestId,
+          uploadId,
+          reportedMimeType: file.type,
+          expectedSize: file.size,
+        }
+        ctx.sendToBackend(request)
+        addEvent('info', 'Started proposed STT API conformance run', {
+          sizeBytes: file.size,
+          mimeType: file.type,
+        })
+      },
+    })
+    sttUpload = upload
+    upload.start()
+  }
+
+  const cancelProposedSttApi = async () => {
+    if (sttUpload) {
+      const upload = sttUpload
+      sttUpload = null
+      sttRunRequestId = null
+      sttCancellationRequested = true
+      await upload.abort()
+      checkSttApiButton.disabled = false
+      runSttApiButton.disabled = !report.sttConformance?.supported || recordedBlob === null
+      cancelSttApiButton.disabled = true
+      sttConformanceStatus.textContent =
+        'Conformance upload cancelled; incomplete staged data will expire under host policy.'
+      addEvent('info', 'Cancelled STT conformance upload locally')
+      return
+    }
+    if (!sttRunRequestId) return
+    sttCancellationRequested = true
+    const request: ProbeRequest = {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'probe.stt.conformance.cancel',
+      requestId: makeRequestId(),
+      targetRequestId: sttRunRequestId,
+    }
+    ctx.sendToBackend(request)
+    cancelSttApiButton.disabled = true
+    sttConformanceStatus.textContent = 'Cancellation requested; awaiting cleanup confirmation…'
+    addEvent('info', 'Requested STT conformance cancellation')
+  }
+
   const clearRecordingTimer = () => {
     if (recordingTimer !== null) window.clearTimeout(recordingTimer)
     recordingTimer = null
@@ -420,6 +719,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (!keepRecording || disposed) {
       recordedBlob = null
       uploadButton.disabled = true
+      runSttApiButton.disabled = true
       recordingStatus.textContent = 'Recording cancelled; no sample retained.'
       addEvent('pass', 'Recording cancelled and media tracks stopped', { tracksStopped })
       return
@@ -441,6 +741,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       : 'Recording failed: the sample was empty or media tracks did not stop.'
     uploadStatus.textContent = passed ? 'Sample ready for upload.' : 'A valid sample is required.'
     uploadButton.disabled = !passed
+    runSttApiButton.disabled = !passed || !report.sttConformance?.supported
     addEvent(passed ? 'pass' : 'fail', 'Microphone recording finished', {
       sizeBytes: blob.size,
       durationMs,
@@ -737,13 +1038,26 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
     const recordingWasActive =
       Boolean(activeStream) || Boolean(activeRecorder && activeRecorder.state !== 'inactive')
-    const uploadWasActive = activeUpload !== null
+    const uploadWasActive = activeUpload !== null || sttUpload !== null
     if (activeRecorder && activeRecorder.state !== 'inactive') activeRecorder.stop()
     const tracksStopped = stopTracks()
     const upload = activeUpload
     activeUpload = null
-    const uploadAbortRequested = upload !== null
+    const conformanceUpload = sttUpload
+    sttUpload = null
+    const uploadAbortRequested = upload !== null || conformanceUpload !== null
     if (upload) void upload.abort().catch(() => undefined)
+    if (conformanceUpload) void conformanceUpload.abort().catch(() => undefined)
+    if (sttRunRequestId) {
+      const request: ProbeRequest = {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'probe.stt.conformance.cancel',
+        requestId: makeRequestId(),
+        targetRequestId: sttRunRequestId,
+      }
+      ctx.sendToBackend(request)
+      sttRunRequestId = null
+    }
 
     saveCleanupReceipt({
       at: new Date().toISOString(),
@@ -802,6 +1116,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   uploadButton.addEventListener('click', () => void uploadRecording())
   cancelUploadButton.addEventListener('click', () => void cancelUpload())
   inspectSttButton.addEventListener('click', inspectSttSurface)
+  checkSttApiButton.addEventListener('click', checkProposedSttApi)
+  runSttApiButton.addEventListener('click', () => void runProposedSttApi())
+  cancelSttApiButton.addEventListener('click', () => void cancelProposedSttApi())
   copyButton.addEventListener('click', () => void copyResults())
   downloadButton.addEventListener('click', downloadResults)
 

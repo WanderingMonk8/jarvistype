@@ -452,6 +452,8 @@ Hosts that lack the capability remain compatible; extensions feature-detect and 
 
 ## Acceptance tests
 
+JarvisType probe `0.4.0` contains a forward-compatible executable version of these checks. It remains installable on older hosts because it does not request `stt` until `stt-invocation-v1` and the complete method surface are detected.
+
 ### Connection and permission
 
 - An extension without `stt` receives the standard permission-denied error.

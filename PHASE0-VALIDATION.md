@@ -4,7 +4,7 @@
 
 This register separates facts guaranteed by published documentation from behavior that must be demonstrated on the hosted Lumiverse installation or against a selected provider. The PRD remains the product source of truth.
 
-Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `LOCAL-PENDING`, `PROVIDER-PENDING`, and `PRODUCT-PENDING`.
+Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `LOCAL-PENDING`, `HOST-PENDING`, `PROVIDER-PENDING`, and `PRODUCT-PENDING`.
 
 ## Documentation-settled facts
 
@@ -24,7 +24,7 @@ Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `LOCAL-PENDI
 
 ## Probe scope and safety
 
-Current probe version: `0.3.0`
+Current probe version: `0.4.0`
 
 The remote probe:
 
@@ -39,6 +39,8 @@ The remote probe:
 - Provides a paced 2 MiB synthetic upload for reload/disable testing. Completed test uploads are verified and deleted; interrupted partial uploads rely on the documented 30-minute inactivity expiry.
 - Counts active setup instances and drawer/input-action activations, and can audit the visible drawer for horizontal overflow, accessible control names, and negative tab stops.
 - Inspects only sanitized frontend/backend API member names and host capability names when checking for configured STT access.
+- Requests the proposed `stt` permission only after `stt-invocation-v1` and all required methods are detected and the user explicitly starts the conformance run.
+- Keeps the visible conformance transcript out of exported JSON; only transcript length and a non-cryptographic hash are retained.
 - Exports no audio or credentials in its result JSON.
 
 ## Remote installation tests
@@ -136,6 +138,8 @@ Probe `0.3.0` determines whether a Spindle extension can reuse the user's existi
 | S2-01 | Host STT invocation surface | The runtime exposes a callable STT/transcription invocation path to either the frontend or backend extension context. | FAIL | R-005: both invocation-candidate arrays were empty; no matching host capability was advertised. |
 | S2-02 | Registration versus invocation | Provider-registration APIs are not mistaken for APIs that invoke the user's configured STT provider. | PASS | R-005: `providers.register` and `providers.handle` were classified as registration-only. |
 | S2-03 | Sanitized discovery | Export contains no connection IDs, names, URLs, provider metadata, credentials, or audio. | PASS | R-005: review confirmed that only API/capability names and availability results were exported. |
+| S2-04 | Proposal capability gate | Probe 0.4.0 detects `stt-invocation-v1` and all five required methods before requesting permission or uploading audio. | REMOTE-PENDING | Run **Check proposed API** on Lumiverse 1.2.4; expect unsupported with no permission prompt. |
+| S2-05 | Proposed API conformance | On an implementing host, redacted discovery, streamed transcription, final reconciliation, capability reporting, cancellation, late-result rejection, and upload deletion pass. | HOST-PENDING | Requires a Lumiverse build implementing `LUMIVERSE-STT-API-PROPOSAL.md`. |
 
 ### Section 2 conclusion
 

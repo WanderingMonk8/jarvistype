@@ -3105,7 +3105,7 @@ var isSupported = typeof XMLHttpRequest === "function" && typeof Blob === "funct
 
 // src/shared.ts
 var PROTOCOL_VERSION = 1;
-var PROBE_VERSION = "0.3.0";
+var PROBE_VERSION = "0.4.0";
 var MAX_PROBE_AUDIO_BYTES = 25 * 1024 * 1024;
 var AUDIO_MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
@@ -3125,6 +3125,15 @@ function isProbeResponse(value) {
   }
   if (value.type === "probe.stt.surface.response") {
     return value.ok === true && isSttApiSurface(value.frontend) && isSttApiSurface(value.backend) && (value.conclusion === "invocation-api-found" || value.conclusion === "registration-only" || value.conclusion === "no-stt-surface");
+  }
+  if (value.type === "probe.stt.conformance.capability.result") {
+    return value.ok === true && typeof value.hostCapabilityVersion === "number" && Number.isSafeInteger(value.hostCapabilityVersion) && value.hostCapabilityVersion >= 0 && typeof value.permissionGranted === "boolean" && isBoundedStringArray(value.availableMethods) && isBoundedStringArray(value.missingMethods) && typeof value.supported === "boolean";
+  }
+  if (value.type === "probe.stt.conformance.event") {
+    return value.ok === true && (value.eventType === "started" || value.eventType === "partial" || value.eventType === "final_segment") && isNullableSafeInteger(value.sequence) && (value.segmentId === null || isBoundedString(value.segmentId, 1, 256)) && isNullableSafeInteger(value.revision) && (value.text === null || isBoundedString(value.text, 0, 1e5)) && isBoundedStringArray(value.appliedFeatures) && isBoundedStringArray(value.unsupportedOptionalFeatures);
+  }
+  if (value.type === "probe.stt.conformance.result") {
+    return typeof value.ok === "boolean" && isNonNegativeSafeInteger(value.connectionCount) && isNonNegativeSafeInteger(value.providerCount) && isNonNegativeSafeInteger(value.partialCount) && isNonNegativeSafeInteger(value.finalSegmentCount) && (value.finalText === null || isBoundedString(value.finalText, 0, 1e5)) && isBoundedStringArray(value.appliedFeatures) && isBoundedStringArray(value.unsupportedOptionalFeatures) && typeof value.uploadDeleted === "boolean" && typeof value.aborted === "boolean" && (value.errorCode === void 0 || isBoundedString(value.errorCode, 1, 128)) && (value.error === void 0 || isBoundedString(value.error, 1, 2e3));
   }
   if (value.type !== "probe.upload.result") return false;
   return typeof value.ok === "boolean" && isSafeProbeSize(value.expectedSize) && (value.actualSize === null || isSafeProbeSize(value.actualSize)) && typeof value.expectedHash === "string" && /^[0-9a-f]{8}$/.test(value.expectedHash) && (value.actualHash === null || typeof value.actualHash === "string" && /^[0-9a-f]{8}$/.test(value.actualHash)) && isBoundedString(value.reportedMimeType, 0, 128) && (value.fileName === null || isBoundedString(value.fileName, 0, 512)) && typeof value.deleted === "boolean" && (value.error === void 0 || isBoundedString(value.error, 1, 2e3));
@@ -3152,6 +3161,12 @@ function isBoundedString(value, minimum, maximum) {
 }
 function isSafeProbeSize(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= MAX_PROBE_AUDIO_BYTES;
+}
+function isNonNegativeSafeInteger(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+function isNullableSafeInteger(value) {
+  return value === null || typeof value === "number" && Number.isSafeInteger(value);
 }
 
 // src/frontend.ts
@@ -3232,7 +3247,7 @@ function setup(ctx) {
     <section class="jt-probe" aria-labelledby="jt-probe-title">
       <div>
         <h2 id="jt-probe-title">JarvisType Phase 0 Capability Probe</h2>
-        <p class="jt-probe-note">This probe requests no gated Lumiverse permissions, sends no chat messages, and deletes each completed staged upload after verification.</p>
+        <p class="jt-probe-note">This probe installs without gated permissions. It requests the proposed stt permission only after capability detection and an explicit test action. It sends no chat messages and deletes completed staged uploads.</p>
       </div>
       <section class="jt-probe-card" aria-labelledby="jt-host-title">
         <h3 id="jt-host-title">Host and lifecycle</h3>
@@ -3269,6 +3284,15 @@ function setup(ctx) {
           <button type="button" data-inspect-stt>Inspect host STT surface</button>
         </div>
         <p class="jt-probe-status" role="status" aria-live="polite" data-stt-status>Not tested.</p>
+        <h3>Proposed API conformance</h3>
+        <p class="jt-probe-note">First check for <code>stt-invocation-v1</code>. If supported, record yourself saying \u201CJarvisType uses a Pip-Boy,\u201D then run the test. The transcript is displayed here but the JSON export retains only its length and hash.</p>
+        <div class="jt-probe-actions">
+          <button type="button" data-check-stt-api>Check proposed API</button>
+          <button type="button" data-run-stt-api disabled>Grant permission and transcribe sample</button>
+          <button type="button" data-cancel-stt-api disabled>Cancel STT test</button>
+        </div>
+        <p class="jt-probe-status" role="status" aria-live="polite" data-stt-conformance-status>Not checked.</p>
+        <pre class="jt-probe-log" tabindex="0" aria-label="Live STT conformance transcript" data-stt-transcript>No transcript.</pre>
       </section>
       <section class="jt-probe-card" aria-labelledby="jt-results-title">
         <h3 id="jt-results-title">Sanitized results</h3>
@@ -3286,6 +3310,8 @@ function setup(ctx) {
   const recordingStatus = requireElement(tab.root, "[data-recording-status]");
   const uploadStatus = requireElement(tab.root, "[data-upload-status]");
   const sttStatus = requireElement(tab.root, "[data-stt-status]");
+  const sttConformanceStatus = requireElement(tab.root, "[data-stt-conformance-status]");
+  const sttTranscript = requireElement(tab.root, "[data-stt-transcript]");
   const resultsLog = requireElement(tab.root, "[data-results-log]");
   const refreshHostButton = requireElement(tab.root, "[data-refresh-host]");
   const lifecycleUploadButton = requireElement(tab.root, "[data-lifecycle-upload]");
@@ -3296,6 +3322,9 @@ function setup(ctx) {
   const uploadButton = requireElement(tab.root, "[data-upload]");
   const cancelUploadButton = requireElement(tab.root, "[data-cancel-upload]");
   const inspectSttButton = requireElement(tab.root, "[data-inspect-stt]");
+  const checkSttApiButton = requireElement(tab.root, "[data-check-stt-api]");
+  const runSttApiButton = requireElement(tab.root, "[data-run-stt-api]");
+  const cancelSttApiButton = requireElement(tab.root, "[data-cancel-stt-api]");
   const copyButton = requireElement(tab.root, "[data-copy-results]");
   const downloadButton = requireElement(tab.root, "[data-download-results]");
   let disposed = false;
@@ -3310,6 +3339,12 @@ function setup(ctx) {
   let activeUploadRequestId = null;
   let healthRequestId = null;
   let sttSurfaceRequestId = null;
+  let sttCapabilityRequestId = null;
+  let sttRunRequestId = null;
+  let sttUpload = null;
+  const sttSegments = /* @__PURE__ */ new Map();
+  let sttCancellationRequested = false;
+  let sttLateEventCount = 0;
   let cleanupPerformed = false;
   const addEvent = (level, message, details) => {
     events.push({ at: (/* @__PURE__ */ new Date()).toISOString(), level, message, ...details ? { details } : {} });
@@ -3412,6 +3447,91 @@ function setup(ctx) {
       );
       return;
     }
+    if (payload.type === "probe.stt.conformance.capability.result" && payload.requestId === sttCapabilityRequestId) {
+      sttCapabilityRequestId = null;
+      checkSttApiButton.disabled = false;
+      report.sttConformance = {
+        checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        hostCapabilityVersion: payload.hostCapabilityVersion,
+        permissionGranted: payload.permissionGranted,
+        availableMethods: payload.availableMethods,
+        missingMethods: payload.missingMethods,
+        supported: payload.supported
+      };
+      runSttApiButton.disabled = !payload.supported || recordedBlob === null;
+      sttConformanceStatus.textContent = payload.supported ? payload.permissionGranted ? "Supported and permission already granted. Record or reuse a sample, then run the test." : "Supported. Running the test will request the stt permission." : `Unavailable: capability version ${payload.hostCapabilityVersion}; missing ${payload.missingMethods.join(", ") || "host capability flag"}.`;
+      addEvent(payload.supported ? "pass" : "info", "Proposed STT API capability check finished", {
+        hostCapabilityVersion: payload.hostCapabilityVersion,
+        permissionGranted: payload.permissionGranted,
+        availableMethods: payload.availableMethods,
+        missingMethods: payload.missingMethods,
+        supported: payload.supported
+      });
+      return;
+    }
+    if (payload.type === "probe.stt.conformance.event" && payload.requestId === sttRunRequestId) {
+      if (sttCancellationRequested) {
+        sttLateEventCount += 1;
+        return;
+      }
+      if (payload.eventType === "started") {
+        sttConformanceStatus.textContent = "Provider transcription started\u2026";
+      } else if (payload.text !== null) {
+        const segmentKey = payload.segmentId ?? `sequence-${payload.sequence ?? sttSegments.size}`;
+        const existing = sttSegments.get(segmentKey);
+        sttSegments.set(segmentKey, {
+          sequence: existing?.sequence ?? payload.sequence ?? sttSegments.size,
+          text: payload.text
+        });
+        sttTranscript.textContent = [...sttSegments.values()].sort((left, right) => left.sequence - right.sequence).map((segment) => segment.text).join(" ");
+      }
+      return;
+    }
+    if (payload.type === "probe.stt.conformance.result" && payload.requestId === sttRunRequestId) {
+      sttRunRequestId = null;
+      sttUpload = null;
+      cancelSttApiButton.disabled = true;
+      checkSttApiButton.disabled = false;
+      runSttApiButton.disabled = !report.sttConformance?.supported || recordedBlob === null;
+      if (payload.finalText !== null) sttTranscript.textContent = payload.finalText;
+      const finalBytes = payload.finalText === null ? null : new TextEncoder().encode(payload.finalText);
+      if (report.sttConformance) {
+        report.sttConformance.run = {
+          completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          passed: payload.ok,
+          connectionCount: payload.connectionCount,
+          providerCount: payload.providerCount,
+          partialCount: payload.partialCount,
+          finalSegmentCount: payload.finalSegmentCount,
+          finalTextLength: payload.finalText?.length ?? null,
+          finalTextHash: finalBytes ? hashBytes(finalBytes) : null,
+          appliedFeatures: payload.appliedFeatures,
+          unsupportedOptionalFeatures: payload.unsupportedOptionalFeatures,
+          uploadDeleted: payload.uploadDeleted,
+          aborted: payload.aborted,
+          lateEventCount: sttLateEventCount,
+          ...payload.errorCode ? { errorCode: payload.errorCode } : {},
+          ...payload.error ? { error: payload.error } : {}
+        };
+      }
+      sttConformanceStatus.textContent = payload.ok ? `Passed: final transcript received; ${payload.partialCount} genuine partial event(s); upload deleted.` : payload.aborted ? `Cancelled; upload deletion ${payload.uploadDeleted ? "confirmed" : "not confirmed"}.` : `Failed: ${payload.errorCode ?? "unknown error"} \u2014 ${payload.error ?? "no details"}`;
+      addEvent(payload.ok ? "pass" : payload.aborted ? "info" : "fail", "Proposed STT API conformance run finished", {
+        passed: payload.ok,
+        connectionCount: payload.connectionCount,
+        providerCount: payload.providerCount,
+        partialCount: payload.partialCount,
+        finalSegmentCount: payload.finalSegmentCount,
+        finalTextLength: payload.finalText?.length ?? null,
+        appliedFeatures: payload.appliedFeatures,
+        unsupportedOptionalFeatures: payload.unsupportedOptionalFeatures,
+        uploadDeleted: payload.uploadDeleted,
+        aborted: payload.aborted,
+        lateEventCount: sttLateEventCount,
+        ...payload.errorCode ? { errorCode: payload.errorCode } : {}
+      });
+      sttCancellationRequested = false;
+      return;
+    }
     if (payload.type === "probe.error") {
       addEvent("fail", "Backend probe error", { error: payload.error });
     }
@@ -3437,6 +3557,141 @@ function setup(ctx) {
     ctx.sendToBackend(request);
     addEvent("info", "Requested sanitized host STT API surface inspection");
   };
+  const checkProposedSttApi = () => {
+    if (sttCapabilityRequestId || sttRunRequestId || sttUpload) return;
+    sttCapabilityRequestId = makeRequestId();
+    checkSttApiButton.disabled = true;
+    runSttApiButton.disabled = true;
+    sttConformanceStatus.textContent = "Checking stt-invocation-v1 and required methods\u2026";
+    const request = {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "probe.stt.conformance.capability",
+      requestId: sttCapabilityRequestId
+    };
+    ctx.sendToBackend(request);
+    addEvent("info", "Requested proposed STT API capability check");
+  };
+  const runProposedSttApi = async () => {
+    if (!report.sttConformance?.supported || !recordedBlob || sttRunRequestId || sttUpload || activeUpload) {
+      return;
+    }
+    runSttApiButton.disabled = true;
+    checkSttApiButton.disabled = true;
+    cancelSttApiButton.disabled = false;
+    sttConformanceStatus.textContent = "Checking the proposed stt permission\u2026";
+    try {
+      const granted = await ctx.permissions.getGranted();
+      if (!granted.includes("stt")) {
+        const updated = await ctx.permissions.request(["stt"], {
+          reason: "Run the explicit JarvisType conformance test through your configured Lumiverse STT connection."
+        });
+        if (!updated.includes("stt")) throw new Error("The stt permission was not granted");
+      }
+      report.sttConformance.permissionGranted = true;
+    } catch (error) {
+      checkSttApiButton.disabled = false;
+      runSttApiButton.disabled = false;
+      cancelSttApiButton.disabled = true;
+      sttConformanceStatus.textContent = `Permission was not granted: ${describeError(error)}`;
+      addEvent("fail", "Could not obtain proposed stt permission", {
+        error: describeError(error)
+      });
+      return;
+    }
+    const blob = recordedBlob;
+    if (blob.size > MAX_PROBE_AUDIO_BYTES) {
+      checkSttApiButton.disabled = false;
+      runSttApiButton.disabled = false;
+      cancelSttApiButton.disabled = true;
+      sttConformanceStatus.textContent = "Recorded sample exceeds the conformance-test limit.";
+      return;
+    }
+    sttSegments.clear();
+    sttCancellationRequested = false;
+    sttLateEventCount = 0;
+    sttTranscript.textContent = "Waiting for provider transcript\u2026";
+    sttRunRequestId = makeRequestId();
+    const extension = extensionForMime(blob.type);
+    const file = new File([blob], `jarvistype-stt-conformance-${Date.now()}.${extension}`, {
+      type: blob.type || "application/octet-stream"
+    });
+    const upload = new Upload(file, {
+      endpoint: "/api/v1/spindle-uploads",
+      chunkSize: 16 * 1024 * 1024,
+      retryDelays: [0, 1e3, 3e3, 5e3],
+      removeFingerprintOnSuccess: true,
+      metadata: { filename: file.name, extension: "jarvistype" },
+      onProgress: (uploaded, total) => {
+        const percent = total > 0 ? Math.round(uploaded / total * 100) : 0;
+        sttConformanceStatus.textContent = `Staging conformance audio\u2026 ${percent}%`;
+      },
+      onError: (error) => {
+        sttUpload = null;
+        sttRunRequestId = null;
+        checkSttApiButton.disabled = false;
+        runSttApiButton.disabled = false;
+        cancelSttApiButton.disabled = true;
+        sttConformanceStatus.textContent = `STT test upload failed: ${error.message}`;
+        addEvent("fail", "STT conformance upload failed", { error: error.message });
+      },
+      onSuccess: () => {
+        const uploadId = upload.url?.split("/").filter(Boolean).pop();
+        sttUpload = null;
+        if (!uploadId || !sttRunRequestId) {
+          sttRunRequestId = null;
+          checkSttApiButton.disabled = false;
+          runSttApiButton.disabled = false;
+          cancelSttApiButton.disabled = true;
+          sttConformanceStatus.textContent = "STT test upload finished without an upload ID.";
+          addEvent("fail", "STT conformance upload returned no upload ID");
+          return;
+        }
+        sttConformanceStatus.textContent = "Audio staged; invoking the configured STT connection\u2026";
+        const request = {
+          protocolVersion: PROTOCOL_VERSION,
+          type: "probe.stt.conformance.run",
+          requestId: sttRunRequestId,
+          uploadId,
+          reportedMimeType: file.type,
+          expectedSize: file.size
+        };
+        ctx.sendToBackend(request);
+        addEvent("info", "Started proposed STT API conformance run", {
+          sizeBytes: file.size,
+          mimeType: file.type
+        });
+      }
+    });
+    sttUpload = upload;
+    upload.start();
+  };
+  const cancelProposedSttApi = async () => {
+    if (sttUpload) {
+      const upload = sttUpload;
+      sttUpload = null;
+      sttRunRequestId = null;
+      sttCancellationRequested = true;
+      await upload.abort();
+      checkSttApiButton.disabled = false;
+      runSttApiButton.disabled = !report.sttConformance?.supported || recordedBlob === null;
+      cancelSttApiButton.disabled = true;
+      sttConformanceStatus.textContent = "Conformance upload cancelled; incomplete staged data will expire under host policy.";
+      addEvent("info", "Cancelled STT conformance upload locally");
+      return;
+    }
+    if (!sttRunRequestId) return;
+    sttCancellationRequested = true;
+    const request = {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "probe.stt.conformance.cancel",
+      requestId: makeRequestId(),
+      targetRequestId: sttRunRequestId
+    };
+    ctx.sendToBackend(request);
+    cancelSttApiButton.disabled = true;
+    sttConformanceStatus.textContent = "Cancellation requested; awaiting cleanup confirmation\u2026";
+    addEvent("info", "Requested STT conformance cancellation");
+  };
   const clearRecordingTimer = () => {
     if (recordingTimer !== null) window.clearTimeout(recordingTimer);
     recordingTimer = null;
@@ -3445,6 +3700,7 @@ function setup(ctx) {
     if (!keepRecording || disposed) {
       recordedBlob = null;
       uploadButton.disabled = true;
+      runSttApiButton.disabled = true;
       recordingStatus.textContent = "Recording cancelled; no sample retained.";
       addEvent("pass", "Recording cancelled and media tracks stopped", { tracksStopped });
       return;
@@ -3463,6 +3719,7 @@ function setup(ctx) {
     recordingStatus.textContent = passed ? `Sample ready: ${blob.size} bytes. You can now test staged upload.` : "Recording failed: the sample was empty or media tracks did not stop.";
     uploadStatus.textContent = passed ? "Sample ready for upload." : "A valid sample is required.";
     uploadButton.disabled = !passed;
+    runSttApiButton.disabled = !passed || !report.sttConformance?.supported;
     addEvent(passed ? "pass" : "fail", "Microphone recording finished", {
       sizeBytes: blob.size,
       durationMs,
@@ -3732,13 +3989,26 @@ function setup(ctx) {
     clearRecordingTimer();
     keepRecording = false;
     const recordingWasActive = Boolean(activeStream) || Boolean(activeRecorder && activeRecorder.state !== "inactive");
-    const uploadWasActive = activeUpload !== null;
+    const uploadWasActive = activeUpload !== null || sttUpload !== null;
     if (activeRecorder && activeRecorder.state !== "inactive") activeRecorder.stop();
     const tracksStopped = stopTracks();
     const upload = activeUpload;
     activeUpload = null;
-    const uploadAbortRequested = upload !== null;
+    const conformanceUpload = sttUpload;
+    sttUpload = null;
+    const uploadAbortRequested = upload !== null || conformanceUpload !== null;
     if (upload) void upload.abort().catch(() => void 0);
+    if (conformanceUpload) void conformanceUpload.abort().catch(() => void 0);
+    if (sttRunRequestId) {
+      const request = {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "probe.stt.conformance.cancel",
+        requestId: makeRequestId(),
+        targetRequestId: sttRunRequestId
+      };
+      ctx.sendToBackend(request);
+      sttRunRequestId = null;
+    }
     saveCleanupReceipt({
       at: (/* @__PURE__ */ new Date()).toISOString(),
       trigger,
@@ -3793,6 +4063,9 @@ function setup(ctx) {
   uploadButton.addEventListener("click", () => void uploadRecording());
   cancelUploadButton.addEventListener("click", () => void cancelUpload());
   inspectSttButton.addEventListener("click", inspectSttSurface);
+  checkSttApiButton.addEventListener("click", checkProposedSttApi);
+  runSttApiButton.addEventListener("click", () => void runProposedSttApi());
+  cancelSttApiButton.addEventListener("click", () => void cancelProposedSttApi());
   copyButton.addEventListener("click", () => void copyResults());
   downloadButton.addEventListener("click", downloadResults);
   addEvent(activeSetupInstances === 1 ? "pass" : "fail", "Frontend capability probe initialized", {

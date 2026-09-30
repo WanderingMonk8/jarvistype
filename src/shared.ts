@@ -1,5 +1,5 @@
 export const PROTOCOL_VERSION = 1 as const
-export const PROBE_VERSION = '0.3.0'
+export const PROBE_VERSION = '0.4.0'
 export const MAX_PROBE_AUDIO_BYTES = 25 * 1024 * 1024
 
 export const AUDIO_MIME_CANDIDATES = [
@@ -30,6 +30,25 @@ export type ProbeRequest =
       type: 'probe.stt.surface.request'
       requestId: string
       frontend: SttApiSurface
+    }
+  | {
+      protocolVersion: typeof PROTOCOL_VERSION
+      type: 'probe.stt.conformance.capability'
+      requestId: string
+    }
+  | {
+      protocolVersion: typeof PROTOCOL_VERSION
+      type: 'probe.stt.conformance.run'
+      requestId: string
+      uploadId: string
+      reportedMimeType: string
+      expectedSize: number
+    }
+  | {
+      protocolVersion: typeof PROTOCOL_VERSION
+      type: 'probe.stt.conformance.cancel'
+      requestId: string
+      targetRequestId: string
     }
 
 export interface SttApiSurface {
@@ -76,6 +95,47 @@ export type ProbeResponse =
     }
   | {
       protocolVersion: typeof PROTOCOL_VERSION
+      type: 'probe.stt.conformance.capability.result'
+      requestId: string
+      ok: true
+      hostCapabilityVersion: number
+      permissionGranted: boolean
+      availableMethods: string[]
+      missingMethods: string[]
+      supported: boolean
+    }
+  | {
+      protocolVersion: typeof PROTOCOL_VERSION
+      type: 'probe.stt.conformance.event'
+      requestId: string
+      ok: true
+      eventType: 'started' | 'partial' | 'final_segment'
+      sequence: number | null
+      segmentId: string | null
+      revision: number | null
+      text: string | null
+      appliedFeatures: string[]
+      unsupportedOptionalFeatures: string[]
+    }
+  | {
+      protocolVersion: typeof PROTOCOL_VERSION
+      type: 'probe.stt.conformance.result'
+      requestId: string
+      ok: boolean
+      connectionCount: number
+      providerCount: number
+      partialCount: number
+      finalSegmentCount: number
+      finalText: string | null
+      appliedFeatures: string[]
+      unsupportedOptionalFeatures: string[]
+      uploadDeleted: boolean
+      aborted: boolean
+      errorCode?: string
+      error?: string
+    }
+  | {
+      protocolVersion: typeof PROTOCOL_VERSION
       type: 'probe.error'
       requestId: string
       ok: false
@@ -88,6 +148,17 @@ export function isProbeRequest(value: unknown): value is ProbeRequest {
 
   if (value.type === 'probe.health.request') return true
   if (value.type === 'probe.stt.surface.request') return isSttApiSurface(value.frontend)
+  if (value.type === 'probe.stt.conformance.capability') return true
+  if (value.type === 'probe.stt.conformance.cancel') {
+    return isBoundedString(value.targetRequestId, 1, 128)
+  }
+  if (value.type === 'probe.stt.conformance.run') {
+    return (
+      isBoundedString(value.uploadId, 1, 512) &&
+      isBoundedString(value.reportedMimeType, 0, 128) &&
+      isSafeProbeSize(value.expectedSize)
+    )
+  }
   if (value.type !== 'probe.upload.verify') return false
 
   return (
@@ -127,6 +198,51 @@ export function isProbeResponse(value: unknown): value is ProbeResponse {
       (value.conclusion === 'invocation-api-found' ||
         value.conclusion === 'registration-only' ||
         value.conclusion === 'no-stt-surface')
+    )
+  }
+
+  if (value.type === 'probe.stt.conformance.capability.result') {
+    return (
+      value.ok === true &&
+      typeof value.hostCapabilityVersion === 'number' &&
+      Number.isSafeInteger(value.hostCapabilityVersion) &&
+      value.hostCapabilityVersion >= 0 &&
+      typeof value.permissionGranted === 'boolean' &&
+      isBoundedStringArray(value.availableMethods) &&
+      isBoundedStringArray(value.missingMethods) &&
+      typeof value.supported === 'boolean'
+    )
+  }
+
+  if (value.type === 'probe.stt.conformance.event') {
+    return (
+      value.ok === true &&
+      (value.eventType === 'started' ||
+        value.eventType === 'partial' ||
+        value.eventType === 'final_segment') &&
+      isNullableSafeInteger(value.sequence) &&
+      (value.segmentId === null || isBoundedString(value.segmentId, 1, 256)) &&
+      isNullableSafeInteger(value.revision) &&
+      (value.text === null || isBoundedString(value.text, 0, 100_000)) &&
+      isBoundedStringArray(value.appliedFeatures) &&
+      isBoundedStringArray(value.unsupportedOptionalFeatures)
+    )
+  }
+
+  if (value.type === 'probe.stt.conformance.result') {
+    return (
+      typeof value.ok === 'boolean' &&
+      isNonNegativeSafeInteger(value.connectionCount) &&
+      isNonNegativeSafeInteger(value.providerCount) &&
+      isNonNegativeSafeInteger(value.partialCount) &&
+      isNonNegativeSafeInteger(value.finalSegmentCount) &&
+      (value.finalText === null || isBoundedString(value.finalText, 0, 100_000)) &&
+      isBoundedStringArray(value.appliedFeatures) &&
+      isBoundedStringArray(value.unsupportedOptionalFeatures) &&
+      typeof value.uploadDeleted === 'boolean' &&
+      typeof value.aborted === 'boolean' &&
+      (value.errorCode === undefined || isBoundedString(value.errorCode, 1, 128)) &&
+      (value.error === undefined || isBoundedString(value.error, 1, 2_000))
     )
   }
 
@@ -190,4 +306,12 @@ function isSafeProbeSize(value: unknown): value is number {
     value >= 0 &&
     value <= MAX_PROBE_AUDIO_BYTES
   )
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isNullableSafeInteger(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isSafeInteger(value))
 }

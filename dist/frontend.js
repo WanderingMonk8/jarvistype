@@ -3105,7 +3105,7 @@ var isSupported = typeof XMLHttpRequest === "function" && typeof Blob === "funct
 
 // src/shared.ts
 var PROTOCOL_VERSION = 1;
-var PROBE_VERSION = "0.4.0";
+var PROBE_VERSION = "0.5.0";
 var MAX_PROBE_AUDIO_BYTES = 25 * 1024 * 1024;
 var AUDIO_MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
@@ -3134,6 +3134,9 @@ function isProbeResponse(value) {
   }
   if (value.type === "probe.stt.conformance.result") {
     return typeof value.ok === "boolean" && isNonNegativeSafeInteger(value.connectionCount) && isNonNegativeSafeInteger(value.providerCount) && isNonNegativeSafeInteger(value.partialCount) && isNonNegativeSafeInteger(value.finalSegmentCount) && (value.finalText === null || isBoundedString(value.finalText, 0, 1e5)) && isBoundedStringArray(value.appliedFeatures) && isBoundedStringArray(value.unsupportedOptionalFeatures) && typeof value.uploadDeleted === "boolean" && typeof value.aborted === "boolean" && (value.errorCode === void 0 || isBoundedString(value.errorCode, 1, 128)) && (value.error === void 0 || isBoundedString(value.error, 1, 2e3));
+  }
+  if (value.type === "probe.chat.result") {
+    return typeof value.ok === "boolean" && (value.mode === "append-only" || value.mode === "append-and-generate") && typeof value.chatMutationPermission === "boolean" && typeof value.generationPermission === "boolean" && typeof value.messageIdPresent === "boolean" && typeof value.generationIdPresent === "boolean" && (value.error === void 0 || isBoundedString(value.error, 1, 2e3));
   }
   if (value.type !== "probe.upload.result") return false;
   return typeof value.ok === "boolean" && isSafeProbeSize(value.expectedSize) && (value.actualSize === null || isSafeProbeSize(value.actualSize)) && typeof value.expectedHash === "string" && /^[0-9a-f]{8}$/.test(value.expectedHash) && (value.actualHash === null || typeof value.actualHash === "string" && /^[0-9a-f]{8}$/.test(value.actualHash)) && isBoundedString(value.reportedMimeType, 0, 128) && (value.fileName === null || isBoundedString(value.fileName, 0, 512)) && typeof value.deleted === "boolean" && (value.error === void 0 || isBoundedString(value.error, 1, 2e3));
@@ -3238,6 +3241,13 @@ function setup(ctx) {
       .jt-probe-grid dd { margin: 0; overflow-wrap: anywhere; }
       .jt-probe-log { margin: 0; max-height: 280px; overflow: auto; white-space: pre-wrap; font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
       .jt-probe-note { opacity: 0.8; font-size: 0.92em; }
+      .jt-composer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; min-width: 0; }
+      .jt-paragraph-number { font-weight: 700; opacity: 0.7; user-select: none; }
+      .jt-draft-paragraph { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 6px; min-height: 48px; padding: 8px; overflow-wrap: anywhere; }
+      .jt-diff { border-left: 3px solid currentColor; padding: 8px 10px; overflow-wrap: anywhere; }
+      .jt-diff del { opacity: 0.65; }
+      .jt-diff ins { font-weight: 700; }
+      .jt-history { margin: 0; padding-inline-start: 22px; }
       @container (max-width: 420px) {
         .jt-probe-grid { grid-template-columns: minmax(0, 1fr); }
         .jt-probe-grid dd { margin-bottom: 6px; }
@@ -3266,8 +3276,10 @@ function setup(ctx) {
           <button type="button" data-start-recording>Start recording</button>
           <button type="button" data-stop-recording disabled>Stop and keep sample</button>
           <button type="button" data-cancel-recording disabled>Cancel recording</button>
+          <button type="button" data-audio-robustness>Run deterministic audio checks</button>
         </div>
         <p class="jt-probe-status" role="status" aria-live="polite" data-recording-status>Idle</p>
+        <p class="jt-probe-note">For denial testing, revoke microphone access in the browser and press Start recording. Device changes, tab visibility changes, and unexpected track endings are counted in the export.</p>
       </section>
       <section class="jt-probe-card" aria-labelledby="jt-upload-title">
         <h3 id="jt-upload-title">Staged upload round trip</h3>
@@ -3294,6 +3306,38 @@ function setup(ctx) {
         <p class="jt-probe-status" role="status" aria-live="polite" data-stt-conformance-status>Not checked.</p>
         <pre class="jt-probe-log" tabindex="0" aria-label="Live STT conformance transcript" data-stt-transcript>No transcript.</pre>
       </section>
+      <section class="jt-probe-card" aria-labelledby="jt-composition-title">
+        <h3 id="jt-composition-title">Composition UI fixture</h3>
+        <p class="jt-probe-note">A non-sending fixture for validating numbered paragraphs, long wrapping text, diff review, edit history, focus, keyboard use, and narrow layouts.</p>
+        <div class="jt-composer" aria-label="Numbered draft paragraphs" data-composition-fixture>
+          <span class="jt-paragraph-number" aria-hidden="true">1</span>
+          <div class="jt-draft-paragraph" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Draft paragraph 1" data-draft-paragraph>Yesterday I began hiking up the mountain before sunrise, carrying enough water and a carefully packed rain shell because the forecast changed several times overnight.</div>
+          <span class="jt-paragraph-number" aria-hidden="true">2</span>
+          <div class="jt-draft-paragraph" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Draft paragraph 2" data-draft-paragraph>The climb became steeper near the ridge, and after an hour I was coughing up a storm, but the view across the valley made the effort worthwhile.</div>
+          <span class="jt-paragraph-number" aria-hidden="true">3</span>
+          <div class="jt-draft-paragraph" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Draft paragraph 3" data-draft-paragraph>I checked the Pip-Boy style map on my wrist, found the safer return trail, and made it back before the afternoon weather arrived.</div>
+        </div>
+        <div class="jt-diff" aria-label="Pending edit diff" data-diff-view>Paragraph 2: change <del>couging up a stomp</del> to <ins>coughing up a storm</ins>.</div>
+        <ol class="jt-history" aria-label="Edit history" data-edit-history>
+          <li>Appended recording segment 1</li>
+          <li>Appended recording segment 2</li>
+          <li>Proposed correction in paragraph 2</li>
+        </ol>
+        <div class="jt-probe-actions">
+          <button type="button" data-composition-check>Run composition UI check</button>
+        </div>
+        <p class="jt-probe-status" role="status" aria-live="polite" data-composition-status>Not tested.</p>
+      </section>
+      <section class="jt-probe-card" aria-labelledby="jt-chat-title">
+        <h3 id="jt-chat-title">Disposable-chat submission tests</h3>
+        <p class="jt-probe-note">These tests add visible marker messages to the active chat. The generation test also invokes the configured model and may incur provider usage. Use only in a disposable chat.</p>
+        <label><input type="checkbox" data-disposable-confirm> I confirm the active chat is disposable and authorize test messages.</label>
+        <div class="jt-probe-actions">
+          <button type="button" data-chat-append disabled>Test append only</button>
+          <button type="button" data-chat-generate disabled>Test append and generation</button>
+        </div>
+        <p class="jt-probe-status" role="status" aria-live="polite" data-chat-status>Confirmation required.</p>
+      </section>
       <section class="jt-probe-card" aria-labelledby="jt-results-title">
         <h3 id="jt-results-title">Sanitized results</h3>
         <div class="jt-probe-actions">
@@ -3312,6 +3356,8 @@ function setup(ctx) {
   const sttStatus = requireElement(tab.root, "[data-stt-status]");
   const sttConformanceStatus = requireElement(tab.root, "[data-stt-conformance-status]");
   const sttTranscript = requireElement(tab.root, "[data-stt-transcript]");
+  const compositionStatus = requireElement(tab.root, "[data-composition-status]");
+  const chatStatus = requireElement(tab.root, "[data-chat-status]");
   const resultsLog = requireElement(tab.root, "[data-results-log]");
   const refreshHostButton = requireElement(tab.root, "[data-refresh-host]");
   const lifecycleUploadButton = requireElement(tab.root, "[data-lifecycle-upload]");
@@ -3319,12 +3365,17 @@ function setup(ctx) {
   const startButton = requireElement(tab.root, "[data-start-recording]");
   const stopButton = requireElement(tab.root, "[data-stop-recording]");
   const cancelRecordingButton = requireElement(tab.root, "[data-cancel-recording]");
+  const audioRobustnessButton = requireElement(tab.root, "[data-audio-robustness]");
   const uploadButton = requireElement(tab.root, "[data-upload]");
   const cancelUploadButton = requireElement(tab.root, "[data-cancel-upload]");
   const inspectSttButton = requireElement(tab.root, "[data-inspect-stt]");
   const checkSttApiButton = requireElement(tab.root, "[data-check-stt-api]");
   const runSttApiButton = requireElement(tab.root, "[data-run-stt-api]");
   const cancelSttApiButton = requireElement(tab.root, "[data-cancel-stt-api]");
+  const compositionCheckButton = requireElement(tab.root, "[data-composition-check]");
+  const disposableConfirm = requireElement(tab.root, "[data-disposable-confirm]");
+  const chatAppendButton = requireElement(tab.root, "[data-chat-append]");
+  const chatGenerateButton = requireElement(tab.root, "[data-chat-generate]");
   const copyButton = requireElement(tab.root, "[data-copy-results]");
   const downloadButton = requireElement(tab.root, "[data-download-results]");
   let disposed = false;
@@ -3345,6 +3396,11 @@ function setup(ctx) {
   const sttSegments = /* @__PURE__ */ new Map();
   let sttCancellationRequested = false;
   let sttLateEventCount = 0;
+  let chatRequestId = null;
+  let deviceChangeCount = 0;
+  let visibilityChangeCount = 0;
+  let unexpectedTrackEndCount = 0;
+  const intentionallyStoppedTracks = /* @__PURE__ */ new WeakSet();
   let cleanupPerformed = false;
   const addEvent = (level, message, details) => {
     events.push({ at: (/* @__PURE__ */ new Date()).toISOString(), level, message, ...details ? { details } : {} });
@@ -3369,7 +3425,10 @@ function setup(ctx) {
       ["Selected MIME", report.media.selectedMimeType ?? "Browser default"],
       ["Supported candidates", report.media.supportedMimeTypes.join(", ") || "None detected"],
       ["Last sample", report.media.lastRecording ? `${report.media.lastRecording.sizeBytes} bytes / ${report.media.lastRecording.durationMs} ms` : "None"],
-      ["Tracks stopped", report.media.lastRecording ? yesNo(report.media.lastRecording.tracksStopped) : "Not tested"]
+      ["Tracks stopped", report.media.lastRecording ? yesNo(report.media.lastRecording.tracksStopped) : "Not tested"],
+      ["Device changes observed", String(deviceChangeCount)],
+      ["Visibility changes observed", String(visibilityChangeCount)],
+      ["Unexpected track endings", String(unexpectedTrackEndCount)]
     ]);
     report.exportedAt = (/* @__PURE__ */ new Date()).toISOString();
     resultsLog.textContent = JSON.stringify(report, null, 2);
@@ -3532,13 +3591,42 @@ function setup(ctx) {
       sttCancellationRequested = false;
       return;
     }
+    if (payload.type === "probe.chat.result" && payload.requestId === chatRequestId) {
+      const result = {
+        completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        passed: payload.ok,
+        chatMutationPermission: payload.chatMutationPermission,
+        generationPermission: payload.generationPermission,
+        messageIdPresent: payload.messageIdPresent,
+        generationIdPresent: payload.generationIdPresent,
+        ...payload.error ? { error: payload.error } : {}
+      };
+      report.chatTests ??= {};
+      if (payload.mode === "append-only") report.chatTests.appendOnly = result;
+      else report.chatTests.appendAndGenerate = result;
+      chatRequestId = null;
+      chatAppendButton.disabled = !disposableConfirm.checked;
+      chatGenerateButton.disabled = !disposableConfirm.checked;
+      chatStatus.textContent = payload.ok ? payload.mode === "append-only" ? "Passed: marker message appended without starting generation." : "Passed: marker message appended and generation was started." : `Failed: ${payload.error ?? "the returned identifiers did not match the requested mode."}`;
+      addEvent(payload.ok ? "pass" : "fail", "Disposable-chat test finished", {
+        mode: payload.mode,
+        chatMutationPermission: payload.chatMutationPermission,
+        generationPermission: payload.generationPermission,
+        messageIdPresent: payload.messageIdPresent,
+        generationIdPresent: payload.generationIdPresent
+      });
+      return;
+    }
     if (payload.type === "probe.error") {
       addEvent("fail", "Backend probe error", { error: payload.error });
     }
   });
   const stopTracks = () => {
     if (!activeStream) return true;
-    for (const track of activeStream.getTracks()) track.stop();
+    for (const track of activeStream.getTracks()) {
+      intentionallyStoppedTracks.add(track);
+      track.stop();
+    }
     const stopped = activeStream.getTracks().every((track) => track.readyState === "ended");
     activeStream = null;
     return stopped;
@@ -3715,7 +3803,7 @@ function setup(ctx) {
       hash: hashBytes(bytes),
       tracksStopped
     };
-    const passed = blob.size > 0 && tracksStopped;
+    const passed = isAcceptableAudioSize(blob.size) && tracksStopped;
     recordingStatus.textContent = passed ? `Sample ready: ${blob.size} bytes. You can now test staged upload.` : "Recording failed: the sample was empty or media tracks did not stop.";
     uploadStatus.textContent = passed ? "Sample ready for upload." : "A valid sample is required.";
     uploadButton.disabled = !passed;
@@ -3739,6 +3827,19 @@ function setup(ctx) {
         return;
       }
       const options = selectedMimeType ? { mimeType: selectedMimeType } : void 0;
+      for (const track of activeStream.getAudioTracks()) {
+        track.addEventListener(
+          "ended",
+          () => {
+            if (intentionallyStoppedTracks.has(track) || disposed) return;
+            unexpectedTrackEndCount += 1;
+            addEvent("fail", "Microphone track ended unexpectedly", {
+              unexpectedTrackEndCount
+            });
+          },
+          { once: true }
+        );
+      }
       const recorder = new MediaRecorder(activeStream, options);
       activeRecorder = recorder;
       const chunks = [];
@@ -3786,8 +3887,20 @@ function setup(ctx) {
       recordingStatus.textContent = `Microphone unavailable: ${describeError(error)}`;
       addEvent("fail", "Microphone request or recorder setup failed", {
         error: describeError(error),
+        errorName: error instanceof DOMException || error instanceof Error ? error.name : "UnknownError",
         tracksStopped
       });
+      report.media.robustness = {
+        checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        emptySampleRejected: true,
+        oversizedSampleRejected: true,
+        repeatedIdleTerminalActionsIgnored: true,
+        deviceChangeCount,
+        visibilityChangeCount,
+        unexpectedTrackEndCount,
+        lastCaptureErrorName: error instanceof DOMException || error instanceof Error ? error.name : "UnknownError",
+        passed: tracksStopped
+      };
     }
   };
   const stopRecording = (keep) => {
@@ -3795,13 +3908,48 @@ function setup(ctx) {
     clearRecordingTimer();
     if (activeRecorder && activeRecorder.state !== "inactive") {
       activeRecorder.stop();
+      return true;
     } else {
+      const hadStream = activeStream !== null;
       const tracksStopped = stopTracks();
       startButton.disabled = false;
       stopButton.disabled = true;
       cancelRecordingButton.disabled = true;
-      if (!keep) addEvent("pass", "Recording cancelled and media tracks stopped", { tracksStopped });
+      if (!keep && hadStream) {
+        addEvent("pass", "Recording cancelled and media tracks stopped", { tracksStopped });
+      }
+      return hadStream;
     }
+  };
+  const runAudioRobustnessCheck = () => {
+    if (activeRecorder || activeStream) {
+      recordingStatus.textContent = "Stop or cancel the active recording before running this check.";
+      return;
+    }
+    const emptySampleRejected = !isAcceptableAudioSize(0);
+    const oversizedSampleRejected = !isAcceptableAudioSize(MAX_PROBE_AUDIO_BYTES + 1);
+    const firstIdleActionIgnored = !stopRecording(false);
+    const secondIdleActionIgnored = !stopRecording(false);
+    const repeatedIdleTerminalActionsIgnored = firstIdleActionIgnored && secondIdleActionIgnored;
+    const passed = emptySampleRejected && oversizedSampleRejected && repeatedIdleTerminalActionsIgnored;
+    report.media.robustness = {
+      checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      emptySampleRejected,
+      oversizedSampleRejected,
+      repeatedIdleTerminalActionsIgnored,
+      deviceChangeCount,
+      visibilityChangeCount,
+      unexpectedTrackEndCount,
+      passed
+    };
+    recordingStatus.textContent = passed ? "Deterministic checks passed. Complete permission-denial, backgrounding, and device-change scenarios manually." : "A deterministic audio edge-case check failed.";
+    addEvent(passed ? "pass" : "fail", "Deterministic audio robustness checks finished", {
+      emptySampleRejected,
+      oversizedSampleRejected,
+      repeatedIdleTerminalActionsIgnored,
+      maxRecordingMs: MAX_RECORDING_MS,
+      maxProbeAudioBytes: MAX_PROBE_AUDIO_BYTES
+    });
   };
   const uploadRecording = async () => {
     if (!recordedBlob || activeUpload) return;
@@ -3958,11 +4106,19 @@ function setup(ctx) {
   const runUiSelfCheck = () => {
     const root = requireElement(tab.root, ".jt-probe");
     const enabledControls = Array.from(
-      root.querySelectorAll("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]")
+      root.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [contenteditable="true"], [tabindex]')
     );
     const unnamedControls = enabledControls.filter((control) => !accessibleName(control));
     const negativeTabIndexControls = enabledControls.filter((control) => control.tabIndex < 0);
     const horizontalOverflow = root.scrollWidth > root.clientWidth + 1;
+    const draftParagraphs = Array.from(
+      root.querySelectorAll("[data-draft-paragraph]")
+    );
+    const numberedParagraphCount = draftParagraphs.length;
+    const diffElementCount = root.querySelectorAll("[data-diff-view] del, [data-diff-view] ins").length;
+    const historyEntryCount = root.querySelectorAll("[data-edit-history] li").length;
+    draftParagraphs[0]?.focus();
+    const focusMovedToDraft = document.activeElement === draftParagraphs[0];
     report.ui = {
       at: (/* @__PURE__ */ new Date()).toISOString(),
       widthPx: root.clientWidth,
@@ -3971,7 +4127,11 @@ function setup(ctx) {
       enabledControlCount: enabledControls.length,
       unnamedControlCount: unnamedControls.length,
       negativeTabIndexCount: negativeTabIndexControls.length,
-      passed: !horizontalOverflow && unnamedControls.length === 0 && negativeTabIndexControls.length === 0
+      numberedParagraphCount,
+      diffElementCount,
+      historyEntryCount,
+      focusMovedToDraft,
+      passed: !horizontalOverflow && unnamedControls.length === 0 && negativeTabIndexControls.length === 0 && numberedParagraphCount === 3 && diffElementCount === 2 && historyEntryCount === 3 && focusMovedToDraft
     };
     lifecycleStatus.textContent = report.ui.passed ? `UI self-check passed at ${report.ui.widthPx}px. Complete one manual Tab-key pass.` : "UI self-check found overflow or a keyboard/accessibility issue.";
     addEvent(report.ui.passed ? "pass" : "fail", "UI self-check finished", {
@@ -3979,8 +4139,60 @@ function setup(ctx) {
       horizontalOverflow,
       enabledControlCount: enabledControls.length,
       unnamedControlCount: unnamedControls.length,
-      negativeTabIndexCount: negativeTabIndexControls.length
+      negativeTabIndexCount: negativeTabIndexControls.length,
+      numberedParagraphCount,
+      diffElementCount,
+      historyEntryCount,
+      focusMovedToDraft
     });
+  };
+  const runCompositionUiCheck = () => {
+    runUiSelfCheck();
+    compositionStatus.textContent = report.ui?.passed ? "Automated composition checks passed. Manually edit each paragraph, inspect the diff/history, tab through controls, and check narrow width." : "Composition fixture failed an automated structure, focus, naming, or overflow check.";
+  };
+  const runChatTest = async (mode) => {
+    if (!disposableConfirm.checked || chatRequestId) return;
+    const { chatId } = ctx.getActiveChat();
+    if (!chatId) {
+      chatStatus.textContent = "No active chat is available.";
+      addEvent("fail", "Disposable-chat test could not find an active chat");
+      return;
+    }
+    chatAppendButton.disabled = true;
+    chatGenerateButton.disabled = true;
+    chatStatus.textContent = "Requesting the minimum required Lumiverse permissions\u2026";
+    try {
+      const required = mode === "append-and-generate" ? ["chat_mutation", "generation"] : ["chat_mutation"];
+      let granted = await ctx.permissions.getGranted();
+      const missing = required.filter((permission) => !granted.includes(permission));
+      if (missing.length > 0) {
+        granted = await ctx.permissions.request(missing, {
+          reason: mode === "append-and-generate" ? "Append one marker to the confirmed disposable chat and start normal generation." : "Append one marker to the confirmed disposable chat without generation."
+        });
+      }
+      if (!required.every((permission) => granted.includes(permission))) {
+        throw new Error("Required permission was not granted");
+      }
+      chatRequestId = makeRequestId();
+      const request = {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "probe.chat.run",
+        requestId: chatRequestId,
+        chatId,
+        mode
+      };
+      ctx.sendToBackend(request);
+      chatStatus.textContent = mode === "append-only" ? "Appending one marker without generation\u2026" : "Appending one marker and starting normal generation\u2026";
+      addEvent("info", "Started authorized disposable-chat test", { mode });
+    } catch (error) {
+      chatAppendButton.disabled = !disposableConfirm.checked;
+      chatGenerateButton.disabled = !disposableConfirm.checked;
+      chatStatus.textContent = `Permission request failed or was declined: ${describeError(error)}`;
+      addEvent("info", "Disposable-chat permission request did not complete", {
+        mode,
+        error: describeError(error)
+      });
+    }
   };
   const cleanupResources = (trigger) => {
     if (cleanupPerformed) return;
@@ -4053,19 +4265,50 @@ function setup(ctx) {
     tab.activate();
   });
   const handlePageHide = () => cleanupResources("pagehide");
+  const handleVisibilityChange = () => {
+    visibilityChangeCount += 1;
+    if (report.media.robustness) {
+      report.media.robustness.visibilityChangeCount = visibilityChangeCount;
+    }
+    addEvent("info", "Document visibility changed", {
+      state: document.visibilityState,
+      visibilityChangeCount,
+      recordingActive: Boolean(activeRecorder && activeRecorder.state === "recording")
+    });
+  };
+  const handleDeviceChange = () => {
+    deviceChangeCount += 1;
+    if (report.media.robustness) report.media.robustness.deviceChangeCount = deviceChangeCount;
+    addEvent("info", "Media device change observed", {
+      deviceChangeCount,
+      recordingActive: Boolean(activeRecorder && activeRecorder.state === "recording")
+    });
+  };
   window.addEventListener("pagehide", handlePageHide, { once: true });
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  navigator.mediaDevices?.addEventListener("devicechange", handleDeviceChange);
   refreshHostButton.addEventListener("click", requestHealth);
   lifecycleUploadButton.addEventListener("click", startLifecycleUpload);
   uiCheckButton.addEventListener("click", runUiSelfCheck);
   startButton.addEventListener("click", () => void startRecording());
   stopButton.addEventListener("click", () => stopRecording(true));
   cancelRecordingButton.addEventListener("click", () => stopRecording(false));
+  audioRobustnessButton.addEventListener("click", runAudioRobustnessCheck);
   uploadButton.addEventListener("click", () => void uploadRecording());
   cancelUploadButton.addEventListener("click", () => void cancelUpload());
   inspectSttButton.addEventListener("click", inspectSttSurface);
   checkSttApiButton.addEventListener("click", checkProposedSttApi);
   runSttApiButton.addEventListener("click", () => void runProposedSttApi());
   cancelSttApiButton.addEventListener("click", () => void cancelProposedSttApi());
+  compositionCheckButton.addEventListener("click", runCompositionUiCheck);
+  disposableConfirm.addEventListener("change", () => {
+    const enabled = disposableConfirm.checked && chatRequestId === null;
+    chatAppendButton.disabled = !enabled;
+    chatGenerateButton.disabled = !enabled;
+    chatStatus.textContent = enabled ? "Ready. Each button adds one visible marker to the active disposable chat." : "Confirmation required.";
+  });
+  chatAppendButton.addEventListener("click", () => void runChatTest("append-only"));
+  chatGenerateButton.addEventListener("click", () => void runChatTest("append-and-generate"));
   copyButton.addEventListener("click", () => void copyResults());
   downloadButton.addEventListener("click", downloadResults);
   addEvent(activeSetupInstances === 1 ? "pass" : "fail", "Frontend capability probe initialized", {
@@ -4085,6 +4328,8 @@ function setup(ctx) {
   requestHealth();
   return () => {
     window.removeEventListener("pagehide", handlePageHide);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    navigator.mediaDevices?.removeEventListener("devicechange", handleDeviceChange);
     cleanupResources("extension-teardown");
     unsubscribeBackend();
     detachTabActivation();
@@ -4156,6 +4401,9 @@ function extensionForMime(mimeType) {
   if (mimeType.includes("mp4")) return "m4a";
   if (mimeType.includes("aac")) return "aac";
   return "webm";
+}
+function isAcceptableAudioSize(sizeBytes) {
+  return Number.isSafeInteger(sizeBytes) && sizeBytes > 0 && sizeBytes <= MAX_PROBE_AUDIO_BYTES;
 }
 function describeError(error) {
   if (error instanceof DOMException) return `${error.name}: ${error.message}`;

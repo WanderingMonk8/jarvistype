@@ -130,6 +130,63 @@ spindle.onFrontendMessage(async (payload: unknown, userId: string) => {
     return
   }
 
+  if (payload.type === 'probe.chat.run') {
+    const chatMutationPermission = spindle.permissions.has('chat_mutation')
+    const generationPermission = spindle.permissions.has('generation')
+    let messageIdPresent = false
+    let generationIdPresent = false
+    let error: string | undefined
+
+    try {
+      if (!chatMutationPermission) throw new Error('chat_mutation permission is not granted')
+      if (payload.mode === 'append-and-generate' && !generationPermission) {
+        throw new Error('generation permission is not granted')
+      }
+      const result = await spindle.chat.appendMessage(
+        payload.chatId,
+        {
+          role: 'user',
+          content:
+            payload.mode === 'append-only'
+              ? '[JarvisType Phase 0 test — append only]'
+              : '[JarvisType Phase 0 test — append and generate a brief acknowledgement]',
+          metadata: {
+            jarvistype_probe: true,
+            probe_version: '0.5.0',
+            mode: payload.mode,
+          },
+        },
+        { triggerGeneration: payload.mode === 'append-and-generate' },
+      )
+      messageIdPresent = typeof result.id === 'string' && result.id.length > 0
+      generationIdPresent =
+        typeof result.generationId === 'string' && result.generationId.length > 0
+    } catch (caught) {
+      error = safeChatError(caught)
+    }
+
+    const ok =
+      error === undefined &&
+      messageIdPresent &&
+      (payload.mode === 'append-only' ? !generationIdPresent : generationIdPresent)
+    send(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'probe.chat.result',
+        requestId: payload.requestId,
+        ok,
+        mode: payload.mode,
+        chatMutationPermission,
+        generationPermission,
+        messageIdPresent,
+        generationIdPresent,
+        ...(error ? { error } : {}),
+      },
+      userId,
+    )
+    return
+  }
+
   let deleted = false
   let actualSize: number | null = null
   let actualHash: string | null = null
@@ -189,6 +246,15 @@ spindle.log.info('JarvisType Phase 0 capability probe loaded')
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function safeChatError(error: unknown): string {
+  const message = describeError(error)
+  if (/permission/i.test(message)) return 'Required Lumiverse permission was not granted'
+  if (/chat/i.test(message) && /(missing|not found|active|ownership)/i.test(message)) {
+    return 'The selected disposable chat was unavailable'
+  }
+  return 'Lumiverse rejected the chat test'
 }
 
 interface ProposedSttApi {

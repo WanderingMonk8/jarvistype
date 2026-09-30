@@ -4,7 +4,7 @@
 
 This register separates facts guaranteed by published documentation from behavior that must be demonstrated on the hosted Lumiverse installation or against a selected provider. The PRD remains the product source of truth.
 
-Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `LOCAL-PENDING`, `HOST-PENDING`, `PROVIDER-PENDING`, and `PRODUCT-PENDING`.
+Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `REMOTE-PENDING`, `LOCAL-PENDING`, `HOST-PENDING`, `PROVIDER-PENDING`, `PRODUCT-PENDING`, and `DEFERRED`.
 
 ## Documentation-settled facts
 
@@ -24,13 +24,15 @@ Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `LOCAL-PENDI
 
 ## Probe scope and safety
 
-Current probe version: `0.4.0`
+Current probe version: `0.5.0`
 
 The remote probe:
 
-- Requests no gated permissions.
-- Does not read or modify chats.
-- Does not call an STT or LLM provider.
+- Requests no gated permissions at installation.
+- Modifies a chat only after the user checks the disposable-chat confirmation and selects one of two explicit test buttons.
+- Requests `chat_mutation` only for append-only; additionally requests `generation` for append-and-generate. The latter can invoke the configured LLM and incur provider usage.
+- Does not read chat messages or export chat identifiers, message identifiers, or generated content.
+- Does not call an STT provider unless the proposed API is available and the user explicitly authorizes its conformance run.
 - Retains a recorded sample only in frontend memory for the current page lifecycle.
 - Uploads recorded audio only after a second explicit user action; the synthetic lifecycle upload also requires its own explicit button action.
 - Computes a non-cryptographic integrity hash solely to compare transferred bytes.
@@ -38,6 +40,8 @@ The remote probe:
 - Stores at most four sanitized teardown receipts in the current browser tab's `sessionStorage`; receipts contain only timestamps and cleanup booleans.
 - Provides a paced 2 MiB synthetic upload for reload/disable testing. Completed test uploads are verified and deleted; interrupted partial uploads rely on the documented 30-minute inactivity expiry.
 - Counts active setup instances and drawer/input-action activations, and can audit the visible drawer for horizontal overflow, accessible control names, and negative tab stops.
+- Provides a non-sending composition fixture with numbered paragraphs, long wrapping text, diff markup, edit history, and a focus check.
+- Rejects zero-byte and over-limit samples deterministically, verifies repeated idle terminal actions are harmless, and observes device, visibility, capture-error, and unexpected-track-ending events.
 - Inspects only sanitized frontend/backend API member names and host capability names when checking for configured STT access.
 - Requests the proposed `stt` permission only after `stt-invocation-v1` and all required methods are detected and the user explicitly starts the conformance run.
 - Keeps the visible conformance transcript out of exported JSON; only transcript length and a non-cryptographic hash are retained.
@@ -135,11 +139,13 @@ The remote probe:
 | L-08 | Upload cancellation | The browser request stops cleanly; incomplete server data is left only to documented host expiry behavior. | PASS | R-003: active tus upload aborted locally without error; partial server data has no deletion receipt and relies on documented expiry. |
 | L-09 | Disable/unload cleanup | Disabling or reloading during recording stops media tracks and aborts the active upload. | PASS | R-004: recording teardown stopped all tracks; upload teardown invoked the tus abort path. R-003 separately verified that awaiting that abort path completes cleanly. Partial server data still relies on documented expiry. |
 | L-10 | Narrow layout and keyboard | Drawer remains usable at the narrowest supported width and every control is keyboard reachable. | PASS | R-004: tester manually confirmed the narrow-layout and keyboard procedure; the final post-reload export did not retain the earlier optional UI snapshot. |
-| L-11 | Cross-user upload isolation | A second user cannot retrieve the first user's upload. A dedicated follow-up probe is required. | LOCAL-PENDING | Not included in probe 0.2.0 |
+| L-11 | Cross-user upload isolation | A second user cannot retrieve the first user's upload. A dedicated follow-up probe is required. | DEFERRED | Only one user account is currently available; explicitly skipped on 2026-09-30. |
 | L-12 | Host audio conversion | Conversion succeeds only if later selected provider formats require it. | PROVIDER-PENDING | Not included in probe 0.1.0 |
 | L-13 | Genuine provider partials | Provider partials arrive incrementally and reconcile with final text; cancellation rejects late updates. | PROVIDER-PENDING | Not included in probe 0.1.0 |
-| L-14 | Chat/send permission behavior | Append-only and append-with-generation behavior match the documented permission model. | LOCAL-PENDING | Deferred to a disposable-chat probe |
+| L-14 | Chat/send permission behavior | Append-only and append-with-generation behavior match the documented permission model. | REMOTE-PENDING | Probe 0.5.0 provides separate, explicitly authorized disposable-chat tests and exports only sanitized booleans. |
 | L-15 | Semantic interpreter corpus | Structured output validates or returns typed failure; unsafe cases never mutate the draft. | PROVIDER-PENDING | Not included in probe 0.1.0 |
+| L-16 | Audio robustness | Zero/oversize rejection, repeated terminal actions, permission denial, backgrounding, device changes, and unexpected track ending are handled and recorded safely. | REMOTE-PENDING | Probe 0.5.0 adds deterministic checks plus sanitized browser-event observations; physical-device scenarios remain manual. |
+| L-17 | Composition UI fixture | Numbered paragraphs, long wrapping text, diff, history, focus, keyboard access, and narrow layout remain usable. | REMOTE-PENDING | Probe 0.5.0 includes the fixture, automated structure/focus/overflow checks, and a manual interaction pass. |
 
 ## Section 2: configured STT connection access
 
@@ -173,7 +179,7 @@ The preferred resolution is the host-managed interface specified in `LUMIVERSE-S
 | P-08 | Product telemetry | Off unless separately approved and disclosed. | PRODUCT-PENDING |
 | P-09 | Initial STT provider | No provider selected. | PROVIDER-PENDING |
 | P-10 | Semantic interpreter | Compare configured Lumiverse generation with a dedicated adapter. | PROVIDER-PENDING |
-| P-11 | Supported platforms and minimum version | Lumiverse 1.2.4 with Firefox 156 on Windows 10 is known-good; minimum and other release targets remain unproven. | LOCAL-PENDING |
+| P-11 | Supported platforms and minimum version | Lumiverse 1.2.4 with Firefox 156 on Windows 10 is known-good; minimum and other release targets remain unproven. | DEFERRED |
 
 ## Evidence submission
 

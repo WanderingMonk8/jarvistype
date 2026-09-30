@@ -36,6 +36,22 @@ interface UiSelfCheck {
   enabledControlCount: number
   unnamedControlCount: number
   negativeTabIndexCount: number
+  numberedParagraphCount: number
+  diffElementCount: number
+  historyEntryCount: number
+  focusMovedToDraft: boolean
+  passed: boolean
+}
+
+interface AudioRobustnessCheck {
+  checkedAt: string
+  emptySampleRejected: boolean
+  oversizedSampleRejected: boolean
+  repeatedIdleTerminalActionsIgnored: boolean
+  deviceChangeCount: number
+  visibilityChangeCount: number
+  unexpectedTrackEndCount: number
+  lastCaptureErrorName?: string
   passed: boolean
 }
 
@@ -68,6 +84,7 @@ interface ProbeReport {
     mediaRecorderAvailable: boolean
     supportedMimeTypes: string[]
     selectedMimeType: string | null
+    robustness?: AudioRobustnessCheck
     lastRecording?: {
       requestedMimeType: string | null
       actualMimeType: string
@@ -76,6 +93,10 @@ interface ProbeReport {
       hash: string
       tracksStopped: boolean
     }
+  }
+  chatTests?: {
+    appendOnly?: ChatTestResult
+    appendAndGenerate?: ChatTestResult
   }
   lumiverse?: {
     backendVersion: string
@@ -123,6 +144,16 @@ interface ProbeReport {
     }
   }
   events: ProbeEvent[]
+}
+
+interface ChatTestResult {
+  completedAt: string
+  passed: boolean
+  chatMutationPermission: boolean
+  generationPermission: boolean
+  messageIdPresent: boolean
+  generationIdPresent: boolean
+  error?: string
 }
 
 type LifecycleContext = SpindleFrontendContext & {
@@ -201,6 +232,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       .jt-probe-grid dd { margin: 0; overflow-wrap: anywhere; }
       .jt-probe-log { margin: 0; max-height: 280px; overflow: auto; white-space: pre-wrap; font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
       .jt-probe-note { opacity: 0.8; font-size: 0.92em; }
+      .jt-composer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; min-width: 0; }
+      .jt-paragraph-number { font-weight: 700; opacity: 0.7; user-select: none; }
+      .jt-draft-paragraph { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 6px; min-height: 48px; padding: 8px; overflow-wrap: anywhere; }
+      .jt-diff { border-left: 3px solid currentColor; padding: 8px 10px; overflow-wrap: anywhere; }
+      .jt-diff del { opacity: 0.65; }
+      .jt-diff ins { font-weight: 700; }
+      .jt-history { margin: 0; padding-inline-start: 22px; }
       @container (max-width: 420px) {
         .jt-probe-grid { grid-template-columns: minmax(0, 1fr); }
         .jt-probe-grid dd { margin-bottom: 6px; }
@@ -229,8 +267,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           <button type="button" data-start-recording>Start recording</button>
           <button type="button" data-stop-recording disabled>Stop and keep sample</button>
           <button type="button" data-cancel-recording disabled>Cancel recording</button>
+          <button type="button" data-audio-robustness>Run deterministic audio checks</button>
         </div>
         <p class="jt-probe-status" role="status" aria-live="polite" data-recording-status>Idle</p>
+        <p class="jt-probe-note">For denial testing, revoke microphone access in the browser and press Start recording. Device changes, tab visibility changes, and unexpected track endings are counted in the export.</p>
       </section>
       <section class="jt-probe-card" aria-labelledby="jt-upload-title">
         <h3 id="jt-upload-title">Staged upload round trip</h3>
@@ -257,6 +297,38 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         <p class="jt-probe-status" role="status" aria-live="polite" data-stt-conformance-status>Not checked.</p>
         <pre class="jt-probe-log" tabindex="0" aria-label="Live STT conformance transcript" data-stt-transcript>No transcript.</pre>
       </section>
+      <section class="jt-probe-card" aria-labelledby="jt-composition-title">
+        <h3 id="jt-composition-title">Composition UI fixture</h3>
+        <p class="jt-probe-note">A non-sending fixture for validating numbered paragraphs, long wrapping text, diff review, edit history, focus, keyboard use, and narrow layouts.</p>
+        <div class="jt-composer" aria-label="Numbered draft paragraphs" data-composition-fixture>
+          <span class="jt-paragraph-number" aria-hidden="true">1</span>
+          <div class="jt-draft-paragraph" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Draft paragraph 1" data-draft-paragraph>Yesterday I began hiking up the mountain before sunrise, carrying enough water and a carefully packed rain shell because the forecast changed several times overnight.</div>
+          <span class="jt-paragraph-number" aria-hidden="true">2</span>
+          <div class="jt-draft-paragraph" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Draft paragraph 2" data-draft-paragraph>The climb became steeper near the ridge, and after an hour I was coughing up a storm, but the view across the valley made the effort worthwhile.</div>
+          <span class="jt-paragraph-number" aria-hidden="true">3</span>
+          <div class="jt-draft-paragraph" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Draft paragraph 3" data-draft-paragraph>I checked the Pip-Boy style map on my wrist, found the safer return trail, and made it back before the afternoon weather arrived.</div>
+        </div>
+        <div class="jt-diff" aria-label="Pending edit diff" data-diff-view>Paragraph 2: change <del>couging up a stomp</del> to <ins>coughing up a storm</ins>.</div>
+        <ol class="jt-history" aria-label="Edit history" data-edit-history>
+          <li>Appended recording segment 1</li>
+          <li>Appended recording segment 2</li>
+          <li>Proposed correction in paragraph 2</li>
+        </ol>
+        <div class="jt-probe-actions">
+          <button type="button" data-composition-check>Run composition UI check</button>
+        </div>
+        <p class="jt-probe-status" role="status" aria-live="polite" data-composition-status>Not tested.</p>
+      </section>
+      <section class="jt-probe-card" aria-labelledby="jt-chat-title">
+        <h3 id="jt-chat-title">Disposable-chat submission tests</h3>
+        <p class="jt-probe-note">These tests add visible marker messages to the active chat. The generation test also invokes the configured model and may incur provider usage. Use only in a disposable chat.</p>
+        <label><input type="checkbox" data-disposable-confirm> I confirm the active chat is disposable and authorize test messages.</label>
+        <div class="jt-probe-actions">
+          <button type="button" data-chat-append disabled>Test append only</button>
+          <button type="button" data-chat-generate disabled>Test append and generation</button>
+        </div>
+        <p class="jt-probe-status" role="status" aria-live="polite" data-chat-status>Confirmation required.</p>
+      </section>
       <section class="jt-probe-card" aria-labelledby="jt-results-title">
         <h3 id="jt-results-title">Sanitized results</h3>
         <div class="jt-probe-actions">
@@ -276,6 +348,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const sttStatus = requireElement<HTMLElement>(tab.root, '[data-stt-status]')
   const sttConformanceStatus = requireElement<HTMLElement>(tab.root, '[data-stt-conformance-status]')
   const sttTranscript = requireElement<HTMLElement>(tab.root, '[data-stt-transcript]')
+  const compositionStatus = requireElement<HTMLElement>(tab.root, '[data-composition-status]')
+  const chatStatus = requireElement<HTMLElement>(tab.root, '[data-chat-status]')
   const resultsLog = requireElement<HTMLElement>(tab.root, '[data-results-log]')
   const refreshHostButton = requireElement<HTMLButtonElement>(tab.root, '[data-refresh-host]')
   const lifecycleUploadButton = requireElement<HTMLButtonElement>(tab.root, '[data-lifecycle-upload]')
@@ -283,12 +357,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const startButton = requireElement<HTMLButtonElement>(tab.root, '[data-start-recording]')
   const stopButton = requireElement<HTMLButtonElement>(tab.root, '[data-stop-recording]')
   const cancelRecordingButton = requireElement<HTMLButtonElement>(tab.root, '[data-cancel-recording]')
+  const audioRobustnessButton = requireElement<HTMLButtonElement>(tab.root, '[data-audio-robustness]')
   const uploadButton = requireElement<HTMLButtonElement>(tab.root, '[data-upload]')
   const cancelUploadButton = requireElement<HTMLButtonElement>(tab.root, '[data-cancel-upload]')
   const inspectSttButton = requireElement<HTMLButtonElement>(tab.root, '[data-inspect-stt]')
   const checkSttApiButton = requireElement<HTMLButtonElement>(tab.root, '[data-check-stt-api]')
   const runSttApiButton = requireElement<HTMLButtonElement>(tab.root, '[data-run-stt-api]')
   const cancelSttApiButton = requireElement<HTMLButtonElement>(tab.root, '[data-cancel-stt-api]')
+  const compositionCheckButton = requireElement<HTMLButtonElement>(tab.root, '[data-composition-check]')
+  const disposableConfirm = requireElement<HTMLInputElement>(tab.root, '[data-disposable-confirm]')
+  const chatAppendButton = requireElement<HTMLButtonElement>(tab.root, '[data-chat-append]')
+  const chatGenerateButton = requireElement<HTMLButtonElement>(tab.root, '[data-chat-generate]')
   const copyButton = requireElement<HTMLButtonElement>(tab.root, '[data-copy-results]')
   const downloadButton = requireElement<HTMLButtonElement>(tab.root, '[data-download-results]')
 
@@ -310,6 +389,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const sttSegments = new Map<string, { sequence: number; text: string }>()
   let sttCancellationRequested = false
   let sttLateEventCount = 0
+  let chatRequestId: string | null = null
+  let deviceChangeCount = 0
+  let visibilityChangeCount = 0
+  let unexpectedTrackEndCount = 0
+  const intentionallyStoppedTracks = new WeakSet<MediaStreamTrack>()
   let cleanupPerformed = false
 
   const addEvent = (
@@ -341,6 +425,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       ['Supported candidates', report.media.supportedMimeTypes.join(', ') || 'None detected'],
       ['Last sample', report.media.lastRecording ? `${report.media.lastRecording.sizeBytes} bytes / ${report.media.lastRecording.durationMs} ms` : 'None'],
       ['Tracks stopped', report.media.lastRecording ? yesNo(report.media.lastRecording.tracksStopped) : 'Not tested'],
+      ['Device changes observed', String(deviceChangeCount)],
+      ['Visibility changes observed', String(visibilityChangeCount)],
+      ['Unexpected track endings', String(unexpectedTrackEndCount)],
     ])
     report.exportedAt = new Date().toISOString()
     resultsLog.textContent = JSON.stringify(report, null, 2)
@@ -531,6 +618,37 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       return
     }
 
+    if (payload.type === 'probe.chat.result' && payload.requestId === chatRequestId) {
+      const result: ChatTestResult = {
+        completedAt: new Date().toISOString(),
+        passed: payload.ok,
+        chatMutationPermission: payload.chatMutationPermission,
+        generationPermission: payload.generationPermission,
+        messageIdPresent: payload.messageIdPresent,
+        generationIdPresent: payload.generationIdPresent,
+        ...(payload.error ? { error: payload.error } : {}),
+      }
+      report.chatTests ??= {}
+      if (payload.mode === 'append-only') report.chatTests.appendOnly = result
+      else report.chatTests.appendAndGenerate = result
+      chatRequestId = null
+      chatAppendButton.disabled = !disposableConfirm.checked
+      chatGenerateButton.disabled = !disposableConfirm.checked
+      chatStatus.textContent = payload.ok
+        ? payload.mode === 'append-only'
+          ? 'Passed: marker message appended without starting generation.'
+          : 'Passed: marker message appended and generation was started.'
+        : `Failed: ${payload.error ?? 'the returned identifiers did not match the requested mode.'}`
+      addEvent(payload.ok ? 'pass' : 'fail', 'Disposable-chat test finished', {
+        mode: payload.mode,
+        chatMutationPermission: payload.chatMutationPermission,
+        generationPermission: payload.generationPermission,
+        messageIdPresent: payload.messageIdPresent,
+        generationIdPresent: payload.generationIdPresent,
+      })
+      return
+    }
+
     if (payload.type === 'probe.error') {
       addEvent('fail', 'Backend probe error', { error: payload.error })
     }
@@ -538,7 +656,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const stopTracks = (): boolean => {
     if (!activeStream) return true
-    for (const track of activeStream.getTracks()) track.stop()
+    for (const track of activeStream.getTracks()) {
+      intentionallyStoppedTracks.add(track)
+      track.stop()
+    }
     const stopped = activeStream.getTracks().every((track) => track.readyState === 'ended')
     activeStream = null
     return stopped
@@ -735,7 +856,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       hash: hashBytes(bytes),
       tracksStopped,
     }
-    const passed = blob.size > 0 && tracksStopped
+    const passed = isAcceptableAudioSize(blob.size) && tracksStopped
     recordingStatus.textContent = passed
       ? `Sample ready: ${blob.size} bytes. You can now test staged upload.`
       : 'Recording failed: the sample was empty or media tracks did not stop.'
@@ -764,6 +885,19 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       }
 
       const options = selectedMimeType ? { mimeType: selectedMimeType } : undefined
+      for (const track of activeStream.getAudioTracks()) {
+        track.addEventListener(
+          'ended',
+          () => {
+            if (intentionallyStoppedTracks.has(track) || disposed) return
+            unexpectedTrackEndCount += 1
+            addEvent('fail', 'Microphone track ended unexpectedly', {
+              unexpectedTrackEndCount,
+            })
+          },
+          { once: true },
+        )
+      }
       const recorder = new MediaRecorder(activeStream, options)
       activeRecorder = recorder
       const chunks: BlobPart[] = []
@@ -813,23 +947,75 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       recordingStatus.textContent = `Microphone unavailable: ${describeError(error)}`
       addEvent('fail', 'Microphone request or recorder setup failed', {
         error: describeError(error),
+        errorName: error instanceof DOMException || error instanceof Error ? error.name : 'UnknownError',
         tracksStopped,
       })
+      report.media.robustness = {
+        checkedAt: new Date().toISOString(),
+        emptySampleRejected: true,
+        oversizedSampleRejected: true,
+        repeatedIdleTerminalActionsIgnored: true,
+        deviceChangeCount,
+        visibilityChangeCount,
+        unexpectedTrackEndCount,
+        lastCaptureErrorName:
+          error instanceof DOMException || error instanceof Error ? error.name : 'UnknownError',
+        passed: tracksStopped,
+      }
     }
   }
 
-  const stopRecording = (keep: boolean) => {
+  const stopRecording = (keep: boolean): boolean => {
     keepRecording = keep
     clearRecordingTimer()
     if (activeRecorder && activeRecorder.state !== 'inactive') {
       activeRecorder.stop()
+      return true
     } else {
+      const hadStream = activeStream !== null
       const tracksStopped = stopTracks()
       startButton.disabled = false
       stopButton.disabled = true
       cancelRecordingButton.disabled = true
-      if (!keep) addEvent('pass', 'Recording cancelled and media tracks stopped', { tracksStopped })
+      if (!keep && hadStream) {
+        addEvent('pass', 'Recording cancelled and media tracks stopped', { tracksStopped })
+      }
+      return hadStream
     }
+  }
+
+  const runAudioRobustnessCheck = () => {
+    if (activeRecorder || activeStream) {
+      recordingStatus.textContent = 'Stop or cancel the active recording before running this check.'
+      return
+    }
+    const emptySampleRejected = !isAcceptableAudioSize(0)
+    const oversizedSampleRejected = !isAcceptableAudioSize(MAX_PROBE_AUDIO_BYTES + 1)
+    const firstIdleActionIgnored = !stopRecording(false)
+    const secondIdleActionIgnored = !stopRecording(false)
+    const repeatedIdleTerminalActionsIgnored = firstIdleActionIgnored && secondIdleActionIgnored
+    const passed =
+      emptySampleRejected && oversizedSampleRejected && repeatedIdleTerminalActionsIgnored
+    report.media.robustness = {
+      checkedAt: new Date().toISOString(),
+      emptySampleRejected,
+      oversizedSampleRejected,
+      repeatedIdleTerminalActionsIgnored,
+      deviceChangeCount,
+      visibilityChangeCount,
+      unexpectedTrackEndCount,
+      passed,
+    }
+    recordingStatus.textContent = passed
+      ? 'Deterministic checks passed. Complete permission-denial, backgrounding, and device-change scenarios manually.'
+      : 'A deterministic audio edge-case check failed.'
+    addEvent(passed ? 'pass' : 'fail', 'Deterministic audio robustness checks finished', {
+      emptySampleRejected,
+      oversizedSampleRejected,
+      repeatedIdleTerminalActionsIgnored,
+      maxRecordingMs: MAX_RECORDING_MS,
+      maxProbeAudioBytes: MAX_PROBE_AUDIO_BYTES,
+    })
   }
 
   const uploadRecording = async () => {
@@ -1001,11 +1187,19 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const runUiSelfCheck = () => {
     const root = requireElement<HTMLElement>(tab.root, '.jt-probe')
     const enabledControls = Array.from(
-      root.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]'),
+      root.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [contenteditable="true"], [tabindex]'),
     )
     const unnamedControls = enabledControls.filter((control) => !accessibleName(control))
     const negativeTabIndexControls = enabledControls.filter((control) => control.tabIndex < 0)
     const horizontalOverflow = root.scrollWidth > root.clientWidth + 1
+    const draftParagraphs = Array.from(
+      root.querySelectorAll<HTMLElement>('[data-draft-paragraph]'),
+    )
+    const numberedParagraphCount = draftParagraphs.length
+    const diffElementCount = root.querySelectorAll('[data-diff-view] del, [data-diff-view] ins').length
+    const historyEntryCount = root.querySelectorAll('[data-edit-history] li').length
+    draftParagraphs[0]?.focus()
+    const focusMovedToDraft = document.activeElement === draftParagraphs[0]
     report.ui = {
       at: new Date().toISOString(),
       widthPx: root.clientWidth,
@@ -1014,8 +1208,18 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       enabledControlCount: enabledControls.length,
       unnamedControlCount: unnamedControls.length,
       negativeTabIndexCount: negativeTabIndexControls.length,
+      numberedParagraphCount,
+      diffElementCount,
+      historyEntryCount,
+      focusMovedToDraft,
       passed:
-        !horizontalOverflow && unnamedControls.length === 0 && negativeTabIndexControls.length === 0,
+        !horizontalOverflow &&
+        unnamedControls.length === 0 &&
+        negativeTabIndexControls.length === 0 &&
+        numberedParagraphCount === 3 &&
+        diffElementCount === 2 &&
+        historyEntryCount === 3 &&
+        focusMovedToDraft,
     }
     lifecycleStatus.textContent = report.ui.passed
       ? `UI self-check passed at ${report.ui.widthPx}px. Complete one manual Tab-key pass.`
@@ -1026,7 +1230,72 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       enabledControlCount: enabledControls.length,
       unnamedControlCount: unnamedControls.length,
       negativeTabIndexCount: negativeTabIndexControls.length,
+      numberedParagraphCount,
+      diffElementCount,
+      historyEntryCount,
+      focusMovedToDraft,
     })
+  }
+
+  const runCompositionUiCheck = () => {
+    runUiSelfCheck()
+    compositionStatus.textContent = report.ui?.passed
+      ? 'Automated composition checks passed. Manually edit each paragraph, inspect the diff/history, tab through controls, and check narrow width.'
+      : 'Composition fixture failed an automated structure, focus, naming, or overflow check.'
+  }
+
+  const runChatTest = async (mode: 'append-only' | 'append-and-generate') => {
+    if (!disposableConfirm.checked || chatRequestId) return
+    const { chatId } = ctx.getActiveChat()
+    if (!chatId) {
+      chatStatus.textContent = 'No active chat is available.'
+      addEvent('fail', 'Disposable-chat test could not find an active chat')
+      return
+    }
+    chatAppendButton.disabled = true
+    chatGenerateButton.disabled = true
+    chatStatus.textContent = 'Requesting the minimum required Lumiverse permissions…'
+    try {
+      const required =
+        mode === 'append-and-generate'
+          ? ['chat_mutation', 'generation']
+          : ['chat_mutation']
+      let granted = await ctx.permissions.getGranted()
+      const missing = required.filter((permission) => !granted.includes(permission))
+      if (missing.length > 0) {
+        granted = await ctx.permissions.request(missing, {
+          reason:
+            mode === 'append-and-generate'
+              ? 'Append one marker to the confirmed disposable chat and start normal generation.'
+              : 'Append one marker to the confirmed disposable chat without generation.',
+        })
+      }
+      if (!required.every((permission) => granted.includes(permission))) {
+        throw new Error('Required permission was not granted')
+      }
+      chatRequestId = makeRequestId()
+      const request: ProbeRequest = {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'probe.chat.run',
+        requestId: chatRequestId,
+        chatId,
+        mode,
+      }
+      ctx.sendToBackend(request)
+      chatStatus.textContent =
+        mode === 'append-only'
+          ? 'Appending one marker without generation…'
+          : 'Appending one marker and starting normal generation…'
+      addEvent('info', 'Started authorized disposable-chat test', { mode })
+    } catch (error) {
+      chatAppendButton.disabled = !disposableConfirm.checked
+      chatGenerateButton.disabled = !disposableConfirm.checked
+      chatStatus.textContent = `Permission request failed or was declined: ${describeError(error)}`
+      addEvent('info', 'Disposable-chat permission request did not complete', {
+        mode,
+        error: describeError(error),
+      })
+    }
   }
 
   const cleanupResources = (trigger: CleanupReceipt['trigger']) => {
@@ -1106,19 +1375,52 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     tab.activate()
   })
   const handlePageHide = () => cleanupResources('pagehide')
+  const handleVisibilityChange = () => {
+    visibilityChangeCount += 1
+    if (report.media.robustness) {
+      report.media.robustness.visibilityChangeCount = visibilityChangeCount
+    }
+    addEvent('info', 'Document visibility changed', {
+      state: document.visibilityState,
+      visibilityChangeCount,
+      recordingActive: Boolean(activeRecorder && activeRecorder.state === 'recording'),
+    })
+  }
+  const handleDeviceChange = () => {
+    deviceChangeCount += 1
+    if (report.media.robustness) report.media.robustness.deviceChangeCount = deviceChangeCount
+    addEvent('info', 'Media device change observed', {
+      deviceChangeCount,
+      recordingActive: Boolean(activeRecorder && activeRecorder.state === 'recording'),
+    })
+  }
   window.addEventListener('pagehide', handlePageHide, { once: true })
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  navigator.mediaDevices?.addEventListener('devicechange', handleDeviceChange)
   refreshHostButton.addEventListener('click', requestHealth)
   lifecycleUploadButton.addEventListener('click', startLifecycleUpload)
   uiCheckButton.addEventListener('click', runUiSelfCheck)
   startButton.addEventListener('click', () => void startRecording())
   stopButton.addEventListener('click', () => stopRecording(true))
   cancelRecordingButton.addEventListener('click', () => stopRecording(false))
+  audioRobustnessButton.addEventListener('click', runAudioRobustnessCheck)
   uploadButton.addEventListener('click', () => void uploadRecording())
   cancelUploadButton.addEventListener('click', () => void cancelUpload())
   inspectSttButton.addEventListener('click', inspectSttSurface)
   checkSttApiButton.addEventListener('click', checkProposedSttApi)
   runSttApiButton.addEventListener('click', () => void runProposedSttApi())
   cancelSttApiButton.addEventListener('click', () => void cancelProposedSttApi())
+  compositionCheckButton.addEventListener('click', runCompositionUiCheck)
+  disposableConfirm.addEventListener('change', () => {
+    const enabled = disposableConfirm.checked && chatRequestId === null
+    chatAppendButton.disabled = !enabled
+    chatGenerateButton.disabled = !enabled
+    chatStatus.textContent = enabled
+      ? 'Ready. Each button adds one visible marker to the active disposable chat.'
+      : 'Confirmation required.'
+  })
+  chatAppendButton.addEventListener('click', () => void runChatTest('append-only'))
+  chatGenerateButton.addEventListener('click', () => void runChatTest('append-and-generate'))
   copyButton.addEventListener('click', () => void copyResults())
   downloadButton.addEventListener('click', downloadResults)
 
@@ -1140,6 +1442,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   return () => {
     window.removeEventListener('pagehide', handlePageHide)
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
+    navigator.mediaDevices?.removeEventListener('devicechange', handleDeviceChange)
     cleanupResources('extension-teardown')
     unsubscribeBackend()
     detachTabActivation()
@@ -1246,6 +1550,10 @@ function extensionForMime(mimeType: string): string {
   if (mimeType.includes('mp4')) return 'm4a'
   if (mimeType.includes('aac')) return 'aac'
   return 'webm'
+}
+
+function isAcceptableAudioSize(sizeBytes: number): boolean {
+  return Number.isSafeInteger(sizeBytes) && sizeBytes > 0 && sizeBytes <= MAX_PROBE_AUDIO_BYTES
 }
 
 function describeError(error: unknown): string {

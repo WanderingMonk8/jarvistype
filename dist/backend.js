@@ -13,6 +13,9 @@ function isProbeRequest(value) {
   if (value.type === "probe.stt.conformance.run") {
     return isBoundedString(value.uploadId, 1, 512) && isBoundedString(value.reportedMimeType, 0, 128) && isSafeProbeSize(value.expectedSize);
   }
+  if (value.type === "probe.chat.run") {
+    return isBoundedString(value.chatId, 1, 256) && (value.mode === "append-only" || value.mode === "append-and-generate");
+  }
   if (value.type !== "probe.upload.verify") return false;
   return isBoundedString(value.uploadId, 1, 512) && typeof value.expectedSize === "number" && Number.isSafeInteger(value.expectedSize) && value.expectedSize >= 0 && value.expectedSize <= MAX_PROBE_AUDIO_BYTES && typeof value.expectedHash === "string" && /^[0-9a-f]{8}$/.test(value.expectedHash) && isBoundedString(value.reportedMimeType, 0, 128);
 }
@@ -148,6 +151,53 @@ spindle.onFrontendMessage(async (payload, userId) => {
     void runSttConformance(payload, userId);
     return;
   }
+  if (payload.type === "probe.chat.run") {
+    const chatMutationPermission = spindle.permissions.has("chat_mutation");
+    const generationPermission = spindle.permissions.has("generation");
+    let messageIdPresent = false;
+    let generationIdPresent = false;
+    let error;
+    try {
+      if (!chatMutationPermission) throw new Error("chat_mutation permission is not granted");
+      if (payload.mode === "append-and-generate" && !generationPermission) {
+        throw new Error("generation permission is not granted");
+      }
+      const result = await spindle.chat.appendMessage(
+        payload.chatId,
+        {
+          role: "user",
+          content: payload.mode === "append-only" ? "[JarvisType Phase 0 test \u2014 append only]" : "[JarvisType Phase 0 test \u2014 append and generate a brief acknowledgement]",
+          metadata: {
+            jarvistype_probe: true,
+            probe_version: "0.5.0",
+            mode: payload.mode
+          }
+        },
+        { triggerGeneration: payload.mode === "append-and-generate" }
+      );
+      messageIdPresent = typeof result.id === "string" && result.id.length > 0;
+      generationIdPresent = typeof result.generationId === "string" && result.generationId.length > 0;
+    } catch (caught) {
+      error = safeChatError(caught);
+    }
+    const ok = error === void 0 && messageIdPresent && (payload.mode === "append-only" ? !generationIdPresent : generationIdPresent);
+    send(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "probe.chat.result",
+        requestId: payload.requestId,
+        ok,
+        mode: payload.mode,
+        chatMutationPermission,
+        generationPermission,
+        messageIdPresent,
+        generationIdPresent,
+        ...error ? { error } : {}
+      },
+      userId
+    );
+    return;
+  }
   let deleted = false;
   let actualSize = null;
   let actualHash = null;
@@ -194,6 +244,14 @@ spindle.onFrontendMessage(async (payload, userId) => {
 spindle.log.info("JarvisType Phase 0 capability probe loaded");
 function describeError(error) {
   return error instanceof Error ? error.message : String(error);
+}
+function safeChatError(error) {
+  const message = describeError(error);
+  if (/permission/i.test(message)) return "Required Lumiverse permission was not granted";
+  if (/chat/i.test(message) && /(missing|not found|active|ownership)/i.test(message)) {
+    return "The selected disposable chat was unavailable";
+  }
+  return "Lumiverse rejected the chat test";
 }
 async function runSttConformance(payload, userId) {
   const key = sttRunKey(userId, payload.requestId);

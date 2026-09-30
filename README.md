@@ -135,9 +135,12 @@ The current `development` branch builds an installable diagnostic extension. It 
 - Drawer activation counters and a responsive-layout/accessibility self-check.
 - Sanitized discovery of any host API capable of invoking Lumiverse's configured STT connection.
 - Forward-compatible conformance testing for the proposed `stt-invocation-v1` API.
+- Deterministic audio edge-case checks and device/visibility/track-ending observations.
+- A numbered-paragraph composition fixture with long text, diff, edit history, focus, keyboard, and narrow-layout checks.
+- Explicitly authorized append-only and append-with-generation tests in a disposable chat.
 - Sanitized JSON evidence export.
 
-The probe installs without gated Lumiverse permissions, does not read or modify chats, and does not read connection identifiers or credentials. It requests the proposed `stt` permission only after detecting `stt-invocation-v1` and the user explicitly starts a transcription test. Recorded audio is not retained after the page or extension is unloaded, and a completed conformance upload is deleted by the backend in `finally`.
+The probe installs without gated Lumiverse permissions and does not read chat messages, connection identifiers, or credentials. Chat mutation is possible only after an explicit disposable-chat confirmation: append-only requests `chat_mutation`, while append-and-generate also requests `generation` and can incur configured-provider usage. It requests the proposed `stt` permission only after detecting `stt-invocation-v1` and the user explicitly starts a transcription test. Recorded audio is not retained after the page or extension is unloaded, and a completed conformance upload is deleted by the backend in `finally`.
 
 ### Build verification
 
@@ -160,14 +163,20 @@ The compiled `dist/backend.js` and `dist/frontend.js` files are committed so the
 8. Repeat once with **Cancel recording** and once with **Cancel upload**.
 9. Start a recording and, while it is active, reload the page or disable then re-enable the extension. Reopen the probe and confirm a cleanup receipt has `recordingWasActive: true`, `tracksStopped: true`, and `passed: true`.
 10. Select **Start paced teardown upload** and immediately reload or disable/re-enable the extension while its percentage is still advancing. Confirm a cleanup receipt has `uploadWasActive: true`, `uploadAbortRequested: true`, and `passed: true`. Any interrupted partial upload expires under Lumiverse's staged-upload policy.
-11. Make the drawer as narrow as the host permits, select **Run UI self-check**, and confirm it passes with no horizontal overflow. Then use only `Tab`, `Shift+Tab`, `Enter`, and `Space` to reach and operate each enabled control.
-12. Select **Inspect host STT surface**. This inspects API names and capability flags only; it does not send audio or invoke the configured provider.
-13. Record the displayed conclusion. **Candidate STT invocation API found** means the exported report contains one or more callable candidate paths. **Only provider-registration surfaces were found** means the host lets extensions supply an STT engine but exposes no callable route to the user's configured engine.
-14. Select **Check proposed API**. On Lumiverse 1.2.4, confirm it reports capability version `0`, lists the five missing methods, and does not show a permission prompt.
-15. On a host implementing the proposal, record yourself saying “JarvisType uses a Pip-Boy,” select **Check proposed API**, and then select **Grant permission and transcribe sample**. Approve only the `stt` permission.
-16. Confirm genuine partials appear incrementally when supported, the final transcript is authoritative, applied/unsupported features are reported, and staged-upload deletion is confirmed. The visible transcript is not included verbatim in exported JSON.
-17. Repeat with a longer sample and select **Cancel STT test** after provider processing starts. Confirm the result is aborted, no late text is accepted, and upload deletion is confirmed.
-18. Select **Download JSON** and retain the resulting evidence file. It contains environment and result metadata, cleanup booleans, counters, sanitized API names, and transcript length/hash, but no audio, transcript text, connection identifiers, settings, or credentials.
+11. Select **Run deterministic audio checks** while no recording is active. Confirm zero-byte and oversized samples are rejected and repeated idle terminal actions are ignored.
+12. Revoke microphone permission in the browser, select **Start recording**, deny the prompt if one appears, and confirm the export records a capture error such as `NotAllowedError` with all acquired tracks stopped. Restore permission afterward.
+13. Start another recording, switch to a different tab and back, and confirm visibility changes are counted. If practical, disconnect or change the active microphone and confirm a device change or unexpected track ending is recorded. Cancel the recording and confirm cleanup.
+14. In **Composition UI fixture**, select **Run composition UI check**. Confirm three numbered editable paragraphs, wrapped long text, one deletion and insertion in the diff, three history entries, successful focus movement, and no overflow.
+15. Make the drawer as narrow as the host permits. Edit all three paragraphs, inspect the diff and history, then use only `Tab`, `Shift+Tab`, `Enter`, and `Space` to reach and operate every enabled control.
+16. Create or open a disposable chat. Check the disposable-chat authorization box and select **Test append only**. Approve `chat_mutation`; confirm exactly one marker is added and no generation starts.
+17. In that disposable chat, select **Test append and generation**. Approve `generation`; confirm exactly one marker is added and a normal response begins. This can incur configured-provider usage.
+18. Select **Inspect host STT surface**. This inspects API names and capability flags only; it does not send audio or invoke the configured provider.
+19. Record the displayed conclusion. **Candidate STT invocation API found** means the exported report contains one or more callable candidate paths. **Only provider-registration surfaces were found** means the host lets extensions supply an STT engine but exposes no callable route to the user's configured engine.
+20. Select **Check proposed API**. On Lumiverse 1.2.4, confirm it reports capability version `0`, lists the five missing methods, and does not show a permission prompt.
+21. On a host implementing the proposal, record yourself saying “JarvisType uses a Pip-Boy,” select **Check proposed API**, and then select **Grant permission and transcribe sample**. Approve only the `stt` permission.
+22. Confirm genuine partials appear incrementally when supported, the final transcript is authoritative, applied/unsupported features are reported, and staged-upload deletion is confirmed. The visible transcript is not included verbatim in exported JSON.
+23. Repeat with a longer sample and select **Cancel STT test** after provider processing starts. Confirm the result is aborted, no late text is accepted, and upload deletion is confirmed.
+24. Select **Download JSON** and retain the resulting evidence file. It contains environment and result metadata, cleanup booleans, counters, sanitized API names, chat-test booleans, and transcript length/hash, but no audio, transcript text, chat/message identifiers, connection identifiers, settings, or credentials.
 
 Do not post the complete JSON report publicly without reviewing its `origin` and `userAgent` fields. Neither field is a credential, but both describe the test environment.
 

@@ -1,5 +1,5 @@
 export const PROTOCOL_VERSION = 1 as const
-export const PROBE_VERSION = '0.4.0'
+export const PROBE_VERSION = '0.5.0'
 export const MAX_PROBE_AUDIO_BYTES = 25 * 1024 * 1024
 
 export const AUDIO_MIME_CANDIDATES = [
@@ -49,6 +49,13 @@ export type ProbeRequest =
       type: 'probe.stt.conformance.cancel'
       requestId: string
       targetRequestId: string
+    }
+  | {
+      protocolVersion: typeof PROTOCOL_VERSION
+      type: 'probe.chat.run'
+      requestId: string
+      chatId: string
+      mode: 'append-only' | 'append-and-generate'
     }
 
 export interface SttApiSurface {
@@ -136,6 +143,18 @@ export type ProbeResponse =
     }
   | {
       protocolVersion: typeof PROTOCOL_VERSION
+      type: 'probe.chat.result'
+      requestId: string
+      ok: boolean
+      mode: 'append-only' | 'append-and-generate'
+      chatMutationPermission: boolean
+      generationPermission: boolean
+      messageIdPresent: boolean
+      generationIdPresent: boolean
+      error?: string
+    }
+  | {
+      protocolVersion: typeof PROTOCOL_VERSION
       type: 'probe.error'
       requestId: string
       ok: false
@@ -157,6 +176,12 @@ export function isProbeRequest(value: unknown): value is ProbeRequest {
       isBoundedString(value.uploadId, 1, 512) &&
       isBoundedString(value.reportedMimeType, 0, 128) &&
       isSafeProbeSize(value.expectedSize)
+    )
+  }
+  if (value.type === 'probe.chat.run') {
+    return (
+      isBoundedString(value.chatId, 1, 256) &&
+      (value.mode === 'append-only' || value.mode === 'append-and-generate')
     )
   }
   if (value.type !== 'probe.upload.verify') return false
@@ -242,6 +267,18 @@ export function isProbeResponse(value: unknown): value is ProbeResponse {
       typeof value.uploadDeleted === 'boolean' &&
       typeof value.aborted === 'boolean' &&
       (value.errorCode === undefined || isBoundedString(value.errorCode, 1, 128)) &&
+      (value.error === undefined || isBoundedString(value.error, 1, 2_000))
+    )
+  }
+
+  if (value.type === 'probe.chat.result') {
+    return (
+      typeof value.ok === 'boolean' &&
+      (value.mode === 'append-only' || value.mode === 'append-and-generate') &&
+      typeof value.chatMutationPermission === 'boolean' &&
+      typeof value.generationPermission === 'boolean' &&
+      typeof value.messageIdPresent === 'boolean' &&
+      typeof value.generationIdPresent === 'boolean' &&
       (value.error === undefined || isBoundedString(value.error, 1, 2_000))
     )
   }

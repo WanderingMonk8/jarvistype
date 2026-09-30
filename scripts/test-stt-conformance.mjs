@@ -2,10 +2,17 @@ import assert from 'node:assert/strict'
 
 const protocolVersion = 1
 
-async function loadBackend({ capabilityVersion = 0, permissionGranted = false, stt } = {}) {
+async function loadBackend({
+  capabilityVersion = 0,
+  permissionGranted = false,
+  grantedPermissions = [],
+  stt,
+  chatAppend,
+} = {}) {
   const sent = []
   let frontendHandler
   const deletedUploads = []
+  const chatAppendCalls = []
 
   globalThis.spindle = {
     host: {
@@ -16,7 +23,14 @@ async function loadBackend({ capabilityVersion = 0, permissionGranted = false, s
     },
     stt,
     permissions: {
-      has: (permission) => permission === 'stt' && permissionGranted,
+      has: (permission) =>
+        (permission === 'stt' && permissionGranted) || grantedPermissions.includes(permission),
+    },
+    chat: {
+      appendMessage: async (...args) => {
+        chatAppendCalls.push(args)
+        return chatAppend ? chatAppend(...args) : { id: 'test-message' }
+      },
     },
     uploads: {
       delete: async (uploadId) => {
@@ -40,7 +54,7 @@ async function loadBackend({ capabilityVersion = 0, permissionGranted = false, s
 
   await import(`../dist/backend.js?test=${Date.now()}-${Math.random()}`)
   assert.equal(typeof frontendHandler, 'function')
-  return { frontendHandler, sent, deletedUploads }
+  return { frontendHandler, sent, deletedUploads, chatAppendCalls }
 }
 
 function request(type, requestId, extra = {}) {
@@ -191,9 +205,68 @@ async function testCancellation() {
   assert.deepEqual(deletedUploads, ['upload-cancel'])
 }
 
+async function testChatModesAndPermissions() {
+  const denied = await loadBackend()
+  await denied.frontendHandler(
+    request('probe.chat.run', 'chat-denied', {
+      chatId: 'disposable-chat',
+      mode: 'append-only',
+    }),
+    'user-d',
+  )
+  const deniedResult = await waitFor(
+    denied.sent,
+    (message) => message.type === 'probe.chat.result',
+  )
+  assert.equal(deniedResult.ok, false)
+  assert.equal(deniedResult.chatMutationPermission, false)
+  assert.equal(denied.chatAppendCalls.length, 0)
+
+  const appendOnly = await loadBackend({
+    grantedPermissions: ['chat_mutation'],
+    chatAppend: async () => ({ id: 'append-message' }),
+  })
+  await appendOnly.frontendHandler(
+    request('probe.chat.run', 'chat-append', {
+      chatId: 'disposable-chat',
+      mode: 'append-only',
+    }),
+    'user-e',
+  )
+  const appendResult = await waitFor(
+    appendOnly.sent,
+    (message) => message.type === 'probe.chat.result',
+  )
+  assert.equal(appendResult.ok, true)
+  assert.equal(appendResult.messageIdPresent, true)
+  assert.equal(appendResult.generationIdPresent, false)
+  assert.equal(appendOnly.chatAppendCalls[0][2].triggerGeneration, false)
+
+  const appendAndGenerate = await loadBackend({
+    grantedPermissions: ['chat_mutation', 'generation'],
+    chatAppend: async () => ({ id: 'generated-message', generationId: 'generation-1' }),
+  })
+  await appendAndGenerate.frontendHandler(
+    request('probe.chat.run', 'chat-generate', {
+      chatId: 'disposable-chat',
+      mode: 'append-and-generate',
+    }),
+    'user-f',
+  )
+  const generateResult = await waitFor(
+    appendAndGenerate.sent,
+    (message) => message.type === 'probe.chat.result',
+  )
+  assert.equal(generateResult.ok, true)
+  assert.equal(generateResult.messageIdPresent, true)
+  assert.equal(generateResult.generationIdPresent, true)
+  assert.equal(appendAndGenerate.chatAppendCalls[0][2].triggerGeneration, true)
+}
+
 await testUnsupportedHost()
 await testSuccessfulStream()
 await testCancellation()
+await testChatModesAndPermissions()
 
 delete globalThis.spindle
-console.log('Validated proposed STT API conformance probe')
+console.log('Validated backend STT conformance and disposable-chat probe paths')

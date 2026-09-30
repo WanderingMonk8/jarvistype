@@ -1,11 +1,11 @@
 {
-  "version": "0.4.0",
+  "version": "0.5.0",
   "name": "JarvisType Phase 0 Probe",
   "identifier": "jarvistype",
   "author": "WanderingMonk8",
   "github": "https://github.com/WanderingMonk8/jarvistype",
   "homepage": "https://github.com/WanderingMonk8/jarvistype",
-  "description": "Capability and conformance probe for JarvisType microphone, uploads, and host-managed STT invocation.",
+  "description": "Phase 0 probe for JarvisType audio, composition UI, chat submission, uploads, and host-managed STT.",
   "permissions": [],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js"

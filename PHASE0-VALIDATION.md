@@ -24,7 +24,7 @@ Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `LOCAL-PENDI
 
 ## Probe scope and safety
 
-Current probe version: `0.2.0`
+Current probe version: `0.3.0`
 
 The remote probe:
 
@@ -38,6 +38,7 @@ The remote probe:
 - Stores at most four sanitized teardown receipts in the current browser tab's `sessionStorage`; receipts contain only timestamps and cleanup booleans.
 - Provides a paced 2 MiB synthetic upload for reload/disable testing. Completed test uploads are verified and deleted; interrupted partial uploads rely on the documented 30-minute inactivity expiry.
 - Counts active setup instances and drawer/input-action activations, and can audit the visible drawer for horizontal overflow, accessible control names, and negative tab stops.
+- Inspects only sanitized frontend/backend API member names and host capability names when checking for configured STT access.
 - Exports no audio or credentials in its result JSON.
 
 ## Remote installation tests
@@ -96,6 +97,18 @@ The remote probe:
 - Event result: no failure event was reported.
 - Data handling: only this sanitized summary is committed; the host origin and complete user-agent report remain outside the repository.
 
+### Recorded run R-005
+
+- Test date: 2026-09-30.
+- Probe version: `0.3.0` (the exported report does not embed a Git commit hash).
+- Environment: Windows 10 x64, Firefox 156, secure HTTPS context.
+- Lumiverse backend/frontend: `1.2.4` / `1.2.4`; the setup reported exactly one active probe instance.
+- Frontend surface: connection discovery/selection members were visible, but no STT invocation candidate or STT provider manager was exposed.
+- Backend surface: `providers.register`, `providers.handle`, `providers.unregister`, and `providers.onChanged` were visible; no STT invocation candidate was exposed.
+- Host capability match: only `connection-dispatch-resolution-v1`; no STT/transcription invocation capability was advertised.
+- Conclusion: `registration-only`. The extension can supply a provider to Lumiverse, but cannot invoke the user's configured Lumiverse STT connection through the observed Spindle surface.
+- Data handling: the export contained API/capability names and availability results, but no connection IDs, names, URLs, settings, provider metadata, credentials, or audio.
+
 | ID | Test | Pass condition | Status | Evidence |
 |---|---|---|---|---|
 | L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | PASS | R-001: health response proves frontend and backend loaded; manifest permissions are empty. |
@@ -120,9 +133,15 @@ Probe `0.3.0` determines whether a Spindle extension can reuse the user's existi
 
 | ID | Check | Pass condition | Status | Evidence |
 |---|---|---|---|---|
-| S2-01 | Host STT invocation surface | The runtime exposes a callable STT/transcription invocation path to either the frontend or backend extension context. | REMOTE-PENDING | Run **Inspect host STT surface** in probe 0.3.0. |
-| S2-02 | Registration versus invocation | Provider-registration APIs are not mistaken for APIs that invoke the user's configured STT provider. | REMOTE-PENDING | Probe conclusion and `registrationCandidates`/`invocationCandidates`. |
-| S2-03 | Sanitized discovery | Export contains no connection IDs, names, URLs, provider metadata, credentials, or audio. | REMOTE-PENDING | Review the probe 0.3.0 JSON export. |
+| S2-01 | Host STT invocation surface | The runtime exposes a callable STT/transcription invocation path to either the frontend or backend extension context. | FAIL | R-005: both invocation-candidate arrays were empty; no matching host capability was advertised. |
+| S2-02 | Registration versus invocation | Provider-registration APIs are not mistaken for APIs that invoke the user's configured STT provider. | PASS | R-005: `providers.register` and `providers.handle` were classified as registration-only. |
+| S2-03 | Sanitized discovery | Export contains no connection IDs, names, URLs, provider metadata, credentials, or audio. | PASS | R-005: review confirmed that only API/capability names and availability results were exported. |
+
+### Section 2 conclusion
+
+Lumiverse `1.2.4` does not expose a callable Spindle API for reusing the user's configured STT connection. Connection discovery alone cannot satisfy JarvisType because it provides no way to submit audio, context, glossary hints, cancellation, or partial-result callbacks. JarvisType must not work around this by silently creating or requesting credentials for a duplicate connection.
+
+The preferred resolution is a host-managed STT invocation API that accepts a configured connection identifier or the active STT connection, audio/upload input, context and vocabulary hints, an abort signal, and partial/final result callbacks. Until that capability exists, provider-dependent tests `L-12` and `L-13` remain blocked by the host integration boundary.
 
 ## Product and provider decisions
 

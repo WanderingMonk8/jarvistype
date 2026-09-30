@@ -111,6 +111,18 @@ The remote probe:
 - Conclusion: `registration-only`. The extension can supply a provider to Lumiverse, but cannot invoke the user's configured Lumiverse STT connection through the observed Spindle surface.
 - Data handling: the export contained API/capability names and availability results, but no connection IDs, names, URLs, settings, provider metadata, credentials, or audio.
 
+### Recorded run R-006
+
+- Test date: 2026-09-30.
+- Probe version: `0.4.0` (the exported report does not embed a Git commit hash).
+- Environment: Windows 10 x64, Firefox 156, secure HTTPS context.
+- Lumiverse backend/frontend: `1.2.4` / `1.2.4`; the setup reported exactly one active probe instance.
+- Capability result: host capability version `0`; `stt-invocation-v1` was unavailable.
+- API result: none of the five required methods were exposed. The missing methods were `transcribe`, `transcribeStream`, `getProviders`, `listConnections`, and `getConnection`.
+- Safety-gate result: `permissionGranted` remained `false`. The probe stopped at capability detection without recording audio, staging an upload, or invoking a provider.
+- Conclusion: the forward-compatible proposal gate passed on an unsupported host. This result does not test the proposed STT API's transcription behavior.
+- Data handling: the exported report contained only sanitized capability and method availability results; it contained no audio, transcript, connection metadata, or credentials.
+
 | ID | Test | Pass condition | Status | Evidence |
 |---|---|---|---|---|
 | L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | PASS | R-001: health response proves frontend and backend loaded; manifest permissions are empty. |
@@ -138,7 +150,7 @@ Probe `0.3.0` determines whether a Spindle extension can reuse the user's existi
 | S2-01 | Host STT invocation surface | The runtime exposes a callable STT/transcription invocation path to either the frontend or backend extension context. | FAIL | R-005: both invocation-candidate arrays were empty; no matching host capability was advertised. |
 | S2-02 | Registration versus invocation | Provider-registration APIs are not mistaken for APIs that invoke the user's configured STT provider. | PASS | R-005: `providers.register` and `providers.handle` were classified as registration-only. |
 | S2-03 | Sanitized discovery | Export contains no connection IDs, names, URLs, provider metadata, credentials, or audio. | PASS | R-005: review confirmed that only API/capability names and availability results were exported. |
-| S2-04 | Proposal capability gate | Probe 0.4.0 detects `stt-invocation-v1` and all five required methods before requesting permission or uploading audio. | REMOTE-PENDING | Run **Check proposed API** on Lumiverse 1.2.4; expect unsupported with no permission prompt. |
+| S2-04 | Proposal capability gate | Probe 0.4.0 detects `stt-invocation-v1` and all five required methods before requesting permission or uploading audio. | PASS | R-006: Lumiverse 1.2.4 reported capability version 0 and all five methods missing; permission remained false and no recording, upload, or provider call occurred. |
 | S2-05 | Proposed API conformance | On an implementing host, redacted discovery, streamed transcription, final reconciliation, capability reporting, cancellation, late-result rejection, and upload deletion pass. | HOST-PENDING | Requires a Lumiverse build implementing `LUMIVERSE-STT-API-PROPOSAL.md`. |
 
 ### Section 2 conclusion

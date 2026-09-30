@@ -5,6 +5,7 @@ import {
   hashBytes,
   isProbeRequest,
   type ProbeResponse,
+  type SttApiSurface,
 } from './shared'
 
 function send(response: ProbeResponse, userId: string): void {
@@ -48,6 +49,32 @@ spindle.onFrontendMessage(async (payload: unknown, userId: string) => {
         userId,
       )
     }
+    return
+  }
+
+  if (payload.type === 'probe.stt.surface.request') {
+    const backend = inspectSttSurface(spindle as unknown)
+    const hasInvocation =
+      payload.frontend.invocationCandidates.length > 0 || backend.invocationCandidates.length > 0
+    const hasRegistration =
+      payload.frontend.registrationCandidates.length > 0 || backend.registrationCandidates.length > 0
+
+    send(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'probe.stt.surface.response',
+        requestId: payload.requestId,
+        ok: true,
+        frontend: payload.frontend,
+        backend,
+        conclusion: hasInvocation
+          ? 'invocation-api-found'
+          : hasRegistration
+            ? 'registration-only'
+            : 'no-stt-surface',
+      },
+      userId,
+    )
     return
   }
 
@@ -110,4 +137,85 @@ spindle.log.info('JarvisType Phase 0 capability probe loaded')
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function inspectSttSurface(root: unknown): SttApiSurface {
+  return {
+    relevantRootMembers: relevantMembers(root),
+    connectionMembers: memberNames(readMember(root, 'connections')),
+    providerMembers: memberNames(readMember(root, 'providers')),
+    relevantHostCapabilities: relevantCapabilityNames(readMember(root, 'host')),
+    invocationCandidates: existingFunctionPaths(root, [
+      'transcribe',
+      'stt',
+      'stt.transcribe',
+      'stt.invoke',
+      'speechToText',
+      'speechToText.transcribe',
+      'speech',
+      'speech.transcribe',
+      'transcription',
+      'transcription.transcribe',
+      'voice.transcribe',
+      'audio.transcribe',
+      'media.transcribe',
+      'connections.transcribe',
+      'providers.invoke',
+      'providers.call',
+      'providers.execute',
+      'providers.transcribe',
+    ]),
+    registrationCandidates: existingFunctionPaths(root, [
+      'registerSttEngine',
+      'providers.register',
+      'providers.handle',
+    ]),
+  }
+}
+
+function relevantMembers(value: unknown): string[] {
+  return memberNames(value).filter((name) => /(stt|speech|transcri|voice|provider|connection)/i.test(name))
+}
+
+function memberNames(value: unknown): string[] {
+  if ((typeof value !== 'object' || value === null) && typeof value !== 'function') return []
+  const names = new Set<string>()
+  let cursor: object | null = value as object
+  for (let depth = 0; cursor && depth < 3; depth += 1) {
+    try {
+      for (const name of Object.getOwnPropertyNames(cursor)) {
+        if (name !== 'constructor' && name.length <= 128) names.add(name)
+      }
+      cursor = Object.getPrototypeOf(cursor) as object | null
+    } catch {
+      break
+    }
+  }
+  return [...names].sort().slice(0, 64)
+}
+
+function relevantCapabilityNames(host: unknown): string[] {
+  const capabilities = readMember(host, 'capabilities')
+  if (typeof capabilities !== 'object' || capabilities === null) return []
+  return Object.keys(capabilities)
+    .filter((name) => /(stt|speech|transcri|voice|provider|connection)/i.test(name))
+    .sort()
+    .slice(0, 64)
+}
+
+function existingFunctionPaths(root: unknown, paths: string[]): string[] {
+  return paths.filter((path) => {
+    let value = root
+    for (const segment of path.split('.')) value = readMember(value, segment)
+    return typeof value === 'function'
+  })
+}
+
+function readMember(value: unknown, name: string): unknown {
+  if ((typeof value !== 'object' || value === null) && typeof value !== 'function') return undefined
+  try {
+    return (value as Record<string, unknown>)[name]
+  } catch {
+    return undefined
+  }
 }

@@ -3105,7 +3105,7 @@ var isSupported = typeof XMLHttpRequest === "function" && typeof Blob === "funct
 
 // src/shared.ts
 var PROTOCOL_VERSION = 1;
-var PROBE_VERSION = "0.2.0";
+var PROBE_VERSION = "0.3.0";
 var MAX_PROBE_AUDIO_BYTES = 25 * 1024 * 1024;
 var AUDIO_MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
@@ -3123,8 +3123,18 @@ function isProbeResponse(value) {
   if (value.type === "probe.error") {
     return value.ok === false && isBoundedString(value.error, 1, 2e3);
   }
+  if (value.type === "probe.stt.surface.response") {
+    return value.ok === true && isSttApiSurface(value.frontend) && isSttApiSurface(value.backend) && (value.conclusion === "invocation-api-found" || value.conclusion === "registration-only" || value.conclusion === "no-stt-surface");
+  }
   if (value.type !== "probe.upload.result") return false;
   return typeof value.ok === "boolean" && isSafeProbeSize(value.expectedSize) && (value.actualSize === null || isSafeProbeSize(value.actualSize)) && typeof value.expectedHash === "string" && /^[0-9a-f]{8}$/.test(value.expectedHash) && (value.actualHash === null || typeof value.actualHash === "string" && /^[0-9a-f]{8}$/.test(value.actualHash)) && isBoundedString(value.reportedMimeType, 0, 128) && (value.fileName === null || isBoundedString(value.fileName, 0, 512)) && typeof value.deleted === "boolean" && (value.error === void 0 || isBoundedString(value.error, 1, 2e3));
+}
+function isSttApiSurface(value) {
+  if (!isRecord(value)) return false;
+  return isBoundedStringArray(value.relevantRootMembers) && isBoundedStringArray(value.connectionMembers) && isBoundedStringArray(value.providerMembers) && isBoundedStringArray(value.relevantHostCapabilities) && isBoundedStringArray(value.invocationCandidates) && isBoundedStringArray(value.registrationCandidates);
+}
+function isBoundedStringArray(value) {
+  return Array.isArray(value) && value.length <= 64 && value.every((item) => isBoundedString(item, 1, 128));
 }
 function hashBytes(bytes) {
   let hash = 2166136261;
@@ -3252,6 +3262,14 @@ function setup(ctx) {
         </div>
         <p class="jt-probe-status" role="status" aria-live="polite" data-upload-status>Record a sample first.</p>
       </section>
+      <section class="jt-probe-card" aria-labelledby="jt-stt-title">
+        <h3 id="jt-stt-title">Configured STT connection access</h3>
+        <p class="jt-probe-note">Inspects host API names and capability flags only. It does not read connection identifiers, settings, credentials, or audio.</p>
+        <div class="jt-probe-actions">
+          <button type="button" data-inspect-stt>Inspect host STT surface</button>
+        </div>
+        <p class="jt-probe-status" role="status" aria-live="polite" data-stt-status>Not tested.</p>
+      </section>
       <section class="jt-probe-card" aria-labelledby="jt-results-title">
         <h3 id="jt-results-title">Sanitized results</h3>
         <div class="jt-probe-actions">
@@ -3267,6 +3285,7 @@ function setup(ctx) {
   const lifecycleStatus = requireElement(tab.root, "[data-lifecycle-status]");
   const recordingStatus = requireElement(tab.root, "[data-recording-status]");
   const uploadStatus = requireElement(tab.root, "[data-upload-status]");
+  const sttStatus = requireElement(tab.root, "[data-stt-status]");
   const resultsLog = requireElement(tab.root, "[data-results-log]");
   const refreshHostButton = requireElement(tab.root, "[data-refresh-host]");
   const lifecycleUploadButton = requireElement(tab.root, "[data-lifecycle-upload]");
@@ -3276,6 +3295,7 @@ function setup(ctx) {
   const cancelRecordingButton = requireElement(tab.root, "[data-cancel-recording]");
   const uploadButton = requireElement(tab.root, "[data-upload]");
   const cancelUploadButton = requireElement(tab.root, "[data-cancel-upload]");
+  const inspectSttButton = requireElement(tab.root, "[data-inspect-stt]");
   const copyButton = requireElement(tab.root, "[data-copy-results]");
   const downloadButton = requireElement(tab.root, "[data-download-results]");
   let disposed = false;
@@ -3289,6 +3309,7 @@ function setup(ctx) {
   let uploadResultTarget = null;
   let activeUploadRequestId = null;
   let healthRequestId = null;
+  let sttSurfaceRequestId = null;
   let cleanupPerformed = false;
   const addEvent = (level, message, details) => {
     events.push({ at: (/* @__PURE__ */ new Date()).toISOString(), level, message, ...details ? { details } : {} });
@@ -3369,6 +3390,28 @@ function setup(ctx) {
       render();
       return;
     }
+    if (payload.type === "probe.stt.surface.response" && payload.requestId === sttSurfaceRequestId) {
+      sttSurfaceRequestId = null;
+      inspectSttButton.disabled = false;
+      report.sttSurface = {
+        testedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        conclusion: payload.conclusion,
+        frontend: payload.frontend,
+        backend: payload.backend
+      };
+      sttStatus.textContent = sttConclusionText(payload.conclusion);
+      addEvent(
+        payload.conclusion === "invocation-api-found" ? "pass" : "info",
+        "Host STT API surface inspection finished",
+        {
+          conclusion: payload.conclusion,
+          frontendInvocationCandidates: payload.frontend.invocationCandidates,
+          backendInvocationCandidates: payload.backend.invocationCandidates,
+          backendRegistrationCandidates: payload.backend.registrationCandidates
+        }
+      );
+      return;
+    }
     if (payload.type === "probe.error") {
       addEvent("fail", "Backend probe error", { error: payload.error });
     }
@@ -3379,6 +3422,20 @@ function setup(ctx) {
     const stopped = activeStream.getTracks().every((track) => track.readyState === "ended");
     activeStream = null;
     return stopped;
+  };
+  const inspectSttSurface = () => {
+    if (sttSurfaceRequestId) return;
+    sttSurfaceRequestId = makeRequestId();
+    inspectSttButton.disabled = true;
+    sttStatus.textContent = "Inspecting documented and runtime host surfaces\u2026";
+    const request = {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "probe.stt.surface.request",
+      requestId: sttSurfaceRequestId,
+      frontend: inspectFrontendSttSurface(ctx)
+    };
+    ctx.sendToBackend(request);
+    addEvent("info", "Requested sanitized host STT API surface inspection");
   };
   const clearRecordingTimer = () => {
     if (recordingTimer !== null) window.clearTimeout(recordingTimer);
@@ -3735,6 +3792,7 @@ function setup(ctx) {
   cancelRecordingButton.addEventListener("click", () => stopRecording(false));
   uploadButton.addEventListener("click", () => void uploadRecording());
   cancelUploadButton.addEventListener("click", () => void cancelUpload());
+  inspectSttButton.addEventListener("click", inspectSttSurface);
   copyButton.addEventListener("click", () => void copyResults());
   downloadButton.addEventListener("click", downloadResults);
   addEvent(activeSetupInstances === 1 ? "pass" : "fail", "Frontend capability probe initialized", {
@@ -3829,6 +3887,87 @@ function extensionForMime(mimeType) {
 function describeError(error) {
   if (error instanceof DOMException) return `${error.name}: ${error.message}`;
   return error instanceof Error ? error.message : String(error);
+}
+function inspectFrontendSttSurface(root) {
+  return {
+    relevantRootMembers: relevantMembers(root),
+    connectionMembers: memberNames(readMember(root, "connections")),
+    providerMembers: memberNames(readMember(root, "providers")),
+    relevantHostCapabilities: relevantCapabilityNames(readMember(root, "host")),
+    invocationCandidates: existingFunctionPaths(root, [
+      "transcribe",
+      "stt",
+      "stt.transcribe",
+      "stt.invoke",
+      "speechToText",
+      "speechToText.transcribe",
+      "speech",
+      "speech.transcribe",
+      "transcription",
+      "transcription.transcribe",
+      "voice.transcribe",
+      "audio.transcribe",
+      "media.transcribe",
+      "connections.transcribe",
+      "providers.invoke",
+      "providers.call",
+      "providers.execute",
+      "providers.transcribe"
+    ]),
+    registrationCandidates: existingFunctionPaths(root, [
+      "registerSttEngine",
+      "providers.register",
+      "providers.handle"
+    ])
+  };
+}
+function sttConclusionText(conclusion) {
+  if (conclusion === "invocation-api-found") {
+    return "Candidate STT invocation API found. Export the JSON so its exact path can be reviewed.";
+  }
+  if (conclusion === "registration-only") {
+    return "Only provider-registration surfaces were found; no host STT invocation API was detected.";
+  }
+  return "No STT invocation or registration surface was detected.";
+}
+function relevantMembers(value) {
+  return memberNames(value).filter((name) => /(stt|speech|transcri|voice|provider|connection)/i.test(name));
+}
+function memberNames(value) {
+  if ((typeof value !== "object" || value === null) && typeof value !== "function") return [];
+  const names = /* @__PURE__ */ new Set();
+  let cursor = value;
+  for (let depth = 0; cursor && depth < 3; depth += 1) {
+    try {
+      for (const name of Object.getOwnPropertyNames(cursor)) {
+        if (name !== "constructor" && name.length <= 128) names.add(name);
+      }
+      cursor = Object.getPrototypeOf(cursor);
+    } catch {
+      break;
+    }
+  }
+  return [...names].sort().slice(0, 64);
+}
+function relevantCapabilityNames(host) {
+  const capabilities = readMember(host, "capabilities");
+  if (typeof capabilities !== "object" || capabilities === null) return [];
+  return Object.keys(capabilities).filter((name) => /(stt|speech|transcri|voice|provider|connection)/i.test(name)).sort().slice(0, 64);
+}
+function existingFunctionPaths(root, paths) {
+  return paths.filter((path) => {
+    let value = root;
+    for (const segment of path.split(".")) value = readMember(value, segment);
+    return typeof value === "function";
+  });
+}
+function readMember(value, name) {
+  if ((typeof value !== "object" || value === null) && typeof value !== "function") return void 0;
+  try {
+    return value[name];
+  } catch {
+    return void 0;
+  }
 }
 function makeRequestId() {
   if (typeof globalThis.crypto?.randomUUID === "function") {

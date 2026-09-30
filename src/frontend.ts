@@ -8,6 +8,7 @@ import {
   hashBytes,
   isProbeResponse,
   type ProbeRequest,
+  type SttApiSurface,
 } from './shared'
 
 const MAX_RECORDING_MS = 60_000
@@ -89,6 +90,12 @@ interface ProbeReport {
     deleted: boolean
     passed: boolean
     error?: string
+  }
+  sttSurface?: {
+    testedAt: string
+    conclusion: 'invocation-api-found' | 'registration-only' | 'no-stt-surface'
+    frontend: SttApiSurface
+    backend: SttApiSurface
   }
   events: ProbeEvent[]
 }
@@ -208,6 +215,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         </div>
         <p class="jt-probe-status" role="status" aria-live="polite" data-upload-status>Record a sample first.</p>
       </section>
+      <section class="jt-probe-card" aria-labelledby="jt-stt-title">
+        <h3 id="jt-stt-title">Configured STT connection access</h3>
+        <p class="jt-probe-note">Inspects host API names and capability flags only. It does not read connection identifiers, settings, credentials, or audio.</p>
+        <div class="jt-probe-actions">
+          <button type="button" data-inspect-stt>Inspect host STT surface</button>
+        </div>
+        <p class="jt-probe-status" role="status" aria-live="polite" data-stt-status>Not tested.</p>
+      </section>
       <section class="jt-probe-card" aria-labelledby="jt-results-title">
         <h3 id="jt-results-title">Sanitized results</h3>
         <div class="jt-probe-actions">
@@ -224,6 +239,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const lifecycleStatus = requireElement<HTMLElement>(tab.root, '[data-lifecycle-status]')
   const recordingStatus = requireElement<HTMLElement>(tab.root, '[data-recording-status]')
   const uploadStatus = requireElement<HTMLElement>(tab.root, '[data-upload-status]')
+  const sttStatus = requireElement<HTMLElement>(tab.root, '[data-stt-status]')
   const resultsLog = requireElement<HTMLElement>(tab.root, '[data-results-log]')
   const refreshHostButton = requireElement<HTMLButtonElement>(tab.root, '[data-refresh-host]')
   const lifecycleUploadButton = requireElement<HTMLButtonElement>(tab.root, '[data-lifecycle-upload]')
@@ -233,6 +249,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const cancelRecordingButton = requireElement<HTMLButtonElement>(tab.root, '[data-cancel-recording]')
   const uploadButton = requireElement<HTMLButtonElement>(tab.root, '[data-upload]')
   const cancelUploadButton = requireElement<HTMLButtonElement>(tab.root, '[data-cancel-upload]')
+  const inspectSttButton = requireElement<HTMLButtonElement>(tab.root, '[data-inspect-stt]')
   const copyButton = requireElement<HTMLButtonElement>(tab.root, '[data-copy-results]')
   const downloadButton = requireElement<HTMLButtonElement>(tab.root, '[data-download-results]')
 
@@ -247,6 +264,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   let uploadResultTarget: 'recording' | 'lifecycle' | null = null
   let activeUploadRequestId: string | null = null
   let healthRequestId: string | null = null
+  let sttSurfaceRequestId: string | null = null
   let cleanupPerformed = false
 
   const addEvent = (
@@ -342,6 +360,29 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       return
     }
 
+    if (payload.type === 'probe.stt.surface.response' && payload.requestId === sttSurfaceRequestId) {
+      sttSurfaceRequestId = null
+      inspectSttButton.disabled = false
+      report.sttSurface = {
+        testedAt: new Date().toISOString(),
+        conclusion: payload.conclusion,
+        frontend: payload.frontend,
+        backend: payload.backend,
+      }
+      sttStatus.textContent = sttConclusionText(payload.conclusion)
+      addEvent(
+        payload.conclusion === 'invocation-api-found' ? 'pass' : 'info',
+        'Host STT API surface inspection finished',
+        {
+          conclusion: payload.conclusion,
+          frontendInvocationCandidates: payload.frontend.invocationCandidates,
+          backendInvocationCandidates: payload.backend.invocationCandidates,
+          backendRegistrationCandidates: payload.backend.registrationCandidates,
+        },
+      )
+      return
+    }
+
     if (payload.type === 'probe.error') {
       addEvent('fail', 'Backend probe error', { error: payload.error })
     }
@@ -353,6 +394,21 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const stopped = activeStream.getTracks().every((track) => track.readyState === 'ended')
     activeStream = null
     return stopped
+  }
+
+  const inspectSttSurface = () => {
+    if (sttSurfaceRequestId) return
+    sttSurfaceRequestId = makeRequestId()
+    inspectSttButton.disabled = true
+    sttStatus.textContent = 'Inspecting documented and runtime host surfaces…'
+    const request: ProbeRequest = {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'probe.stt.surface.request',
+      requestId: sttSurfaceRequestId,
+      frontend: inspectFrontendSttSurface(ctx),
+    }
+    ctx.sendToBackend(request)
+    addEvent('info', 'Requested sanitized host STT API surface inspection')
   }
 
   const clearRecordingTimer = () => {
@@ -745,6 +801,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cancelRecordingButton.addEventListener('click', () => stopRecording(false))
   uploadButton.addEventListener('click', () => void uploadRecording())
   cancelUploadButton.addEventListener('click', () => void cancelUpload())
+  inspectSttButton.addEventListener('click', inspectSttSurface)
   copyButton.addEventListener('click', () => void copyResults())
   downloadButton.addEventListener('click', downloadResults)
 
@@ -877,6 +934,99 @@ function extensionForMime(mimeType: string): string {
 function describeError(error: unknown): string {
   if (error instanceof DOMException) return `${error.name}: ${error.message}`
   return error instanceof Error ? error.message : String(error)
+}
+
+function inspectFrontendSttSurface(root: unknown): SttApiSurface {
+  return {
+    relevantRootMembers: relevantMembers(root),
+    connectionMembers: memberNames(readMember(root, 'connections')),
+    providerMembers: memberNames(readMember(root, 'providers')),
+    relevantHostCapabilities: relevantCapabilityNames(readMember(root, 'host')),
+    invocationCandidates: existingFunctionPaths(root, [
+      'transcribe',
+      'stt',
+      'stt.transcribe',
+      'stt.invoke',
+      'speechToText',
+      'speechToText.transcribe',
+      'speech',
+      'speech.transcribe',
+      'transcription',
+      'transcription.transcribe',
+      'voice.transcribe',
+      'audio.transcribe',
+      'media.transcribe',
+      'connections.transcribe',
+      'providers.invoke',
+      'providers.call',
+      'providers.execute',
+      'providers.transcribe',
+    ]),
+    registrationCandidates: existingFunctionPaths(root, [
+      'registerSttEngine',
+      'providers.register',
+      'providers.handle',
+    ]),
+  }
+}
+
+function sttConclusionText(
+  conclusion: 'invocation-api-found' | 'registration-only' | 'no-stt-surface',
+): string {
+  if (conclusion === 'invocation-api-found') {
+    return 'Candidate STT invocation API found. Export the JSON so its exact path can be reviewed.'
+  }
+  if (conclusion === 'registration-only') {
+    return 'Only provider-registration surfaces were found; no host STT invocation API was detected.'
+  }
+  return 'No STT invocation or registration surface was detected.'
+}
+
+function relevantMembers(value: unknown): string[] {
+  return memberNames(value).filter((name) => /(stt|speech|transcri|voice|provider|connection)/i.test(name))
+}
+
+function memberNames(value: unknown): string[] {
+  if ((typeof value !== 'object' || value === null) && typeof value !== 'function') return []
+  const names = new Set<string>()
+  let cursor: object | null = value as object
+  for (let depth = 0; cursor && depth < 3; depth += 1) {
+    try {
+      for (const name of Object.getOwnPropertyNames(cursor)) {
+        if (name !== 'constructor' && name.length <= 128) names.add(name)
+      }
+      cursor = Object.getPrototypeOf(cursor) as object | null
+    } catch {
+      break
+    }
+  }
+  return [...names].sort().slice(0, 64)
+}
+
+function relevantCapabilityNames(host: unknown): string[] {
+  const capabilities = readMember(host, 'capabilities')
+  if (typeof capabilities !== 'object' || capabilities === null) return []
+  return Object.keys(capabilities)
+    .filter((name) => /(stt|speech|transcri|voice|provider|connection)/i.test(name))
+    .sort()
+    .slice(0, 64)
+}
+
+function existingFunctionPaths(root: unknown, paths: string[]): string[] {
+  return paths.filter((path) => {
+    let value = root
+    for (const segment of path.split('.')) value = readMember(value, segment)
+    return typeof value === 'function'
+  })
+}
+
+function readMember(value: unknown, name: string): unknown {
+  if ((typeof value !== 'object' || value === null) && typeof value !== 'function') return undefined
+  try {
+    return (value as Record<string, unknown>)[name]
+  } catch {
+    return undefined
+  }
 }
 
 function makeRequestId(): string {

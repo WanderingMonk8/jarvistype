@@ -114,6 +114,16 @@ The remote probe:
 | L-14 | Chat/send permission behavior | Append-only and append-with-generation behavior match the documented permission model. | LOCAL-PENDING | Deferred to a disposable-chat probe |
 | L-15 | Semantic interpreter corpus | Structured output validates or returns typed failure; unsafe cases never mutate the draft. | PROVIDER-PENDING | Not included in probe 0.1.0 |
 
+## Section 2: configured STT connection access
+
+Probe `0.3.0` determines whether a Spindle extension can reuse the user's existing Lumiverse STT connection. It does not create a connection, request credentials, invoke a provider, or send audio. The exported result is limited to API member names, host capability names, and availability booleans.
+
+| ID | Check | Pass condition | Status | Evidence |
+|---|---|---|---|---|
+| S2-01 | Host STT invocation surface | The runtime exposes a callable STT/transcription invocation path to either the frontend or backend extension context. | REMOTE-PENDING | Run **Inspect host STT surface** in probe 0.3.0. |
+| S2-02 | Registration versus invocation | Provider-registration APIs are not mistaken for APIs that invoke the user's configured STT provider. | REMOTE-PENDING | Probe conclusion and `registrationCandidates`/`invocationCandidates`. |
+| S2-03 | Sanitized discovery | Export contains no connection IDs, names, URLs, provider metadata, credentials, or audio. | REMOTE-PENDING | Review the probe 0.3.0 JSON export. |
+
 ## Product and provider decisions
 
 | ID | Decision | Current baseline | Status |

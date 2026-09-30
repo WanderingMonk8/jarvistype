@@ -1,5 +1,5 @@
 export const PROTOCOL_VERSION = 1 as const
-export const PROBE_VERSION = '0.2.0'
+export const PROBE_VERSION = '0.3.0'
 export const MAX_PROBE_AUDIO_BYTES = 25 * 1024 * 1024
 
 export const AUDIO_MIME_CANDIDATES = [
@@ -25,6 +25,21 @@ export type ProbeRequest =
       expectedHash: string
       reportedMimeType: string
     }
+  | {
+      protocolVersion: typeof PROTOCOL_VERSION
+      type: 'probe.stt.surface.request'
+      requestId: string
+      frontend: SttApiSurface
+    }
+
+export interface SttApiSurface {
+  relevantRootMembers: string[]
+  connectionMembers: string[]
+  providerMembers: string[]
+  relevantHostCapabilities: string[]
+  invocationCandidates: string[]
+  registrationCandidates: string[]
+}
 
 export type ProbeResponse =
   | {
@@ -52,6 +67,15 @@ export type ProbeResponse =
     }
   | {
       protocolVersion: typeof PROTOCOL_VERSION
+      type: 'probe.stt.surface.response'
+      requestId: string
+      ok: true
+      frontend: SttApiSurface
+      backend: SttApiSurface
+      conclusion: 'invocation-api-found' | 'registration-only' | 'no-stt-surface'
+    }
+  | {
+      protocolVersion: typeof PROTOCOL_VERSION
       type: 'probe.error'
       requestId: string
       ok: false
@@ -63,6 +87,7 @@ export function isProbeRequest(value: unknown): value is ProbeRequest {
   if (!isBoundedString(value.requestId, 1, 128)) return false
 
   if (value.type === 'probe.health.request') return true
+  if (value.type === 'probe.stt.surface.request') return isSttApiSurface(value.frontend)
   if (value.type !== 'probe.upload.verify') return false
 
   return (
@@ -94,6 +119,17 @@ export function isProbeResponse(value: unknown): value is ProbeResponse {
     return value.ok === false && isBoundedString(value.error, 1, 2_000)
   }
 
+  if (value.type === 'probe.stt.surface.response') {
+    return (
+      value.ok === true &&
+      isSttApiSurface(value.frontend) &&
+      isSttApiSurface(value.backend) &&
+      (value.conclusion === 'invocation-api-found' ||
+        value.conclusion === 'registration-only' ||
+        value.conclusion === 'no-stt-surface')
+    )
+  }
+
   if (value.type !== 'probe.upload.result') return false
   return (
     typeof value.ok === 'boolean' &&
@@ -107,6 +143,26 @@ export function isProbeResponse(value: unknown): value is ProbeResponse {
     (value.fileName === null || isBoundedString(value.fileName, 0, 512)) &&
     typeof value.deleted === 'boolean' &&
     (value.error === undefined || isBoundedString(value.error, 1, 2_000))
+  )
+}
+
+function isSttApiSurface(value: unknown): value is SttApiSurface {
+  if (!isRecord(value)) return false
+  return (
+    isBoundedStringArray(value.relevantRootMembers) &&
+    isBoundedStringArray(value.connectionMembers) &&
+    isBoundedStringArray(value.providerMembers) &&
+    isBoundedStringArray(value.relevantHostCapabilities) &&
+    isBoundedStringArray(value.invocationCandidates) &&
+    isBoundedStringArray(value.registrationCandidates)
+  )
+}
+
+function isBoundedStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= 64 &&
+    value.every((item) => isBoundedString(item, 1, 128))
   )
 }
 

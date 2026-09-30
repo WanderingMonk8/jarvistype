@@ -131,9 +131,10 @@ The current `development` branch builds an installable diagnostic extension. It 
 - Explicit deletion of the completed staged upload.
 - Reload/disable cleanup receipts for active recording and upload resources.
 - Drawer activation counters and a responsive-layout/accessibility self-check.
+- Sanitized discovery of any host API capable of invoking Lumiverse's configured STT connection.
 - Sanitized JSON evidence export.
 
-The probe requests no gated Lumiverse permissions, does not read or modify chats, does not call an external provider, and does not retain recorded audio after the page or extension is unloaded.
+The probe requests no gated Lumiverse permissions, does not read or modify chats, does not call an external provider, does not read connection identifiers or credentials, and does not retain recorded audio after the page or extension is unloaded.
 
 ### Build verification
 
@@ -157,7 +158,9 @@ The compiled `dist/backend.js` and `dist/frontend.js` files are committed so the
 9. Start a recording and, while it is active, reload the page or disable then re-enable the extension. Reopen the probe and confirm a cleanup receipt has `recordingWasActive: true`, `tracksStopped: true`, and `passed: true`.
 10. Select **Start paced teardown upload** and immediately reload or disable/re-enable the extension while its percentage is still advancing. Confirm a cleanup receipt has `uploadWasActive: true`, `uploadAbortRequested: true`, and `passed: true`. Any interrupted partial upload expires under Lumiverse's staged-upload policy.
 11. Make the drawer as narrow as the host permits, select **Run UI self-check**, and confirm it passes with no horizontal overflow. Then use only `Tab`, `Shift+Tab`, `Enter`, and `Space` to reach and operate each enabled control.
-12. Select **Download JSON** and retain the resulting evidence file. It contains environment and result metadata, cleanup booleans, and counters, but no audio or credentials.
+12. Select **Inspect host STT surface**. This inspects API names and capability flags only; it does not send audio or invoke the configured provider.
+13. Record the displayed conclusion. **Candidate STT invocation API found** means the exported report contains one or more callable candidate paths. **Only provider-registration surfaces were found** means the host lets extensions supply an STT engine but exposes no callable route to the user's configured engine.
+14. Select **Download JSON** and retain the resulting evidence file. It contains environment and result metadata, cleanup booleans, counters, and sanitized API member names, but no audio, connection identifiers, settings, or credentials.
 
 Do not post the complete JSON report publicly without reviewing its `origin` and `userAgent` fields. Neither field is a credential, but both describe the test environment.
 

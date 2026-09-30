@@ -53,7 +53,7 @@ Phases are ordered by dependency rather than date. Estimates will be added after
 
 - Resolve the active chat and eligible context messages.
 - Read and write user-scoped settings and glossary entries.
-- Store provider credentials only through Lumiverse Secure Enclave.
+- Reuse host-managed Lumiverse provider connections without exposing credentials; use Secure Enclave only for a separately approved external service that cannot use a host connection.
 - Coordinate transcription, normalization, and semantic-interpretation adapters.
 - Enforce request limits, operation schemas, and permissions.
 - Submit only confirmed clean text to Lumiverse.
@@ -475,7 +475,7 @@ Improve recognition using bounded chat context, draft continuity, spoken punctua
 #### Privacy
 
 - Disclose whether context and glossary terms go to the provider.
-- Store credentials in Secure Enclave.
+- Keep configured-connection credentials inside Lumiverse; store any separately approved external-service credential only in Secure Enclave.
 - Redact context, drafts, glossary values, and secrets from normal logs.
 
 ### Deliverables
@@ -722,7 +722,7 @@ Make the feature-complete beta safe and dependable across supported environments
 
 - Verify direct-action microphone activation and accessible indication.
 - Verify audio/upload deletion on every terminal path.
-- Verify Secure Enclave credential storage.
+- Verify configured-connection credentials are never exposed; if a separate external service is explicitly approved, verify its credential is stored only in Secure Enclave.
 - Verify log redaction and user-data isolation.
 - Match provider disclosures to actual network payloads.
 

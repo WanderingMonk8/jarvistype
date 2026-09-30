@@ -141,7 +141,7 @@ Probe `0.3.0` determines whether a Spindle extension can reuse the user's existi
 
 Lumiverse `1.2.4` does not expose a callable Spindle API for reusing the user's configured STT connection. Connection discovery alone cannot satisfy JarvisType because it provides no way to submit audio, context, glossary hints, cancellation, or partial-result callbacks. JarvisType must not work around this by silently creating or requesting credentials for a duplicate connection.
 
-The preferred resolution is a host-managed STT invocation API that accepts a configured connection identifier or the active STT connection, audio/upload input, context and vocabulary hints, an abort signal, and partial/final result callbacks. Until that capability exists, provider-dependent tests `L-12` and `L-13` remain blocked by the host integration boundary.
+The preferred resolution is the host-managed interface specified in `LUMIVERSE-STT-API-PROPOSAL.md`: configured connection selection, audio/upload input, context and vocabulary hints, cancellation, capability negotiation, and genuine partial/final result events. Until that capability exists, provider-dependent tests `L-12` and `L-13` remain blocked by the host integration boundary.
 
 ## Product and provider decisions
 

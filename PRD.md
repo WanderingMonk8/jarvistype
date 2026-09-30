@@ -534,7 +534,8 @@ JarvisType is expected to use the following Spindle capabilities:
 - `spindle.chats.getActive()` for active-chat identification.
 - `spindle.chat.getMessages(chatId)` for recent context.
 - `spindle.chat.appendMessage(...)` for confirmed submission.
-- Secure Enclave for external API credentials.
+- A host-managed STT invocation API for the user's configured Lumiverse transcription connection.
+- Secure Enclave only for credentials belonging to a separately approved external service that cannot use a host-managed connection.
 - User-scoped storage for settings and the personal spelling glossary.
 - Lumiverse generation APIs if the configured Lumiverse LLM performs edit parsing.
 - The CORS proxy if transcription or editing uses an external compatible endpoint.
@@ -560,7 +561,7 @@ JarvisType shall degrade with a clear explanation when a required permission is 
 
 **PRIV-004:** Staged uploads and temporary audio shall be deleted promptly after processing or explicit cancellation.
 
-**PRIV-005:** External API credentials shall be stored only in Lumiverse's encrypted Secure Enclave.
+**PRIV-005:** JarvisType shall reuse the user's configured Lumiverse STT connection without reading its credential or requesting a duplicate key. Credentials for any separately approved external service shall be stored only in Lumiverse's encrypted Secure Enclave.
 
 **PRIV-006:** JarvisType shall disclose which provider receives audio, recent-message context, glossary terms, and editing instructions.
 
@@ -711,7 +712,7 @@ No analytics collection is implied by this section; any telemetry implementation
 
 The following decisions remain open and must be resolved through deliberate PRD updates:
 
-1. Initial transcription provider and credential model.
+1. Minimum Lumiverse version providing `stt-invocation-v1` and which configured STT providers satisfy the required capabilities. The credential model is host-managed and shall not duplicate the user's STT key.
 2. Supported audio formats and whether host-side conversion is required.
 3. Whether edit parsing uses the user's configured Lumiverse LLM or a dedicated service.
 4. Primary composition placement: drawer, docked panel, floating widget, or modal.
@@ -741,6 +742,7 @@ The following decisions remain open and must be resolved through deliberate PRD 
 - [Chat Mutation API](https://docs.lumiverse.chat/backend-api/chat-mutation/)
 - [Generation API](https://docs.lumiverse.chat/backend-api/generation/)
 - [Secure Enclave](https://docs.lumiverse.chat/backend-api/secure-enclave/)
+- [JarvisType proposal for host-managed STT invocation](./LUMIVERSE-STT-API-PROPOSAL.md)
 - [CORS Proxy](https://docs.lumiverse.chat/backend-api/cors-proxy/)
 - [Uploads API](https://docs.lumiverse.chat/backend-api/uploads/)
 - [UI Placement API](https://docs.lumiverse.chat/frontend-api/ui-placement/)

@@ -95,6 +95,8 @@ The [Product Requirements Document](./PRD.md) is the source of truth for product
 
 The [Phase 0 Validation Register](./PHASE0-VALIDATION.md) records documentation-settled facts, remote test cases, expected results, and evidence still required before Phase 1.
 
+The [Lumiverse STT API Proposal](./LUMIVERSE-STT-API-PROPOSAL.md) defines the host capability needed to reuse a user's configured STT connection without exposing or duplicating credentials.
+
 Lumiverse extension development references:
 
 - [Spindle Extension Developer Guide](https://docs.lumiverse.chat/)
@@ -112,7 +114,7 @@ The current design expects to use:
 - Frontend/backend extension messaging.
 - Lumiverse chat access for recent context.
 - Chat mutation for confirmed submission.
-- Secure Enclave storage for external provider credentials.
+- A host-managed STT invocation API that reuses the user's configured connection without exposing credentials.
 - User-scoped storage for settings and personal spelling glossary entries.
 
 The exact transcription provider, editor placement, context ceiling, supported languages, and draft-persistence policy remain open product decisions documented in the PRD.

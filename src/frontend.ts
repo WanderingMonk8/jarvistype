@@ -891,6 +891,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           () => {
             if (intentionallyStoppedTracks.has(track) || disposed) return
             unexpectedTrackEndCount += 1
+            if (report.media.robustness) {
+              report.media.robustness.unexpectedTrackEndCount = unexpectedTrackEndCount
+            }
             addEvent('fail', 'Microphone track ended unexpectedly', {
               unexpectedTrackEndCount,
             })

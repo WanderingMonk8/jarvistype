@@ -3105,7 +3105,7 @@ var isSupported = typeof XMLHttpRequest === "function" && typeof Blob === "funct
 
 // src/shared.ts
 var PROTOCOL_VERSION = 1;
-var PROBE_VERSION = "0.5.0";
+var PROBE_VERSION = "0.5.1";
 var MAX_PROBE_AUDIO_BYTES = 25 * 1024 * 1024;
 var AUDIO_MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
@@ -3311,11 +3311,11 @@ function setup(ctx) {
         <p class="jt-probe-note">A non-sending fixture for validating numbered paragraphs, long wrapping text, diff review, edit history, focus, keyboard use, and narrow layouts.</p>
         <div class="jt-composer" aria-label="Numbered draft paragraphs" data-composition-fixture>
           <span class="jt-paragraph-number" aria-hidden="true">1</span>
-          <div class="jt-draft-paragraph" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Draft paragraph 1" data-draft-paragraph>Yesterday I began hiking up the mountain before sunrise, carrying enough water and a carefully packed rain shell because the forecast changed several times overnight.</div>
+          <div class="jt-draft-paragraph" contenteditable="true" tabindex="0" role="textbox" aria-multiline="true" aria-label="Draft paragraph 1" data-draft-paragraph>Yesterday I began hiking up the mountain before sunrise, carrying enough water and a carefully packed rain shell because the forecast changed several times overnight.</div>
           <span class="jt-paragraph-number" aria-hidden="true">2</span>
-          <div class="jt-draft-paragraph" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Draft paragraph 2" data-draft-paragraph>The climb became steeper near the ridge, and after an hour I was coughing up a storm, but the view across the valley made the effort worthwhile.</div>
+          <div class="jt-draft-paragraph" contenteditable="true" tabindex="0" role="textbox" aria-multiline="true" aria-label="Draft paragraph 2" data-draft-paragraph>The climb became steeper near the ridge, and after an hour I was coughing up a storm, but the view across the valley made the effort worthwhile.</div>
           <span class="jt-paragraph-number" aria-hidden="true">3</span>
-          <div class="jt-draft-paragraph" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Draft paragraph 3" data-draft-paragraph>I checked the Pip-Boy style map on my wrist, found the safer return trail, and made it back before the afternoon weather arrived.</div>
+          <div class="jt-draft-paragraph" contenteditable="true" tabindex="0" role="textbox" aria-multiline="true" aria-label="Draft paragraph 3" data-draft-paragraph>I checked the Pip-Boy style map on my wrist, found the safer return trail, and made it back before the afternoon weather arrived.</div>
         </div>
         <div class="jt-diff" aria-label="Pending edit diff" data-diff-view>Paragraph 2: change <del>couging up a stomp</del> to <ins>coughing up a storm</ins>.</div>
         <ol class="jt-history" aria-label="Edit history" data-edit-history>
@@ -4356,6 +4356,10 @@ function accessibleName(element) {
   const labelledBy = element.getAttribute("aria-labelledby");
   if (labelledBy) {
     const label = labelledBy.split(/\s+/).map((id) => document.getElementById(id)?.textContent?.trim() ?? "").filter(Boolean).join(" ");
+    if (label) return label;
+  }
+  if (element instanceof HTMLInputElement) {
+    const label = Array.from(element.labels ?? []).map((item) => item.textContent?.trim() ?? "").filter(Boolean).join(" ");
     if (label) return label;
   }
   return element.getAttribute("title")?.trim() || element.textContent?.trim() || "";

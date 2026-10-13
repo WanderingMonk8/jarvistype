@@ -24,7 +24,7 @@ Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `REMOTE-PEND
 
 ## Probe scope and safety
 
-Current probe version: `0.5.0`
+Current probe version: `0.5.1`
 
 The remote probe:
 
@@ -138,6 +138,26 @@ The remote probe:
 - Conclusion: the two submission modes invoked the documented permission and generation paths independently.
 - Data handling: the export retained only booleans and timestamps for these tests; it contained no chat identifier, message identifier, message content, generated response, or credentials.
 
+### Recorded run R-008
+
+- Test date: 2026-10-12 (America/Los_Angeles).
+- Probe version: `0.5.0`.
+- Deterministic result: zero-byte rejection, over-limit rejection, and repeated idle terminal actions all passed.
+- Permission-denial result: capture returned `NotAllowedError`; every denial event reported `tracksStopped: true`.
+- Background result: hidden and visible transitions were observed while `recordingActive: true`, after which cancellation reported `tracksStopped: true` and retained no sample.
+- Device-change result: explicitly skipped because the test system has only an internal microphone and no safe disconnection or route-change setup.
+- Conclusion: all feasible audio-robustness checks passed; physical device change and unexpected hardware track ending remain unverified.
+
+### Recorded run R-009
+
+- Test date: 2026-10-13 (America/Los_Angeles).
+- Probe version: `0.5.0`.
+- Structure and layout: three numbered paragraphs, two diff elements, three history entries, focus transfer, and zero horizontal overflow passed at widths 340 px and 200 px.
+- Manual result: editing, long-text wrapping, narrow layout, and keyboard operation were confirmed; the screen-reader pass was explicitly skipped.
+- Automated accessibility result: both runs failed because the audit found one unnamed control and three controls with negative tab order.
+- Diagnosis: the wrapped disposable-chat checkbox was not recognized by the probe's simplified accessible-name helper, and the three content-editable paragraphs lacked explicit `tabindex="0"`.
+- Conclusion: the composition surface was manually usable, but L-17 cannot pass until the automated accessibility findings are corrected and retested.
+
 | ID | Test | Pass condition | Status | Evidence |
 |---|---|---|---|---|
 | L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | PASS | R-001: health response proves frontend and backend loaded; manifest permissions are empty. |
@@ -155,8 +175,8 @@ The remote probe:
 | L-13 | Genuine provider partials | Provider partials arrive incrementally and reconcile with final text; cancellation rejects late updates. | PROVIDER-PENDING | Not included in probe 0.1.0 |
 | L-14 | Chat/send permission behavior | Append-only and append-with-generation behavior match the documented permission model. | PASS | R-007: append-only returned a message ID without a generation ID under `chat_mutation`; append-and-generate returned both IDs after `generation` was also granted. |
 | L-15 | Semantic interpreter corpus | Structured output validates or returns typed failure; unsafe cases never mutate the draft. | PROVIDER-PENDING | Not included in probe 0.1.0 |
-| L-16 | Audio robustness | Zero/oversize rejection, repeated terminal actions, permission denial, backgrounding, device changes, and unexpected track ending are handled and recorded safely. | REMOTE-PENDING | Probe 0.5.0 adds deterministic checks plus sanitized browser-event observations; physical-device scenarios remain manual. |
-| L-17 | Composition UI fixture | Numbered paragraphs, long wrapping text, diff, history, focus, keyboard access, and narrow layout remain usable. | REMOTE-PENDING | Probe 0.5.0 includes the fixture, automated structure/focus/overflow checks, and a manual interaction pass. |
+| L-16 | Audio robustness | Zero/oversize rejection, repeated terminal actions, permission denial, backgrounding, device changes, and unexpected track ending are handled and recorded safely. | PARTIAL | R-008: all feasible checks passed. Device change and unexpected physical track ending were explicitly skipped because only an internal microphone is available. |
+| L-17 | Composition UI fixture | Numbered paragraphs, long wrapping text, diff, history, focus, keyboard access, and narrow layout remain usable. | PARTIAL | R-009: structure, focus, narrow layout, and manual operation passed, but the automated audit found one unnamed control and three negative-tab-order controls. Probe 0.5.1 contains the correction and requires a focused rerun. |
 
 ## Section 2: configured STT connection access
 

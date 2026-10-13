@@ -158,6 +158,18 @@ The remote probe:
 - Diagnosis: the wrapped disposable-chat checkbox was not recognized by the probe's simplified accessible-name helper, and the three content-editable paragraphs lacked explicit `tabindex="0"`.
 - Conclusion: the composition surface was manually usable, but L-17 cannot pass until the automated accessibility findings are corrected and retested.
 
+### Recorded run R-010
+
+- Test date: 2026-10-13 (America/Los_Angeles).
+- Probe version: `0.5.1`.
+- Environment: Windows 10 x64, Firefox 157, secure HTTPS context.
+- Lumiverse backend/frontend: `1.2.5` / `1.2.5`; the setup reported exactly one active probe instance.
+- Minimum-width result: at 200 px, client and scroll widths both equaled 200 px and horizontal overflow was false.
+- Accessibility result: all 16 enabled controls had accessible names and non-negative tab order.
+- Composition result: three numbered paragraphs, two diff elements, three history entries, and focus transfer to the draft all passed.
+- Manual scope: R-009 already confirmed editing, wrapping, narrow-layout usability, and keyboard operation; the screen-reader-specific pass remains explicitly skipped.
+- Conclusion: the probe 0.5.1 correction resolved both automated findings and the full composition UI test passed.
+
 | ID | Test | Pass condition | Status | Evidence |
 |---|---|---|---|---|
 | L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | PASS | R-001: health response proves frontend and backend loaded; manifest permissions are empty. |
@@ -176,7 +188,7 @@ The remote probe:
 | L-14 | Chat/send permission behavior | Append-only and append-with-generation behavior match the documented permission model. | PASS | R-007: append-only returned a message ID without a generation ID under `chat_mutation`; append-and-generate returned both IDs after `generation` was also granted. |
 | L-15 | Semantic interpreter corpus | Structured output validates or returns typed failure; unsafe cases never mutate the draft. | PROVIDER-PENDING | Not included in probe 0.1.0 |
 | L-16 | Audio robustness | Zero/oversize rejection, repeated terminal actions, permission denial, backgrounding, device changes, and unexpected track ending are handled and recorded safely. | PARTIAL | R-008: all feasible checks passed. Device change and unexpected physical track ending were explicitly skipped because only an internal microphone is available. |
-| L-17 | Composition UI fixture | Numbered paragraphs, long wrapping text, diff, history, focus, keyboard access, and narrow layout remain usable. | PARTIAL | R-009: structure, focus, narrow layout, and manual operation passed, but the automated audit found one unnamed control and three negative-tab-order controls. Probe 0.5.1 contains the correction and requires a focused rerun. |
+| L-17 | Composition UI fixture | Numbered paragraphs, long wrapping text, diff, history, focus, keyboard access, and narrow layout remain usable. | PASS | R-009 confirmed manual editing, wrapping, narrow layout, and keyboard use; R-010 passed all automated structure, focus, naming, tab-order, and overflow checks at 200 px. The optional screen-reader pass was skipped. |
 
 ## Section 2: configured STT connection access
 

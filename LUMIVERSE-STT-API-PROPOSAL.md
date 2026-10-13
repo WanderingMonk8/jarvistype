@@ -2,6 +2,9 @@
 
 ## Status
 
+- Superseded on 2026-10-13 by Lumiverse 1.2.5's official frontend `ctx.stt` API behind `speech-to-text-v1`.
+- Historical purpose: records the backend proposal developed from Lumiverse 1.2.4 findings; it is not JarvisType's current primary integration contract.
+- Official replacement: <https://docs.lumiverse.chat/frontend-api/speech-to-text/>
 - Proposed by: JarvisType
 - Target: Lumiverse Spindle backend API
 - Baseline tested: Lumiverse `1.2.4`, `lumiverse-spindle-types` `0.6.36`
@@ -9,9 +12,9 @@
 
 ## Summary
 
-Add a host-managed `spindle.stt` API that lets an extension invoke a user's existing Lumiverse speech-to-text connection without exposing its credentials.
+This document proposed a host-managed `spindle.stt` backend API that would let an extension invoke a user's existing Lumiverse speech-to-text connection without exposing its credentials.
 
-Lumiverse currently lets extensions register an STT provider through `spindle.providers.register()` and receive host-originated invocations through `spindle.providers.handle()`. The inverse operation is missing: an extension cannot submit audio to the user's configured STT connection.
+At the Lumiverse 1.2.4 baseline, extensions could register an STT provider through `spindle.providers.register()` and receive host-originated invocations through `spindle.providers.handle()`, but could not submit audio to the user's configured STT connection. Lumiverse 1.2.5 resolved the product need through a different, frontend-only API.
 
 The proposed API follows the existing `spindle.imageGen` pattern:
 

@@ -529,12 +529,12 @@ JarvisType is expected to use the following Spindle capabilities:
 
 - Input-bar action for opening JarvisType.
 - An extension-owned drawer, panel, widget, or modal for composition.
-- Frontend browser microphone capture.
+- Frontend microphone capture through Lumiverse `ctx.stt.start(...)` where available, with browser microphone permission still controlled by the host environment.
 - Frontend-to-backend messaging for recordings, partial results, status, and draft operations.
 - `spindle.chats.getActive()` for active-chat identification.
 - `spindle.chat.getMessages(chatId)` for recent context.
 - `spindle.chat.appendMessage(...)` for confirmed submission.
-- A host-managed STT invocation API for the user's configured Lumiverse transcription connection.
+- Frontend `ctx.stt` behind `speech-to-text-v1` for live capture or supplied-audio transcription through the user's selected or explicitly configured Lumiverse STT provider.
 - Secure Enclave only for credentials belonging to a separately approved external service that cannot use a host-managed connection.
 - User-scoped storage for settings and the personal spelling glossary.
 - Lumiverse generation APIs if the configured Lumiverse LLM performs edit parsing.
@@ -547,7 +547,7 @@ Expected gated permissions are:
 - `generation` when Lumiverse generation is used for edit parsing or correction, and when **Confirm & Send** triggers the normal Lumiverse response-generation flow
 - `cors_proxy` when an external service is used
 - `ui_panels` if the selected UI placement requires it
-- `media` only if server-side audio conversion is required
+- `media` for Lumiverse STT preparation, capture, and supplied-audio transcription, and for server-side conversion if separately required
 
 JarvisType shall degrade with a clear explanation when a required permission is unavailable or revoked.
 
@@ -712,7 +712,7 @@ No analytics collection is implied by this section; any telemetry implementation
 
 The following decisions remain open and must be resolved through deliberate PRD updates:
 
-1. Minimum Lumiverse version providing `stt-invocation-v1` and which configured STT providers satisfy the required capabilities. The credential model is host-managed and shall not duplicate the user's STT key.
+1. Which Lumiverse `speech-to-text-v1` providers satisfy the required accuracy, context, vocabulary, interim-result, format, language, latency, and retention capabilities. Lumiverse 1.2.5 is the first verified host version exposing the API; the credential model is host-managed and shall not duplicate the user's STT key.
 2. Supported audio formats and whether host-side conversion is required.
 3. Whether edit parsing uses the user's configured Lumiverse LLM or a dedicated service.
 4. Primary composition placement: drawer, docked panel, floating widget, or modal.
@@ -729,7 +729,7 @@ The following decisions remain open and must be resolved through deliberate PRD 
 
 - Lumiverse does not currently document a public API for setting the unsent native chat-composer draft. JarvisType therefore uses its own editing surface and submits only after approval.
 - The documented Lumiverse CORS proxy uses a string request body. Transcription providers that require binary multipart uploads may need a compatible JSON/base64 endpoint, a JarvisType relay, or future Lumiverse proxy support.
-- The documented Lumiverse CORS proxy does not expose an incremental response-stream contract. Genuine partial transcription therefore requires a separately verified provider-to-extension transport rather than an assumption that the CORS proxy can relay streaming results.
+- The documented Lumiverse CORS proxy does not expose an incremental response-stream contract. External fallback adapters cannot assume it will relay partials; the primary `ctx.stt.start(...)` path provides documented interim callbacks that still require provider-specific verification.
 - Browser microphone access depends on secure-context behavior, user permission, and the runtime environment. Compatibility must be validated before release commitments are made.
 - Progressive display depends on the selected provider returning partial results. Batch-only providers cannot supply genuine interim recognition.
 - Semantic editing can be probabilistic. Structured operations, target validation, confidence gating, diffs, and undo are mandatory safeguards.
@@ -741,8 +741,9 @@ The following decisions remain open and must be resolved through deliberate PRD 
 - [Chats API](https://docs.lumiverse.chat/backend-api/chats/)
 - [Chat Mutation API](https://docs.lumiverse.chat/backend-api/chat-mutation/)
 - [Generation API](https://docs.lumiverse.chat/backend-api/generation/)
+- [Speech-to-text API](https://docs.lumiverse.chat/frontend-api/speech-to-text/)
 - [Secure Enclave](https://docs.lumiverse.chat/backend-api/secure-enclave/)
-- [JarvisType proposal for host-managed STT invocation](./LUMIVERSE-STT-API-PROPOSAL.md)
+- [Historical JarvisType backend STT proposal](./LUMIVERSE-STT-API-PROPOSAL.md)
 - [CORS Proxy](https://docs.lumiverse.chat/backend-api/cors-proxy/)
 - [Uploads API](https://docs.lumiverse.chat/backend-api/uploads/)
 - [UI Placement API](https://docs.lumiverse.chat/frontend-api/ui-placement/)

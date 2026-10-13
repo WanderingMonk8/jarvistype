@@ -25,15 +25,15 @@ Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `REMOTE-PEND
 
 ## Probe scope and safety
 
-Current probe version: `0.5.1`
+Current probe version: `0.6.0`
 
 The remote probe:
 
-- Requests no gated permissions at installation.
+- Declares only the Lumiverse `media` permission, which is required by the native `ctx.stt` capture API.
 - Modifies a chat only after the user checks the disposable-chat confirmation and selects one of two explicit test buttons.
 - Requests `chat_mutation` only for append-only; additionally requests `generation` for append-and-generate. The latter can invoke the configured LLM and incur provider usage.
 - Does not read chat messages or export chat identifiers, message identifiers, or generated content.
-- Does not call an STT provider unless the proposed API is available and the user explicitly authorizes its conformance run.
+- Lists native STT providers without starting capture. It invokes the configured STT connection only after the user explicitly starts a native conformance run; provider-side processing and retention then follow that configured provider's policy.
 - Retains a recorded sample only in frontend memory for the current page lifecycle.
 - Uploads recorded audio only after a second explicit user action; the synthetic lifecycle upload also requires its own explicit button action.
 - Computes a non-cryptographic integrity hash solely to compare transferred bytes.
@@ -44,6 +44,8 @@ The remote probe:
 - Provides a non-sending composition fixture with numbered paragraphs, long wrapping text, diff markup, edit history, and a focus check.
 - Rejects zero-byte and over-limit samples deterministically, verifies repeated idle terminal actions are harmless, and observes device, visibility, capture-error, and unexpected-track-ending events.
 - Inspects only sanitized frontend/backend API member names and host capability names when checking for configured STT access.
+- Shows the native transcript only in the drawer. The exported report retains its length, non-cryptographic hash, provider class, lifecycle counters, and sanitized error names, but not the transcript text or audio.
+- Cancels an active native STT session on user cancellation, page unload, or extension teardown and records only cleanup booleans.
 - Requests the proposed `stt` permission only after `stt-invocation-v1` and all required methods are detected and the user explicitly starts the conformance run.
 - Keeps the visible conformance transcript out of exported JSON; only transcript length and a non-cryptographic hash are retained.
 - Exports no audio or credentials in its result JSON.
@@ -185,7 +187,7 @@ The remote probe:
 
 | ID | Test | Pass condition | Status | Evidence |
 |---|---|---|---|---|
-| L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | PASS | R-001: health response proves frontend and backend loaded; manifest permissions are empty. |
+| L-01 | Install and enable | Production bundle installs from `development`, declares only the permission required by the current probe, and backend starts. | PASS | R-001 proved frontend/backend startup without gated permissions. Probe 0.6.0 intentionally adds only `media` for native STT; package validation enforces that exact manifest permission. |
 | L-02 | UI placement | Input-bar action activates exactly one drawer; command palette can also open it; reload creates no duplicates. | PASS | R-004: tester confirmed both activation paths, exactly one entry in each placement, no post-reload duplicates, and one active setup instance. |
 | L-03 | Version and lifecycle | Backend/frontend versions appear and readiness APIs are reported. | PASS | R-001: versions `1.2.4` / `1.2.4`; both readiness APIs available. |
 | L-04 | Microphone availability | Page is secure, permission prompt appears after the button action, and a non-empty sample is produced. | PASS | R-001: secure context; 75,280-byte recording. |
@@ -214,13 +216,13 @@ Probe `0.3.0` determines whether a Spindle extension can reuse the user's existi
 | S2-03 | Sanitized discovery | Export contains no connection IDs, names, URLs, provider metadata, credentials, or audio. | PASS | R-005: review confirmed that only API/capability names and availability results were exported. |
 | S2-04 | Proposal capability gate | Probe 0.4.0 detects `stt-invocation-v1` and all five required methods before requesting permission or uploading audio. | PASS | R-006: Lumiverse 1.2.4 reported capability version 0 and all five methods missing; permission remained false and no recording, upload, or provider call occurred. |
 | S2-05 | Proposed API conformance | On an implementing host, redacted discovery, streamed transcription, final reconciliation, capability reporting, cancellation, late-result rejection, and upload deletion pass. | SUPERSEDED | Lumiverse 1.2.5 shipped the official frontend `speech-to-text-v1` API instead of the proposed backend contract. |
-| S2-06 | Native frontend STT conformance | Provider discovery, configured-connection transcription, interim/final reconciliation, cancellation, cleanup, and sanitized export work through `ctx.stt`. | REMOTE-PENDING | Requires probe 0.6.0 using `lumiverse-spindle-types` 0.6.39 or newer and the manifest `media` permission. |
+| S2-06 | Native frontend STT conformance | Provider discovery, configured-connection transcription, interim/final reconciliation, cancellation, cleanup, and sanitized export work through `ctx.stt`. | REMOTE-PENDING | Probe 0.6.0 implements this check using `lumiverse-spindle-types` 0.6.46 and only the manifest `media` permission. VPS evidence is still required. |
 
 ### Section 2 conclusion
 
 Lumiverse `1.2.4` did not expose a callable STT invocation API, but `1.2.5` now exposes the official frontend-only `ctx.stt` surface behind `speech-to-text-v1`. It supports the user's selected provider, explicit configured connections, on-device Whistle, browser Web Speech, live capture, supplied `Blob` audio, interim/final results, status callbacks, stop, and cancellation without exposing credentials.
 
-JarvisType should target this official API rather than the custom backend contract in `LUMIVERSE-STT-API-PROPOSAL.md`. A focused 0.6.0 probe must still prove the configured provider path, genuine interim behavior, final reconciliation, cancellation, cleanup, and sanitized data handling on the VPS. The documented options do not include context prompts or vocabulary hints, so those accuracy requirements remain an integration question rather than an assumed capability.
+JarvisType should target this official API rather than the custom backend contract in `LUMIVERSE-STT-API-PROPOSAL.md`. Probe 0.6.0 is ready to verify the configured provider path, genuine interim behavior, final reconciliation, cancellation, cleanup, and sanitized data handling on the VPS. The documented options do not include context prompts or vocabulary hints, so those accuracy requirements remain an integration question rather than an assumed capability.
 
 ## Product and provider decisions
 

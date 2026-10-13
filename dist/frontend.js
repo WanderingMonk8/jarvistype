@@ -3105,7 +3105,7 @@ var isSupported = typeof XMLHttpRequest === "function" && typeof Blob === "funct
 
 // src/shared.ts
 var PROTOCOL_VERSION = 1;
-var PROBE_VERSION = "0.5.1";
+var PROBE_VERSION = "0.6.0";
 var MAX_PROBE_AUDIO_BYTES = 25 * 1024 * 1024;
 var AUDIO_MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
@@ -3257,7 +3257,7 @@ function setup(ctx) {
     <section class="jt-probe" aria-labelledby="jt-probe-title">
       <div>
         <h2 id="jt-probe-title">JarvisType Phase 0 Capability Probe</h2>
-        <p class="jt-probe-note">This probe installs without gated permissions. It requests the proposed stt permission only after capability detection and an explicit test action. It sends no chat messages and deletes completed staged uploads.</p>
+        <p class="jt-probe-note">This probe declares the Lumiverse media permission for native STT, but starts capture only after an explicit test action. Chat tests remain separately authorized, and completed staged uploads are deleted.</p>
       </div>
       <section class="jt-probe-card" aria-labelledby="jt-host-title">
         <h3 id="jt-host-title">Host and lifecycle</h3>
@@ -3296,7 +3296,17 @@ function setup(ctx) {
           <button type="button" data-inspect-stt>Inspect host STT surface</button>
         </div>
         <p class="jt-probe-status" role="status" aria-live="polite" data-stt-status>Not tested.</p>
-        <h3>Proposed API conformance</h3>
+        <h3>Native speech-to-text conformance</h3>
+        <p class="jt-probe-note">Provider discovery is permission-free. Live testing requests media permission and uses the configured connection provider. Say \u201CJarvisType uses a Pip-Boy,\u201D then stop. Transcript text is shown here but excluded from JSON.</p>
+        <div class="jt-probe-actions">
+          <button type="button" data-native-stt-discover>Discover native providers</button>
+          <button type="button" data-native-stt-start disabled>Start configured STT</button>
+          <button type="button" data-native-stt-stop disabled>Stop and finalize</button>
+          <button type="button" data-native-stt-cancel disabled>Cancel and discard</button>
+        </div>
+        <p class="jt-probe-status" role="status" aria-live="polite" data-native-stt-status>Not checked.</p>
+        <pre class="jt-probe-log" tabindex="0" aria-label="Live native STT transcript" data-native-stt-transcript>No transcript.</pre>
+        <h3>Historical proposed API conformance</h3>
         <p class="jt-probe-note">First check for <code>stt-invocation-v1</code>. If supported, record yourself saying \u201CJarvisType uses a Pip-Boy,\u201D then run the test. The transcript is displayed here but the JSON export retains only its length and hash.</p>
         <div class="jt-probe-actions">
           <button type="button" data-check-stt-api>Check proposed API</button>
@@ -3356,6 +3366,8 @@ function setup(ctx) {
   const sttStatus = requireElement(tab.root, "[data-stt-status]");
   const sttConformanceStatus = requireElement(tab.root, "[data-stt-conformance-status]");
   const sttTranscript = requireElement(tab.root, "[data-stt-transcript]");
+  const nativeSttStatus = requireElement(tab.root, "[data-native-stt-status]");
+  const nativeSttTranscript = requireElement(tab.root, "[data-native-stt-transcript]");
   const compositionStatus = requireElement(tab.root, "[data-composition-status]");
   const chatStatus = requireElement(tab.root, "[data-chat-status]");
   const resultsLog = requireElement(tab.root, "[data-results-log]");
@@ -3372,6 +3384,10 @@ function setup(ctx) {
   const checkSttApiButton = requireElement(tab.root, "[data-check-stt-api]");
   const runSttApiButton = requireElement(tab.root, "[data-run-stt-api]");
   const cancelSttApiButton = requireElement(tab.root, "[data-cancel-stt-api]");
+  const nativeSttDiscoverButton = requireElement(tab.root, "[data-native-stt-discover]");
+  const nativeSttStartButton = requireElement(tab.root, "[data-native-stt-start]");
+  const nativeSttStopButton = requireElement(tab.root, "[data-native-stt-stop]");
+  const nativeSttCancelButton = requireElement(tab.root, "[data-native-stt-cancel]");
   const compositionCheckButton = requireElement(tab.root, "[data-composition-check]");
   const disposableConfirm = requireElement(tab.root, "[data-disposable-confirm]");
   const chatAppendButton = requireElement(tab.root, "[data-chat-append]");
@@ -3396,6 +3412,7 @@ function setup(ctx) {
   const sttSegments = /* @__PURE__ */ new Map();
   let sttCancellationRequested = false;
   let sttLateEventCount = 0;
+  let activeNativeSttRun = null;
   let chatRequestId = null;
   let deviceChangeCount = 0;
   let visibilityChangeCount = 0;
@@ -3630,6 +3647,231 @@ function setup(ctx) {
     const stopped = activeStream.getTracks().every((track) => track.readyState === "ended");
     activeStream = null;
     return stopped;
+  };
+  const nativeConnectionAvailable = () => report.nativeStt?.providers.some(
+    (provider) => provider.id === "connection" && provider.available
+  ) === true;
+  const updateNativeSttButtons = () => {
+    const running = activeNativeSttRun !== null && !activeNativeSttRun.finished;
+    nativeSttDiscoverButton.disabled = running;
+    nativeSttStartButton.disabled = running || !nativeConnectionAvailable();
+    nativeSttStopButton.disabled = !running;
+    nativeSttCancelButton.disabled = !running;
+  };
+  const discoverNativeStt = async () => {
+    if (activeNativeSttRun) return;
+    const rawCapability = ctx.host.capabilities["speech-to-text-v1"];
+    const hostCapabilityVersion = typeof rawCapability === "number" && Number.isSafeInteger(rawCapability) ? rawCapability : 0;
+    const apiAvailable = Boolean(ctx.stt) && hostCapabilityVersion >= 1;
+    let permissionGranted = false;
+    try {
+      permissionGranted = (await ctx.permissions.getGranted()).includes("media");
+    } catch {
+    }
+    try {
+      const providers = apiAvailable ? (ctx.stt?.listProviders() ?? []).map((provider) => ({
+        id: provider.id,
+        available: provider.available,
+        onDevice: provider.onDevice,
+        supportsAudioTranscription: provider.supportsAudioTranscription,
+        languageCount: provider.languages?.length ?? 0
+      })) : [];
+      report.nativeStt = {
+        checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        hostCapabilityVersion,
+        apiAvailable,
+        permissionGranted,
+        providers
+      };
+      const connection = providers.find((provider) => provider.id === "connection");
+      nativeSttStatus.textContent = !apiAvailable ? "Native STT is unavailable on this host." : connection?.available ? permissionGranted ? "Configured connection is available and media permission is granted." : "Configured connection is available. Start will request media permission first." : "The configured connection provider is unavailable.";
+      addEvent(apiAvailable && connection?.available ? "pass" : "fail", "Native STT provider discovery finished", {
+        hostCapabilityVersion,
+        apiAvailable,
+        permissionGranted,
+        providers
+      });
+    } catch (error) {
+      report.nativeStt = {
+        checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        hostCapabilityVersion,
+        apiAvailable,
+        permissionGranted,
+        providers: []
+      };
+      const safe = safeNativeSttError(error);
+      nativeSttStatus.textContent = `Native provider discovery failed: ${safe.errorName}`;
+      addEvent("fail", "Native STT provider discovery failed", safe);
+    }
+    updateNativeSttButtons();
+  };
+  const requestNativeSttPermission = async () => {
+    nativeSttStartButton.disabled = true;
+    nativeSttStatus.textContent = "Requesting Lumiverse media permission\u2026";
+    try {
+      const granted = await ctx.permissions.request(["media"], {
+        reason: "Test the configured Lumiverse STT connection with an explicit microphone recording."
+      });
+      const permissionGranted = granted.includes("media");
+      if (report.nativeStt) report.nativeStt.permissionGranted = permissionGranted;
+      nativeSttStatus.textContent = permissionGranted ? "Media permission granted. Select Start configured STT again to preserve the microphone user gesture." : "Media permission was not granted.";
+      addEvent(permissionGranted ? "pass" : "info", "Native STT media permission request finished", {
+        permissionGranted
+      });
+    } catch (error) {
+      const safe = safeNativeSttError(error);
+      nativeSttStatus.textContent = `Media permission request failed: ${safe.errorName}`;
+      addEvent("info", "Native STT media permission request did not complete", safe);
+    }
+    updateNativeSttButtons();
+  };
+  const finalizeNativeSttRun = (run, transcript, error) => {
+    if (run.finished) return;
+    run.finished = true;
+    if (activeNativeSttRun === run) activeNativeSttRun = null;
+    const errorDetails = error === void 0 ? {} : safeNativeSttError(error);
+    const aborted = errorDetails.errorName === "AbortError";
+    const finalText = transcript?.text ?? null;
+    const assembledLiveText = [...run.finalSegments, run.pendingInterim].filter(Boolean).join(" ").trim();
+    const liveTextMatchedFinal = finalText === null || run.interimCount + run.finalSegmentCount === 0 ? null : normalizeTranscript(assembledLiveText) === normalizeTranscript(finalText);
+    const classification = run.cancelRequested ? aborted ? "cancelled" : "failed" : error !== void 0 ? "failed" : run.interimCount > 0 ? "genuine-interim" : "batch-only";
+    const passed = run.cancelRequested ? aborted : error === void 0 && finalText !== null && finalText.trim().length > 0;
+    const finalBytes = finalText === null ? null : new TextEncoder().encode(finalText);
+    const result = {
+      completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      passed,
+      provider: transcript?.provider ?? run.provider,
+      ready: run.ready,
+      statusPhases: [...run.statusPhases],
+      interimCount: run.interimCount,
+      finalSegmentCount: run.finalSegmentCount,
+      audioFrameCount: run.audioFrameCount,
+      finalTextLength: finalText?.length ?? null,
+      finalTextHash: finalBytes ? hashBytes(finalBytes) : null,
+      liveTextMatchedFinal,
+      classification,
+      aborted,
+      lateResultCount: run.lateResultCount,
+      ...errorDetails
+    };
+    run.result = result;
+    if (report.nativeStt) {
+      if (run.cancelRequested) report.nativeStt.cancellationRun = result;
+      else report.nativeStt.liveRun = result;
+    }
+    if (finalText !== null && !run.cancelRequested) nativeSttTranscript.textContent = finalText;
+    else if (run.cancelRequested) nativeSttTranscript.textContent = "Cancelled; transcript discarded.";
+    nativeSttStatus.textContent = passed ? run.cancelRequested ? "Cancellation passed: capture was aborted and pending transcript was discarded." : `Transcription passed: ${classification}; authoritative final transcript received.` : `Native STT test failed: ${errorDetails.errorName ?? "invalid or empty result"}.`;
+    addEvent(passed ? "pass" : "fail", "Native STT run finished", {
+      passed,
+      cancelRequested: run.cancelRequested,
+      provider: result.provider,
+      ready: result.ready,
+      statusPhases: result.statusPhases,
+      interimCount: result.interimCount,
+      finalSegmentCount: result.finalSegmentCount,
+      audioFrameCount: result.audioFrameCount,
+      finalTextLength: result.finalTextLength,
+      liveTextMatchedFinal,
+      classification,
+      aborted,
+      lateResultCount: result.lateResultCount,
+      ...errorDetails
+    });
+    updateNativeSttButtons();
+  };
+  const startNativeStt = () => {
+    if (!ctx.stt || !report.nativeStt?.apiAvailable || activeNativeSttRun) return;
+    if (!report.nativeStt.permissionGranted) {
+      void requestNativeSttPermission();
+      return;
+    }
+    if (activeRecorder || activeStream) {
+      nativeSttStatus.textContent = "Stop the MediaRecorder test before starting native STT.";
+      return;
+    }
+    const run = {
+      session: null,
+      provider: null,
+      ready: false,
+      finished: false,
+      cancelRequested: false,
+      statusPhases: /* @__PURE__ */ new Set(),
+      interimCount: 0,
+      finalSegmentCount: 0,
+      audioFrameCount: 0,
+      finalSegments: [],
+      pendingInterim: "",
+      lateResultCount: 0
+    };
+    activeNativeSttRun = run;
+    nativeSttTranscript.textContent = "Listening\u2026";
+    nativeSttStatus.textContent = "Starting configured Lumiverse STT connection\u2026";
+    updateNativeSttButtons();
+    try {
+      const session = ctx.stt.start({
+        provider: "connection",
+        language: "en",
+        continuous: true,
+        interimResults: true,
+        onStatus: (status) => {
+          if (run.finished || run.cancelRequested) return;
+          run.statusPhases.add(status.phase);
+          nativeSttStatus.textContent = status.phase === "loading" && status.progress !== void 0 ? `Loading STT provider\u2026 ${Math.round(status.progress * 100)}%` : `Native STT: ${status.phase}\u2026`;
+        },
+        onAudioFrame: () => {
+          if (!run.finished && !run.cancelRequested) run.audioFrameCount += 1;
+        },
+        onResult: (result) => {
+          if (run.finished || run.cancelRequested) {
+            run.lateResultCount += 1;
+            if (run.result) run.result.lateResultCount = run.lateResultCount;
+            return;
+          }
+          if (result.isFinal) {
+            run.finalSegmentCount += 1;
+            run.finalSegments.push(result.text);
+            run.pendingInterim = "";
+          } else {
+            run.interimCount += 1;
+            run.pendingInterim = result.text;
+          }
+          nativeSttTranscript.textContent = [...run.finalSegments, run.pendingInterim].filter(Boolean).join(" ");
+        }
+      });
+      run.session = session;
+      run.provider = session.provider;
+      void session.ready.then(() => {
+        if (run.finished) return;
+        run.ready = true;
+        nativeSttStatus.textContent = "Listening through configured STT. Speak, then select Stop and finalize.";
+      }).catch(() => void 0);
+      void session.result.then((transcript) => finalizeNativeSttRun(run, transcript)).catch((error) => finalizeNativeSttRun(run, null, error));
+      addEvent("info", "Native configured-connection STT capture started");
+    } catch (error) {
+      finalizeNativeSttRun(run, null, error);
+    }
+  };
+  const stopNativeStt = () => {
+    const run = activeNativeSttRun;
+    if (!run?.session || run.finished) return;
+    nativeSttStopButton.disabled = true;
+    nativeSttCancelButton.disabled = true;
+    nativeSttStatus.textContent = "Stopping capture and awaiting authoritative transcript\u2026";
+    void run.session.stop().catch(() => void 0);
+  };
+  const cancelNativeStt = () => {
+    const run = activeNativeSttRun;
+    if (!run?.session || run.finished) return;
+    run.cancelRequested = true;
+    nativeSttStopButton.disabled = true;
+    nativeSttCancelButton.disabled = true;
+    nativeSttStatus.textContent = "Cancelling capture and discarding pending transcript\u2026";
+    try {
+      run.session.cancel();
+    } catch (error) {
+      finalizeNativeSttRun(run, null, error);
+    }
   };
   const inspectSttSurface = () => {
     if (sttSurfaceRequestId) return;
@@ -4203,8 +4445,9 @@ function setup(ctx) {
     disposed = true;
     clearRecordingTimer();
     keepRecording = false;
-    const recordingWasActive = Boolean(activeStream) || Boolean(activeRecorder && activeRecorder.state !== "inactive");
+    const recordingWasActive = Boolean(activeStream) || Boolean(activeRecorder && activeRecorder.state !== "inactive") || Boolean(activeNativeSttRun && !activeNativeSttRun.finished);
     const uploadWasActive = activeUpload !== null || sttUpload !== null;
+    const nativeSttWasActive = Boolean(activeNativeSttRun && !activeNativeSttRun.finished);
     if (activeRecorder && activeRecorder.state !== "inactive") activeRecorder.stop();
     const tracksStopped = stopTracks();
     const upload = activeUpload;
@@ -4224,6 +4467,18 @@ function setup(ctx) {
       ctx.sendToBackend(request);
       sttRunRequestId = null;
     }
+    let nativeSttCancelRequested = false;
+    if (activeNativeSttRun && !activeNativeSttRun.finished) {
+      const run = activeNativeSttRun;
+      activeNativeSttRun = null;
+      run.cancelRequested = true;
+      run.finished = true;
+      nativeSttCancelRequested = true;
+      try {
+        run.session?.cancel();
+      } catch {
+      }
+    }
     saveCleanupReceipt({
       at: (/* @__PURE__ */ new Date()).toISOString(),
       trigger,
@@ -4231,7 +4486,9 @@ function setup(ctx) {
       uploadWasActive,
       tracksStopped,
       uploadAbortRequested,
-      passed: tracksStopped && (!uploadWasActive || uploadAbortRequested)
+      nativeSttWasActive,
+      nativeSttCancelRequested,
+      passed: tracksStopped && (!uploadWasActive || uploadAbortRequested) && (!nativeSttWasActive || nativeSttCancelRequested)
     });
   };
   const copyResults = async () => {
@@ -4276,7 +4533,7 @@ function setup(ctx) {
     addEvent("info", "Document visibility changed", {
       state: document.visibilityState,
       visibilityChangeCount,
-      recordingActive: Boolean(activeRecorder && activeRecorder.state === "recording")
+      recordingActive: Boolean(activeRecorder && activeRecorder.state === "recording") || Boolean(activeNativeSttRun && !activeNativeSttRun.finished)
     });
   };
   const handleDeviceChange = () => {
@@ -4284,7 +4541,7 @@ function setup(ctx) {
     if (report.media.robustness) report.media.robustness.deviceChangeCount = deviceChangeCount;
     addEvent("info", "Media device change observed", {
       deviceChangeCount,
-      recordingActive: Boolean(activeRecorder && activeRecorder.state === "recording")
+      recordingActive: Boolean(activeRecorder && activeRecorder.state === "recording") || Boolean(activeNativeSttRun && !activeNativeSttRun.finished)
     });
   };
   window.addEventListener("pagehide", handlePageHide, { once: true });
@@ -4303,6 +4560,10 @@ function setup(ctx) {
   checkSttApiButton.addEventListener("click", checkProposedSttApi);
   runSttApiButton.addEventListener("click", () => void runProposedSttApi());
   cancelSttApiButton.addEventListener("click", () => void cancelProposedSttApi());
+  nativeSttDiscoverButton.addEventListener("click", () => void discoverNativeStt());
+  nativeSttStartButton.addEventListener("click", startNativeStt);
+  nativeSttStopButton.addEventListener("click", stopNativeStt);
+  nativeSttCancelButton.addEventListener("click", cancelNativeStt);
   compositionCheckButton.addEventListener("click", runCompositionUiCheck);
   disposableConfirm.addEventListener("change", () => {
     const enabled = disposableConfirm.checked && chatRequestId === null;
@@ -4323,7 +4584,9 @@ function setup(ctx) {
       recordingWasActive: receipt.recordingWasActive,
       uploadWasActive: receipt.uploadWasActive,
       tracksStopped: receipt.tracksStopped,
-      uploadAbortRequested: receipt.uploadAbortRequested
+      uploadAbortRequested: receipt.uploadAbortRequested,
+      nativeSttWasActive: receipt.nativeSttWasActive ?? false,
+      nativeSttCancelRequested: receipt.nativeSttCancelRequested ?? false
     });
   }
   render();
@@ -4415,6 +4678,15 @@ function isAcceptableAudioSize(sizeBytes) {
 function describeError(error) {
   if (error instanceof DOMException) return `${error.name}: ${error.message}`;
   return error instanceof Error ? error.message : String(error);
+}
+function safeNativeSttError(error) {
+  const errorName = error instanceof DOMException || error instanceof Error ? error.name || "Error" : "UnknownError";
+  const rawCode = readMember(error, "code");
+  const errorCode = typeof rawCode === "string" && rawCode.length > 0 && rawCode.length <= 128 ? rawCode : void 0;
+  return { errorName, ...errorCode ? { errorCode } : {} };
+}
+function normalizeTranscript(value) {
+  return value.trim().replace(/\s+/g, " ");
 }
 function inspectFrontendSttSurface(root) {
   return {

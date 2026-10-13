@@ -121,7 +121,7 @@ The exact transcription provider, editor placement, context ceiling, supported l
 
 ## Phase 0 remote capability probe
 
-The current `development` branch builds an installable diagnostic extension. It does not transcribe audio yet. It verifies the platform path that transcription will depend on:
+The current `development` branch builds an installable diagnostic extension. Probe 0.6.0 can invoke Lumiverse's native frontend STT API during an explicit test and verifies the platform path that JarvisType will depend on:
 
 - Drawer-tab registration and input-bar activation.
 - Frontend/backend messaging and Lumiverse version discovery.
@@ -134,13 +134,14 @@ The current `development` branch builds an installable diagnostic extension. It 
 - Reload/disable cleanup receipts for active recording and upload resources.
 - Drawer activation counters and a responsive-layout/accessibility self-check.
 - Sanitized discovery of any host API capable of invoking Lumiverse's configured STT connection.
+- Native `ctx.stt` provider discovery, configured-connection capture, interim/final reconciliation, cancellation, and teardown cleanup.
 - Forward-compatible conformance testing for the proposed `stt-invocation-v1` API.
 - Deterministic audio edge-case checks and device/visibility/track-ending observations.
 - A numbered-paragraph composition fixture with long text, diff, edit history, focus, keyboard, and narrow-layout checks.
 - Explicitly authorized append-only and append-with-generation tests in a disposable chat.
 - Sanitized JSON evidence export.
 
-The probe installs without gated Lumiverse permissions and does not read chat messages, connection identifiers, or credentials. Chat mutation is possible only after an explicit disposable-chat confirmation: append-only requests `chat_mutation`, while append-and-generate also requests `generation` and can incur configured-provider usage. It requests the proposed `stt` permission only after detecting `stt-invocation-v1` and the user explicitly starts a transcription test. Recorded audio is not retained after the page or extension is unloaded, and a completed conformance upload is deleted by the backend in `finally`.
+The probe declares only Lumiverse's `media` permission and does not read chat messages, connection identifiers, or credentials. Native provider discovery does not start the microphone; configured-connection capture begins only from the explicit start button and may send audio to the user's configured STT provider under that provider's policy. The live transcript is visible in the drawer but excluded from the JSON export, which retains only sanitized metadata such as length, hash, lifecycle counts, and error names. Chat mutation is possible only after an explicit disposable-chat confirmation: append-only requests `chat_mutation`, while append-and-generate also requests `generation` and can incur configured-provider usage. Recorded audio is not retained after the page or extension is unloaded, and a completed historical conformance upload is deleted by the backend in `finally`.
 
 ### Build verification
 
@@ -153,8 +154,25 @@ The compiled `dist/backend.js` and `dist/frontend.js` files are committed so the
 
 ### Remote test procedure
 
+#### Native STT 0.6.0 focused test
+
+1. Install or update the extension from the `development` branch and verify the displayed probe version is `0.6.0`. Approve the declared `media` permission if Lumiverse asks during installation.
+2. Open **JarvisType Probe** and select **Discover native providers**. This action must not start the microphone.
+3. Confirm the status says the configured connection is available. If it does not, download the JSON and stop; do not continue with capture.
+4. Select **Start configured STT**. If Lumiverse requests `media`, approve it and then select **Start configured STT** a second time as instructed.
+5. After the status says it is listening, say: “JarvisType uses a Pip-Boy. Caesar is spelled C-A-E-S-A-R.” Watch the visible transcript, then select **Stop and finalize**.
+6. Confirm the status reports a passed transcription and an authoritative final transcript. `genuine-interim` means live partials were observed; `batch-only` is also a valid API run but leaves genuine provider partials unconfirmed.
+7. Start another run, speak briefly, and select **Cancel and discard** while it is listening. Confirm cancellation passes and the visible transcript is discarded.
+8. Select **Download JSON** and retain this first report. Under `nativeStt`, confirm `apiAvailable: true`, an available `connection` provider, a passing `liveRun`, a passing `cancellationRun` with `aborted: true`, and `lateResultCount: 0`. Confirm no transcript text or audio appears in the file.
+9. For teardown cleanup, start configured STT once more and wait for the listening status. While it is active, reload Lumiverse or disable and re-enable the extension.
+10. Reopen the probe and select **Download JSON** again. Confirm the recovered cleanup receipt has `nativeSttWasActive: true`, `nativeSttCancelRequested: true`, and `passed: true`.
+
+Keep both JSON reports. Do not post them publicly without reviewing `origin` and `userAgent`; neither is a credential, but both describe the test environment.
+
+#### Full regression procedure
+
 1. Install or update the extension from the `development` branch using the VPS deployment workflow.
-2. Enable **JarvisType Phase 0 Probe**. It should request no gated permissions.
+2. Enable **JarvisType Phase 0 Probe**. Probe 0.6.0 should declare only the `media` permission.
 3. Open **JarvisType Probe** from the chat input-bar Extras menu. Confirm that **Input-action activations** and **Drawer activations** increase once, then open the same drawer through `Ctrl+K` and confirm only the drawer count increases.
 4. Reload Lumiverse. Confirm there is exactly one JarvisType sidebar entry, one Extras action, one command-palette result, and **Active probe instances** is `1`.
 5. Confirm that the backend and frontend Lumiverse versions appear in **Host and lifecycle**.
@@ -176,7 +194,7 @@ The compiled `dist/backend.js` and `dist/frontend.js` files are committed so the
 21. On a host implementing the proposal, record yourself saying “JarvisType uses a Pip-Boy,” select **Check proposed API**, and then select **Grant permission and transcribe sample**. Approve only the `stt` permission.
 22. Confirm genuine partials appear incrementally when supported, the final transcript is authoritative, applied/unsupported features are reported, and staged-upload deletion is confirmed. The visible transcript is not included verbatim in exported JSON.
 23. Repeat with a longer sample and select **Cancel STT test** after provider processing starts. Confirm the result is aborted, no late text is accepted, and upload deletion is confirmed.
-24. Select **Download JSON** and retain the resulting evidence file. It contains environment and result metadata, cleanup booleans, counters, sanitized API names, chat-test booleans, and transcript length/hash, but no audio, transcript text, chat/message identifiers, connection identifiers, settings, or credentials.
+24. Run the focused native STT procedure above, then select **Download JSON** and retain the resulting evidence files. They contain environment and result metadata, cleanup booleans, counters, sanitized API/provider summaries, chat-test booleans, and transcript length/hash, but no audio, transcript text, chat/message identifiers, connection identifiers, settings, or credentials.
 
 Do not post the complete JSON report publicly without reviewing its `origin` and `userAgent` fields. Neither field is a credential, but both describe the test environment.
 

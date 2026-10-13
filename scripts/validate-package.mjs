@@ -6,8 +6,12 @@ if (manifest.identifier !== 'jarvistype') {
   throw new Error('spindle.json identifier must be jarvistype')
 }
 
-if (!Array.isArray(manifest.permissions) || manifest.permissions.length !== 0) {
-  throw new Error('The Phase 0 probe must not request gated permissions')
+if (
+  !Array.isArray(manifest.permissions) ||
+  manifest.permissions.length !== 1 ||
+  manifest.permissions[0] !== 'media'
+) {
+  throw new Error('Probe 0.6.0 must declare only the media permission')
 }
 
 for (const entry of [manifest.entry_backend, manifest.entry_frontend]) {

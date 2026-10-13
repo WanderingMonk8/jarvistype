@@ -127,6 +127,17 @@ The remote probe:
 - Conclusion: the forward-compatible proposal gate passed on an unsupported host. This result does not test the proposed STT API's transcription behavior.
 - Data handling: the exported report contained only sanitized capability and method availability results; it contained no audio, transcript, connection metadata, or credentials.
 
+### Recorded run R-007
+
+- Test date: 2026-10-12 (America/Los_Angeles; export timestamp `2026-10-13T06:46:03.584Z`).
+- Probe version: `0.5.0` (the exported report does not embed a Git commit hash).
+- Environment: Windows 10 x64, Firefox 157, secure HTTPS context.
+- Lumiverse backend/frontend: `1.2.5` / `1.2.5`; the setup reported exactly one active probe instance.
+- Append-only result: passed with `chat_mutation` granted, `generation` not granted, a returned message identifier, and no generation identifier.
+- Append-and-generate result: passed with both `chat_mutation` and `generation` granted and both message and generation identifiers returned.
+- Conclusion: the two submission modes invoked the documented permission and generation paths independently.
+- Data handling: the export retained only booleans and timestamps for these tests; it contained no chat identifier, message identifier, message content, generated response, or credentials.
+
 | ID | Test | Pass condition | Status | Evidence |
 |---|---|---|---|---|
 | L-01 | Install and enable | Production bundle installs from `development`, requests no gated permissions, and backend starts. | PASS | R-001: health response proves frontend and backend loaded; manifest permissions are empty. |
@@ -142,7 +153,7 @@ The remote probe:
 | L-11 | Cross-user upload isolation | A second user cannot retrieve the first user's upload. A dedicated follow-up probe is required. | DEFERRED | Only one user account is currently available; explicitly skipped on 2026-09-30. |
 | L-12 | Host audio conversion | Conversion succeeds only if later selected provider formats require it. | PROVIDER-PENDING | Not included in probe 0.1.0 |
 | L-13 | Genuine provider partials | Provider partials arrive incrementally and reconcile with final text; cancellation rejects late updates. | PROVIDER-PENDING | Not included in probe 0.1.0 |
-| L-14 | Chat/send permission behavior | Append-only and append-with-generation behavior match the documented permission model. | REMOTE-PENDING | Probe 0.5.0 provides separate, explicitly authorized disposable-chat tests and exports only sanitized booleans. |
+| L-14 | Chat/send permission behavior | Append-only and append-with-generation behavior match the documented permission model. | PASS | R-007: append-only returned a message ID without a generation ID under `chat_mutation`; append-and-generate returned both IDs after `generation` was also granted. |
 | L-15 | Semantic interpreter corpus | Structured output validates or returns typed failure; unsafe cases never mutate the draft. | PROVIDER-PENDING | Not included in probe 0.1.0 |
 | L-16 | Audio robustness | Zero/oversize rejection, repeated terminal actions, permission denial, backgrounding, device changes, and unexpected track ending are handled and recorded safely. | REMOTE-PENDING | Probe 0.5.0 adds deterministic checks plus sanitized browser-event observations; physical-device scenarios remain manual. |
 | L-17 | Composition UI fixture | Numbered paragraphs, long wrapping text, diff, history, focus, keyboard access, and narrow layout remain usable. | REMOTE-PENDING | Probe 0.5.0 includes the fixture, automated structure/focus/overflow checks, and a manual interaction pass. |

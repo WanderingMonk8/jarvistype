@@ -1,5 +1,5 @@
 export const PROTOCOL_VERSION = 1 as const
-export const PROBE_VERSION = '0.6.0'
+export const PROBE_VERSION = '0.6.1'
 export const MAX_PROBE_AUDIO_BYTES = 25 * 1024 * 1024
 
 export const AUDIO_MIME_CANDIDATES = [

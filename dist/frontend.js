@@ -3105,7 +3105,7 @@ var isSupported = typeof XMLHttpRequest === "function" && typeof Blob === "funct
 
 // src/shared.ts
 var PROTOCOL_VERSION = 1;
-var PROBE_VERSION = "0.6.0";
+var PROBE_VERSION = "0.6.1";
 var MAX_PROBE_AUDIO_BYTES = 25 * 1024 * 1024;
 var AUDIO_MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
@@ -3660,6 +3660,8 @@ function setup(ctx) {
   };
   const discoverNativeStt = async () => {
     if (activeNativeSttRun) return;
+    const previousLiveRun = report.nativeStt?.liveRun;
+    const previousCancellationRun = report.nativeStt?.cancellationRun;
     const rawCapability = ctx.host.capabilities["speech-to-text-v1"];
     const hostCapabilityVersion = typeof rawCapability === "number" && Number.isSafeInteger(rawCapability) ? rawCapability : 0;
     const apiAvailable = Boolean(ctx.stt) && hostCapabilityVersion >= 1;
@@ -3681,7 +3683,9 @@ function setup(ctx) {
         hostCapabilityVersion,
         apiAvailable,
         permissionGranted,
-        providers
+        providers,
+        ...previousLiveRun ? { liveRun: previousLiveRun } : {},
+        ...previousCancellationRun ? { cancellationRun: previousCancellationRun } : {}
       };
       const connection = providers.find((provider) => provider.id === "connection");
       nativeSttStatus.textContent = !apiAvailable ? "Native STT is unavailable on this host." : connection?.available ? permissionGranted ? "Configured connection is available and media permission is granted." : "Configured connection is available. Start will request media permission first." : "The configured connection provider is unavailable.";
@@ -3697,7 +3701,9 @@ function setup(ctx) {
         hostCapabilityVersion,
         apiAvailable,
         permissionGranted,
-        providers: []
+        providers: [],
+        ...previousLiveRun ? { liveRun: previousLiveRun } : {},
+        ...previousCancellationRun ? { cancellationRun: previousCancellationRun } : {}
       };
       const safe = safeNativeSttError(error);
       nativeSttStatus.textContent = `Native provider discovery failed: ${safe.errorName}`;

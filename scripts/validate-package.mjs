@@ -11,7 +11,7 @@ if (
   manifest.permissions.length !== 1 ||
   manifest.permissions[0] !== 'media'
 ) {
-  throw new Error('Probe 0.6.0 must declare only the media permission')
+  throw new Error('Probe 0.6.1 must declare only the media permission')
 }
 
 for (const entry of [manifest.entry_backend, manifest.entry_frontend]) {

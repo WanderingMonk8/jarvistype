@@ -121,7 +121,7 @@ The exact transcription provider, editor placement, context ceiling, supported l
 
 ## Phase 0 remote capability probe
 
-The current `development` branch builds an installable diagnostic extension. Probe 0.6.0 can invoke Lumiverse's native frontend STT API during an explicit test and verifies the platform path that JarvisType will depend on:
+The current `development` branch builds an installable diagnostic extension. Probe 0.6.1 can invoke Lumiverse's native frontend STT API during an explicit test and verifies the platform path that JarvisType will depend on:
 
 - Drawer-tab registration and input-bar activation.
 - Frontend/backend messaging and Lumiverse version discovery.
@@ -154,9 +154,9 @@ The compiled `dist/backend.js` and `dist/frontend.js` files are committed so the
 
 ### Remote test procedure
 
-#### Native STT 0.6.0 focused test
+#### Native STT 0.6.x focused test
 
-1. Install or update the extension from the `development` branch and verify the displayed probe version is `0.6.0`. Approve the declared `media` permission if Lumiverse asks during installation.
+1. Install or update the extension from the `development` branch and verify the displayed probe version is `0.6.1` or newer. Approve the declared `media` permission if Lumiverse asks during installation.
 2. Open **JarvisType Probe** and select **Discover native providers**. This action must not start the microphone.
 3. Confirm the status says the configured connection is available. If it does not, download the JSON and stop; do not continue with capture.
 4. Select **Start configured STT**. If Lumiverse requests `media`, approve it and then select **Start configured STT** a second time as instructed.
@@ -172,7 +172,7 @@ Keep both JSON reports. Do not post them publicly without reviewing `origin` and
 #### Full regression procedure
 
 1. Install or update the extension from the `development` branch using the VPS deployment workflow.
-2. Enable **JarvisType Phase 0 Probe**. Probe 0.6.0 should declare only the `media` permission.
+2. Enable **JarvisType Phase 0 Probe**. Probe 0.6.1 should declare only the `media` permission.
 3. Open **JarvisType Probe** from the chat input-bar Extras menu. Confirm that **Input-action activations** and **Drawer activations** increase once, then open the same drawer through `Ctrl+K` and confirm only the drawer count increases.
 4. Reload Lumiverse. Confirm there is exactly one JarvisType sidebar entry, one Extras action, one command-palette result, and **Active probe instances** is `1`.
 5. Confirm that the backend and frontend Lumiverse versions appear in **Host and lifecycle**.

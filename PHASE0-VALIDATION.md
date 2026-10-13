@@ -25,7 +25,7 @@ Status values are `DOCUMENTED`, `READY`, `PARTIAL`, `PASS`, `FAIL`, `REMOTE-PEND
 
 ## Probe scope and safety
 
-Current probe version: `0.6.0`
+Current probe version: `0.6.1`
 
 The remote probe:
 
@@ -185,6 +185,20 @@ The remote probe:
 - Conclusion: Lumiverse 1.2.5 added an official frontend STT invocation path that supersedes the custom backend proposal as JarvisType's primary integration target.
 - Data handling: discovery exported only sanitized API/capability names and availability results; no audio, transcript, connection identifier, provider settings, or credentials were included.
 
+### Recorded run R-012
+
+- Test date: 2026-10-13 (America/Los_Angeles).
+- Probe version: `0.6.0`.
+- Environment: Windows 10 x64, Firefox 157, secure HTTPS context.
+- Lumiverse backend/frontend: `1.2.5` / `1.2.5`; the setup reported exactly one active probe instance.
+- Discovery result: capability `speech-to-text-v1` version 1 and the native STT API were available. The configured `connection` and on-device `whistle` providers were available; browser `webspeech` was unavailable.
+- Configured-connection result: two runs became ready and returned authoritative final transcripts. Both emitted one final segment, matched the assembled live text, produced no late results, and were classified `batch-only`; no interim result arrived, including during the longer run.
+- Accuracy observation: the requested “JarvisType” wording was visibly recognized as “John's type.” This does not invalidate API conformance, but demonstrates the need for JarvisType's planned contextual and glossary correction layers.
+- Cancellation result: cancellation while listening rejected with `AbortError`, discarded the transcript, and accepted no late results.
+- Teardown result: reloading during active native capture produced a `pagehide` receipt with `nativeSttWasActive: true`, `nativeSttCancelRequested: true`, `tracksStopped: true`, and `passed: true`.
+- Data handling: exported JSON contained provider capability summaries, lifecycle counters, transcript lengths, and sanitized error names, but no transcript text, audio, connection identifier, provider settings, or credentials. The repeat-discovery issue removed the top-level hashes from this particular export while leaving the run evidence in the event log.
+- Probe observation: repeating provider discovery after the runs replaced the top-level run summaries in 0.6.0, although the sanitized event log retained all evidence. Probe 0.6.1 preserves those summaries across rediscovery.
+
 | ID | Test | Pass condition | Status | Evidence |
 |---|---|---|---|---|
 | L-01 | Install and enable | Production bundle installs from `development`, declares only the permission required by the current probe, and backend starts. | PASS | R-001 proved frontend/backend startup without gated permissions. Probe 0.6.0 intentionally adds only `media` for native STT; package validation enforces that exact manifest permission. |
@@ -199,7 +213,7 @@ The remote probe:
 | L-10 | Narrow layout and keyboard | Drawer remains usable at the narrowest supported width and every control is keyboard reachable. | PASS | R-004: tester manually confirmed the narrow-layout and keyboard procedure; the final post-reload export did not retain the earlier optional UI snapshot. |
 | L-11 | Cross-user upload isolation | A second user cannot retrieve the first user's upload. A dedicated follow-up probe is required. | DEFERRED | Only one user account is currently available; explicitly skipped on 2026-09-30. |
 | L-12 | Host audio conversion | Conversion succeeds only if later selected provider formats require it. | PROVIDER-PENDING | Not included in probe 0.1.0 |
-| L-13 | Genuine provider partials | Provider partials arrive incrementally and reconcile with final text; cancellation rejects late updates. | READY | Lumiverse 1.2.5 documents interim `onResult`, authoritative session results, and cancellation through frontend `ctx.stt`; a focused native-API probe is required. |
+| L-13 | Genuine provider partials | Provider partials arrive incrementally and reconcile with final text; cancellation rejects late updates. | PARTIAL | R-012: final reconciliation, cancellation, and late-result rejection passed, but the configured connection emitted no interim results and was classified `batch-only`, including during a longer run. |
 | L-14 | Chat/send permission behavior | Append-only and append-with-generation behavior match the documented permission model. | PASS | R-007: append-only returned a message ID without a generation ID under `chat_mutation`; append-and-generate returned both IDs after `generation` was also granted. |
 | L-15 | Semantic interpreter corpus | Structured output validates or returns typed failure; unsafe cases never mutate the draft. | PROVIDER-PENDING | Not included in probe 0.1.0 |
 | L-16 | Audio robustness | Zero/oversize rejection, repeated terminal actions, permission denial, backgrounding, device changes, and unexpected track ending are handled and recorded safely. | PARTIAL | R-008: all feasible checks passed. Device change and unexpected physical track ending were explicitly skipped because only an internal microphone is available. |
@@ -216,13 +230,13 @@ Probe `0.3.0` determines whether a Spindle extension can reuse the user's existi
 | S2-03 | Sanitized discovery | Export contains no connection IDs, names, URLs, provider metadata, credentials, or audio. | PASS | R-005: review confirmed that only API/capability names and availability results were exported. |
 | S2-04 | Proposal capability gate | Probe 0.4.0 detects `stt-invocation-v1` and all five required methods before requesting permission or uploading audio. | PASS | R-006: Lumiverse 1.2.4 reported capability version 0 and all five methods missing; permission remained false and no recording, upload, or provider call occurred. |
 | S2-05 | Proposed API conformance | On an implementing host, redacted discovery, streamed transcription, final reconciliation, capability reporting, cancellation, late-result rejection, and upload deletion pass. | SUPERSEDED | Lumiverse 1.2.5 shipped the official frontend `speech-to-text-v1` API instead of the proposed backend contract. |
-| S2-06 | Native frontend STT conformance | Provider discovery, configured-connection transcription, interim/final reconciliation, cancellation, cleanup, and sanitized export work through `ctx.stt`. | REMOTE-PENDING | Probe 0.6.0 implements this check using `lumiverse-spindle-types` 0.6.46 and only the manifest `media` permission. VPS evidence is still required. |
+| S2-06 | Native frontend STT conformance | Provider discovery, configured-connection transcription, interim-behavior classification, final reconciliation, cancellation, cleanup, and sanitized export work through `ctx.stt`. | PASS | R-012: discovery, two authoritative final runs, batch-only classification, cancellation with no late results, unload cleanup, and sanitized export all passed. |
 
 ### Section 2 conclusion
 
 Lumiverse `1.2.4` did not expose a callable STT invocation API, but `1.2.5` now exposes the official frontend-only `ctx.stt` surface behind `speech-to-text-v1`. It supports the user's selected provider, explicit configured connections, on-device Whistle, browser Web Speech, live capture, supplied `Blob` audio, interim/final results, status callbacks, stop, and cancellation without exposing credentials.
 
-JarvisType should target this official API rather than the custom backend contract in `LUMIVERSE-STT-API-PROPOSAL.md`. Probe 0.6.0 is ready to verify the configured provider path, genuine interim behavior, final reconciliation, cancellation, cleanup, and sanitized data handling on the VPS. The documented options do not include context prompts or vocabulary hints, so those accuracy requirements remain an integration question rather than an assumed capability.
+JarvisType should target this official API rather than the custom backend contract in `LUMIVERSE-STT-API-PROPOSAL.md`. R-012 verifies configured-provider discovery and capture, authoritative final transcription, cancellation, unload cleanup, and sanitized data handling on the VPS. The current configured connection is batch-only, so the product cannot assume live interim text from this provider; it can still display recording/status feedback and show the authoritative transcript after each recorded segment. The documented options do not include context prompts or vocabulary hints, and the observed “JarvisType” recognition error reinforces that those accuracy requirements need JarvisType's own contextual or correction layer.
 
 ## Product and provider decisions
 

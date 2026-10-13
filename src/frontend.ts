@@ -753,6 +753,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const discoverNativeStt = async () => {
     if (activeNativeSttRun) return
+    const previousLiveRun = report.nativeStt?.liveRun
+    const previousCancellationRun = report.nativeStt?.cancellationRun
     const rawCapability = ctx.host.capabilities['speech-to-text-v1']
     const hostCapabilityVersion =
       typeof rawCapability === 'number' && Number.isSafeInteger(rawCapability)
@@ -782,6 +784,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         apiAvailable,
         permissionGranted,
         providers,
+        ...(previousLiveRun ? { liveRun: previousLiveRun } : {}),
+        ...(previousCancellationRun ? { cancellationRun: previousCancellationRun } : {}),
       }
       const connection = providers.find((provider) => provider.id === 'connection')
       nativeSttStatus.textContent = !apiAvailable
@@ -804,6 +808,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         apiAvailable,
         permissionGranted,
         providers: [],
+        ...(previousLiveRun ? { liveRun: previousLiveRun } : {}),
+        ...(previousCancellationRun ? { cancellationRun: previousCancellationRun } : {}),
       }
       const safe = safeNativeSttError(error)
       nativeSttStatus.textContent = `Native provider discovery failed: ${safe.errorName}`

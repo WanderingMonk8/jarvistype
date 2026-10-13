@@ -121,7 +121,7 @@ The validated primary placement is an extension-owned drawer opened from the inp
 
 ## Current development build
 
-Version `0.7.0` is the Phase 1 production foundation. It provides:
+Version `0.7.0` is the completed Phase 1 production foundation. It provides:
 
 - A lifecycle-safe JarvisType drawer and input-bar action.
 - A validated, versioned frontend/backend protocol.
@@ -130,7 +130,7 @@ Version `0.7.0` is the Phase 1 production foundation. It provides:
 - Disabled placeholders for the draft, Record Message, Record Edit, Undo, History, and Confirm & Send features.
 - Formatting, linting, strict type checking, unit tests, production builds, package validation, and CI.
 
-The disabled controls are intentional: Phase 1 establishes the shell and safety boundaries; later phases implement drafting, recording, editing, and sending. See [PHASE1-VALIDATION.md](./PHASE1-VALIDATION.md) for the exact hosted verification steps.
+The disabled controls are intentional: Phase 1 established the shell and safety boundaries, and Phase 2 is the next implementation stage for the numbered draft lifecycle and safe confirmed sending. See [PHASE1-VALIDATION.md](./PHASE1-VALIDATION.md) for the completed local and hosted verification evidence.
 
 ## Historical Phase 0 remote capability probe
 

@@ -195,7 +195,7 @@ Resolve open decisions and platform risks that could invalidate the architecture
 
 ### Status
 
-In progress. The local `0.7.0` foundation is implemented; hosted Lumiverse verification remains before the exit gate can close.
+Complete as of 2026-10-13. Version `0.7.0` passed the local quality pipeline and the hosted Lumiverse 1.2.5 lifecycle checklist recorded in `PHASE1-VALIDATION.md`.
 
 ### Objective
 

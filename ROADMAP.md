@@ -1,7 +1,7 @@
 # JarvisType Project Roadmap
 
 - **Status:** Draft 0.1
-- **Last updated:** 2026-08-30
+- **Last updated:** 2026-10-13
 - **Branch:** `development`
 - **Authority:** Execution plan derived from `PRD.md`
 
@@ -26,16 +26,16 @@ Phases are ordered by dependency rather than date. Estimates will be added after
 
 ## 3. Release checkpoints
 
-| Checkpoint | Completion | User-visible result |
-| --- | --- | --- |
-| Technical foundation | Phase 1 | Installable extension shell with frontend/backend communication |
-| Drafting foundation | Phase 2 | Numbered editor and manual confirmed send |
-| Voice MVP | Phase 3 | Record, transcribe, append sequentially, review, and send |
-| Context-aware alpha | Phase 4 | Chat context, punctuation, explicit spelling, and personal glossary |
-| Editing alpha | Phase 5 | Natural-language editing through validated structured patches |
-| Feature-complete beta | Phase 6 | Advanced targeting, references, casing, paragraph operations, and multi-edit support |
-| Release candidate | Phase 7 | Accessible, private, resilient, compatible, and performance-tested build |
-| General availability | Phase 8 | Validated beta, packaged release, migrations, and support documentation |
+| Checkpoint            | Completion | User-visible result                                                                  |
+| --------------------- | ---------- | ------------------------------------------------------------------------------------ |
+| Technical foundation  | Phase 1    | Installable extension shell with frontend/backend communication                      |
+| Drafting foundation   | Phase 2    | Numbered editor and manual confirmed send                                            |
+| Voice MVP             | Phase 3    | Record, transcribe, append sequentially, review, and send                            |
+| Context-aware alpha   | Phase 4    | Chat context, punctuation, explicit spelling, and personal glossary                  |
+| Editing alpha         | Phase 5    | Natural-language editing through validated structured patches                        |
+| Feature-complete beta | Phase 6    | Advanced targeting, references, casing, paragraph operations, and multi-edit support |
+| Release candidate     | Phase 7    | Accessible, private, resilient, compatible, and performance-tested build             |
+| General availability  | Phase 8    | Validated beta, packaged release, migrations, and support documentation              |
 
 ## 4. Stable technical boundaries
 
@@ -193,6 +193,10 @@ Resolve open decisions and platform risks that could invalidate the architecture
 
 ## Phase 1: Extension foundation and development infrastructure
 
+### Status
+
+In progress. The local `0.7.0` foundation is implemented; hosted Lumiverse verification remains before the exit gate can close.
+
 ### Objective
 
 Create an installable Spindle extension shell with dependable frontend/backend lifecycle management and an enforceable quality baseline.
@@ -200,6 +204,14 @@ Create an installable Spindle extension shell with dependable frontend/backend l
 ### Dependencies
 
 - Phase 0 UI and minimum-version decisions.
+
+### Phase 0 baseline adopted by Phase 1
+
+- The primary composition surface is an extension-owned drawer opened from the input-bar action; the command palette remains an alternate entry.
+- Lumiverse `1.2.5` is the minimum voice-capable host because it is the first verified version exposing `speech-to-text-v1`.
+- The initial native STT path is the user's configured `connection` provider. The tested connection is batch-only, so the UI must not assume genuine interim text.
+- `media` is the only gated permission declared by the Phase 1 shell. Later phases add permissions only when the corresponding feature is enabled.
+- Phase 1 does not depend on native composer selectors or a native unsent-draft mutation API.
 
 ### Detailed specifications
 
@@ -831,22 +843,22 @@ Validate real usage, finalize operational documentation and migrations, and publ
 
 ## 6. Requirement traceability
 
-| Requirement group | Primary phase | Hardening |
-| --- | --- | --- |
-| Draft composition (`FR-DRAFT-*`) | 2–3 | 7 |
-| Context (`FR-CTX-*`) | 4 | 7 |
-| Transcription display (`FR-STT-*`) | 3 | 7 |
-| Paragraph numbering (`FR-PARA-*`) | 2 | 6–7 |
-| Conversational editing (`FR-EDIT-*`) | 5 | 6–7 |
-| Diff/history (`FR-DIFF-*`) | 2 and 5 | 7 |
-| Punctuation (`FR-PUNC-*`) | 4 | 7 |
-| Explicit spelling (`FR-SPELL-*`) | 4 | 6–7 |
-| Capitalization (`FR-CASE-*`) | 5–6 | 7 |
-| Personal glossary (`FR-GLOSS-*`) | 4 | 7 |
-| Referential wording (`FR-REF-*`) | 6 | 7 |
-| Sending (`FR-SEND-*`) | 2 | 7 |
-| Privacy (`PRIV-*`) | Begins 1–4 | 7 audit |
-| Success measures | 8 | Post-release |
+| Requirement group                    | Primary phase | Hardening    |
+| ------------------------------------ | ------------- | ------------ |
+| Draft composition (`FR-DRAFT-*`)     | 2–3           | 7            |
+| Context (`FR-CTX-*`)                 | 4             | 7            |
+| Transcription display (`FR-STT-*`)   | 3             | 7            |
+| Paragraph numbering (`FR-PARA-*`)    | 2             | 6–7          |
+| Conversational editing (`FR-EDIT-*`) | 5             | 6–7          |
+| Diff/history (`FR-DIFF-*`)           | 2 and 5       | 7            |
+| Punctuation (`FR-PUNC-*`)            | 4             | 7            |
+| Explicit spelling (`FR-SPELL-*`)     | 4             | 6–7          |
+| Capitalization (`FR-CASE-*`)         | 5–6           | 7            |
+| Personal glossary (`FR-GLOSS-*`)     | 4             | 7            |
+| Referential wording (`FR-REF-*`)     | 6             | 7            |
+| Sending (`FR-SEND-*`)                | 2             | 7            |
+| Privacy (`PRIV-*`)                   | Begins 1–4    | 7 audit      |
+| Success measures                     | 8             | Post-release |
 
 ## 7. Deferred candidates
 

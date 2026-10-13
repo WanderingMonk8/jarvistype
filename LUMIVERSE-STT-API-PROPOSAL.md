@@ -111,10 +111,7 @@ interface SpindleAPI {
 
     getProviders(userId?: string): Promise<SttProviderDTO[]>
     listConnections(userId?: string): Promise<SttConnectionDTO[]>
-    getConnection(
-      connectionId: string,
-      userId?: string,
-    ): Promise<SttConnectionDTO | null>
+    getConnection(connectionId: string, userId?: string): Promise<SttConnectionDTO | null>
   }
 }
 ```
@@ -155,12 +152,7 @@ The caller remains responsible for deleting its staged upload in `finally`. Tran
 
 ```ts
 type SttFeatureDTO =
-  | 'partials'
-  | 'context_prompt'
-  | 'keywords'
-  | 'language_hint'
-  | 'punctuation'
-  | 'word_timestamps'
+  'partials' | 'context_prompt' | 'keywords' | 'language_hint' | 'punctuation' | 'word_timestamps'
 
 interface SttTranscriptionRequestDTO {
   source: SttAudioSourceDTO
@@ -411,15 +403,15 @@ An installation may require the existing `media` permission for explicit extensi
 
 Recommended initial defaults:
 
-| Item | Default |
-|---|---:|
-| Inline audio | 8 MiB |
-| Staged-upload audio | 25 MiB |
-| Context prompt | 16,000 characters |
-| Keywords | 500 entries |
-| Keyword length | 128 characters |
-| Timeout | 120 seconds |
-| Concurrent requests per extension/user | 2 |
+| Item                                   |           Default |
+| -------------------------------------- | ----------------: |
+| Inline audio                           |             8 MiB |
+| Staged-upload audio                    |            25 MiB |
+| Context prompt                         | 16,000 characters |
+| Keywords                               |       500 entries |
+| Keyword length                         |    128 characters |
+| Timeout                                |       120 seconds |
+| Concurrent requests per extension/user |                 2 |
 
 All limits should be host-configurable and surfaced through typed validation errors. Provider-specific lower limits take precedence and should appear in resolved capabilities when known.
 
@@ -504,4 +496,3 @@ JarvisType can treat the Lumiverse integration gap as resolved when a released h
 3. proves whether context, glossary hints, and genuine partials were applied;
 4. aborts cleanly and rejects late results;
 5. exposes no provider credential to the extension.
-

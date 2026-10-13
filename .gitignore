@@ -2,3 +2,5 @@ node_modules/
 *.log
 *.zip
 *.tsbuildinfo
+coverage/
+.eslintcache

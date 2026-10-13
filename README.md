@@ -93,7 +93,7 @@ Paragraph numbers, diff markers, segment metadata, and editing history are never
 
 The [Product Requirements Document](./PRD.md) is the source of truth for product behavior, scope, acceptance scenarios, platform constraints, privacy requirements, and unresolved decisions.
 
-The [Phase 0 Validation Register](./PHASE0-VALIDATION.md) records documentation-settled facts, remote test cases, expected results, and evidence still required before Phase 1.
+The [Phase 0 Validation Register](./PHASE0-VALIDATION.md) records the completed feasibility evidence and known provider limitations. The [Phase 1 Validation Register](./PHASE1-VALIDATION.md) tracks the production-foundation exit gate and hosted verification procedure.
 
 The [historical Lumiverse STT API Proposal](./LUMIVERSE-STT-API-PROPOSAL.md) records the backend contract proposed against Lumiverse 1.2.4. Lumiverse 1.2.5 instead shipped the official frontend [Speech-to-text API](https://docs.lumiverse.chat/frontend-api/speech-to-text/), which is now the primary integration target.
 
@@ -117,11 +117,24 @@ The current design expects to use:
 - Frontend `ctx.stt` behind `speech-to-text-v1`, reusing the user's selected or explicitly configured STT connection without exposing credentials.
 - User-scoped storage for settings and personal spelling glossary entries.
 
-The exact transcription provider, editor placement, context ceiling, supported languages, and draft-persistence policy remain open product decisions documented in the PRD.
+The validated primary placement is an extension-owned drawer opened from the input bar. Lumiverse 1.2.5 is the minimum voice-capable host, and the tested configured STT connection returns batch-only final transcripts. Context ceilings, supported languages, and draft-persistence policy remain open product decisions documented in the PRD.
 
-## Phase 0 remote capability probe
+## Current development build
 
-The current `development` branch builds an installable diagnostic extension. Probe 0.6.1 can invoke Lumiverse's native frontend STT API during an explicit test and verifies the platform path that JarvisType will depend on:
+Version `0.7.0` is the Phase 1 production foundation. It provides:
+
+- A lifecycle-safe JarvisType drawer and input-bar action.
+- A validated, versioned frontend/backend protocol.
+- Typed health, error, timeout, and cancellation behavior.
+- Active-chat, Lumiverse-version, backend-readiness, and media-permission status.
+- Disabled placeholders for the draft, Record Message, Record Edit, Undo, History, and Confirm & Send features.
+- Formatting, linting, strict type checking, unit tests, production builds, package validation, and CI.
+
+The disabled controls are intentional: Phase 1 establishes the shell and safety boundaries; later phases implement drafting, recording, editing, and sending. See [PHASE1-VALIDATION.md](./PHASE1-VALIDATION.md) for the exact hosted verification steps.
+
+## Historical Phase 0 remote capability probe
+
+Probe 0.6.1, preserved in repository history and summarized in the Phase 0 register, invoked Lumiverse's native frontend STT API and verified the platform path that JarvisType depends on:
 
 - Drawer-tab registration and input-bar activation.
 - Frontend/backend messaging and Lumiverse version discovery.
@@ -154,9 +167,11 @@ The compiled `dist/backend.js` and `dist/frontend.js` files are committed so the
 
 ### Remote test procedure
 
+The following procedure is historical and applies to probe 0.6.x, not the current `development` build. Current Phase 1 verification is maintained in `PHASE1-VALIDATION.md`.
+
 #### Native STT 0.6.x focused test
 
-1. Install or update the extension from the `development` branch and verify the displayed probe version is `0.6.1` or newer. Approve the declared `media` permission if Lumiverse asks during installation.
+1. For historical reproduction only, check out commit `1130daa` and verify the displayed probe version is `0.6.1`. Approve the declared `media` permission if Lumiverse asks during installation.
 2. Open **JarvisType Probe** and select **Discover native providers**. This action must not start the microphone.
 3. Confirm the status says the configured connection is available. If it does not, download the JSON and stop; do not continue with capture.
 4. Select **Start configured STT**. If Lumiverse requests `media`, approve it and then select **Start configured STT** a second time as instructed.
@@ -171,7 +186,7 @@ Keep both JSON reports. Do not post them publicly without reviewing `origin` and
 
 #### Full regression procedure
 
-1. Install or update the extension from the `development` branch using the VPS deployment workflow.
+1. For historical reproduction only, install commit `1130daa` using the VPS deployment workflow.
 2. Enable **JarvisType Phase 0 Probe**. Probe 0.6.1 should declare only the `media` permission.
 3. Open **JarvisType Probe** from the chat input-bar Extras menu. Confirm that **Input-action activations** and **Drawer activations** increase once, then open the same drawer through `Ctrl+K` and confirm only the drawer count increases.
 4. Reload Lumiverse. Confirm there is exactly one JarvisType sidebar entry, one Extras action, one command-palette result, and **Active probe instances** is `1`.

@@ -11,7 +11,7 @@ if (
   manifest.permissions.length !== 1 ||
   manifest.permissions[0] !== 'media'
 ) {
-  throw new Error('Probe 0.6.1 must declare only the media permission')
+  throw new Error('Phase 1 must declare only the Phase 0-validated media permission')
 }
 
 for (const entry of [manifest.entry_backend, manifest.entry_frontend]) {
@@ -21,4 +21,8 @@ for (const entry of [manifest.entry_backend, manifest.entry_frontend]) {
   await access(entry)
 }
 
-console.log('Validated Phase 0 probe package')
+if (manifest.name !== 'JarvisType' || manifest.version !== '0.7.0') {
+  throw new Error('Phase 1 manifest name and version are invalid')
+}
+
+console.log('Validated JarvisType Phase 1 package')

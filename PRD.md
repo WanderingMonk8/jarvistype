@@ -4,7 +4,7 @@
 - **Last updated:** 2026-08-30
 - **Product:** JarvisType
 - **Platform:** Lumiverse Spindle extension
-**Document role:** Product source of truth
+  **Document role:** Product source of truth
 
 ## 1. Purpose
 

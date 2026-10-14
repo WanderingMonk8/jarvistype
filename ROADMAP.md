@@ -282,7 +282,7 @@ Create an installable Spindle extension shell with dependable frontend/backend l
 
 ### Status
 
-In progress. Version `0.8.0` implements the local Phase 2 feature set and quality gate; hosted Lumiverse verification remains before the exit gate can close.
+Complete as of 2026-10-14. Version `0.8.0` passed the complete local quality gate and all six hosted verification groups on Lumiverse 1.2.5.
 
 ### Objective
 

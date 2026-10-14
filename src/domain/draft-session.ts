@@ -1,6 +1,7 @@
-export const DRAFT_SCHEMA_VERSION = 1 as const
+export const DRAFT_SCHEMA_VERSION = 2 as const
 export const MAX_DRAFT_CHARACTERS = 100_000
 export const MAX_HISTORY_ENTRIES = 200
+export const MAX_RECORDING_SEGMENTS = 200
 
 export interface DraftParagraph {
   id: string
@@ -18,12 +19,22 @@ export interface DraftDiff {
 
 export interface DraftHistoryEntry {
   id: string
-  kind: 'manual-edit' | 'undo'
+  kind: 'manual-edit' | 'undo' | 'recording-append' | 'recording-undo'
   editGroupId?: string
   beforeVersion: number
   afterVersion: number
   timestamp: string
   diff: DraftDiff
+}
+
+export interface RecordingSegment {
+  id: string
+  rawTranscript: string
+  committedText: string
+  startOffset: number
+  beforeVersion: number
+  resultingVersion: number
+  committedAt: string
 }
 
 export interface DraftSnapshot {
@@ -34,6 +45,8 @@ export interface DraftSnapshot {
   history: DraftHistoryEntry[]
   latestDiff: DraftDiff | null
   canUndo: boolean
+  recordingSegments: RecordingSegment[]
+  canUndoRecording: boolean
   dirty: boolean
   updatedAt: string
 }
@@ -70,6 +83,8 @@ export function createDraftSession(
     latestDiff: null,
     undoStack: [],
     canUndo: false,
+    recordingSegments: [],
+    canUndoRecording: false,
     dirty: false,
     updatedAt: now,
   }
@@ -135,6 +150,7 @@ export function applyManualEdit(
       latestDiff: diff,
       undoStack,
       canUndo: undoStack.length > 0,
+      canUndoRecording: canUndoLatestRecording(session, nextText, undoStack),
       dirty: nextText.length > 0,
       updatedAt: now,
     },
@@ -155,6 +171,12 @@ export function undoLatestDraftMutation(
 
   const nextVersion = session.draftVersion + 1
   const diff = createDiff(session.cleanText, previousText)
+  const lastHistory = session.history.at(-1)
+  const recordingSegments =
+    lastHistory?.kind === 'recording-append'
+      ? session.recordingSegments.slice(0, -1)
+      : session.recordingSegments
+  const undoStack = session.undoStack.slice(0, -1)
   return {
     applied: true,
     session: {
@@ -174,8 +196,14 @@ export function undoLatestDraftMutation(
         },
       ].slice(-MAX_HISTORY_ENTRIES),
       latestDiff: diff,
-      undoStack: session.undoStack.slice(0, -1),
-      canUndo: session.undoStack.length > 1,
+      undoStack,
+      canUndo: undoStack.length > 0,
+      recordingSegments,
+      canUndoRecording: canUndoLatestRecording(
+        { ...session, recordingSegments },
+        previousText,
+        undoStack,
+      ),
       dirty: previousText.length > 0,
       updatedAt: now,
     },
@@ -198,9 +226,154 @@ export function toDraftSnapshot(session: PersistedDraftSession): DraftSnapshot {
     history: session.history,
     latestDiff: session.latestDiff,
     canUndo: session.canUndo,
+    recordingSegments: session.recordingSegments,
+    canUndoRecording: session.canUndoRecording,
     dirty: session.dirty,
     updatedAt: session.updatedAt,
   }
+}
+
+export interface RecordingMutationOptions {
+  expectedVersion: number
+  segmentId: string
+  now?: string
+  createId?: () => string
+}
+
+export function appendRecordingTranscript(
+  session: PersistedDraftSession,
+  rawTranscript: string,
+  options: RecordingMutationOptions,
+): DraftMutationResult {
+  if (session.recordingSegments.some((segment) => segment.id === options.segmentId)) {
+    return { applied: false, reason: 'unchanged', session }
+  }
+  if (options.expectedVersion !== session.draftVersion) {
+    return { applied: false, reason: 'stale-version', session }
+  }
+  if (rawTranscript.trim().length === 0) {
+    return { applied: false, reason: 'unchanged', session }
+  }
+
+  const nextText = joinRecordingTranscript(session.cleanText, rawTranscript)
+  if (nextText.length > MAX_DRAFT_CHARACTERS) {
+    return { applied: false, reason: 'too-large', session }
+  }
+
+  const now = options.now ?? new Date().toISOString()
+  const createId = options.createId ?? defaultId
+  const nextVersion = session.draftVersion + 1
+  const diff = createDiff(session.cleanText, nextText)
+  const committedText = nextText.slice(session.cleanText.length)
+  const recordingSegments = [
+    ...session.recordingSegments,
+    {
+      id: options.segmentId,
+      rawTranscript,
+      committedText,
+      startOffset: session.cleanText.length,
+      beforeVersion: session.draftVersion,
+      resultingVersion: nextVersion,
+      committedAt: now,
+    },
+  ].slice(-MAX_RECORDING_SEGMENTS)
+  const undoStack = [...session.undoStack, session.cleanText].slice(-MAX_HISTORY_ENTRIES)
+
+  return {
+    applied: true,
+    session: {
+      ...session,
+      draftVersion: nextVersion,
+      cleanText: nextText,
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      history: [
+        ...session.history,
+        {
+          id: createId(),
+          kind: 'recording-append' as const,
+          beforeVersion: session.draftVersion,
+          afterVersion: nextVersion,
+          timestamp: now,
+          diff,
+        },
+      ].slice(-MAX_HISTORY_ENTRIES),
+      latestDiff: diff,
+      undoStack,
+      canUndo: true,
+      recordingSegments,
+      canUndoRecording: true,
+      dirty: true,
+      updatedAt: now,
+    },
+  }
+}
+
+export function undoLastRecording(
+  session: PersistedDraftSession,
+  expectedVersion: number,
+  now = new Date().toISOString(),
+  createId: () => string = defaultId,
+): DraftMutationResult {
+  if (expectedVersion !== session.draftVersion) {
+    return { applied: false, reason: 'stale-version', session }
+  }
+  if (!session.canUndoRecording) return { applied: false, reason: 'unchanged', session }
+  const segment = session.recordingSegments.at(-1)
+  if (!segment) return { applied: false, reason: 'unchanged', session }
+
+  const nextText = session.cleanText.slice(0, segment.startOffset)
+  const nextVersion = session.draftVersion + 1
+  const diff = createDiff(session.cleanText, nextText)
+  const recordingSegments = session.recordingSegments.slice(0, -1)
+  const undoStack = session.undoStack.slice(0, -1)
+  return {
+    applied: true,
+    session: {
+      ...session,
+      draftVersion: nextVersion,
+      cleanText: nextText,
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      history: [
+        ...session.history,
+        {
+          id: createId(),
+          kind: 'recording-undo' as const,
+          beforeVersion: session.draftVersion,
+          afterVersion: nextVersion,
+          timestamp: now,
+          diff,
+        },
+      ].slice(-MAX_HISTORY_ENTRIES),
+      latestDiff: diff,
+      undoStack,
+      canUndo: undoStack.length > 0,
+      recordingSegments,
+      canUndoRecording: canUndoLatestRecording(
+        { ...session, recordingSegments },
+        nextText,
+        undoStack,
+      ),
+      dirty: nextText.length > 0,
+      updatedAt: now,
+    },
+  }
+}
+
+export function joinRecordingTranscript(existing: string, transcript: string): string {
+  if (existing.length === 0) return transcript
+  if (transcript.length === 0) return existing
+
+  const existingEndsWithLineBreak = /[\r\n]$/.test(existing)
+  const transcriptStartsWithLineBreak = /^[\r\n]/.test(transcript)
+  if (existingEndsWithLineBreak || transcriptStartsWithLineBreak) return existing + transcript
+
+  const trailingHorizontal = existing.match(/[\t ]+$/)?.[0] ?? ''
+  const leadingHorizontal = transcript.match(/^[\t ]+/)?.[0] ?? ''
+  if (trailingHorizontal && leadingHorizontal) {
+    return existing + transcript.slice(leadingHorizontal.length)
+  }
+  if (trailingHorizontal || leadingHorizontal) return existing + transcript
+  return `${existing} ${transcript}`
 }
 
 export function isPersistedDraftSession(
@@ -227,9 +400,33 @@ export function isPersistedDraftSession(
     ) &&
     typeof value.canUndo === 'boolean' &&
     value.canUndo === value.undoStack.length > 0 &&
+    Array.isArray(value.recordingSegments) &&
+    value.recordingSegments.length <= MAX_RECORDING_SEGMENTS &&
+    value.recordingSegments.every(isRecordingSegment) &&
+    typeof value.canUndoRecording === 'boolean' &&
+    value.canUndoRecording ===
+      canUndoLatestRecording(
+        value as unknown as PersistedDraftSession,
+        value.cleanText,
+        value.undoStack,
+      ) &&
     typeof value.dirty === 'boolean' &&
     typeof value.updatedAt === 'string'
   )
+}
+
+export function restoreDraftSession(
+  value: unknown,
+  expectedChatId: string,
+): PersistedDraftSession | null {
+  if (isPersistedDraftSession(value, expectedChatId)) return value
+  if (!isLegacyDraftSession(value, expectedChatId)) return null
+  return {
+    ...value,
+    schemaVersion: DRAFT_SCHEMA_VERSION,
+    recordingSegments: [],
+    canUndoRecording: false,
+  }
 }
 
 export function createDiff(before: string, after: string): DraftDiff {
@@ -352,12 +549,86 @@ function isHistoryEntry(value: unknown): value is DraftHistoryEntry {
   if (!isRecord(value)) return false
   return (
     typeof value.id === 'string' &&
-    (value.kind === 'manual-edit' || value.kind === 'undo') &&
+    (value.kind === 'manual-edit' ||
+      value.kind === 'undo' ||
+      value.kind === 'recording-append' ||
+      value.kind === 'recording-undo') &&
     (value.editGroupId === undefined || typeof value.editGroupId === 'string') &&
     isNonNegativeInteger(value.beforeVersion) &&
     isPositiveInteger(value.afterVersion) &&
     typeof value.timestamp === 'string' &&
     isDraftDiff(value.diff)
+  )
+}
+
+function isRecordingSegment(value: unknown): value is RecordingSegment {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.id === 'string' &&
+    value.id.length > 0 &&
+    typeof value.rawTranscript === 'string' &&
+    value.rawTranscript.trim().length > 0 &&
+    typeof value.committedText === 'string' &&
+    value.committedText.length > 0 &&
+    isNonNegativeInteger(value.startOffset) &&
+    isNonNegativeInteger(value.beforeVersion) &&
+    isPositiveInteger(value.resultingVersion) &&
+    value.resultingVersion === value.beforeVersion + 1 &&
+    typeof value.committedAt === 'string'
+  )
+}
+
+function isLegacyDraftSession(
+  value: unknown,
+  expectedChatId: string,
+): value is Omit<
+  PersistedDraftSession,
+  'schemaVersion' | 'recordingSegments' | 'canUndoRecording'
+> & {
+  schemaVersion: 1
+} {
+  if (!isRecord(value)) return false
+  return (
+    value.schemaVersion === 1 &&
+    value.chatId === expectedChatId &&
+    isNonNegativeInteger(value.draftVersion) &&
+    typeof value.cleanText === 'string' &&
+    value.cleanText.length <= MAX_DRAFT_CHARACTERS &&
+    Array.isArray(value.paragraphs) &&
+    value.paragraphs.every(isDraftParagraph) &&
+    Array.isArray(value.history) &&
+    value.history.length <= MAX_HISTORY_ENTRIES &&
+    value.history.every(
+      (entry) =>
+        isRecord(entry) &&
+        (entry.kind === 'manual-edit' || entry.kind === 'undo') &&
+        isHistoryEntry(entry),
+    ) &&
+    (value.latestDiff === null || isDraftDiff(value.latestDiff)) &&
+    Array.isArray(value.undoStack) &&
+    value.undoStack.length <= MAX_HISTORY_ENTRIES &&
+    value.undoStack.every(
+      (text) => typeof text === 'string' && text.length <= MAX_DRAFT_CHARACTERS,
+    ) &&
+    typeof value.canUndo === 'boolean' &&
+    value.canUndo === value.undoStack.length > 0 &&
+    typeof value.dirty === 'boolean' &&
+    typeof value.updatedAt === 'string'
+  )
+}
+
+function canUndoLatestRecording(
+  session: Pick<PersistedDraftSession, 'recordingSegments'>,
+  cleanText: string,
+  undoStack: string[],
+): boolean {
+  const segment = session.recordingSegments.at(-1)
+  if (!segment) return false
+  const beforeText = cleanText.slice(0, segment.startOffset)
+  return (
+    segment.startOffset + segment.committedText.length === cleanText.length &&
+    cleanText.slice(segment.startOffset) === segment.committedText &&
+    undoStack.at(-1) === beforeText
   )
 }
 

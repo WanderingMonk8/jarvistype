@@ -1,13 +1,13 @@
 import type { DraftSnapshot } from '../domain/draft-session'
 
-export const PROTOCOL_VERSION = 2 as const
-export const APP_VERSION = '0.8.0'
+export const PROTOCOL_VERSION = 3 as const
+export const APP_VERSION = '0.9.0'
 export const REQUEST_TIMEOUT_MS = 15_000
 export const SEND_TIMEOUT_MS = 120_000
 
-export const PHASE_TWO_PERMISSIONS = ['media', 'chats', 'chat_mutation', 'generation'] as const
+export const PHASE_THREE_PERMISSIONS = ['media', 'chats', 'chat_mutation', 'generation'] as const
 
-export type PermissionName = (typeof PHASE_TWO_PERMISSIONS)[number]
+export type PermissionName = (typeof PHASE_THREE_PERMISSIONS)[number]
 
 export interface PermissionSnapshot {
   declared: PermissionName[]
@@ -43,6 +43,19 @@ export type FrontendRequest =
     })
   | (RequestEnvelope & {
       type: 'draft.undo.request'
+      operationId: string
+      chatId: string
+      expectedVersion: number
+    })
+  | (RequestEnvelope & {
+      type: 'draft.recording.append.request'
+      operationId: string
+      chatId: string
+      expectedVersion: number
+      rawTranscript: string
+    })
+  | (RequestEnvelope & {
+      type: 'draft.recording.undo.request'
       operationId: string
       chatId: string
       expectedVersion: number
@@ -102,6 +115,8 @@ export type AppErrorCode =
   | 'DRAFT_TOO_LARGE'
   | 'DRAFT_EMPTY'
   | 'DRAFT_PERSIST_FAILED'
+  | 'TRANSCRIPT_EMPTY'
+  | 'RECORDING_UNDO_CONFLICT'
   | 'CHAT_MISMATCH'
   | 'PERMISSION_DENIED'
   | 'SEND_FAILED'

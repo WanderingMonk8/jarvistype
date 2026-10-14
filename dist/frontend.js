@@ -1,6 +1,7 @@
 // src/domain/draft-session.ts
 var MAX_DRAFT_CHARACTERS = 1e5;
 var MAX_HISTORY_ENTRIES = 200;
+var MAX_RECORDING_SEGMENTS = 200;
 
 // src/domain/request-registry.ts
 var RequestRegistry = class {
@@ -45,11 +46,11 @@ var RequestRegistry = class {
 };
 
 // src/protocol/messages.ts
-var PROTOCOL_VERSION = 2;
-var APP_VERSION = "0.8.0";
+var PROTOCOL_VERSION = 3;
+var APP_VERSION = "0.9.0";
 var REQUEST_TIMEOUT_MS = 15e3;
 var SEND_TIMEOUT_MS = 12e4;
-var PHASE_TWO_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
+var PHASE_THREE_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 function createRequestId(prefix = "request") {
   return `${prefix}-${Date.now().toString(36)}-${crypto.randomUUID()}`;
 }
@@ -63,6 +64,8 @@ var ERROR_CODES = [
   "DRAFT_TOO_LARGE",
   "DRAFT_EMPTY",
   "DRAFT_PERSIST_FAILED",
+  "TRANSCRIPT_EMPTY",
+  "RECORDING_UNDO_CONFLICT",
   "CHAT_MISMATCH",
   "PERMISSION_DENIED",
   "SEND_FAILED"
@@ -88,18 +91,21 @@ function isBackendResponse(value) {
 }
 function sanitizeGrantedPermissions(granted) {
   return {
-    declared: [...PHASE_TWO_PERMISSIONS],
-    granted: PHASE_TWO_PERMISSIONS.filter((permission) => granted.includes(permission))
+    declared: [...PHASE_THREE_PERMISSIONS],
+    granted: PHASE_THREE_PERMISSIONS.filter((permission) => granted.includes(permission))
   };
 }
 function isDraftSnapshot(value) {
   if (!isRecord(value)) return false;
   return isIdentifier(value.chatId) && isNonNegativeInteger(value.draftVersion) && typeof value.cleanText === "string" && value.cleanText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.paragraphs) && value.paragraphs.every(
     (paragraph) => isRecord(paragraph) && isIdentifier(paragraph.id) && isPositiveInteger(paragraph.ordinal) && isNonNegativeInteger(paragraph.lineIndex) && typeof paragraph.text === "string" && paragraph.text.trim().length > 0
-  ) && Array.isArray(value.history) && value.history.length <= MAX_HISTORY_ENTRIES && value.history.every(isHistoryEntry) && (value.latestDiff === null || isDiff(value.latestDiff)) && typeof value.canUndo === "boolean" && typeof value.dirty === "boolean" && isBoundedString(value.updatedAt, 1, 128);
+  ) && Array.isArray(value.history) && value.history.length <= MAX_HISTORY_ENTRIES && value.history.every(isHistoryEntry) && (value.latestDiff === null || isDiff(value.latestDiff)) && typeof value.canUndo === "boolean" && Array.isArray(value.recordingSegments) && value.recordingSegments.length <= MAX_RECORDING_SEGMENTS && value.recordingSegments.every(isRecordingSegment) && typeof value.canUndoRecording === "boolean" && typeof value.dirty === "boolean" && isBoundedString(value.updatedAt, 1, 128);
 }
 function isHistoryEntry(value) {
-  return isRecord(value) && isIdentifier(value.id) && (value.kind === "manual-edit" || value.kind === "undo") && (value.editGroupId === void 0 || isIdentifier(value.editGroupId)) && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.afterVersion) && isBoundedString(value.timestamp, 1, 128) && isDiff(value.diff);
+  return isRecord(value) && isIdentifier(value.id) && (value.kind === "manual-edit" || value.kind === "undo" || value.kind === "recording-append" || value.kind === "recording-undo") && (value.editGroupId === void 0 || isIdentifier(value.editGroupId)) && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.afterVersion) && isBoundedString(value.timestamp, 1, 128) && isDiff(value.diff);
+}
+function isRecordingSegment(value) {
+  return isRecord(value) && isIdentifier(value.id) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) && isBoundedString(value.committedText, 1, MAX_DRAFT_CHARACTERS) && isNonNegativeInteger(value.startOffset) && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.resultingVersion) && value.resultingVersion === value.beforeVersion + 1 && isBoundedString(value.committedAt, 1, 128);
 }
 function isDiff(value) {
   return isRecord(value) && typeof value.removed === "string" && typeof value.added === "string" && value.removed.length <= MAX_DRAFT_CHARACTERS && value.added.length <= MAX_DRAFT_CHARACTERS && isNonNegativeInteger(value.startOffset) && Array.isArray(value.affectedParagraphOrdinals) && value.affectedParagraphOrdinals.every(isPositiveInteger);
@@ -108,7 +114,7 @@ function isPermissionSnapshot(value) {
   if (!isRecord(value) || !Array.isArray(value.declared) || !Array.isArray(value.granted)) {
     return false;
   }
-  return value.declared.length === PHASE_TWO_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_TWO_PERMISSIONS[index]) && value.granted.length <= PHASE_TWO_PERMISSIONS.length && value.granted.every((permission) => PHASE_TWO_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
+  return value.declared.length === PHASE_THREE_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_THREE_PERMISSIONS[index]) && value.granted.length <= PHASE_THREE_PERMISSIONS.length && value.granted.every((permission) => PHASE_THREE_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function hasEnvelope(value) {
   return isRecord(value) && value.protocolVersion === PROTOCOL_VERSION && isBoundedString(value.type, 1, 128) && isIdentifier(value.requestId);
@@ -130,6 +136,7 @@ function isPositiveInteger(value) {
 }
 
 // src/frontend.ts
+var MAX_RECORDING_DURATION_MS = 5 * 60 * 1e3;
 function setup(ctx) {
   ctx.deferReady();
   const tab = ctx.ui.registerDrawerTab({
@@ -157,6 +164,18 @@ function setup(ctx) {
   const editor = requireElement(tab.root, "[data-draft-editor]");
   const draftMeta = requireElement(tab.root, "[data-draft-meta]");
   const paragraphList = requireElement(tab.root, "[data-paragraph-list]");
+  const recordButton = requireElement(tab.root, "[data-record-message]");
+  const cancelRecordingButton = requireElement(
+    tab.root,
+    "[data-cancel-recording]"
+  );
+  const undoRecordingButton = requireElement(tab.root, "[data-undo-recording]");
+  const voiceStatus = requireElement(tab.root, "[data-voice-status]");
+  const voiceElapsed = requireElement(tab.root, "[data-voice-elapsed]");
+  const voiceProvider = requireElement(tab.root, "[data-voice-provider]");
+  const voiceProvisional = requireElement(tab.root, "[data-voice-provisional]");
+  const voiceFinal = requireElement(tab.root, "[data-voice-final]");
+  const voiceSegmentCount = requireElement(tab.root, "[data-voice-segment-count]");
   const diffPanel = requireElement(tab.root, "[data-diff-panel]");
   const diffParagraphs = requireElement(tab.root, "[data-diff-paragraphs]");
   const diffRemoved = requireElement(tab.root, "[data-diff-removed]");
@@ -182,7 +201,13 @@ function setup(ctx) {
     automatedBusy: false,
     sending: false,
     sendOutcomeUnknown: false,
-    historyExpanded: false
+    historyExpanded: false,
+    voicePhase: "idle",
+    voiceElapsedMs: 0,
+    voiceProvider: null,
+    voiceProvisionalText: "",
+    voiceFinalText: "",
+    voiceMessage: "Ready to record a message segment."
   };
   let alive = true;
   let currentHealthRequestId = null;
@@ -191,6 +216,10 @@ function setup(ctx) {
   let editGroupId = null;
   let editGroupTimer = null;
   let sendFlowActive = false;
+  let activeRecording = null;
+  let recordingTimer = null;
+  let recordingDeadline = null;
+  let recordingStartedAt = 0;
   const disposers = [];
   const sendCancellation = (requestId) => {
     if (!alive) return;
@@ -206,6 +235,8 @@ function setup(ctx) {
   const hasChatMismatch = () => Boolean(
     state.snapshot?.dirty && state.snapshot.chatId && state.activeChatId !== state.snapshot.chatId
   );
+  const hasNativeStt = () => Boolean((ctx.host.capabilities["speech-to-text-v1"] ?? 0) >= 1 && ctx.stt);
+  const voiceBusy = () => state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing" || state.voicePhase === "committing";
   const render = () => {
     backendStatus.textContent = state.backendState === "ready" ? "Ready" : state.backendState === "connecting" ? "Connecting\u2026" : "Unavailable";
     backendStatus.dataset.state = state.backendState;
@@ -219,7 +250,7 @@ function setup(ctx) {
     const mismatch = hasChatMismatch();
     mismatchNotice.hidden = !mismatch;
     switchDraftButton.hidden = !state.activeChatId || state.activeChatId === state.snapshot?.chatId;
-    const editorEnabled = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.automatedBusy && !state.sending;
+    const editorEnabled = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.automatedBusy && !state.sending && !voiceBusy();
     editor.disabled = !editorEnabled;
     draftMeta.textContent = state.snapshot ? `Version ${state.snapshot.draftVersion} \xB7 ${desiredText.length.toLocaleString()} / ${MAX_DRAFT_CHARACTERS.toLocaleString()} characters${state.saving ? " \xB7 Saving\u2026" : " \xB7 Saved"}` : "Draft not loaded";
     renderParagraphs(paragraphList, desiredText);
@@ -229,7 +260,21 @@ function setup(ctx) {
     historyButton.textContent = state.historyExpanded ? "Hide History" : "Show History";
     historyButton.disabled = !state.snapshot || state.snapshot.history.length === 0;
     undoButton.disabled = !editorEnabled || state.saving || !state.snapshot?.canUndo || desiredText !== state.snapshot.cleanText;
-    sendButton.disabled = !editorEnabled || state.saving || mismatch || desiredText.trim().length === 0 || desiredText !== state.snapshot?.cleanText || state.sendOutcomeUnknown || sendFlowActive;
+    const recordingOwnerReady = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.saving && !state.automatedBusy && !state.sending && !mismatch && state.activeChatId === state.snapshot.chatId && desiredText === state.snapshot.cleanText;
+    recordButton.textContent = state.voicePhase === "starting" || state.voicePhase === "recording" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Appending\u2026" : "Record Message";
+    recordButton.disabled = !hasNativeStt() || !recordingOwnerReady || state.voicePhase === "processing" || state.voicePhase === "committing";
+    cancelRecordingButton.hidden = !(state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing");
+    cancelRecordingButton.disabled = !activeRecording;
+    undoRecordingButton.disabled = !recordingOwnerReady || voiceBusy() || !state.snapshot?.canUndoRecording;
+    voiceStatus.textContent = state.voiceMessage;
+    voiceStatus.dataset.phase = state.voicePhase;
+    voiceElapsed.textContent = `Elapsed: ${formatDuration(state.voiceElapsedMs)}`;
+    voiceProvider.textContent = state.voiceProvider ? `Provider: ${state.voiceProvider}` : hasNativeStt() ? "Provider: Lumiverse selection" : "Speech-to-text unavailable on this host";
+    voiceProvisional.textContent = state.voiceProvisionalText || "No interim transcript received.";
+    voiceProvisional.hidden = state.voiceProvisionalText.length === 0;
+    voiceFinal.textContent = state.voiceFinalText || "No completed recording yet.";
+    voiceSegmentCount.textContent = `Committed recording segments: ${state.snapshot?.recordingSegments.length ?? 0}`;
+    sendButton.disabled = !editorEnabled || state.saving || mismatch || desiredText.trim().length === 0 || desiredText !== state.snapshot?.cleanText || state.sendOutcomeUnknown || sendFlowActive || voiceBusy();
   };
   const send = (request) => {
     if (alive) ctx.sendToBackend(request);
@@ -430,6 +475,230 @@ function setup(ctx) {
     }
     render();
   };
+  const clearRecordingTimers = () => {
+    if (recordingTimer) clearInterval(recordingTimer);
+    if (recordingDeadline) clearTimeout(recordingDeadline);
+    recordingTimer = null;
+    recordingDeadline = null;
+  };
+  const cancelActiveRecording = (message) => {
+    const recording = activeRecording;
+    if (!recording) return;
+    activeRecording = null;
+    clearRecordingTimers();
+    recording.session.cancel();
+    state.voicePhase = "idle";
+    state.voiceProvisionalText = "";
+    state.voiceMessage = message;
+    render();
+  };
+  const commitRecordingTranscript = async (rawTranscript, operationId, attempt = 0) => {
+    const snapshot = state.snapshot;
+    if (!snapshot || ctx.getActiveChat().chatId !== snapshot.chatId) {
+      state.voicePhase = "error";
+      state.voiceMessage = "The active chat changed before the transcript could be appended. No text was committed.";
+      render();
+      return;
+    }
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "draft.recording.append.request",
+      requestId: createRequestId("recording-append"),
+      operationId,
+      chatId: snapshot.chatId,
+      expectedVersion: snapshot.draftVersion,
+      rawTranscript
+    });
+    if (!alive) return;
+    if (outcome.status === "resolved" && outcome.value.type === "draft.snapshot.response") {
+      applySnapshot(outcome.value.snapshot, true);
+      if (outcome.value.outcome === "stale-version" && attempt === 0) {
+        state.voiceMessage = "Draft changed while transcribing; reconciling once\u2026";
+        render();
+        await commitRecordingTranscript(rawTranscript, operationId, 1);
+        return;
+      }
+      const committed = outcome.value.snapshot.recordingSegments.some(
+        (segment) => segment.id === operationId
+      );
+      state.voicePhase = committed ? "idle" : "error";
+      state.voiceMessage = committed ? "Final transcript appended to the end of the draft." : "The final transcript was not appended. The existing draft was preserved.";
+    } else if (outcome.status === "resolved" && outcome.value.type === "app.error") {
+      if (outcome.value.snapshot) applySnapshot(outcome.value.snapshot, true);
+      state.voicePhase = "error";
+      state.voiceMessage = outcome.value.message;
+    } else {
+      state.voicePhase = "error";
+      state.voiceMessage = "Transcript commit timed out. Reload this chat\u2019s draft before recording again.";
+    }
+    render();
+  };
+  const finishRecording = async (runId, transcript) => {
+    const recording = activeRecording;
+    if (!recording || recording.runId !== runId) return;
+    activeRecording = null;
+    clearRecordingTimers();
+    state.voiceElapsedMs = Math.max(0, Date.now() - recordingStartedAt);
+    state.voiceProvisionalText = "";
+    state.voiceFinalText = transcript.text;
+    state.voiceProvider = transcript.provider;
+    if (transcript.text.trim().length === 0) {
+      state.voicePhase = "error";
+      state.voiceMessage = "No usable speech was recognized. Nothing was appended.";
+      render();
+      return;
+    }
+    state.voicePhase = "committing";
+    state.voiceMessage = "Transcription complete. Appending the final segment\u2026";
+    render();
+    await commitRecordingTranscript(transcript.text, recording.operationId);
+  };
+  const failRecording = (runId, error) => {
+    if (activeRecording?.runId !== runId) return;
+    activeRecording = null;
+    clearRecordingTimers();
+    state.voiceProvisionalText = "";
+    state.voicePhase = "error";
+    state.voiceMessage = describeRecordingError(error);
+    render();
+  };
+  const stopActiveRecording = () => {
+    const recording = activeRecording;
+    if (!recording || state.voicePhase === "processing") return;
+    state.voicePhase = "processing";
+    state.voiceMessage = "Recording stopped. Waiting for the authoritative transcript\u2026";
+    render();
+    void recording.session.stop().catch(() => {
+    });
+  };
+  const startRecording = () => {
+    const stt = ctx.stt;
+    const snapshot = state.snapshot;
+    if (!stt || !hasNativeStt() || !snapshot) return;
+    const runId = createRequestId("recording-run");
+    const operationId = createRequestId("recording-segment");
+    const finalSegments = [];
+    try {
+      const session = stt.start({
+        continuous: true,
+        interimResults: true,
+        onStatus: (status) => {
+          if (activeRecording?.runId !== runId) return;
+          if (status.phase === "listening") {
+            state.voicePhase = "recording";
+            state.voiceMessage = "Recording\u2026 Speak naturally, then select Stop Recording.";
+          } else if (status.phase === "processing") {
+            state.voicePhase = "processing";
+            state.voiceMessage = "Transcribing the completed recording\u2026";
+          } else {
+            state.voiceMessage = "Preparing the configured speech-to-text provider\u2026";
+          }
+          render();
+        },
+        onResult: (result) => {
+          const current = activeRecording;
+          if (!current || current.runId !== runId) return;
+          if (result.isFinal) {
+            if (result.text) finalSegments.push(result.text);
+            current.interimText = "";
+          } else {
+            current.interimText = result.text;
+          }
+          state.voiceProvisionalText = joinTranscriptUpdates(finalSegments, current.interimText);
+          render();
+        }
+      });
+      activeRecording = {
+        runId,
+        operationId,
+        session,
+        finalSegments,
+        interimText: ""
+      };
+      recordingStartedAt = Date.now();
+      state.voicePhase = "starting";
+      state.voiceElapsedMs = 0;
+      state.voiceProvider = session.provider;
+      state.voiceProvisionalText = "";
+      state.voiceMessage = "Starting microphone capture\u2026";
+      recordingTimer = setInterval(() => {
+        if (!activeRecording || activeRecording.runId !== runId) return;
+        state.voiceElapsedMs = Date.now() - recordingStartedAt;
+        render();
+      }, 250);
+      recordingDeadline = setTimeout(() => {
+        if (activeRecording?.runId !== runId) return;
+        state.voiceMessage = "Five-minute recording limit reached. Finalizing\u2026";
+        stopActiveRecording();
+      }, MAX_RECORDING_DURATION_MS);
+      void session.ready.then(() => {
+        if (activeRecording?.runId !== runId || state.voicePhase === "processing") return;
+        state.voicePhase = "recording";
+        state.voiceMessage = "Recording\u2026 Speak naturally, then select Stop Recording.";
+        render();
+      }).catch((error) => failRecording(runId, error));
+      void session.result.then((transcript) => finishRecording(runId, transcript)).catch((error) => failRecording(runId, error));
+      render();
+    } catch (error) {
+      failRecording(runId, error);
+      if (!activeRecording) {
+        state.voicePhase = "error";
+        state.voiceMessage = describeRecordingError(error);
+        render();
+      }
+    }
+  };
+  const requestMediaPermission = async () => {
+    try {
+      const granted = await ctx.permissions.request(["media"], {
+        reason: "Record a user-initiated message segment through Lumiverse\u2019s configured speech-to-text provider."
+      });
+      state.permissions = sanitizeGrantedPermissions(granted);
+      state.voiceMessage = granted.includes("media") ? "Microphone permission is ready. Select Record Message again to begin." : "Media permission was not granted. No recording started.";
+    } catch {
+      state.voiceMessage = "Media permission was not granted. No recording started.";
+    }
+    render();
+  };
+  const handleRecordMessage = () => {
+    if (state.voicePhase === "starting" || state.voicePhase === "recording") {
+      stopActiveRecording();
+      return;
+    }
+    if (voiceBusy() || !state.snapshot || state.saving || state.activeChatId !== state.snapshot.chatId)
+      return;
+    if (!state.permissions.granted.includes("media")) {
+      void requestMediaPermission();
+      return;
+    }
+    startRecording();
+  };
+  const handleUndoRecording = async () => {
+    const snapshot = state.snapshot;
+    if (!snapshot?.canUndoRecording || voiceBusy() || state.saving) return;
+    state.automatedBusy = true;
+    state.voiceMessage = "Removing the most recently appended recording segment\u2026";
+    render();
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "draft.recording.undo.request",
+      requestId: createRequestId("recording-undo"),
+      operationId: createRequestId("recording-undo-operation"),
+      chatId: snapshot.chatId,
+      expectedVersion: snapshot.draftVersion
+    });
+    state.automatedBusy = false;
+    if (!alive) return;
+    if (outcome.status === "resolved" && outcome.value.type === "draft.snapshot.response") {
+      applySnapshot(outcome.value.snapshot, true);
+      state.voiceMessage = outcome.value.outcome === "applied" ? "Last recording segment removed; older content was preserved." : "The last recording can no longer be removed as one unchanged segment.";
+    } else if (outcome.status === "resolved" && outcome.value.type === "app.error") {
+      state.voiceMessage = outcome.value.message;
+    } else {
+      state.voiceMessage = "Recording undo timed out. The existing draft was preserved.";
+    }
+    render();
+  };
   const requestSendPermissions = async () => {
     const required = ["chats", "chat_mutation", "generation"];
     const missing = required.filter((permission) => !state.permissions.granted.includes(permission));
@@ -517,13 +786,31 @@ function setup(ctx) {
   });
   disposers.push(removeBackendListener);
   const refreshFromHost = () => void refreshHostState();
-  disposers.push(ctx.events.on("PERMISSION_CHANGED", refreshFromHost));
-  disposers.push(ctx.events.on("CHAT_SWITCHED", refreshFromHost));
+  const handlePermissionChange = () => {
+    if (activeRecording) {
+      cancelActiveRecording("Recording cancelled because permissions changed.");
+    }
+    void refreshHostState();
+  };
+  const handleChatSwitch = () => {
+    cancelActiveRecording("Recording cancelled because the active chat changed.");
+    void refreshHostState();
+  };
+  disposers.push(ctx.events.on("PERMISSION_CHANGED", handlePermissionChange));
+  disposers.push(ctx.events.on("CHAT_SWITCHED", handleChatSwitch));
+  disposers.push(
+    ctx.ui.events.onDrawerChange((drawer) => {
+      if (activeRecording && (!drawer.open || drawer.tabId !== tab.tabId)) {
+        cancelActiveRecording("Recording cancelled because JarvisType was closed.");
+      }
+    })
+  );
   disposers.push(tab.onActivate(refreshFromHost));
   disposers.push(inputAction.onClick(() => tab.activate()));
   const handleVisibility = () => {
     if (document.visibilityState === "visible") void refreshHostState();
   };
+  const handlePageHide = () => cancelActiveRecording("Recording cancelled because the page is closing.");
   const handleFocus = () => void refreshHostState();
   const handleRetry = () => void checkBackend();
   const handleSwitchDraft = () => {
@@ -534,12 +821,19 @@ function setup(ctx) {
     render();
   };
   const handleUndoClick = () => void handleUndo();
+  const handleRecordClick = () => handleRecordMessage();
+  const handleCancelRecordingClick = () => cancelActiveRecording("Recording cancelled. No transcript was appended.");
+  const handleUndoRecordingClick = () => void handleUndoRecording();
   const handleSendClick = () => void handleSend();
   document.addEventListener("visibilitychange", handleVisibility);
+  window.addEventListener("pagehide", handlePageHide);
   window.addEventListener("focus", handleFocus);
   retryButton.addEventListener("click", handleRetry);
   switchDraftButton.addEventListener("click", handleSwitchDraft);
   editor.addEventListener("input", handleEditorInput);
+  recordButton.addEventListener("click", handleRecordClick);
+  cancelRecordingButton.addEventListener("click", handleCancelRecordingClick);
+  undoRecordingButton.addEventListener("click", handleUndoRecordingClick);
   undoButton.addEventListener("click", handleUndoClick);
   historyButton.addEventListener("click", handleHistoryToggle);
   sendButton.addEventListener("click", handleSendClick);
@@ -551,15 +845,21 @@ function setup(ctx) {
     if (cleaned) return;
     cleaned = true;
     alive = false;
+    cancelActiveRecording("Recording cancelled during extension cleanup.");
+    clearRecordingTimers();
     if (editGroupTimer) clearTimeout(editGroupTimer);
     registry.cancelAll();
     sendRegistry.cancelAll();
     for (const dispose of disposers.splice(0)) dispose();
     document.removeEventListener("visibilitychange", handleVisibility);
+    window.removeEventListener("pagehide", handlePageHide);
     window.removeEventListener("focus", handleFocus);
     retryButton.removeEventListener("click", handleRetry);
     switchDraftButton.removeEventListener("click", handleSwitchDraft);
     editor.removeEventListener("input", handleEditorInput);
+    recordButton.removeEventListener("click", handleRecordClick);
+    cancelRecordingButton.removeEventListener("click", handleCancelRecordingClick);
+    undoRecordingButton.removeEventListener("click", handleUndoRecordingClick);
     undoButton.removeEventListener("click", handleUndoClick);
     historyButton.removeEventListener("click", handleHistoryToggle);
     sendButton.removeEventListener("click", handleSendClick);
@@ -613,11 +913,34 @@ function renderHistory(list, snapshot) {
   list.replaceChildren();
   for (const entry of snapshot?.history ?? []) {
     const item = document.createElement("li");
-    const kind = entry.kind === "undo" ? "Undo" : "Manual edit";
+    const kind = entry.kind === "undo" ? "Undo" : entry.kind === "recording-append" ? "Recording appended" : entry.kind === "recording-undo" ? "Recording removed" : "Manual edit";
     const affected = entry.diff.affectedParagraphOrdinals.length ? ` \xB7 paragraph ${entry.diff.affectedParagraphOrdinals.join(", ")}` : "";
     item.textContent = `${kind} \xB7 v${entry.beforeVersion} \u2192 v${entry.afterVersion}${affected}`;
     list.append(item);
   }
+}
+function joinTranscriptUpdates(finalSegments, interimText) {
+  return [...finalSegments, interimText].filter(Boolean).join(" ").trim();
+}
+function formatDuration(durationMs) {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1e3));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+function describeRecordingError(error) {
+  const name = error instanceof DOMException || error instanceof Error ? error.name : "";
+  if (name === "NotAllowedError") {
+    return "Microphone access was denied. No transcript was appended.";
+  }
+  if (name === "NotFoundError") {
+    return "No microphone is available. No transcript was appended.";
+  }
+  if (name === "NotReadableError") {
+    return "The microphone is unavailable or already in use. No transcript was appended.";
+  }
+  if (name === "AbortError") return "Recording cancelled. No transcript was appended.";
+  return "Speech transcription failed. No transcript was appended; you may record again.";
 }
 function grantLabel(granted, permission) {
   return granted.includes(permission) ? "granted" : "not granted";
@@ -667,6 +990,11 @@ function shellMarkup() {
       .jt-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
       .jt-shell button { min-height: 2.35rem; }
       .jt-shell button:disabled { cursor: not-allowed; opacity: .55; }
+      .jt-voice { display: grid; gap: .55rem; padding: .7rem; border-radius: .5rem; background: color-mix(in srgb, currentColor 6%, transparent); }
+      .jt-voice__meta { display: flex; flex-wrap: wrap; gap: .35rem 1rem; font-size: .8rem; opacity: .78; }
+      .jt-voice__transcript { min-height: 2.5rem; padding: .55rem; border-left: .2rem solid color-mix(in srgb, currentColor 35%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; }
+      .jt-voice__transcript--provisional { font-style: italic; opacity: .72; }
+      .jt-voice [data-phase="recording"] { color: #e53e3e; font-weight: 700; }
       .jt-diff { display: grid; gap: .4rem; padding: .65rem; border-radius: .5rem; background: color-mix(in srgb, currentColor 6%, transparent); }
       .jt-diff__line { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: .5rem; }
       .jt-diff del, .jt-diff ins { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -677,7 +1005,7 @@ function shellMarkup() {
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
-        <p class="jt-shell__eyebrow">Phase 2 draft foundation \xB7 v${APP_VERSION}</p>
+        <p class="jt-shell__eyebrow">Phase 3 voice composition \xB7 v${APP_VERSION}</p>
         <h2 id="jt-title">JarvisType</h2>
         <p>Compose privately, review every change, and send only when you confirm.</p>
       </header>
@@ -710,8 +1038,24 @@ function shellMarkup() {
         <h4>Numbered paragraphs</h4>
         <div class="jt-paragraphs" data-paragraph-list aria-live="polite"></div>
 
-        <div class="jt-actions" aria-label="Voice composition controls">
-          <button type="button" disabled>Record Message \xB7 Phase 3</button>
+        <section class="jt-voice" aria-labelledby="jt-voice-title">
+          <h4 id="jt-voice-title">Voice message segment</h4>
+          <p role="status" aria-live="polite" data-voice-status>Ready to record a message segment.</p>
+          <div class="jt-voice__meta">
+            <span data-voice-elapsed>Elapsed: 0:00</span>
+            <span data-voice-provider>Provider: Lumiverse selection</span>
+            <span data-voice-segment-count>Committed recording segments: 0</span>
+          </div>
+          <p class="jt-voice__transcript jt-voice__transcript--provisional" data-voice-provisional hidden></p>
+          <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
+          <div class="jt-actions" aria-label="Voice composition controls">
+            <button type="button" data-record-message disabled>Record Message</button>
+            <button type="button" data-cancel-recording hidden>Cancel Recording</button>
+            <button type="button" data-undo-recording disabled>Undo Last Recording</button>
+          </div>
+        </section>
+
+        <div class="jt-actions" aria-label="Editing voice controls">
           <button type="button" disabled>Record Edit \xB7 Phase 5</button>
         </div>
         <div class="jt-actions">

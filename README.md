@@ -93,7 +93,7 @@ Paragraph numbers, diff markers, segment metadata, and editing history are never
 
 The [Product Requirements Document](./PRD.md) is the source of truth for product behavior, scope, acceptance scenarios, platform constraints, privacy requirements, and unresolved decisions.
 
-The [Phase 0 Validation Register](./PHASE0-VALIDATION.md) records the completed feasibility evidence and known provider limitations. The [Phase 1 Validation Register](./PHASE1-VALIDATION.md) records the completed production-foundation exit gate. The [Phase 2 Validation Register](./PHASE2-VALIDATION.md) records the completed draft-lifecycle and safe-send exit gate.
+The [Phase 0 Validation Register](./PHASE0-VALIDATION.md) records the completed feasibility evidence and known provider limitations. The [Phase 1 Validation Register](./PHASE1-VALIDATION.md) records the completed production-foundation exit gate. The [Phase 2 Validation Register](./PHASE2-VALIDATION.md) records the completed draft-lifecycle and safe-send exit gate. The [Phase 3 Validation Register](./PHASE3-VALIDATION.md) tracks voice recording, transcription, sequential append, and recording cleanup.
 
 The [historical Lumiverse STT API Proposal](./LUMIVERSE-STT-API-PROPOSAL.md) records the backend contract proposed against Lumiverse 1.2.4. Lumiverse 1.2.5 instead shipped the official frontend [Speech-to-text API](https://docs.lumiverse.chat/frontend-api/speech-to-text/), which is now the primary integration target.
 
@@ -121,18 +121,18 @@ The validated primary placement is an extension-owned drawer opened from the inp
 
 ## Current development build
 
-Version `0.8.0` is the completed Phase 2 build. It adds:
+Version `0.9.0` is the Phase 3 hosted-test candidate. It retains the completed Phase 2 draft lifecycle and adds:
 
-- A backend-owned, per-user and per-chat persistent draft.
-- A keyboard-editable clean-text surface with presentation-only paragraph numbering.
-- Stable internal paragraph identities, versioned mutations, latest-change diff, grouped history, and undo.
-- Synchronous local buffering plus backend persistence for reload recovery.
-- Explicit draft ownership and blocking when the active chat differs.
-- Confirmation-only sending with `chats`, `chat_mutation`, and `generation` requested for the operation.
-- Duplicate-send suppression, normal response generation, success-only clearing, and failure retention.
-- Sixteen passing domain, protocol, request-lifecycle, persistence, and mocked-backend tests.
+- User-initiated host-managed recording through Lumiverse `ctx.stt.start(...)`.
+- Visible starting, recording, processing, committing, completion, cancellation, and error feedback with elapsed time.
+- Genuine interim transcript display when supplied by the provider and authoritative final-only display for batch providers.
+- A five-minute recording ceiling and cleanup on cancel, drawer close, chat switch, page exit, permission change, and teardown.
+- Ordered, idempotent final-transcript append with conservative boundary whitespace.
+- Persisted recording-segment metadata and **Undo Last Recording**.
+- Safe migration of existing Phase 2 draft storage.
+- Twenty-two passing domain, protocol, request-lifecycle, persistence, and mocked-backend tests.
 
-Record Message and Record Edit remain intentionally disabled until their later phases. See [PHASE2-VALIDATION.md](./PHASE2-VALIDATION.md) for the completed hosted verification record.
+Record Message is enabled when the active chat owns a saved draft and Lumiverse exposes `speech-to-text-v1`. Record Edit remains intentionally disabled until Phase 5. See [PHASE3-VALIDATION.md](./PHASE3-VALIDATION.md) for the hosted verification procedure.
 
 ## Historical Phase 0 remote capability probe
 

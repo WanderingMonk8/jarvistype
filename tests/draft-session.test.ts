@@ -2,9 +2,13 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  appendRecordingTranscript,
   applyManualEdit,
   createDraftSession,
+  joinRecordingTranscript,
+  restoreDraftSession,
   undoLatestDraftMutation,
+  undoLastRecording,
 } from '../src/domain/draft-session'
 
 function idSequence(...ids: string[]): () => string {
@@ -86,4 +90,82 @@ test('increments versions, rejects stale edits, groups typing, and undoes the gr
   assert.equal(undone.session.cleanText, '')
   assert.equal(undone.session.canUndo, false)
   assert.equal(undone.session.history.at(-1)?.kind, 'undo')
+})
+
+test('appends recordings in order with conservative boundary whitespace', () => {
+  const typed = applyManualEdit(createDraftSession('chat-voice'), 'Typed opening.', {
+    expectedVersion: 0,
+    editGroupId: 'typing',
+    createId: idSequence('typed-history', 'typed-paragraph'),
+  }).session
+  const first = appendRecordingTranscript(typed, 'First spoken segment.', {
+    expectedVersion: 1,
+    segmentId: 'segment-1',
+    now: '2026-10-14T10:00:00.000Z',
+    createId: idSequence('voice-paragraph-1', 'voice-history-1'),
+  }).session
+  const second = appendRecordingTranscript(first, '\nSecond spoken paragraph.\n', {
+    expectedVersion: 2,
+    segmentId: 'segment-2',
+    now: '2026-10-14T10:01:00.000Z',
+    createId: idSequence('voice-paragraph-2', 'voice-history-2'),
+  }).session
+
+  assert.equal(second.cleanText, 'Typed opening. First spoken segment.\nSecond spoken paragraph.\n')
+  assert.deepEqual(
+    second.recordingSegments.map((segment) => segment.id),
+    ['segment-1', 'segment-2'],
+  )
+  assert.equal(second.history.at(-1)?.kind, 'recording-append')
+  assert.equal(second.canUndoRecording, true)
+  assert.equal(joinRecordingTranscript('Hello ', ' world'), 'Hello world')
+  assert.equal(joinRecordingTranscript('Hello', 'world'), 'Hello world')
+  assert.equal(joinRecordingTranscript('Hello\n', '\nworld'), 'Hello\n\nworld')
+})
+
+test('undo last recording removes only that segment and supports the preceding segment', () => {
+  const base = applyManualEdit(createDraftSession('chat-voice'), 'Base', {
+    expectedVersion: 0,
+    editGroupId: 'typing',
+  }).session
+  const first = appendRecordingTranscript(base, 'One', {
+    expectedVersion: 1,
+    segmentId: 'segment-1',
+  }).session
+  const second = appendRecordingTranscript(first, 'Two', {
+    expectedVersion: 2,
+    segmentId: 'segment-2',
+  }).session
+  const undoSecond = undoLastRecording(second, 3)
+  const undoFirst = undoLastRecording(undoSecond.session, 4)
+
+  assert.equal(undoSecond.applied, true)
+  assert.equal(undoSecond.session.cleanText, 'Base One')
+  assert.equal(undoSecond.session.recordingSegments.length, 1)
+  assert.equal(undoSecond.session.canUndoRecording, true)
+  assert.equal(undoFirst.session.cleanText, 'Base')
+  assert.equal(undoFirst.session.recordingSegments.length, 0)
+  assert.equal(undoFirst.session.canUndoRecording, false)
+})
+
+test('deduplicates recording operation ids and migrates Phase 2 drafts', () => {
+  const first = appendRecordingTranscript(createDraftSession('chat-voice'), 'Once', {
+    expectedVersion: 0,
+    segmentId: 'segment-once',
+  }).session
+  const duplicate = appendRecordingTranscript(first, 'Once again', {
+    expectedVersion: 1,
+    segmentId: 'segment-once',
+  })
+  const legacySource = createDraftSession('legacy-chat')
+  const legacy = { ...legacySource, schemaVersion: 1 } as Record<string, unknown>
+  delete legacy.recordingSegments
+  delete legacy.canUndoRecording
+  const migrated = restoreDraftSession(legacy, 'legacy-chat')
+
+  assert.equal(duplicate.applied, false)
+  assert.equal(duplicate.session.cleanText, 'Once')
+  assert.equal(migrated?.schemaVersion, 2)
+  assert.deepEqual(migrated?.recordingSegments, [])
+  assert.equal(migrated?.canUndoRecording, false)
 })

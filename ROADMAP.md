@@ -357,6 +357,10 @@ Implement the complete extension-owned draft lifecycle before voice input, provi
 
 ## Phase 3: Voice recording, transcription, and sequential composition MVP
 
+### Status
+
+In progress. Version `0.9.0` implements the local Phase 3 feature set and quality gate; hosted Lumiverse verification remains before the exit gate can close.
+
 ### Objective
 
 Deliver bounded recording, genuine progressive display where supported, ordered sequential append, review, undo, and confirmed send.
@@ -380,11 +384,12 @@ Deliver bounded recording, genuine progressive display where supported, ordered 
 
 #### Upload and cleanup
 
-- Create a provider-supported recording file.
-- Keep provider credentials out of frontend code.
-- Show meaningful progress and bounded retry.
-- Prevent duplicate transcription on retry.
-- Delete uploads and release browser resources on every terminal path.
+- Use Lumiverse's host-managed `ctx.stt.start(...)` capture path; JarvisType does not create, upload, retain, or receive raw audio.
+- Keep provider credentials inside the user's configured Lumiverse connection.
+- Show host-reported loading, listening, and processing states plus elapsed time.
+- Reconcile a stale final-transcript commit at most once and deduplicate it by recording operation ID.
+- Cancel the host session on explicit cancellation, drawer close, chat switch, page exit, permission change, or extension teardown.
+- Require a fresh user-initiated recording after transcription failure because the host API does not expose captured audio for replay.
 
 #### STT adapter
 

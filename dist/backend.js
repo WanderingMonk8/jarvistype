@@ -1,7 +1,8 @@
 // src/domain/draft-session.ts
-var DRAFT_SCHEMA_VERSION = 1;
+var DRAFT_SCHEMA_VERSION = 2;
 var MAX_DRAFT_CHARACTERS = 1e5;
 var MAX_HISTORY_ENTRIES = 200;
+var MAX_RECORDING_SEGMENTS = 200;
 function createDraftSession(chatId, now = (/* @__PURE__ */ new Date()).toISOString()) {
   return {
     schemaVersion: DRAFT_SCHEMA_VERSION,
@@ -13,6 +14,8 @@ function createDraftSession(chatId, now = (/* @__PURE__ */ new Date()).toISOStri
     latestDiff: null,
     undoStack: [],
     canUndo: false,
+    recordingSegments: [],
+    canUndoRecording: false,
     dirty: false,
     updatedAt: now
   };
@@ -66,6 +69,7 @@ function applyManualEdit(session, nextText, options) {
       latestDiff: diff,
       undoStack,
       canUndo: undoStack.length > 0,
+      canUndoRecording: canUndoLatestRecording(session, nextText, undoStack),
       dirty: nextText.length > 0,
       updatedAt: now
     }
@@ -79,6 +83,9 @@ function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
   if (previousText === void 0) return { applied: false, reason: "unchanged", session };
   const nextVersion = session.draftVersion + 1;
   const diff = createDiff(session.cleanText, previousText);
+  const lastHistory = session.history.at(-1);
+  const recordingSegments = lastHistory?.kind === "recording-append" ? session.recordingSegments.slice(0, -1) : session.recordingSegments;
+  const undoStack = session.undoStack.slice(0, -1);
   return {
     applied: true,
     session: {
@@ -98,8 +105,14 @@ function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
         }
       ].slice(-MAX_HISTORY_ENTRIES),
       latestDiff: diff,
-      undoStack: session.undoStack.slice(0, -1),
-      canUndo: session.undoStack.length > 1,
+      undoStack,
+      canUndo: undoStack.length > 0,
+      recordingSegments,
+      canUndoRecording: canUndoLatestRecording(
+        { ...session, recordingSegments },
+        previousText,
+        undoStack
+      ),
       dirty: previousText.length > 0,
       updatedAt: now
     }
@@ -117,15 +130,149 @@ function toDraftSnapshot(session) {
     history: session.history,
     latestDiff: session.latestDiff,
     canUndo: session.canUndo,
+    recordingSegments: session.recordingSegments,
+    canUndoRecording: session.canUndoRecording,
     dirty: session.dirty,
     updatedAt: session.updatedAt
   };
+}
+function appendRecordingTranscript(session, rawTranscript, options) {
+  if (session.recordingSegments.some((segment) => segment.id === options.segmentId)) {
+    return { applied: false, reason: "unchanged", session };
+  }
+  if (options.expectedVersion !== session.draftVersion) {
+    return { applied: false, reason: "stale-version", session };
+  }
+  if (rawTranscript.trim().length === 0) {
+    return { applied: false, reason: "unchanged", session };
+  }
+  const nextText = joinRecordingTranscript(session.cleanText, rawTranscript);
+  if (nextText.length > MAX_DRAFT_CHARACTERS) {
+    return { applied: false, reason: "too-large", session };
+  }
+  const now = options.now ?? (/* @__PURE__ */ new Date()).toISOString();
+  const createId = options.createId ?? defaultId;
+  const nextVersion = session.draftVersion + 1;
+  const diff = createDiff(session.cleanText, nextText);
+  const committedText = nextText.slice(session.cleanText.length);
+  const recordingSegments = [
+    ...session.recordingSegments,
+    {
+      id: options.segmentId,
+      rawTranscript,
+      committedText,
+      startOffset: session.cleanText.length,
+      beforeVersion: session.draftVersion,
+      resultingVersion: nextVersion,
+      committedAt: now
+    }
+  ].slice(-MAX_RECORDING_SEGMENTS);
+  const undoStack = [...session.undoStack, session.cleanText].slice(-MAX_HISTORY_ENTRIES);
+  return {
+    applied: true,
+    session: {
+      ...session,
+      draftVersion: nextVersion,
+      cleanText: nextText,
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      history: [
+        ...session.history,
+        {
+          id: createId(),
+          kind: "recording-append",
+          beforeVersion: session.draftVersion,
+          afterVersion: nextVersion,
+          timestamp: now,
+          diff
+        }
+      ].slice(-MAX_HISTORY_ENTRIES),
+      latestDiff: diff,
+      undoStack,
+      canUndo: true,
+      recordingSegments,
+      canUndoRecording: true,
+      dirty: true,
+      updatedAt: now
+    }
+  };
+}
+function undoLastRecording(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId = defaultId) {
+  if (expectedVersion !== session.draftVersion) {
+    return { applied: false, reason: "stale-version", session };
+  }
+  if (!session.canUndoRecording) return { applied: false, reason: "unchanged", session };
+  const segment = session.recordingSegments.at(-1);
+  if (!segment) return { applied: false, reason: "unchanged", session };
+  const nextText = session.cleanText.slice(0, segment.startOffset);
+  const nextVersion = session.draftVersion + 1;
+  const diff = createDiff(session.cleanText, nextText);
+  const recordingSegments = session.recordingSegments.slice(0, -1);
+  const undoStack = session.undoStack.slice(0, -1);
+  return {
+    applied: true,
+    session: {
+      ...session,
+      draftVersion: nextVersion,
+      cleanText: nextText,
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      history: [
+        ...session.history,
+        {
+          id: createId(),
+          kind: "recording-undo",
+          beforeVersion: session.draftVersion,
+          afterVersion: nextVersion,
+          timestamp: now,
+          diff
+        }
+      ].slice(-MAX_HISTORY_ENTRIES),
+      latestDiff: diff,
+      undoStack,
+      canUndo: undoStack.length > 0,
+      recordingSegments,
+      canUndoRecording: canUndoLatestRecording(
+        { ...session, recordingSegments },
+        nextText,
+        undoStack
+      ),
+      dirty: nextText.length > 0,
+      updatedAt: now
+    }
+  };
+}
+function joinRecordingTranscript(existing, transcript) {
+  if (existing.length === 0) return transcript;
+  if (transcript.length === 0) return existing;
+  const existingEndsWithLineBreak = /[\r\n]$/.test(existing);
+  const transcriptStartsWithLineBreak = /^[\r\n]/.test(transcript);
+  if (existingEndsWithLineBreak || transcriptStartsWithLineBreak) return existing + transcript;
+  const trailingHorizontal = existing.match(/[\t ]+$/)?.[0] ?? "";
+  const leadingHorizontal = transcript.match(/^[\t ]+/)?.[0] ?? "";
+  if (trailingHorizontal && leadingHorizontal) {
+    return existing + transcript.slice(leadingHorizontal.length);
+  }
+  if (trailingHorizontal || leadingHorizontal) return existing + transcript;
+  return `${existing} ${transcript}`;
 }
 function isPersistedDraftSession(value, expectedChatId) {
   if (!isRecord(value)) return false;
   return value.schemaVersion === DRAFT_SCHEMA_VERSION && value.chatId === expectedChatId && isNonNegativeInteger(value.draftVersion) && typeof value.cleanText === "string" && value.cleanText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.paragraphs) && value.paragraphs.every(isDraftParagraph) && Array.isArray(value.history) && value.history.length <= MAX_HISTORY_ENTRIES && value.history.every(isHistoryEntry) && (value.latestDiff === null || isDraftDiff(value.latestDiff)) && Array.isArray(value.undoStack) && value.undoStack.length <= MAX_HISTORY_ENTRIES && value.undoStack.every(
     (text) => typeof text === "string" && text.length <= MAX_DRAFT_CHARACTERS
-  ) && typeof value.canUndo === "boolean" && value.canUndo === value.undoStack.length > 0 && typeof value.dirty === "boolean" && typeof value.updatedAt === "string";
+  ) && typeof value.canUndo === "boolean" && value.canUndo === value.undoStack.length > 0 && Array.isArray(value.recordingSegments) && value.recordingSegments.length <= MAX_RECORDING_SEGMENTS && value.recordingSegments.every(isRecordingSegment) && typeof value.canUndoRecording === "boolean" && value.canUndoRecording === canUndoLatestRecording(
+    value,
+    value.cleanText,
+    value.undoStack
+  ) && typeof value.dirty === "boolean" && typeof value.updatedAt === "string";
+}
+function restoreDraftSession(value, expectedChatId) {
+  if (isPersistedDraftSession(value, expectedChatId)) return value;
+  if (!isLegacyDraftSession(value, expectedChatId)) return null;
+  return {
+    ...value,
+    schemaVersion: DRAFT_SCHEMA_VERSION,
+    recordingSegments: [],
+    canUndoRecording: false
+  };
 }
 function createDiff(before, after) {
   let prefix = 0;
@@ -217,7 +364,25 @@ function isDraftParagraph(value) {
 }
 function isHistoryEntry(value) {
   if (!isRecord(value)) return false;
-  return typeof value.id === "string" && (value.kind === "manual-edit" || value.kind === "undo") && (value.editGroupId === void 0 || typeof value.editGroupId === "string") && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.afterVersion) && typeof value.timestamp === "string" && isDraftDiff(value.diff);
+  return typeof value.id === "string" && (value.kind === "manual-edit" || value.kind === "undo" || value.kind === "recording-append" || value.kind === "recording-undo") && (value.editGroupId === void 0 || typeof value.editGroupId === "string") && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.afterVersion) && typeof value.timestamp === "string" && isDraftDiff(value.diff);
+}
+function isRecordingSegment(value) {
+  if (!isRecord(value)) return false;
+  return typeof value.id === "string" && value.id.length > 0 && typeof value.rawTranscript === "string" && value.rawTranscript.trim().length > 0 && typeof value.committedText === "string" && value.committedText.length > 0 && isNonNegativeInteger(value.startOffset) && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.resultingVersion) && value.resultingVersion === value.beforeVersion + 1 && typeof value.committedAt === "string";
+}
+function isLegacyDraftSession(value, expectedChatId) {
+  if (!isRecord(value)) return false;
+  return value.schemaVersion === 1 && value.chatId === expectedChatId && isNonNegativeInteger(value.draftVersion) && typeof value.cleanText === "string" && value.cleanText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.paragraphs) && value.paragraphs.every(isDraftParagraph) && Array.isArray(value.history) && value.history.length <= MAX_HISTORY_ENTRIES && value.history.every(
+    (entry) => isRecord(entry) && (entry.kind === "manual-edit" || entry.kind === "undo") && isHistoryEntry(entry)
+  ) && (value.latestDiff === null || isDraftDiff(value.latestDiff)) && Array.isArray(value.undoStack) && value.undoStack.length <= MAX_HISTORY_ENTRIES && value.undoStack.every(
+    (text) => typeof text === "string" && text.length <= MAX_DRAFT_CHARACTERS
+  ) && typeof value.canUndo === "boolean" && value.canUndo === value.undoStack.length > 0 && typeof value.dirty === "boolean" && typeof value.updatedAt === "string";
+}
+function canUndoLatestRecording(session, cleanText, undoStack) {
+  const segment = session.recordingSegments.at(-1);
+  if (!segment) return false;
+  const beforeText = cleanText.slice(0, segment.startOffset);
+  return segment.startOffset + segment.committedText.length === cleanText.length && cleanText.slice(segment.startOffset) === segment.committedText && undoStack.at(-1) === beforeText;
 }
 function isDraftDiff(value) {
   if (!isRecord(value)) return false;
@@ -240,9 +405,9 @@ function defaultId() {
 }
 
 // src/protocol/messages.ts
-var PROTOCOL_VERSION = 2;
-var APP_VERSION = "0.8.0";
-var PHASE_TWO_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
+var PROTOCOL_VERSION = 3;
+var APP_VERSION = "0.9.0";
+var PHASE_THREE_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts
 function isFrontendRequest(value) {
@@ -258,12 +423,18 @@ function isFrontendRequest(value) {
   if (value.type === "draft.undo.request" || value.type === "draft.send.request") {
     return isIdentifier(value.operationId) && isIdentifier(value.chatId) && isNonNegativeInteger2(value.expectedVersion);
   }
+  if (value.type === "draft.recording.append.request") {
+    return isIdentifier(value.operationId) && isIdentifier(value.chatId) && isNonNegativeInteger2(value.expectedVersion) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS);
+  }
+  if (value.type === "draft.recording.undo.request") {
+    return isIdentifier(value.operationId) && isIdentifier(value.chatId) && isNonNegativeInteger2(value.expectedVersion);
+  }
   return false;
 }
 function sanitizeGrantedPermissions(granted) {
   return {
-    declared: [...PHASE_TWO_PERMISSIONS],
-    granted: PHASE_TWO_PERMISSIONS.filter((permission) => granted.includes(permission))
+    declared: [...PHASE_THREE_PERMISSIONS],
+    granted: PHASE_THREE_PERMISSIONS.filter((permission) => granted.includes(permission))
   };
 }
 function hasEnvelope(value) {
@@ -333,6 +504,10 @@ async function handleRequest(request, context) {
       await handleDraftMutation(request, context, activeRequest);
     } else if (request.type === "draft.undo.request") {
       await handleDraftUndo(request, context, activeRequest);
+    } else if (request.type === "draft.recording.append.request") {
+      await handleRecordingAppend(request, context, activeRequest);
+    } else if (request.type === "draft.recording.undo.request") {
+      await handleRecordingUndo(request, context, activeRequest);
     } else {
       await handleDraftSend(request, context);
     }
@@ -355,6 +530,95 @@ async function handleRequest(request, context) {
   } finally {
     activeRequests.delete(request.requestId);
   }
+}
+async function handleRecordingAppend(request, context, activeRequest) {
+  const result = await withDraftLock(context.userId, request.chatId, async () => {
+    const session = await loadDraft(context.userId, request.chatId);
+    if (!spindle.permissions.has("chats")) {
+      return { kind: "error", error: "permission", session };
+    }
+    const activeChat = await spindle.chats.getActive(context.userId);
+    if (!activeChat || activeChat.id !== request.chatId) {
+      return { kind: "error", error: "chat-mismatch", session };
+    }
+    const mutation = appendRecordingTranscript(session, request.rawTranscript, {
+      expectedVersion: request.expectedVersion,
+      segmentId: request.operationId
+    });
+    if (mutation.applied) await persistDraft(context.userId, mutation.session);
+    return { kind: "mutation", mutation };
+  });
+  if (activeRequest.cancelled) return;
+  if (result.kind === "error") {
+    sendDraftError(
+      request,
+      context,
+      result.error === "permission" ? "PERMISSION_DENIED" : "CHAT_MISMATCH",
+      result.error === "permission" ? "Chat access is required before a transcript can be appended." : "The active chat changed before transcription completed. Nothing was appended.",
+      result.session
+    );
+    return;
+  }
+  if (result.mutation.reason === "too-large") {
+    sendDraftError(
+      request,
+      context,
+      "DRAFT_TOO_LARGE",
+      "The transcript would exceed the safe draft size limit. It was not appended.",
+      result.mutation.session
+    );
+    return;
+  }
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "draft.snapshot.response",
+      requestId: request.requestId,
+      ok: true,
+      outcome: result.mutation.applied ? "applied" : result.mutation.reason === "stale-version" ? "stale-version" : "unchanged",
+      operationId: request.operationId,
+      snapshot: toDraftSnapshot(result.mutation.session)
+    },
+    context
+  );
+}
+async function handleRecordingUndo(request, context, activeRequest) {
+  const result = await withDraftLock(context.userId, request.chatId, async () => {
+    const session = await loadDraft(context.userId, request.chatId);
+    if (!spindle.permissions.has("chats")) {
+      return { kind: "error", error: "permission", session };
+    }
+    const activeChat = await spindle.chats.getActive(context.userId);
+    if (!activeChat || activeChat.id !== request.chatId) {
+      return { kind: "error", error: "chat-mismatch", session };
+    }
+    const mutation = undoLastRecording(session, request.expectedVersion);
+    if (mutation.applied) await persistDraft(context.userId, mutation.session);
+    return { kind: "mutation", mutation };
+  });
+  if (activeRequest.cancelled) return;
+  if (result.kind === "error") {
+    sendDraftError(
+      request,
+      context,
+      result.error === "permission" ? "PERMISSION_DENIED" : "CHAT_MISMATCH",
+      result.error === "permission" ? "Chat access is required before a recording segment can be removed." : "Return to the draft\u2019s owning chat before removing a recording segment.",
+      result.session
+    );
+    return;
+  }
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "draft.snapshot.response",
+      requestId: request.requestId,
+      ok: true,
+      outcome: result.mutation.applied ? "applied" : result.mutation.reason === "stale-version" ? "stale-version" : "unchanged",
+      operationId: request.operationId,
+      snapshot: toDraftSnapshot(result.mutation.session)
+    },
+    context
+  );
 }
 async function handleHealth(request, context, activeRequest) {
   const [backendVersion, frontendVersion, granted] = await Promise.all([
@@ -586,7 +850,7 @@ async function loadDraft(userId, chatId) {
     fallback: null,
     userId
   });
-  const session = isPersistedDraftSession(raw, chatId) ? raw : createDraftSession(chatId);
+  const session = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId);
   draftCache.set(key, session);
   return session;
 }
@@ -641,4 +905,4 @@ function draftPath(chatId) {
 function describeError(error) {
   return error instanceof Error ? error.message : String(error);
 }
-spindle.log.info("JarvisType Phase 2 draft service loaded");
+spindle.log.info("JarvisType Phase 3 voice composition service loaded");

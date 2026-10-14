@@ -186,6 +186,66 @@ test('retains the draft when Lumiverse rejects the send', async () => {
   }
 })
 
+test('commits recording segments once, in order, and undoes only the latest segment', async () => {
+  const userId = 'recording-user'
+  const chatId = 'recording-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Typed')
+  responses.length = 0
+
+  const first = recordingAppendRequest(chatId, 'segment-one', 1, 'First')
+  await dispatch(first, userId)
+  await dispatch({ ...first, requestId: 'duplicate-recording-request' }, userId)
+  await dispatch(recordingAppendRequest(chatId, 'segment-two', 2, 'Second'), userId)
+
+  const appendedResponse = responses.at(-1)?.payload
+  assert.equal(appendedResponse?.type, 'draft.snapshot.response')
+  if (appendedResponse?.type === 'draft.snapshot.response') {
+    assert.equal(appendedResponse.snapshot.cleanText, 'Typed First Second')
+    assert.deepEqual(
+      appendedResponse.snapshot.recordingSegments.map((segment) => segment.id),
+      ['segment-one', 'segment-two'],
+    )
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.recording.undo.request',
+      requestId: 'undo-recording-request',
+      operationId: 'undo-recording-operation',
+      chatId,
+      expectedVersion: 3,
+    },
+    userId,
+  )
+  const undoResponse = responses.at(-1)?.payload
+  assert.equal(undoResponse?.type, 'draft.snapshot.response')
+  if (undoResponse?.type === 'draft.snapshot.response') {
+    assert.equal(undoResponse.snapshot.cleanText, 'Typed First')
+    assert.equal(undoResponse.snapshot.recordingSegments.length, 1)
+    assert.equal(undoResponse.snapshot.canUndoRecording, true)
+  }
+})
+
+test('blocks recording commit after the active chat changes', async () => {
+  const userId = 'recording-mismatch-user'
+  const chatId = 'recording-owner-chat'
+  await seedDraft(userId, chatId, 'Preserve this')
+  responses.length = 0
+  activeChatId = 'different-recording-chat'
+
+  await dispatch(recordingAppendRequest(chatId, 'blocked-segment', 1, 'Do not append'), userId)
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'app.error')
+  if (response?.type === 'app.error') {
+    assert.equal(response.code, 'CHAT_MISMATCH')
+    assert.equal(response.snapshot?.cleanText, 'Preserve this')
+    assert.equal(response.snapshot?.recordingSegments.length, 0)
+  }
+})
+
 test('rejects malformed messages without replying', async () => {
   await dispatch({ type: 'untrusted' }, 'malformed-user')
   assert.equal(responses.length, 0)
@@ -216,6 +276,23 @@ function sendRequest(chatId: string, operationId: string) {
     operationId,
     chatId,
     expectedVersion: 1,
+  }
+}
+
+function recordingAppendRequest(
+  chatId: string,
+  operationId: string,
+  expectedVersion: number,
+  rawTranscript: string,
+) {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'draft.recording.append.request' as const,
+    requestId: `request-${operationId}`,
+    operationId,
+    chatId,
+    expectedVersion,
+    rawTranscript,
   }
 }
 

@@ -1,10 +1,11 @@
 import {
   MAX_DRAFT_CHARACTERS,
   MAX_HISTORY_ENTRIES,
+  MAX_RECORDING_SEGMENTS,
   type DraftSnapshot,
 } from '../domain/draft-session'
 import {
-  PHASE_TWO_PERMISSIONS,
+  PHASE_THREE_PERMISSIONS,
   PROTOCOL_VERSION,
   type AppErrorCode,
   type BackendResponse,
@@ -20,6 +21,8 @@ const ERROR_CODES: readonly AppErrorCode[] = [
   'DRAFT_TOO_LARGE',
   'DRAFT_EMPTY',
   'DRAFT_PERSIST_FAILED',
+  'TRANSCRIPT_EMPTY',
+  'RECORDING_UNDO_CONFLICT',
   'CHAT_MISMATCH',
   'PERMISSION_DENIED',
   'SEND_FAILED',
@@ -47,6 +50,21 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
     )
   }
   if (value.type === 'draft.undo.request' || value.type === 'draft.send.request') {
+    return (
+      isIdentifier(value.operationId) &&
+      isIdentifier(value.chatId) &&
+      isNonNegativeInteger(value.expectedVersion)
+    )
+  }
+  if (value.type === 'draft.recording.append.request') {
+    return (
+      isIdentifier(value.operationId) &&
+      isIdentifier(value.chatId) &&
+      isNonNegativeInteger(value.expectedVersion) &&
+      isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS)
+    )
+  }
+  if (value.type === 'draft.recording.undo.request') {
     return (
       isIdentifier(value.operationId) &&
       isIdentifier(value.chatId) &&
@@ -111,8 +129,8 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
 
 export function sanitizeGrantedPermissions(granted: readonly string[]): PermissionSnapshot {
   return {
-    declared: [...PHASE_TWO_PERMISSIONS],
-    granted: PHASE_TWO_PERMISSIONS.filter((permission) => granted.includes(permission)),
+    declared: [...PHASE_THREE_PERMISSIONS],
+    granted: PHASE_THREE_PERMISSIONS.filter((permission) => granted.includes(permission)),
   }
 }
 
@@ -138,6 +156,10 @@ function isDraftSnapshot(value: unknown): value is DraftSnapshot {
     value.history.every(isHistoryEntry) &&
     (value.latestDiff === null || isDiff(value.latestDiff)) &&
     typeof value.canUndo === 'boolean' &&
+    Array.isArray(value.recordingSegments) &&
+    value.recordingSegments.length <= MAX_RECORDING_SEGMENTS &&
+    value.recordingSegments.every(isRecordingSegment) &&
+    typeof value.canUndoRecording === 'boolean' &&
     typeof value.dirty === 'boolean' &&
     isBoundedString(value.updatedAt, 1, 128)
   )
@@ -147,12 +169,29 @@ function isHistoryEntry(value: unknown): boolean {
   return (
     isRecord(value) &&
     isIdentifier(value.id) &&
-    (value.kind === 'manual-edit' || value.kind === 'undo') &&
+    (value.kind === 'manual-edit' ||
+      value.kind === 'undo' ||
+      value.kind === 'recording-append' ||
+      value.kind === 'recording-undo') &&
     (value.editGroupId === undefined || isIdentifier(value.editGroupId)) &&
     isNonNegativeInteger(value.beforeVersion) &&
     isPositiveInteger(value.afterVersion) &&
     isBoundedString(value.timestamp, 1, 128) &&
     isDiff(value.diff)
+  )
+}
+
+function isRecordingSegment(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isIdentifier(value.id) &&
+    isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) &&
+    isBoundedString(value.committedText, 1, MAX_DRAFT_CHARACTERS) &&
+    isNonNegativeInteger(value.startOffset) &&
+    isNonNegativeInteger(value.beforeVersion) &&
+    isPositiveInteger(value.resultingVersion) &&
+    value.resultingVersion === value.beforeVersion + 1 &&
+    isBoundedString(value.committedAt, 1, 128)
   )
 }
 
@@ -174,10 +213,10 @@ function isPermissionSnapshot(value: unknown): value is PermissionSnapshot {
     return false
   }
   return (
-    value.declared.length === PHASE_TWO_PERMISSIONS.length &&
-    value.declared.every((permission, index) => permission === PHASE_TWO_PERMISSIONS[index]) &&
-    value.granted.length <= PHASE_TWO_PERMISSIONS.length &&
-    value.granted.every((permission) => PHASE_TWO_PERMISSIONS.includes(permission)) &&
+    value.declared.length === PHASE_THREE_PERMISSIONS.length &&
+    value.declared.every((permission, index) => permission === PHASE_THREE_PERMISSIONS[index]) &&
+    value.granted.length <= PHASE_THREE_PERMISSIONS.length &&
+    value.granted.every((permission) => PHASE_THREE_PERMISSIONS.includes(permission)) &&
     new Set(value.granted).size === value.granted.length
   )
 }

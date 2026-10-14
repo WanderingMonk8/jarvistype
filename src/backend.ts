@@ -1,12 +1,14 @@
 import type { SpindleAPI } from 'lumiverse-spindle-types'
 
 import {
+  appendRecordingTranscript,
   applyManualEdit,
   clearDraftAfterSend,
   createDraftSession,
-  isPersistedDraftSession,
+  restoreDraftSession,
   toDraftSnapshot,
   undoLatestDraftMutation,
+  undoLastRecording,
   type PersistedDraftSession,
 } from './domain/draft-session'
 import {
@@ -89,6 +91,10 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
       await handleDraftMutation(request, context, activeRequest)
     } else if (request.type === 'draft.undo.request') {
       await handleDraftUndo(request, context, activeRequest)
+    } else if (request.type === 'draft.recording.append.request') {
+      await handleRecordingAppend(request, context, activeRequest)
+    } else if (request.type === 'draft.recording.undo.request') {
+      await handleRecordingUndo(request, context, activeRequest)
     } else {
       await handleDraftSend(request, context)
     }
@@ -111,6 +117,117 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
   } finally {
     activeRequests.delete(request.requestId)
   }
+}
+
+async function handleRecordingAppend(
+  request: Extract<FrontendRequest, { type: 'draft.recording.append.request' }>,
+  context: RequestContext,
+  activeRequest: ActiveRequest,
+): Promise<void> {
+  const result = await withDraftLock(context.userId, request.chatId, async () => {
+    const session = await loadDraft(context.userId, request.chatId)
+    if (!spindle.permissions.has('chats')) {
+      return { kind: 'error' as const, error: 'permission' as const, session }
+    }
+    const activeChat = await spindle.chats.getActive(context.userId)
+    if (!activeChat || activeChat.id !== request.chatId) {
+      return { kind: 'error' as const, error: 'chat-mismatch' as const, session }
+    }
+    const mutation = appendRecordingTranscript(session, request.rawTranscript, {
+      expectedVersion: request.expectedVersion,
+      segmentId: request.operationId,
+    })
+    if (mutation.applied) await persistDraft(context.userId, mutation.session)
+    return { kind: 'mutation' as const, mutation }
+  })
+  if (activeRequest.cancelled) return
+  if (result.kind === 'error') {
+    sendDraftError(
+      request,
+      context,
+      result.error === 'permission' ? 'PERMISSION_DENIED' : 'CHAT_MISMATCH',
+      result.error === 'permission'
+        ? 'Chat access is required before a transcript can be appended.'
+        : 'The active chat changed before transcription completed. Nothing was appended.',
+      result.session,
+    )
+    return
+  }
+  if (result.mutation.reason === 'too-large') {
+    sendDraftError(
+      request,
+      context,
+      'DRAFT_TOO_LARGE',
+      'The transcript would exceed the safe draft size limit. It was not appended.',
+      result.mutation.session,
+    )
+    return
+  }
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.snapshot.response',
+      requestId: request.requestId,
+      ok: true,
+      outcome: result.mutation.applied
+        ? 'applied'
+        : result.mutation.reason === 'stale-version'
+          ? 'stale-version'
+          : 'unchanged',
+      operationId: request.operationId,
+      snapshot: toDraftSnapshot(result.mutation.session),
+    },
+    context,
+  )
+}
+
+async function handleRecordingUndo(
+  request: Extract<FrontendRequest, { type: 'draft.recording.undo.request' }>,
+  context: RequestContext,
+  activeRequest: ActiveRequest,
+): Promise<void> {
+  const result = await withDraftLock(context.userId, request.chatId, async () => {
+    const session = await loadDraft(context.userId, request.chatId)
+    if (!spindle.permissions.has('chats')) {
+      return { kind: 'error' as const, error: 'permission' as const, session }
+    }
+    const activeChat = await spindle.chats.getActive(context.userId)
+    if (!activeChat || activeChat.id !== request.chatId) {
+      return { kind: 'error' as const, error: 'chat-mismatch' as const, session }
+    }
+    const mutation = undoLastRecording(session, request.expectedVersion)
+    if (mutation.applied) await persistDraft(context.userId, mutation.session)
+    return { kind: 'mutation' as const, mutation }
+  })
+  if (activeRequest.cancelled) return
+  if (result.kind === 'error') {
+    sendDraftError(
+      request,
+      context,
+      result.error === 'permission' ? 'PERMISSION_DENIED' : 'CHAT_MISMATCH',
+      result.error === 'permission'
+        ? 'Chat access is required before a recording segment can be removed.'
+        : 'Return to the draft’s owning chat before removing a recording segment.',
+      result.session,
+    )
+    return
+  }
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.snapshot.response',
+      requestId: request.requestId,
+      ok: true,
+      outcome: result.mutation.applied
+        ? 'applied'
+        : result.mutation.reason === 'stale-version'
+          ? 'stale-version'
+          : 'unchanged',
+      operationId: request.operationId,
+      snapshot: toDraftSnapshot(result.mutation.session),
+    },
+    context,
+  )
 }
 
 async function handleHealth(
@@ -395,7 +512,7 @@ async function loadDraft(userId: string, chatId: string): Promise<PersistedDraft
     fallback: null,
     userId,
   })
-  const session = isPersistedDraftSession(raw, chatId) ? raw : createDraftSession(chatId)
+  const session = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId)
   draftCache.set(key, session)
   return session
 }
@@ -466,4 +583,4 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-spindle.log.info('JarvisType Phase 2 draft service loaded')
+spindle.log.info('JarvisType Phase 3 voice composition service loaded')

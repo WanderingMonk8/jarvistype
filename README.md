@@ -93,7 +93,7 @@ Paragraph numbers, diff markers, segment metadata, and editing history are never
 
 The [Product Requirements Document](./PRD.md) is the source of truth for product behavior, scope, acceptance scenarios, platform constraints, privacy requirements, and unresolved decisions.
 
-The [Phase 0 Validation Register](./PHASE0-VALIDATION.md) records the completed feasibility evidence and known provider limitations. The [Phase 1 Validation Register](./PHASE1-VALIDATION.md) tracks the production-foundation exit gate and hosted verification procedure.
+The [Phase 0 Validation Register](./PHASE0-VALIDATION.md) records the completed feasibility evidence and known provider limitations. The [Phase 1 Validation Register](./PHASE1-VALIDATION.md) records the completed production-foundation exit gate. The [Phase 2 Validation Register](./PHASE2-VALIDATION.md) tracks the draft-lifecycle and safe-send exit gate.
 
 The [historical Lumiverse STT API Proposal](./LUMIVERSE-STT-API-PROPOSAL.md) records the backend contract proposed against Lumiverse 1.2.4. Lumiverse 1.2.5 instead shipped the official frontend [Speech-to-text API](https://docs.lumiverse.chat/frontend-api/speech-to-text/), which is now the primary integration target.
 
@@ -117,20 +117,22 @@ The current design expects to use:
 - Frontend `ctx.stt` behind `speech-to-text-v1`, reusing the user's selected or explicitly configured STT connection without exposing credentials.
 - User-scoped storage for settings and personal spelling glossary entries.
 
-The validated primary placement is an extension-owned drawer opened from the input bar. Lumiverse 1.2.5 is the minimum voice-capable host, and the tested configured STT connection returns batch-only final transcripts. Context ceilings, supported languages, and draft-persistence policy remain open product decisions documented in the PRD.
+The validated primary placement is an extension-owned drawer opened from the input bar. Lumiverse 1.2.5 is the minimum voice-capable host, and the tested configured STT connection returns batch-only final transcripts. Drafts persist per user and per owning chat across reloads and extension restarts. Context ceilings, supported languages, and draft expiry/discard UX remain open product decisions documented in the PRD.
 
 ## Current development build
 
-Version `0.7.0` is the completed Phase 1 production foundation. It provides:
+Version `0.8.0` is the Phase 2 hosted-test candidate. It adds:
 
-- A lifecycle-safe JarvisType drawer and input-bar action.
-- A validated, versioned frontend/backend protocol.
-- Typed health, error, timeout, and cancellation behavior.
-- Active-chat, Lumiverse-version, backend-readiness, and media-permission status.
-- Disabled placeholders for the draft, Record Message, Record Edit, Undo, History, and Confirm & Send features.
-- Formatting, linting, strict type checking, unit tests, production builds, package validation, and CI.
+- A backend-owned, per-user and per-chat persistent draft.
+- A keyboard-editable clean-text surface with presentation-only paragraph numbering.
+- Stable internal paragraph identities, versioned mutations, latest-change diff, grouped history, and undo.
+- Synchronous local buffering plus backend persistence for reload recovery.
+- Explicit draft ownership and blocking when the active chat differs.
+- Confirmation-only sending with `chats`, `chat_mutation`, and `generation` requested for the operation.
+- Duplicate-send suppression, normal response generation, success-only clearing, and failure retention.
+- Sixteen passing domain, protocol, request-lifecycle, persistence, and mocked-backend tests.
 
-The disabled controls are intentional: Phase 1 established the shell and safety boundaries, and Phase 2 is the next implementation stage for the numbered draft lifecycle and safe confirmed sending. See [PHASE1-VALIDATION.md](./PHASE1-VALIDATION.md) for the completed local and hosted verification evidence.
+Record Message and Record Edit remain intentionally disabled until their later phases. See [PHASE2-VALIDATION.md](./PHASE2-VALIDATION.md) for the hosted verification procedure.
 
 ## Historical Phase 0 remote capability probe
 

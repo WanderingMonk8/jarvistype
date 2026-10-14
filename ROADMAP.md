@@ -1,7 +1,7 @@
 # JarvisType Project Roadmap
 
 - **Status:** Draft 0.1
-- **Last updated:** 2026-10-13
+- **Last updated:** 2026-10-14
 - **Branch:** `development`
 - **Authority:** Execution plan derived from `PRD.md`
 
@@ -279,6 +279,10 @@ Create an installable Spindle extension shell with dependable frontend/backend l
 ---
 
 ## Phase 2: Draft editor, paragraphs, history, and safe send
+
+### Status
+
+In progress. Version `0.8.0` implements the local Phase 2 feature set and quality gate; hosted Lumiverse verification remains before the exit gate can close.
 
 ### Objective
 

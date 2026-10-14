@@ -1,7 +1,7 @@
 # JarvisType Product Requirements Document
 
-- **Status:** Draft 0.1
-- **Last updated:** 2026-08-30
+- **Status:** Draft 0.2
+- **Last updated:** 2026-10-14
 - **Product:** JarvisType
 - **Platform:** Lumiverse Spindle extension
   **Document role:** Product source of truth
@@ -97,6 +97,8 @@ Important use cases include:
 4. The draft remains unsent until the user explicitly selects **Confirm & Send**.
 5. After Lumiverse confirms a successful send, JarvisType clears the submitted draft and its transient history.
 6. If sending fails, JarvisType retains the full draft and permits retry.
+7. Each draft is owned by one Lumiverse chat and persists in per-user extension storage across page reloads and extension restarts until a confirmed successful send or a future explicit discard action.
+8. Switching chats never silently reassigns a non-empty draft. JarvisType warns about the mismatch, blocks sending to the different chat, and allows the user to open that chat's independently stored draft.
 
 ### 6.2 Initial and sequential dictation
 
@@ -719,7 +721,7 @@ The following decisions remain open and must be resolved through deliberate PRD 
 5. Minimum and maximum values for the recent-message context setting.
 6. The hard context token or character ceiling.
 7. Exact confidence thresholds for automatic application and proposed edits.
-8. Draft persistence behavior across refreshes, extension restarts, and chat switches.
+8. Expiry, retention duration, and explicit discard UX for per-chat persistent drafts. Persistence across refreshes, extension restarts, and chat switches is resolved in Section 6.1.
 9. Whether an optional send-without-generation action is included.
 10. Languages supported in the initial release.
 11. Whether **Record Insert** is added in a future release.

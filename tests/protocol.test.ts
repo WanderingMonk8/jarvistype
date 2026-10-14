@@ -53,21 +53,43 @@ test('accepts valid health responses and rejects malformed permission snapshots'
     backendVersion: '1.2.5',
     frontendVersion: '1.2.5',
     serverTimestamp: '2026-10-13T08:00:00.000Z',
-    permissions: { declared: ['media'], granted: ['media'] },
+    permissions: {
+      declared: ['media', 'chats', 'chat_mutation', 'generation'],
+      granted: ['media'],
+    },
   }
   assert.equal(isBackendResponse(response), true)
   assert.equal(
     isBackendResponse({
       ...response,
-      permissions: { declared: ['media'], granted: ['credentials'] },
+      permissions: {
+        declared: ['media', 'chats', 'chat_mutation', 'generation'],
+        granted: ['credentials'],
+      },
     }),
     false,
   )
 })
 
-test('permission snapshots expose only unique declared Phase 1 permissions', () => {
+test('permission snapshots expose only unique declared Phase 2 permissions', () => {
   assert.deepEqual(sanitizeGrantedPermissions(['generation', 'media', 'media', 'chat_mutation']), {
-    declared: ['media'],
-    granted: ['media'],
+    declared: ['media', 'chats', 'chat_mutation', 'generation'],
+    granted: ['media', 'chat_mutation', 'generation'],
   })
+})
+
+test('validates bounded draft mutations', () => {
+  assert.equal(
+    isFrontendRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.mutate.request',
+      requestId: 'request-1',
+      operationId: 'operation-1',
+      chatId: 'chat-1',
+      expectedVersion: 0,
+      editGroupId: 'group-1',
+      cleanText: 'Draft text',
+    }),
+    true,
+  )
 })

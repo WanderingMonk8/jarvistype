@@ -359,7 +359,7 @@ Implement the complete extension-owned draft lifecycle before voice input, provi
 
 ### Status
 
-In progress. Version `0.9.0` implements the local Phase 3 feature set and quality gate; hosted Lumiverse verification remains before the exit gate can close.
+Complete as of 2026-10-15. Version `0.9.0` passed the complete local quality gate and all seven hosted verification groups on Lumiverse 1.2.5.
 
 ### Objective
 

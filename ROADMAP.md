@@ -1,7 +1,7 @@
 # JarvisType Project Roadmap
 
-- **Status:** Draft 0.1
-- **Last updated:** 2026-10-14
+- **Status:** Active implementation — Phases 0–4 complete
+- **Last updated:** 2026-10-16
 - **Branch:** `development`
 - **Authority:** Execution plan derived from `PRD.md`
 
@@ -443,7 +443,7 @@ Deliver bounded recording, genuine progressive display where supported, ordered 
 
 ### Status
 
-Implementation candidate ready for hosted validation as of 2026-10-16. Version `1.2.3` uses Lumiverse's authoritative STT result, then applies deterministic punctuation/spelling/glossary rules and an optional bounded `spindle.generate.quiet(...)` correction pass through Main or a user-selected Lumiverse connection and optional model selected from Lumiverse's host-managed searchable catalog. The verified `ctx.stt` contract accepts no context or vocabulary hints, so JarvisType does not claim that recent messages are sent to the STT provider. Every completed message segment requires visible acceptance or rejection before draft mutation.
+Complete as of 2026-10-16. Version `1.2.3` passed the complete local quality gate and all eight hosted verification groups on Lumiverse 1.2.5. It uses Lumiverse's authoritative STT result, applies deterministic punctuation/spelling/glossary rules, and optionally performs bounded correction through Main or a user-selected connection and model from Lumiverse's host-managed catalog. The verified `ctx.stt` contract accepts no context or vocabulary hints, so recent messages are used only after STT. Every completed message segment requires visible acceptance or rejection before draft mutation.
 
 ### Objective
 

@@ -4,7 +4,7 @@
 
 Phase 4 adds bounded post-transcription context normalization, spoken punctuation, explicit spelling and casing, per-user glossary learning and maintenance, visible review, and reversible glossary changes.
 
-Current candidate version: `1.2.3`
+Validated version: `1.2.3`
 
 ## Platform decision
 
@@ -19,20 +19,20 @@ Current candidate version: `1.2.3`
 
 ## Implemented baseline
 
-| ID    | Requirement                            | Status     | Evidence                                                                                                                  |
-| ----- | -------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| F4-01 | Configurable bounded context           | LOCAL-PASS | Unit tests cover default five, zero, maximum clamping, eligibility, ordering, and hard-character truncation.              |
-| F4-02 | Conservative post-STT normalization    | LOCAL-PASS | Backend preserves raw text, validates model output, falls back safely, and routes every completed segment through review. |
-| F4-03 | Spoken punctuation and literal wording | LOCAL-PASS | Deterministic tests cover punctuation, paragraph breaks, and explicit `literal`/`the word` escape wording.                |
-| F4-04 | Explicit spelling and casing           | LOCAL-PASS | Tests cover separated letters, pronunciation cue collapse, casing, and learning-candidate creation.                       |
-| F4-05 | Personal glossary lifecycle            | LOCAL-PASS | Per-user storage supports inspect, add, edit, delete, conflicts, usage metadata, and undo.                                |
-| F4-06 | Commit-only automatic learning         | LOCAL-PASS | Backend test proves an explicit spelling is absent before confirmation and learned only after the confirmed draft commit. |
-| F4-07 | Visible and reversible changes         | LOCAL-PASS | Review card shows raw/candidate/context details; learned-entry notice points to independent glossary undo.                |
-| F4-08 | Draft and chat safety                  | LOCAL-PASS | Version and active-chat checks guard normalization and confirmation; rejection leaves the draft unchanged.                |
-| F4-09 | Privacy disclosure                     | LOCAL-PASS | Drawer states exactly which data goes to Lumiverse generation and that STT receives no added context.                     |
-| F4-10 | Searchable normalization dispatch      | LOCAL-PASS | Settings use Lumiverse's connection-aware searchable model picker and pass the selected connection ID and model override. |
-| F4-11 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 39 unit tests, both builds, and package validation pass.                                 |
-| F4-12 | Hosted Lumiverse verification          | PENDING    | Run the sequence below on the hosted installation.                                                                        |
+| ID    | Requirement                            | Status      | Evidence                                                                                                                  |
+| ----- | -------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------- |
+| F4-01 | Configurable bounded context           | LOCAL-PASS  | Unit tests cover default five, zero, maximum clamping, eligibility, ordering, and hard-character truncation.              |
+| F4-02 | Conservative post-STT normalization    | LOCAL-PASS  | Backend preserves raw text, validates model output, falls back safely, and routes every completed segment through review. |
+| F4-03 | Spoken punctuation and literal wording | LOCAL-PASS  | Deterministic tests cover punctuation, paragraph breaks, and explicit `literal`/`the word` escape wording.                |
+| F4-04 | Explicit spelling and casing           | LOCAL-PASS  | Tests cover separated letters, pronunciation cue collapse, casing, and learning-candidate creation.                       |
+| F4-05 | Personal glossary lifecycle            | LOCAL-PASS  | Per-user storage supports inspect, add, edit, delete, conflicts, usage metadata, and undo.                                |
+| F4-06 | Commit-only automatic learning         | LOCAL-PASS  | Backend test proves an explicit spelling is absent before confirmation and learned only after the confirmed draft commit. |
+| F4-07 | Visible and reversible changes         | LOCAL-PASS  | Review card shows raw/candidate/context details; learned-entry notice points to independent glossary undo.                |
+| F4-08 | Draft and chat safety                  | LOCAL-PASS  | Version and active-chat checks guard normalization and confirmation; rejection leaves the draft unchanged.                |
+| F4-09 | Privacy disclosure                     | LOCAL-PASS  | Drawer states exactly which data goes to Lumiverse generation and that STT receives no added context.                     |
+| F4-10 | Searchable normalization dispatch      | LOCAL-PASS  | Settings use Lumiverse's connection-aware searchable model picker and pass the selected connection ID and model override. |
+| F4-11 | Automated quality gate                 | LOCAL-PASS  | Formatting, lint, strict typing, 39 unit tests, both builds, and package validation pass.                                 |
+| F4-12 | Hosted Lumiverse verification          | REMOTE-PASS | All eight hosted groups passed on the Lumiverse installation on 2026-10-16.                                               |
 
 ## Hosted verification sequence
 
@@ -128,6 +128,10 @@ Verified on the hosted Lumiverse installation with `Vault-Tec`: the manual entry
 
 ### Test 8: Ownership, cancellation, failure, and regression
 
+**Status:** REMOTE-PASS — 2026-10-16
+
+Verified on the hosted Lumiverse installation: cancellation produced no proposal or mutation; switching chats discarded an unresolved proposal without changing either draft; denied generation access failed safely and recovered after permission restoration; recording undo, manual edit save/undo, chat ownership blocking, and confirmed send all retained their Phase 2–3 behavior. Confirmed send added one clean message, started normal response generation, and cleared the draft only after success.
+
 1. Begin a recording and cancel it. Confirm no proposal, draft mutation, or learned entry appears.
 2. Produce a review proposal, switch chats before accepting, and confirm the proposal is discarded and cannot mutate either chat.
 3. Temporarily deny generation permission or make the configured generation connection unavailable. Confirm normalization fails safely and preserves the draft and glossary.
@@ -135,6 +139,8 @@ Verified on the hosted Lumiverse installation with `Vault-Tec`: the manual entry
 5. Confirm Undo Last Recording, manual draft editing, draft undo/history, chat ownership blocking, and Confirm & Send still behave as in Phases 2–3.
 
 ## Exit gate
+
+**Result:** PASSED — Phase 4 complete on version `1.2.3` as of 2026-10-16.
 
 - All eight hosted groups are marked `REMOTE-PASS` or carry an explicitly accepted limitation.
 - No tested normalization path silently changes meaning.

@@ -48,9 +48,9 @@ Verified on the hosted Lumiverse installation: version `1.0.0` loaded successful
 
 ### Test 2: Spoken punctuation and literal wording
 
-**Status:** PARTIAL — 2026-10-16
+**Status:** REMOTE-PASS — 2026-10-16
 
-Part A is `REMOTE-PASS`: spoken punctuation and the paragraph break normalized correctly, the review was accepted, and the committed segment behaved as expected. Part B first exposed a 15-second contextual-normalization timeout and a CSS rule that left an empty disabled proposal card visible. Version `1.0.1` fixed those defects, then revealed that contextual output could restore the raw provider-punctuated transcript after deterministic command handling and bypass review. Version `1.0.2` re-applies deterministic rules after contextual output and collapses adjacent provider punctuation; Part B must be repeated after updating.
+Verified on the hosted Lumiverse installation. Part A normalized spoken punctuation and the paragraph break correctly, displayed review, and committed the accepted segment once. Part B initially exposed timeout, hidden-state, and contextual-override defects; after the `1.0.2` fixes, JarvisType preserved the provider transcript `Use the word period here, period.`, proposed `Use period here.`, enabled both review actions, and rejected the segment without committing it.
 
 1. Start with an empty disposable draft.
 2. Record: “Hello comma world question mark new paragraph Next period”.

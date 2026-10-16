@@ -115,12 +115,16 @@ Verified on the hosted Lumiverse installation: a two-message bounded context use
 
 ### Test 7: Manual glossary management, conflict, and undo
 
-1. Add canonical `Pip-Boy`, variants `pip boy, Pipboy`, and hint `Fallout wrist device`.
+**Status:** REMOTE-PASS — 2026-10-16
+
+Verified on the hosted Lumiverse installation with `Vault-Tec`: the manual entry persisted across reload, editing updated the same entry, `VaultTec` was blocked as a normalized-key conflict, deletion and glossary undo restored the edited entry without changing the draft, and the glossary corrected `vault tech` in a review proposal that was rejected without draft or glossary mutation.
+
+1. Add canonical `Vault-Tec`, variant `vault tech`, and hint `Fallout corporation`.
 2. Reload and confirm the entry persists.
 3. Edit its hint and confirm the same entry updates rather than duplicates.
-4. Attempt to add canonical `Pipboy`; confirm a conflict is shown and the existing entry is not overwritten.
-5. Delete `Pip-Boy`, confirm it disappears, then select **Undo glossary change** and confirm it returns without changing the draft.
-6. Record a phrase containing `pip boy`; confirm the proposed text uses `Pip-Boy`, then reject it and confirm the glossary itself remains unchanged.
+4. Attempt to add canonical `VaultTec`; confirm a conflict is shown and the existing entry is not overwritten.
+5. Delete `Vault-Tec`, confirm it disappears, then select **Undo glossary change** and confirm it returns without changing the draft.
+6. Record a phrase containing `vault tech`; confirm the proposed text uses `Vault-Tec`, then reject it and confirm the glossary itself remains unchanged.
 
 ### Test 8: Ownership, cancellation, failure, and regression
 

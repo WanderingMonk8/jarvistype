@@ -71,7 +71,7 @@ test('accepts valid health responses and rejects malformed permission snapshots'
   )
 })
 
-test('permission snapshots expose only unique declared Phase 3 permissions', () => {
+test('permission snapshots expose only unique declared Phase 4 permissions', () => {
   assert.deepEqual(sanitizeGrantedPermissions(['generation', 'media', 'media', 'chat_mutation']), {
     declared: ['media', 'chats', 'chat_mutation', 'generation'],
     granted: ['media', 'chat_mutation', 'generation'],
@@ -94,11 +94,11 @@ test('validates bounded draft mutations', () => {
   )
 })
 
-test('validates recording append and undo requests', () => {
+test('validates transcript normalization and recording undo requests', () => {
   assert.equal(
     isFrontendRequest({
       protocolVersion: PROTOCOL_VERSION,
-      type: 'draft.recording.append.request',
+      type: 'transcript.normalize.request',
       requestId: 'recording-request-1',
       operationId: 'recording-operation-1',
       chatId: 'chat-1',
@@ -110,7 +110,7 @@ test('validates recording append and undo requests', () => {
   assert.equal(
     isFrontendRequest({
       protocolVersion: PROTOCOL_VERSION,
-      type: 'draft.recording.append.request',
+      type: 'transcript.normalize.request',
       requestId: 'recording-request-2',
       operationId: 'recording-operation-2',
       chatId: 'chat-1',

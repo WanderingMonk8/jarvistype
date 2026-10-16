@@ -58,6 +58,7 @@ const spindleMock = {
       ),
   },
   chat: {
+    getMessages: () => Promise.resolve([]),
     appendMessage: (
       chatId: string,
       message: { content: string },
@@ -70,6 +71,12 @@ const spindleMock = {
         triggerGeneration: options?.triggerGeneration === true,
       })
       return Promise.resolve({ id: `message-${appended.length}`, generationId: 'generation-1' })
+    },
+  },
+  generate: {
+    quiet: (request: { messages?: Array<{ content: string }> }) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { candidate?: string }
+      return Promise.resolve({ content: JSON.stringify({ normalizedText: input.candidate ?? '' }) })
     },
   },
   log: {
@@ -199,8 +206,8 @@ test('commits recording segments once, in order, and undoes only the latest segm
   await dispatch(recordingAppendRequest(chatId, 'segment-two', 2, 'Second'), userId)
 
   const appendedResponse = responses.at(-1)?.payload
-  assert.equal(appendedResponse?.type, 'draft.snapshot.response')
-  if (appendedResponse?.type === 'draft.snapshot.response') {
+  assert.equal(appendedResponse?.type, 'transcript.normalization.response')
+  if (appendedResponse?.type === 'transcript.normalization.response' && appendedResponse.snapshot) {
     assert.equal(appendedResponse.snapshot.cleanText, 'Typed First Second')
     assert.deepEqual(
       appendedResponse.snapshot.recordingSegments.map((segment) => segment.id),
@@ -246,6 +253,60 @@ test('blocks recording commit after the active chat changes', async () => {
   }
 })
 
+test('requires review before committing explicit spelling and learns only after confirmation', async () => {
+  const userId = 'spelling-user'
+  const chatId = 'spelling-chat'
+  activeChatId = chatId
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'spelling-segment',
+      0,
+      'Write capitalized C-A-E-S-A-R Caesar period',
+    ),
+    userId,
+  )
+  const proposalResponse = responses.at(-1)?.payload
+  assert.equal(proposalResponse?.type, 'transcript.normalization.response')
+  if (proposalResponse?.type !== 'transcript.normalization.response') return
+  assert.equal(proposalResponse.outcome, 'review')
+  assert.equal(proposalResponse.proposal.candidateText, 'Write Caesar.')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.load.request',
+      requestId: 'glossary-before',
+    },
+    userId,
+  )
+  const before = responses.at(-1)?.payload
+  assert.equal(before?.type === 'phase4.state.response' ? before.glossary.length : -1, 0)
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.confirm.request',
+      requestId: 'confirm-spelling',
+      operationId: 'spelling-segment',
+      chatId,
+      expectedVersion: 0,
+    },
+    userId,
+  )
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'transcript.normalization.response')
+  if (committed?.type === 'transcript.normalization.response') {
+    assert.equal(committed.snapshot?.cleanText, 'Write Caesar.')
+    assert.equal(
+      committed.snapshot?.recordingSegments[0]?.rawTranscript,
+      'Write capitalized C-A-E-S-A-R Caesar period',
+    )
+    assert.equal(committed.glossaryLearned?.[0]?.canonical, 'Caesar')
+  }
+})
+
 test('rejects malformed messages without replying', async () => {
   await dispatch({ type: 'untrusted' }, 'malformed-user')
   assert.equal(responses.length, 0)
@@ -287,7 +348,7 @@ function recordingAppendRequest(
 ) {
   return {
     protocolVersion: PROTOCOL_VERSION,
-    type: 'draft.recording.append.request' as const,
+    type: 'transcript.normalize.request' as const,
     requestId: `request-${operationId}`,
     operationId,
     chatId,

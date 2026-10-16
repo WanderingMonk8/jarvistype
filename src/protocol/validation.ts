@@ -5,7 +5,7 @@ import {
   type DraftSnapshot,
 } from '../domain/draft-session'
 import {
-  PHASE_THREE_PERMISSIONS,
+  PHASE_FOUR_PERMISSIONS,
   PROTOCOL_VERSION,
   type AppErrorCode,
   type BackendResponse,
@@ -22,6 +22,9 @@ const ERROR_CODES: readonly AppErrorCode[] = [
   'DRAFT_EMPTY',
   'DRAFT_PERSIST_FAILED',
   'TRANSCRIPT_EMPTY',
+  'NORMALIZATION_FAILED',
+  'NORMALIZATION_EXPIRED',
+  'GLOSSARY_CONFLICT',
   'RECORDING_UNDO_CONFLICT',
   'CHAT_MISMATCH',
   'PERMISSION_DENIED',
@@ -56,12 +59,19 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       isNonNegativeInteger(value.expectedVersion)
     )
   }
-  if (value.type === 'draft.recording.append.request') {
+  if (value.type === 'transcript.normalize.request') {
     return (
       isIdentifier(value.operationId) &&
       isIdentifier(value.chatId) &&
       isNonNegativeInteger(value.expectedVersion) &&
       isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS)
+    )
+  }
+  if (value.type === 'transcript.confirm.request') {
+    return (
+      isIdentifier(value.operationId) &&
+      isIdentifier(value.chatId) &&
+      isNonNegativeInteger(value.expectedVersion)
     )
   }
   if (value.type === 'draft.recording.undo.request') {
@@ -71,6 +81,20 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       isNonNegativeInteger(value.expectedVersion)
     )
   }
+  if (value.type === 'phase4.load.request' || value.type === 'glossary.undo.request') return true
+  if (value.type === 'phase4.settings.update.request') return isPhaseFourSettings(value.settings)
+  if (value.type === 'glossary.upsert.request') {
+    return (
+      (value.entryId === undefined || isIdentifier(value.entryId)) &&
+      isBoundedString(value.canonical, 1, 200) &&
+      Array.isArray(value.variants) &&
+      value.variants.length <= 20 &&
+      value.variants.every((variant) => isBoundedString(variant, 1, 200)) &&
+      typeof value.hint === 'string' &&
+      value.hint.length <= 500
+    )
+  }
+  if (value.type === 'glossary.delete.request') return isIdentifier(value.entryId)
   return false
 }
 
@@ -113,6 +137,26 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
       isDraftSnapshot(value.snapshot)
     )
   }
+  if (value.type === 'transcript.normalization.response') {
+    return (
+      value.ok === true &&
+      (value.outcome === 'committed' || value.outcome === 'review') &&
+      isNormalizationProposal(value.proposal) &&
+      (value.snapshot === undefined || isDraftSnapshot(value.snapshot)) &&
+      (value.glossaryLearned === undefined ||
+        (Array.isArray(value.glossaryLearned) && value.glossaryLearned.every(isGlossaryEntry)))
+    )
+  }
+  if (value.type === 'phase4.state.response') {
+    return (
+      value.ok === true &&
+      isPhaseFourSettings(value.settings) &&
+      Array.isArray(value.glossary) &&
+      value.glossary.every(isGlossaryEntry) &&
+      typeof value.canUndoGlossary === 'boolean' &&
+      (value.notice === undefined || isBoundedString(value.notice, 1, 1_000))
+    )
+  }
   if (value.type === 'app.error') {
     return (
       value.ok === false &&
@@ -129,8 +173,8 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
 
 export function sanitizeGrantedPermissions(granted: readonly string[]): PermissionSnapshot {
   return {
-    declared: [...PHASE_THREE_PERMISSIONS],
-    granted: PHASE_THREE_PERMISSIONS.filter((permission) => granted.includes(permission)),
+    declared: [...PHASE_FOUR_PERMISSIONS],
+    granted: PHASE_FOUR_PERMISSIONS.filter((permission) => granted.includes(permission)),
   }
 }
 
@@ -186,12 +230,26 @@ function isRecordingSegment(value: unknown): boolean {
     isRecord(value) &&
     isIdentifier(value.id) &&
     isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) &&
+    isBoundedString(value.normalizedTranscript, 1, MAX_DRAFT_CHARACTERS) &&
+    isRecordingNormalization(value.normalization) &&
     isBoundedString(value.committedText, 1, MAX_DRAFT_CHARACTERS) &&
     isNonNegativeInteger(value.startOffset) &&
     isNonNegativeInteger(value.beforeVersion) &&
     isPositiveInteger(value.resultingVersion) &&
     value.resultingVersion === value.beforeVersion + 1 &&
     isBoundedString(value.committedAt, 1, 128)
+  )
+}
+
+function isRecordingNormalization(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.reasons) &&
+    value.reasons.every((reason) => isBoundedString(reason, 1, 200)) &&
+    isNonNegativeInteger(value.contextMessageCount) &&
+    isNonNegativeInteger(value.contextCharacterCount) &&
+    typeof value.contextTruncated === 'boolean' &&
+    typeof value.contextualModelUsed === 'boolean'
   )
 }
 
@@ -213,11 +271,63 @@ function isPermissionSnapshot(value: unknown): value is PermissionSnapshot {
     return false
   }
   return (
-    value.declared.length === PHASE_THREE_PERMISSIONS.length &&
-    value.declared.every((permission, index) => permission === PHASE_THREE_PERMISSIONS[index]) &&
-    value.granted.length <= PHASE_THREE_PERMISSIONS.length &&
-    value.granted.every((permission) => PHASE_THREE_PERMISSIONS.includes(permission)) &&
+    value.declared.length === PHASE_FOUR_PERMISSIONS.length &&
+    value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) &&
+    value.granted.length <= PHASE_FOUR_PERMISSIONS.length &&
+    value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) &&
     new Set(value.granted).size === value.granted.length
+  )
+}
+
+function isPhaseFourSettings(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isNonNegativeInteger(value.contextMessageCount) &&
+    value.contextMessageCount <= 20 &&
+    typeof value.contextualNormalizationEnabled === 'boolean'
+  )
+}
+
+function isNormalizationProposal(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isIdentifier(value.operationId) &&
+    isIdentifier(value.chatId) &&
+    isNonNegativeInteger(value.expectedVersion) &&
+    isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) &&
+    isBoundedString(value.candidateText, 1, MAX_DRAFT_CHARACTERS) &&
+    Array.isArray(value.reasons) &&
+    value.reasons.every((reason) => isBoundedString(reason, 1, 200)) &&
+    Array.isArray(value.ambiguities) &&
+    value.ambiguities.every((reason) => isBoundedString(reason, 1, 500)) &&
+    Array.isArray(value.learningCandidates) &&
+    value.learningCandidates.every(
+      (candidate) =>
+        isRecord(candidate) &&
+        isBoundedString(candidate.canonical, 1, 200) &&
+        typeof candidate.spokenVariant === 'string' &&
+        candidate.spokenVariant.length <= 500,
+    ) &&
+    isNonNegativeInteger(value.contextMessageCount) &&
+    isNonNegativeInteger(value.contextCharacterCount) &&
+    typeof value.contextTruncated === 'boolean' &&
+    typeof value.contextualModelUsed === 'boolean'
+  )
+}
+
+function isGlossaryEntry(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isIdentifier(value.id) &&
+    isBoundedString(value.canonical, 1, 200) &&
+    Array.isArray(value.variants) &&
+    value.variants.every((variant) => isBoundedString(variant, 1, 200)) &&
+    typeof value.hint === 'string' &&
+    value.hint.length <= 500 &&
+    (value.source === 'explicit-spelling' || value.source === 'manual') &&
+    isNonNegativeInteger(value.useCount) &&
+    isBoundedString(value.createdAt, 1, 128) &&
+    isBoundedString(value.updatedAt, 1, 128)
   )
 }
 

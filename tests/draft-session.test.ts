@@ -165,7 +165,7 @@ test('deduplicates recording operation ids and migrates Phase 2 drafts', () => {
 
   assert.equal(duplicate.applied, false)
   assert.equal(duplicate.session.cleanText, 'Once')
-  assert.equal(migrated?.schemaVersion, 2)
+  assert.equal(migrated?.schemaVersion, 3)
   assert.deepEqual(migrated?.recordingSegments, [])
   assert.equal(migrated?.canUndoRecording, false)
 })

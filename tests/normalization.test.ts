@@ -1,0 +1,44 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import { normalizeDeterministically } from '../src/domain/normalization'
+
+test('supports spoken punctuation and paragraph commands', () => {
+  const result = normalizeDeterministically(
+    'Hello comma world question mark new paragraph Next period',
+    [],
+  )
+  assert.equal(result.text, 'Hello, world?\n\nNext.')
+  assert.equal(result.changed, true)
+})
+
+test('preserves explicitly literal punctuation words', () => {
+  assert.equal(
+    normalizeDeterministically('Use the word period here period', []).text,
+    'Use period here.',
+  )
+})
+
+test('collapses explicit spelling, obeys casing, and creates a learning candidate', () => {
+  const result = normalizeDeterministically('Write capitalized C-A-E-S-A-R Caesar period', [])
+  assert.equal(result.text, 'Write Caesar.')
+  assert.deepEqual(result.learningCandidates, [
+    { canonical: 'Caesar', spokenVariant: 'C-A-E-S-A-R' },
+  ])
+})
+
+test('uses glossary variants without paraphrasing surrounding content', () => {
+  const result = normalizeDeterministically('My pip boy is ready', [
+    {
+      id: 'entry-1',
+      canonical: 'Pip-Boy',
+      variants: ['pip boy'],
+      hint: 'Fallout device',
+      source: 'manual',
+      useCount: 0,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ])
+  assert.equal(result.text, 'My Pip-Boy is ready')
+})

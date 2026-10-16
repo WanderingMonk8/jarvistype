@@ -1,4 +1,4 @@
-export const DRAFT_SCHEMA_VERSION = 2 as const
+export const DRAFT_SCHEMA_VERSION = 3 as const
 export const MAX_DRAFT_CHARACTERS = 100_000
 export const MAX_HISTORY_ENTRIES = 200
 export const MAX_RECORDING_SEGMENTS = 200
@@ -30,6 +30,14 @@ export interface DraftHistoryEntry {
 export interface RecordingSegment {
   id: string
   rawTranscript: string
+  normalizedTranscript: string
+  normalization: {
+    reasons: string[]
+    contextMessageCount: number
+    contextCharacterCount: number
+    contextTruncated: boolean
+    contextualModelUsed: boolean
+  }
   committedText: string
   startOffset: number
   beforeVersion: number
@@ -236,6 +244,8 @@ export function toDraftSnapshot(session: PersistedDraftSession): DraftSnapshot {
 export interface RecordingMutationOptions {
   expectedVersion: number
   segmentId: string
+  committedTranscript?: string
+  normalization?: RecordingSegment['normalization']
   now?: string
   createId?: () => string
 }
@@ -255,7 +265,10 @@ export function appendRecordingTranscript(
     return { applied: false, reason: 'unchanged', session }
   }
 
-  const nextText = joinRecordingTranscript(session.cleanText, rawTranscript)
+  const normalizedTranscript = options.committedTranscript ?? rawTranscript
+  if (normalizedTranscript.trim().length === 0)
+    return { applied: false, reason: 'unchanged', session }
+  const nextText = joinRecordingTranscript(session.cleanText, normalizedTranscript)
   if (nextText.length > MAX_DRAFT_CHARACTERS) {
     return { applied: false, reason: 'too-large', session }
   }
@@ -270,6 +283,14 @@ export function appendRecordingTranscript(
     {
       id: options.segmentId,
       rawTranscript,
+      normalizedTranscript,
+      normalization: options.normalization ?? {
+        reasons: [],
+        contextMessageCount: 0,
+        contextCharacterCount: 0,
+        contextTruncated: false,
+        contextualModelUsed: false,
+      },
       committedText,
       startOffset: session.cleanText.length,
       beforeVersion: session.draftVersion,
@@ -420,6 +441,23 @@ export function restoreDraftSession(
   expectedChatId: string,
 ): PersistedDraftSession | null {
   if (isPersistedDraftSession(value, expectedChatId)) return value
+  if (isSchemaTwoDraftSession(value, expectedChatId)) {
+    return {
+      ...value,
+      schemaVersion: DRAFT_SCHEMA_VERSION,
+      recordingSegments: value.recordingSegments.map((segment) => ({
+        ...segment,
+        normalizedTranscript: segment.rawTranscript,
+        normalization: {
+          reasons: [],
+          contextMessageCount: 0,
+          contextCharacterCount: 0,
+          contextTruncated: false,
+          contextualModelUsed: false,
+        },
+      })),
+    }
+  }
   if (!isLegacyDraftSession(value, expectedChatId)) return null
   return {
     ...value,
@@ -568,6 +606,9 @@ function isRecordingSegment(value: unknown): value is RecordingSegment {
     value.id.length > 0 &&
     typeof value.rawTranscript === 'string' &&
     value.rawTranscript.trim().length > 0 &&
+    typeof value.normalizedTranscript === 'string' &&
+    value.normalizedTranscript.trim().length > 0 &&
+    isRecordingNormalization(value.normalization) &&
     typeof value.committedText === 'string' &&
     value.committedText.length > 0 &&
     isNonNegativeInteger(value.startOffset) &&
@@ -576,6 +617,54 @@ function isRecordingSegment(value: unknown): value is RecordingSegment {
     value.resultingVersion === value.beforeVersion + 1 &&
     typeof value.committedAt === 'string'
   )
+}
+
+function isRecordingNormalization(value: unknown): value is RecordingSegment['normalization'] {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.reasons) &&
+    value.reasons.every((reason) => typeof reason === 'string') &&
+    isNonNegativeInteger(value.contextMessageCount) &&
+    isNonNegativeInteger(value.contextCharacterCount) &&
+    typeof value.contextTruncated === 'boolean' &&
+    typeof value.contextualModelUsed === 'boolean'
+  )
+}
+
+function isSchemaTwoDraftSession(
+  value: unknown,
+  expectedChatId: string,
+): value is Omit<PersistedDraftSession, 'schemaVersion' | 'recordingSegments'> & {
+  schemaVersion: 2
+  recordingSegments: Array<Omit<RecordingSegment, 'normalizedTranscript' | 'normalization'>>
+} {
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 2 ||
+    value.chatId !== expectedChatId ||
+    !Array.isArray(value.recordingSegments)
+  )
+    return false
+  const candidate = {
+    ...value,
+    schemaVersion: DRAFT_SCHEMA_VERSION,
+    recordingSegments: value.recordingSegments.map((segment) =>
+      isRecord(segment)
+        ? {
+            ...segment,
+            normalizedTranscript: segment.rawTranscript,
+            normalization: {
+              reasons: [],
+              contextMessageCount: 0,
+              contextCharacterCount: 0,
+              contextTruncated: false,
+              contextualModelUsed: false,
+            },
+          }
+        : segment,
+    ),
+  }
+  return isPersistedDraftSession(candidate, expectedChatId)
 }
 
 function isLegacyDraftSession(

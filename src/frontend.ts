@@ -5,6 +5,7 @@ import type {
 } from 'lumiverse-spindle-types'
 
 import { MAX_DRAFT_CHARACTERS, type DraftSnapshot } from './domain/draft-session'
+import type { GlossaryEntry } from './domain/glossary'
 import { RequestRegistry, type RequestOutcome } from './domain/request-registry'
 import {
   APP_VERSION,
@@ -14,12 +15,15 @@ import {
   createRequestId,
   type BackendResponse,
   type FrontendRequest,
+  type NormalizationProposal,
+  type PhaseFourSettings,
   type PermissionSnapshot,
 } from './protocol/messages'
 import { isBackendResponse, sanitizeGrantedPermissions } from './protocol/validation'
 
 type BackendState = 'connecting' | 'ready' | 'unavailable'
-type VoicePhase = 'idle' | 'starting' | 'recording' | 'processing' | 'committing' | 'error'
+type VoicePhase =
+  'idle' | 'starting' | 'recording' | 'processing' | 'committing' | 'review' | 'error'
 
 const MAX_RECORDING_DURATION_MS = 5 * 60 * 1_000
 
@@ -51,6 +55,11 @@ interface ComposerState {
   voiceProvisionalText: string
   voiceFinalText: string
   voiceMessage: string
+  pendingProposal: NormalizationProposal | null
+  settings: PhaseFourSettings
+  glossary: GlossaryEntry[]
+  canUndoGlossary: boolean
+  phaseFourMessage: string
 }
 
 export function setup(ctx: SpindleFrontendContext): () => void {
@@ -103,6 +112,29 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const historyPanel = requireElement<HTMLElement>(tab.root, '[data-history-panel]')
   const historyList = requireElement<HTMLOListElement>(tab.root, '[data-history-list]')
   const sendButton = requireElement<HTMLButtonElement>(tab.root, '[data-send]')
+  const proposalPanel = requireElement<HTMLElement>(tab.root, '[data-normalization-proposal]')
+  const proposalRaw = requireElement<HTMLElement>(tab.root, '[data-proposal-raw]')
+  const proposalCandidate = requireElement<HTMLElement>(tab.root, '[data-proposal-candidate]')
+  const proposalMeta = requireElement<HTMLElement>(tab.root, '[data-proposal-meta]')
+  const acceptProposalButton = requireElement<HTMLButtonElement>(tab.root, '[data-proposal-accept]')
+  const rejectProposalButton = requireElement<HTMLButtonElement>(tab.root, '[data-proposal-reject]')
+  const contextCountInput = requireElement<HTMLInputElement>(tab.root, '[data-context-count]')
+  const contextualToggle = requireElement<HTMLInputElement>(tab.root, '[data-context-enabled]')
+  const saveSettingsButton = requireElement<HTMLButtonElement>(tab.root, '[data-settings-save]')
+  const glossaryCanonicalInput = requireElement<HTMLInputElement>(
+    tab.root,
+    '[data-glossary-canonical]',
+  )
+  const glossaryVariantsInput = requireElement<HTMLInputElement>(
+    tab.root,
+    '[data-glossary-variants]',
+  )
+  const glossaryHintInput = requireElement<HTMLInputElement>(tab.root, '[data-glossary-hint]')
+  const glossarySaveButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-save]')
+  const glossaryCancelButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-cancel]')
+  const glossaryUndoButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-undo]')
+  const glossaryList = requireElement<HTMLElement>(tab.root, '[data-glossary-list]')
+  const phaseFourStatus = requireElement<HTMLElement>(tab.root, '[data-phase4-status]')
 
   const state: ComposerState = {
     activeChatId: ctx.getActiveChat().chatId,
@@ -127,6 +159,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     voiceProvisionalText: '',
     voiceFinalText: '',
     voiceMessage: 'Ready to record a message segment.',
+    pendingProposal: null,
+    settings: { contextMessageCount: 5, contextualNormalizationEnabled: true },
+    glossary: [],
+    canUndoGlossary: false,
+    phaseFourMessage: 'Loading context and glossary settings…',
   }
 
   let alive = true
@@ -140,6 +177,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   let recordingTimer: ReturnType<typeof setInterval> | null = null
   let recordingDeadline: ReturnType<typeof setTimeout> | null = null
   let recordingStartedAt = 0
+  let editingGlossaryEntryId: string | undefined
   const disposers: Array<() => void> = []
 
   const sendCancellation = (requestId: string) => {
@@ -168,7 +206,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.voicePhase === 'starting' ||
     state.voicePhase === 'recording' ||
     state.voicePhase === 'processing' ||
-    state.voicePhase === 'committing'
+    state.voicePhase === 'committing' ||
+    state.voicePhase === 'review'
 
   const render = () => {
     backendStatus.textContent =
@@ -235,13 +274,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         : state.voicePhase === 'processing'
           ? 'Transcribing…'
           : state.voicePhase === 'committing'
-            ? 'Appending…'
-            : 'Record Message'
+            ? 'Normalizing…'
+            : state.voicePhase === 'review'
+              ? 'Review required'
+              : 'Record Message'
     recordButton.disabled =
       !hasNativeStt() ||
       !recordingOwnerReady ||
       state.voicePhase === 'processing' ||
-      state.voicePhase === 'committing'
+      state.voicePhase === 'committing' ||
+      state.voicePhase === 'review'
     cancelRecordingButton.hidden = !(
       state.voicePhase === 'starting' ||
       state.voicePhase === 'recording' ||
@@ -262,6 +304,22 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     voiceProvisional.hidden = state.voiceProvisionalText.length === 0
     voiceFinal.textContent = state.voiceFinalText || 'No completed recording yet.'
     voiceSegmentCount.textContent = `Committed recording segments: ${state.snapshot?.recordingSegments.length ?? 0}`
+    const proposal = state.pendingProposal
+    proposalPanel.hidden = !proposal
+    proposalRaw.textContent = proposal?.rawTranscript ?? ''
+    proposalCandidate.textContent = proposal?.candidateText ?? ''
+    proposalMeta.textContent = proposal
+      ? `${proposal.contextMessageCount} context message(s), ${proposal.contextCharacterCount} characters${proposal.contextTruncated ? ', truncated to the privacy limit' : ''}. ${proposal.reasons.length ? `Changes: ${proposal.reasons.join(', ')}.` : ''}${proposal.ambiguities.length ? ` Review: ${proposal.ambiguities.join(' ')}` : ''}`
+      : ''
+    acceptProposalButton.disabled = !proposal || state.automatedBusy
+    rejectProposalButton.disabled = !proposal || state.automatedBusy
+    contextCountInput.value = String(state.settings.contextMessageCount)
+    contextualToggle.checked = state.settings.contextualNormalizationEnabled
+    phaseFourStatus.textContent = state.phaseFourMessage
+    glossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy
+    glossarySaveButton.textContent = editingGlossaryEntryId ? 'Update entry' : 'Add entry'
+    glossaryCancelButton.hidden = !editingGlossaryEntryId
+    renderGlossary(glossaryList, state.glossary)
     sendButton.disabled =
       !editorEnabled ||
       state.saving ||
@@ -341,6 +399,25 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (alive) render()
   }
 
+  const loadPhaseFourState = async () => {
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.load.request',
+      requestId: createRequestId('phase4-load'),
+    })
+    if (!alive) return
+    if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response') {
+      state.settings = outcome.value.settings
+      state.glossary = outcome.value.glossary
+      state.canUndoGlossary = outcome.value.canUndoGlossary
+      state.phaseFourMessage = outcome.value.notice ?? 'Context and glossary settings ready.'
+    } else {
+      state.phaseFourMessage =
+        'Context and glossary settings could not be loaded. Retry the backend connection.'
+    }
+    render()
+  }
+
   const refreshHostState = async () => {
     const nextChatId = ctx.getActiveChat().chatId
     const changed = nextChatId !== state.activeChatId
@@ -383,6 +460,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.permissions = outcome.value.permissions
       state.statusMessage = 'Backend ready. Loading the active chat draft…'
       render()
+      await loadPhaseFourState()
       if (state.activeChatId) await loadDraft(state.activeChatId)
       else {
         state.statusMessage = 'Select a chat to begin a private draft.'
@@ -525,7 +603,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const commitRecordingTranscript = async (
     rawTranscript: string,
     operationId: string,
-    attempt = 0,
   ): Promise<void> => {
     const snapshot = state.snapshot
     if (!snapshot || ctx.getActiveChat().chatId !== snapshot.chatId) {
@@ -538,29 +615,36 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
-      type: 'draft.recording.append.request',
-      requestId: createRequestId('recording-append'),
+      type: 'transcript.normalize.request',
+      requestId: createRequestId('transcript-normalize'),
       operationId,
       chatId: snapshot.chatId,
       expectedVersion: snapshot.draftVersion,
       rawTranscript,
     })
     if (!alive) return
-    if (outcome.status === 'resolved' && outcome.value.type === 'draft.snapshot.response') {
-      applySnapshot(outcome.value.snapshot, true)
-      if (outcome.value.outcome === 'stale-version' && attempt === 0) {
-        state.voiceMessage = 'Draft changed while transcribing; reconciling once…'
+    if (
+      outcome.status === 'resolved' &&
+      outcome.value.type === 'transcript.normalization.response'
+    ) {
+      if (outcome.value.outcome === 'review') {
+        state.pendingProposal = outcome.value.proposal
+        state.voicePhase = 'review'
+        state.voiceMessage =
+          'Review the raw and normalized transcript before committing this segment.'
         render()
-        await commitRecordingTranscript(rawTranscript, operationId, 1)
         return
       }
+      if (!outcome.value.snapshot) return
+      applySnapshot(outcome.value.snapshot, true)
       const committed = outcome.value.snapshot.recordingSegments.some(
         (segment) => segment.id === operationId,
       )
       state.voicePhase = committed ? 'idle' : 'error'
       state.voiceMessage = committed
-        ? 'Final transcript appended to the end of the draft.'
+        ? 'Normalized transcript appended; the original remains in the segment audit record.'
         : 'The final transcript was not appended. The existing draft was preserved.'
+      if (outcome.value.glossaryLearned?.length) void loadPhaseFourState()
     } else if (outcome.status === 'resolved' && outcome.value.type === 'app.error') {
       if (outcome.value.snapshot) applySnapshot(outcome.value.snapshot, true)
       state.voicePhase = 'error'
@@ -570,6 +654,152 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.voiceMessage =
         'Transcript commit timed out. Reload this chat’s draft before recording again.'
     }
+    render()
+  }
+
+  const acceptNormalizationProposal = async () => {
+    const proposal = state.pendingProposal
+    if (!proposal || state.automatedBusy) return
+    state.automatedBusy = true
+    state.voiceMessage = 'Committing the reviewed transcript…'
+    render()
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.confirm.request',
+      requestId: createRequestId('transcript-confirm'),
+      operationId: proposal.operationId,
+      chatId: proposal.chatId,
+      expectedVersion: proposal.expectedVersion,
+    })
+    state.automatedBusy = false
+    if (!alive) return
+    if (
+      outcome.status === 'resolved' &&
+      outcome.value.type === 'transcript.normalization.response' &&
+      outcome.value.snapshot
+    ) {
+      applySnapshot(outcome.value.snapshot, true)
+      state.pendingProposal = null
+      state.voicePhase = 'idle'
+      state.voiceMessage = 'Reviewed transcript appended to the draft.'
+      if (outcome.value.glossaryLearned?.length) {
+        state.phaseFourMessage = `Learned ${outcome.value.glossaryLearned.map((entry) => entry.canonical).join(', ')} from confirmed spelling. The glossary change is undoable.`
+        await loadPhaseFourState()
+      }
+    } else {
+      state.voicePhase = 'error'
+      state.voiceMessage =
+        outcome.status === 'resolved' && outcome.value.type === 'app.error'
+          ? outcome.value.message
+          : 'Transcript confirmation timed out. Nothing was appended.'
+    }
+    render()
+  }
+
+  const rejectNormalizationProposal = () => {
+    state.pendingProposal = null
+    state.voicePhase = 'idle'
+    state.voiceMessage = 'Normalized transcript rejected. Nothing was appended or learned.'
+    render()
+  }
+
+  const applyPhaseFourResponse = (
+    response: Extract<BackendResponse, { type: 'phase4.state.response' }>,
+  ) => {
+    state.settings = response.settings
+    state.glossary = response.glossary
+    state.canUndoGlossary = response.canUndoGlossary
+    state.phaseFourMessage = response.notice ?? 'Context and glossary settings ready.'
+  }
+
+  const saveSettings = async () => {
+    const contextMessageCount = Math.min(
+      20,
+      Math.max(0, Number.parseInt(contextCountInput.value, 10) || 0),
+    )
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: createRequestId('settings-update'),
+      settings: { contextMessageCount, contextualNormalizationEnabled: contextualToggle.checked },
+    })
+    if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
+      applyPhaseFourResponse(outcome.value)
+    else state.phaseFourMessage = 'Settings were not saved. Try again.'
+    render()
+  }
+
+  const saveGlossaryEntry = async () => {
+    const canonical = glossaryCanonicalInput.value.trim()
+    if (!canonical) {
+      state.phaseFourMessage = 'Enter a canonical spelling before saving.'
+      render()
+      return
+    }
+    const variants = glossaryVariantsInput.value
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .slice(0, 20)
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'glossary.upsert.request',
+      requestId: createRequestId('glossary-upsert'),
+      ...(editingGlossaryEntryId ? { entryId: editingGlossaryEntryId } : {}),
+      canonical,
+      variants,
+      hint: glossaryHintInput.value.trim(),
+    })
+    if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response') {
+      applyPhaseFourResponse(outcome.value)
+      clearGlossaryForm()
+    } else if (outcome.status === 'resolved' && outcome.value.type === 'app.error')
+      state.phaseFourMessage = outcome.value.message
+    else state.phaseFourMessage = 'Glossary entry was not saved. Try again.'
+    render()
+  }
+
+  const clearGlossaryForm = () => {
+    editingGlossaryEntryId = undefined
+    glossaryCanonicalInput.value = ''
+    glossaryVariantsInput.value = ''
+    glossaryHintInput.value = ''
+  }
+
+  const handleGlossaryListClick = async (event: Event) => {
+    const button = (event.target as Element | null)?.closest<HTMLButtonElement>(
+      'button[data-glossary-action]',
+    )
+    if (!button) return
+    const entry = state.glossary.find((item) => item.id === button.dataset.entryId)
+    if (!entry) return
+    if (button.dataset.glossaryAction === 'edit') {
+      editingGlossaryEntryId = entry.id
+      glossaryCanonicalInput.value = entry.canonical
+      glossaryVariantsInput.value = entry.variants.join(', ')
+      glossaryHintInput.value = entry.hint
+      render()
+      return
+    }
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'glossary.delete.request',
+      requestId: createRequestId('glossary-delete'),
+      entryId: entry.id,
+    })
+    if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
+      applyPhaseFourResponse(outcome.value)
+    render()
+  }
+
+  const undoGlossary = async () => {
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'glossary.undo.request',
+      requestId: createRequestId('glossary-undo'),
+    })
+    if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
+      applyPhaseFourResponse(outcome.value)
     render()
   }
 
@@ -589,7 +819,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       return
     }
     state.voicePhase = 'committing'
-    state.voiceMessage = 'Transcription complete. Appending the final segment…'
+    state.voiceMessage =
+      'Transcription complete. Applying bounded context, punctuation, spelling, and glossary rules…'
     render()
     await commitRecordingTranscript(transcript.text, recording.operationId)
   }
@@ -697,23 +928,31 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
   }
 
-  const requestMediaPermission = async () => {
+  const requestRecordingPermissions = async (): Promise<boolean> => {
+    const required = ['media', 'chats', 'generation'] as const
+    const missing = required.filter((permission) => !state.permissions.granted.includes(permission))
+    if (!missing.length) return true
     try {
-      const granted = await ctx.permissions.request(['media'], {
+      const granted = await ctx.permissions.request(missing, {
         reason:
-          'Record a user-initiated message segment through Lumiverse’s configured speech-to-text provider.',
+          'Record through Lumiverse speech-to-text, read bounded chat context, and normalize the transcript through your configured Lumiverse generation connection.',
       })
       state.permissions = sanitizeGrantedPermissions(granted)
-      state.voiceMessage = granted.includes('media')
-        ? 'Microphone permission is ready. Select Record Message again to begin.'
-        : 'Media permission was not granted. No recording started.'
+      const ready = required.every((permission) => granted.includes(permission))
+      state.voiceMessage = ready
+        ? 'Recording and normalization permissions are ready. Select Record Message again to begin.'
+        : 'Required recording or normalization permission was not granted. No recording started.'
+      render()
+      return ready
     } catch {
-      state.voiceMessage = 'Media permission was not granted. No recording started.'
+      state.voiceMessage =
+        'Required recording or normalization permission was not granted. No recording started.'
+      render()
+      return false
     }
-    render()
   }
 
-  const handleRecordMessage = () => {
+  const handleRecordMessage = async () => {
     if (state.voicePhase === 'starting' || state.voicePhase === 'recording') {
       stopActiveRecording()
       return
@@ -725,8 +964,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.activeChatId !== state.snapshot.chatId
     )
       return
-    if (!state.permissions.granted.includes('media')) {
-      void requestMediaPermission()
+    const missingPermission = ['media', 'chats', 'generation'].some(
+      (permission) =>
+        !state.permissions.granted.includes(permission as 'media' | 'chats' | 'generation'),
+    )
+    if (missingPermission) {
+      await requestRecordingPermissions()
       return
     }
     startRecording()
@@ -872,6 +1115,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
   const handleChatSwitch = () => {
     cancelActiveRecording('Recording cancelled because the active chat changed.')
+    if (state.pendingProposal) rejectNormalizationProposal()
     void refreshHostState()
   }
   disposers.push(ctx.events.on('PERMISSION_CHANGED', handlePermissionChange))
@@ -901,11 +1145,20 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     render()
   }
   const handleUndoClick = () => void handleUndo()
-  const handleRecordClick = () => handleRecordMessage()
+  const handleRecordClick = () => void handleRecordMessage()
   const handleCancelRecordingClick = () =>
     cancelActiveRecording('Recording cancelled. No transcript was appended.')
   const handleUndoRecordingClick = () => void handleUndoRecording()
   const handleSendClick = () => void handleSend()
+  const handleAcceptProposalClick = () => void acceptNormalizationProposal()
+  const handleRejectProposalClick = () => rejectNormalizationProposal()
+  const handleSaveSettingsClick = () => void saveSettings()
+  const handleSaveGlossaryClick = () => void saveGlossaryEntry()
+  const handleCancelGlossaryClick = () => {
+    clearGlossaryForm()
+    render()
+  }
+  const handleUndoGlossaryClick = () => void undoGlossary()
   document.addEventListener('visibilitychange', handleVisibility)
   window.addEventListener('pagehide', handlePageHide)
   window.addEventListener('focus', handleFocus)
@@ -918,6 +1171,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   undoButton.addEventListener('click', handleUndoClick)
   historyButton.addEventListener('click', handleHistoryToggle)
   sendButton.addEventListener('click', handleSendClick)
+  acceptProposalButton.addEventListener('click', handleAcceptProposalClick)
+  rejectProposalButton.addEventListener('click', handleRejectProposalClick)
+  saveSettingsButton.addEventListener('click', handleSaveSettingsClick)
+  glossarySaveButton.addEventListener('click', handleSaveGlossaryClick)
+  glossaryCancelButton.addEventListener('click', handleCancelGlossaryClick)
+  glossaryUndoButton.addEventListener('click', handleUndoGlossaryClick)
+  glossaryList.addEventListener('click', handleGlossaryListClick)
 
   render()
   void checkBackend()
@@ -946,12 +1206,49 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     undoButton.removeEventListener('click', handleUndoClick)
     historyButton.removeEventListener('click', handleHistoryToggle)
     sendButton.removeEventListener('click', handleSendClick)
+    acceptProposalButton.removeEventListener('click', handleAcceptProposalClick)
+    rejectProposalButton.removeEventListener('click', handleRejectProposalClick)
+    saveSettingsButton.removeEventListener('click', handleSaveSettingsClick)
+    glossarySaveButton.removeEventListener('click', handleSaveGlossaryClick)
+    glossaryCancelButton.removeEventListener('click', handleCancelGlossaryClick)
+    glossaryUndoButton.removeEventListener('click', handleUndoGlossaryClick)
+    glossaryList.removeEventListener('click', handleGlossaryListClick)
     inputAction.destroy()
     tab.destroy()
   }
   const removeTeardownListener = ctx.onTeardown?.(cleanup)
   if (removeTeardownListener) disposers.push(removeTeardownListener)
   return cleanup
+}
+
+function renderGlossary(container: HTMLElement, entries: readonly GlossaryEntry[]): void {
+  container.replaceChildren()
+  if (!entries.length) {
+    const empty = document.createElement('p')
+    empty.className = 'jt-empty'
+    empty.textContent =
+      'No glossary entries yet. Confirmed explicit spelling can add them automatically.'
+    container.append(empty)
+    return
+  }
+  for (const entry of entries) {
+    const row = document.createElement('div')
+    row.className = 'jt-glossary-row'
+    const text = document.createElement('p')
+    text.textContent = `${entry.canonical}${entry.variants.length ? ` — heard as: ${entry.variants.join(', ')}` : ''}${entry.hint ? ` — ${entry.hint}` : ''}`
+    const actions = document.createElement('div')
+    actions.className = 'jt-actions'
+    for (const action of ['edit', 'delete'] as const) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.dataset.glossaryAction = action
+      button.dataset.entryId = entry.id
+      button.textContent = action === 'edit' ? 'Edit' : 'Delete'
+      actions.append(button)
+    }
+    row.append(text, actions)
+    container.append(row)
+  }
 }
 
 function renderParagraphs(container: HTMLElement, cleanText: string): void {
@@ -1114,13 +1411,20 @@ function shellMarkup(): string {
       .jt-diff__line { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: .5rem; }
       .jt-diff del, .jt-diff ins { white-space: pre-wrap; overflow-wrap: anywhere; }
       .jt-history { max-height: 12rem; overflow: auto; padding-inline-start: 1.4rem; }
+      .jt-form-grid { display: grid; gap: .5rem; }
+      .jt-form-grid label { display: grid; gap: .25rem; font-size: .85rem; }
+      .jt-form-grid input { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
+      .jt-proposal { display: grid; gap: .55rem; padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
+      .jt-proposal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .55rem; background: color-mix(in srgb, currentColor 6%, transparent); }
+      .jt-glossary { display: grid; gap: .55rem; }
+      .jt-glossary-row { display: grid; gap: .35rem; padding: .55rem; border-radius: .45rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-wrap: anywhere; }
       .jt-empty { opacity: .65; font-style: italic; }
       [data-state="ready"] { color: #38a169; }
       [data-state="unavailable"] { color: #e53e3e; }
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
-        <p class="jt-shell__eyebrow">Phase 3 voice composition · v${APP_VERSION}</p>
+        <p class="jt-shell__eyebrow">Phase 4 context and vocabulary · v${APP_VERSION}</p>
         <h2 id="jt-title">JarvisType</h2>
         <p>Compose privately, review every change, and send only when you confirm.</p>
       </header>
@@ -1163,6 +1467,18 @@ function shellMarkup(): string {
           </div>
           <p class="jt-voice__transcript jt-voice__transcript--provisional" data-voice-provisional hidden></p>
           <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
+          <section class="jt-proposal" data-normalization-proposal hidden aria-labelledby="jt-proposal-title">
+            <h4 id="jt-proposal-title">Review normalized transcript</h4>
+            <p><strong>Raw provider transcript</strong></p>
+            <pre data-proposal-raw></pre>
+            <p><strong>Proposed text</strong></p>
+            <pre data-proposal-candidate></pre>
+            <p class="jt-draft-meta" data-proposal-meta></p>
+            <div class="jt-actions">
+              <button type="button" data-proposal-accept>Accept &amp; append</button>
+              <button type="button" data-proposal-reject>Reject</button>
+            </div>
+          </section>
           <div class="jt-actions" aria-label="Voice composition controls">
             <button type="button" data-record-message disabled>Record Message</button>
             <button type="button" data-cancel-recording hidden>Cancel Recording</button>
@@ -1193,6 +1509,30 @@ function shellMarkup(): string {
         <div class="jt-actions">
           <button type="button" data-send disabled>Confirm &amp; Send</button>
         </div>
+      </section>
+
+      <section class="jt-shell__card" aria-labelledby="jt-context-title">
+        <h3 id="jt-context-title">Context and glossary</h3>
+        <p class="jt-shell__notice">JarvisType sends the selected recent chat text, current draft tail, and glossary to your configured Lumiverse generation connection only for post-transcription normalization. Lumiverse STT receives no added context. Set recent messages to 0 to exclude chat history.</p>
+        <div class="jt-form-grid">
+          <label>Recent messages (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
+          <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
+        </div>
+        <div class="jt-actions"><button type="button" data-settings-save>Save context settings</button></div>
+        <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings…</p>
+
+        <h4>Personal glossary</h4>
+        <div class="jt-form-grid">
+          <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-glossary-canonical></label>
+          <label>Heard-as variants, comma separated<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-glossary-variants></label>
+          <label>Optional reference or hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-glossary-hint></label>
+        </div>
+        <div class="jt-actions">
+          <button type="button" data-glossary-save>Add entry</button>
+          <button type="button" data-glossary-cancel hidden>Cancel edit</button>
+          <button type="button" data-glossary-undo disabled>Undo glossary change</button>
+        </div>
+        <div class="jt-glossary" data-glossary-list></div>
       </section>
     </main>
   `

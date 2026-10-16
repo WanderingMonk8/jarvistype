@@ -46,11 +46,11 @@ var RequestRegistry = class {
 };
 
 // src/protocol/messages.ts
-var PROTOCOL_VERSION = 3;
-var APP_VERSION = "0.9.0";
+var PROTOCOL_VERSION = 4;
+var APP_VERSION = "1.0.0";
 var REQUEST_TIMEOUT_MS = 15e3;
 var SEND_TIMEOUT_MS = 12e4;
-var PHASE_THREE_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
+var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 function createRequestId(prefix = "request") {
   return `${prefix}-${Date.now().toString(36)}-${crypto.randomUUID()}`;
 }
@@ -65,6 +65,9 @@ var ERROR_CODES = [
   "DRAFT_EMPTY",
   "DRAFT_PERSIST_FAILED",
   "TRANSCRIPT_EMPTY",
+  "NORMALIZATION_FAILED",
+  "NORMALIZATION_EXPIRED",
+  "GLOSSARY_CONFLICT",
   "RECORDING_UNDO_CONFLICT",
   "CHAT_MISMATCH",
   "PERMISSION_DENIED",
@@ -84,6 +87,12 @@ function isBackendResponse(value) {
   if (value.type === "draft.send.response") {
     return value.ok === true && isIdentifier(value.operationId) && value.messageIdPresent === true && typeof value.generationIdPresent === "boolean" && isDraftSnapshot(value.snapshot);
   }
+  if (value.type === "transcript.normalization.response") {
+    return value.ok === true && (value.outcome === "committed" || value.outcome === "review") && isNormalizationProposal(value.proposal) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot)) && (value.glossaryLearned === void 0 || Array.isArray(value.glossaryLearned) && value.glossaryLearned.every(isGlossaryEntry));
+  }
+  if (value.type === "phase4.state.response") {
+    return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
+  }
   if (value.type === "app.error") {
     return value.ok === false && typeof value.code === "string" && ERROR_CODES.includes(value.code) && isBoundedString(value.message, 1, 2e3) && typeof value.retryable === "boolean" && (value.operationId === void 0 || isIdentifier(value.operationId)) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot));
   }
@@ -91,8 +100,8 @@ function isBackendResponse(value) {
 }
 function sanitizeGrantedPermissions(granted) {
   return {
-    declared: [...PHASE_THREE_PERMISSIONS],
-    granted: PHASE_THREE_PERMISSIONS.filter((permission) => granted.includes(permission))
+    declared: [...PHASE_FOUR_PERMISSIONS],
+    granted: PHASE_FOUR_PERMISSIONS.filter((permission) => granted.includes(permission))
   };
 }
 function isDraftSnapshot(value) {
@@ -105,7 +114,10 @@ function isHistoryEntry(value) {
   return isRecord(value) && isIdentifier(value.id) && (value.kind === "manual-edit" || value.kind === "undo" || value.kind === "recording-append" || value.kind === "recording-undo") && (value.editGroupId === void 0 || isIdentifier(value.editGroupId)) && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.afterVersion) && isBoundedString(value.timestamp, 1, 128) && isDiff(value.diff);
 }
 function isRecordingSegment(value) {
-  return isRecord(value) && isIdentifier(value.id) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) && isBoundedString(value.committedText, 1, MAX_DRAFT_CHARACTERS) && isNonNegativeInteger(value.startOffset) && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.resultingVersion) && value.resultingVersion === value.beforeVersion + 1 && isBoundedString(value.committedAt, 1, 128);
+  return isRecord(value) && isIdentifier(value.id) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) && isBoundedString(value.normalizedTranscript, 1, MAX_DRAFT_CHARACTERS) && isRecordingNormalization(value.normalization) && isBoundedString(value.committedText, 1, MAX_DRAFT_CHARACTERS) && isNonNegativeInteger(value.startOffset) && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.resultingVersion) && value.resultingVersion === value.beforeVersion + 1 && isBoundedString(value.committedAt, 1, 128);
+}
+function isRecordingNormalization(value) {
+  return isRecord(value) && Array.isArray(value.reasons) && value.reasons.every((reason) => isBoundedString(reason, 1, 200)) && isNonNegativeInteger(value.contextMessageCount) && isNonNegativeInteger(value.contextCharacterCount) && typeof value.contextTruncated === "boolean" && typeof value.contextualModelUsed === "boolean";
 }
 function isDiff(value) {
   return isRecord(value) && typeof value.removed === "string" && typeof value.added === "string" && value.removed.length <= MAX_DRAFT_CHARACTERS && value.added.length <= MAX_DRAFT_CHARACTERS && isNonNegativeInteger(value.startOffset) && Array.isArray(value.affectedParagraphOrdinals) && value.affectedParagraphOrdinals.every(isPositiveInteger);
@@ -114,7 +126,18 @@ function isPermissionSnapshot(value) {
   if (!isRecord(value) || !Array.isArray(value.declared) || !Array.isArray(value.granted)) {
     return false;
   }
-  return value.declared.length === PHASE_THREE_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_THREE_PERMISSIONS[index]) && value.granted.length <= PHASE_THREE_PERMISSIONS.length && value.granted.every((permission) => PHASE_THREE_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
+  return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
+}
+function isPhaseFourSettings(value) {
+  return isRecord(value) && isNonNegativeInteger(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean";
+}
+function isNormalizationProposal(value) {
+  return isRecord(value) && isIdentifier(value.operationId) && isIdentifier(value.chatId) && isNonNegativeInteger(value.expectedVersion) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) && isBoundedString(value.candidateText, 1, MAX_DRAFT_CHARACTERS) && Array.isArray(value.reasons) && value.reasons.every((reason) => isBoundedString(reason, 1, 200)) && Array.isArray(value.ambiguities) && value.ambiguities.every((reason) => isBoundedString(reason, 1, 500)) && Array.isArray(value.learningCandidates) && value.learningCandidates.every(
+    (candidate) => isRecord(candidate) && isBoundedString(candidate.canonical, 1, 200) && typeof candidate.spokenVariant === "string" && candidate.spokenVariant.length <= 500
+  ) && isNonNegativeInteger(value.contextMessageCount) && isNonNegativeInteger(value.contextCharacterCount) && typeof value.contextTruncated === "boolean" && typeof value.contextualModelUsed === "boolean";
+}
+function isGlossaryEntry(value) {
+  return isRecord(value) && isIdentifier(value.id) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && typeof value.hint === "string" && value.hint.length <= 500 && (value.source === "explicit-spelling" || value.source === "manual") && isNonNegativeInteger(value.useCount) && isBoundedString(value.createdAt, 1, 128) && isBoundedString(value.updatedAt, 1, 128);
 }
 function hasEnvelope(value) {
   return isRecord(value) && value.protocolVersion === PROTOCOL_VERSION && isBoundedString(value.type, 1, 128) && isIdentifier(value.requestId);
@@ -185,6 +208,29 @@ function setup(ctx) {
   const historyPanel = requireElement(tab.root, "[data-history-panel]");
   const historyList = requireElement(tab.root, "[data-history-list]");
   const sendButton = requireElement(tab.root, "[data-send]");
+  const proposalPanel = requireElement(tab.root, "[data-normalization-proposal]");
+  const proposalRaw = requireElement(tab.root, "[data-proposal-raw]");
+  const proposalCandidate = requireElement(tab.root, "[data-proposal-candidate]");
+  const proposalMeta = requireElement(tab.root, "[data-proposal-meta]");
+  const acceptProposalButton = requireElement(tab.root, "[data-proposal-accept]");
+  const rejectProposalButton = requireElement(tab.root, "[data-proposal-reject]");
+  const contextCountInput = requireElement(tab.root, "[data-context-count]");
+  const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
+  const saveSettingsButton = requireElement(tab.root, "[data-settings-save]");
+  const glossaryCanonicalInput = requireElement(
+    tab.root,
+    "[data-glossary-canonical]"
+  );
+  const glossaryVariantsInput = requireElement(
+    tab.root,
+    "[data-glossary-variants]"
+  );
+  const glossaryHintInput = requireElement(tab.root, "[data-glossary-hint]");
+  const glossarySaveButton = requireElement(tab.root, "[data-glossary-save]");
+  const glossaryCancelButton = requireElement(tab.root, "[data-glossary-cancel]");
+  const glossaryUndoButton = requireElement(tab.root, "[data-glossary-undo]");
+  const glossaryList = requireElement(tab.root, "[data-glossary-list]");
+  const phaseFourStatus = requireElement(tab.root, "[data-phase4-status]");
   const state = {
     activeChatId: ctx.getActiveChat().chatId,
     snapshot: null,
@@ -207,7 +253,12 @@ function setup(ctx) {
     voiceProvider: null,
     voiceProvisionalText: "",
     voiceFinalText: "",
-    voiceMessage: "Ready to record a message segment."
+    voiceMessage: "Ready to record a message segment.",
+    pendingProposal: null,
+    settings: { contextMessageCount: 5, contextualNormalizationEnabled: true },
+    glossary: [],
+    canUndoGlossary: false,
+    phaseFourMessage: "Loading context and glossary settings\u2026"
   };
   let alive = true;
   let currentHealthRequestId = null;
@@ -220,6 +271,7 @@ function setup(ctx) {
   let recordingTimer = null;
   let recordingDeadline = null;
   let recordingStartedAt = 0;
+  let editingGlossaryEntryId;
   const disposers = [];
   const sendCancellation = (requestId) => {
     if (!alive) return;
@@ -236,7 +288,7 @@ function setup(ctx) {
     state.snapshot?.dirty && state.snapshot.chatId && state.activeChatId !== state.snapshot.chatId
   );
   const hasNativeStt = () => Boolean((ctx.host.capabilities["speech-to-text-v1"] ?? 0) >= 1 && ctx.stt);
-  const voiceBusy = () => state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing" || state.voicePhase === "committing";
+  const voiceBusy = () => state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
   const render = () => {
     backendStatus.textContent = state.backendState === "ready" ? "Ready" : state.backendState === "connecting" ? "Connecting\u2026" : "Unavailable";
     backendStatus.dataset.state = state.backendState;
@@ -261,8 +313,8 @@ function setup(ctx) {
     historyButton.disabled = !state.snapshot || state.snapshot.history.length === 0;
     undoButton.disabled = !editorEnabled || state.saving || !state.snapshot?.canUndo || desiredText !== state.snapshot.cleanText;
     const recordingOwnerReady = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.saving && !state.automatedBusy && !state.sending && !mismatch && state.activeChatId === state.snapshot.chatId && desiredText === state.snapshot.cleanText;
-    recordButton.textContent = state.voicePhase === "starting" || state.voicePhase === "recording" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Appending\u2026" : "Record Message";
-    recordButton.disabled = !hasNativeStt() || !recordingOwnerReady || state.voicePhase === "processing" || state.voicePhase === "committing";
+    recordButton.textContent = state.voicePhase === "starting" || state.voicePhase === "recording" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record Message";
+    recordButton.disabled = !hasNativeStt() || !recordingOwnerReady || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
     cancelRecordingButton.hidden = !(state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing");
     cancelRecordingButton.disabled = !activeRecording;
     undoRecordingButton.disabled = !recordingOwnerReady || voiceBusy() || !state.snapshot?.canUndoRecording;
@@ -274,6 +326,20 @@ function setup(ctx) {
     voiceProvisional.hidden = state.voiceProvisionalText.length === 0;
     voiceFinal.textContent = state.voiceFinalText || "No completed recording yet.";
     voiceSegmentCount.textContent = `Committed recording segments: ${state.snapshot?.recordingSegments.length ?? 0}`;
+    const proposal = state.pendingProposal;
+    proposalPanel.hidden = !proposal;
+    proposalRaw.textContent = proposal?.rawTranscript ?? "";
+    proposalCandidate.textContent = proposal?.candidateText ?? "";
+    proposalMeta.textContent = proposal ? `${proposal.contextMessageCount} context message(s), ${proposal.contextCharacterCount} characters${proposal.contextTruncated ? ", truncated to the privacy limit" : ""}. ${proposal.reasons.length ? `Changes: ${proposal.reasons.join(", ")}.` : ""}${proposal.ambiguities.length ? ` Review: ${proposal.ambiguities.join(" ")}` : ""}` : "";
+    acceptProposalButton.disabled = !proposal || state.automatedBusy;
+    rejectProposalButton.disabled = !proposal || state.automatedBusy;
+    contextCountInput.value = String(state.settings.contextMessageCount);
+    contextualToggle.checked = state.settings.contextualNormalizationEnabled;
+    phaseFourStatus.textContent = state.phaseFourMessage;
+    glossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy;
+    glossarySaveButton.textContent = editingGlossaryEntryId ? "Update entry" : "Add entry";
+    glossaryCancelButton.hidden = !editingGlossaryEntryId;
+    renderGlossary(glossaryList, state.glossary);
     sendButton.disabled = !editorEnabled || state.saving || mismatch || desiredText.trim().length === 0 || desiredText !== state.snapshot?.cleanText || state.sendOutcomeUnknown || sendFlowActive || voiceBusy();
   };
   const send = (request) => {
@@ -334,6 +400,23 @@ function setup(ctx) {
     }
     if (alive) render();
   };
+  const loadPhaseFourState = async () => {
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "phase4.load.request",
+      requestId: createRequestId("phase4-load")
+    });
+    if (!alive) return;
+    if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
+      state.settings = outcome.value.settings;
+      state.glossary = outcome.value.glossary;
+      state.canUndoGlossary = outcome.value.canUndoGlossary;
+      state.phaseFourMessage = outcome.value.notice ?? "Context and glossary settings ready.";
+    } else {
+      state.phaseFourMessage = "Context and glossary settings could not be loaded. Retry the backend connection.";
+    }
+    render();
+  };
   const refreshHostState = async () => {
     const nextChatId = ctx.getActiveChat().chatId;
     const changed = nextChatId !== state.activeChatId;
@@ -371,6 +454,7 @@ function setup(ctx) {
       state.permissions = outcome.value.permissions;
       state.statusMessage = "Backend ready. Loading the active chat draft\u2026";
       render();
+      await loadPhaseFourState();
       if (state.activeChatId) await loadDraft(state.activeChatId);
       else {
         state.statusMessage = "Select a chat to begin a private draft.";
@@ -492,7 +576,7 @@ function setup(ctx) {
     state.voiceMessage = message;
     render();
   };
-  const commitRecordingTranscript = async (rawTranscript, operationId, attempt = 0) => {
+  const commitRecordingTranscript = async (rawTranscript, operationId) => {
     const snapshot = state.snapshot;
     if (!snapshot || ctx.getActiveChat().chatId !== snapshot.chatId) {
       state.voicePhase = "error";
@@ -502,27 +586,30 @@ function setup(ctx) {
     }
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
-      type: "draft.recording.append.request",
-      requestId: createRequestId("recording-append"),
+      type: "transcript.normalize.request",
+      requestId: createRequestId("transcript-normalize"),
       operationId,
       chatId: snapshot.chatId,
       expectedVersion: snapshot.draftVersion,
       rawTranscript
     });
     if (!alive) return;
-    if (outcome.status === "resolved" && outcome.value.type === "draft.snapshot.response") {
-      applySnapshot(outcome.value.snapshot, true);
-      if (outcome.value.outcome === "stale-version" && attempt === 0) {
-        state.voiceMessage = "Draft changed while transcribing; reconciling once\u2026";
+    if (outcome.status === "resolved" && outcome.value.type === "transcript.normalization.response") {
+      if (outcome.value.outcome === "review") {
+        state.pendingProposal = outcome.value.proposal;
+        state.voicePhase = "review";
+        state.voiceMessage = "Review the raw and normalized transcript before committing this segment.";
         render();
-        await commitRecordingTranscript(rawTranscript, operationId, 1);
         return;
       }
+      if (!outcome.value.snapshot) return;
+      applySnapshot(outcome.value.snapshot, true);
       const committed = outcome.value.snapshot.recordingSegments.some(
         (segment) => segment.id === operationId
       );
       state.voicePhase = committed ? "idle" : "error";
-      state.voiceMessage = committed ? "Final transcript appended to the end of the draft." : "The final transcript was not appended. The existing draft was preserved.";
+      state.voiceMessage = committed ? "Normalized transcript appended; the original remains in the segment audit record." : "The final transcript was not appended. The existing draft was preserved.";
+      if (outcome.value.glossaryLearned?.length) void loadPhaseFourState();
     } else if (outcome.status === "resolved" && outcome.value.type === "app.error") {
       if (outcome.value.snapshot) applySnapshot(outcome.value.snapshot, true);
       state.voicePhase = "error";
@@ -531,6 +618,131 @@ function setup(ctx) {
       state.voicePhase = "error";
       state.voiceMessage = "Transcript commit timed out. Reload this chat\u2019s draft before recording again.";
     }
+    render();
+  };
+  const acceptNormalizationProposal = async () => {
+    const proposal = state.pendingProposal;
+    if (!proposal || state.automatedBusy) return;
+    state.automatedBusy = true;
+    state.voiceMessage = "Committing the reviewed transcript\u2026";
+    render();
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "transcript.confirm.request",
+      requestId: createRequestId("transcript-confirm"),
+      operationId: proposal.operationId,
+      chatId: proposal.chatId,
+      expectedVersion: proposal.expectedVersion
+    });
+    state.automatedBusy = false;
+    if (!alive) return;
+    if (outcome.status === "resolved" && outcome.value.type === "transcript.normalization.response" && outcome.value.snapshot) {
+      applySnapshot(outcome.value.snapshot, true);
+      state.pendingProposal = null;
+      state.voicePhase = "idle";
+      state.voiceMessage = "Reviewed transcript appended to the draft.";
+      if (outcome.value.glossaryLearned?.length) {
+        state.phaseFourMessage = `Learned ${outcome.value.glossaryLearned.map((entry) => entry.canonical).join(", ")} from confirmed spelling. The glossary change is undoable.`;
+        await loadPhaseFourState();
+      }
+    } else {
+      state.voicePhase = "error";
+      state.voiceMessage = outcome.status === "resolved" && outcome.value.type === "app.error" ? outcome.value.message : "Transcript confirmation timed out. Nothing was appended.";
+    }
+    render();
+  };
+  const rejectNormalizationProposal = () => {
+    state.pendingProposal = null;
+    state.voicePhase = "idle";
+    state.voiceMessage = "Normalized transcript rejected. Nothing was appended or learned.";
+    render();
+  };
+  const applyPhaseFourResponse = (response) => {
+    state.settings = response.settings;
+    state.glossary = response.glossary;
+    state.canUndoGlossary = response.canUndoGlossary;
+    state.phaseFourMessage = response.notice ?? "Context and glossary settings ready.";
+  };
+  const saveSettings = async () => {
+    const contextMessageCount = Math.min(
+      20,
+      Math.max(0, Number.parseInt(contextCountInput.value, 10) || 0)
+    );
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "phase4.settings.update.request",
+      requestId: createRequestId("settings-update"),
+      settings: { contextMessageCount, contextualNormalizationEnabled: contextualToggle.checked }
+    });
+    if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
+      applyPhaseFourResponse(outcome.value);
+    else state.phaseFourMessage = "Settings were not saved. Try again.";
+    render();
+  };
+  const saveGlossaryEntry = async () => {
+    const canonical = glossaryCanonicalInput.value.trim();
+    if (!canonical) {
+      state.phaseFourMessage = "Enter a canonical spelling before saving.";
+      render();
+      return;
+    }
+    const variants = glossaryVariantsInput.value.split(",").map((value) => value.trim()).filter(Boolean).slice(0, 20);
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "glossary.upsert.request",
+      requestId: createRequestId("glossary-upsert"),
+      ...editingGlossaryEntryId ? { entryId: editingGlossaryEntryId } : {},
+      canonical,
+      variants,
+      hint: glossaryHintInput.value.trim()
+    });
+    if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
+      applyPhaseFourResponse(outcome.value);
+      clearGlossaryForm();
+    } else if (outcome.status === "resolved" && outcome.value.type === "app.error")
+      state.phaseFourMessage = outcome.value.message;
+    else state.phaseFourMessage = "Glossary entry was not saved. Try again.";
+    render();
+  };
+  const clearGlossaryForm = () => {
+    editingGlossaryEntryId = void 0;
+    glossaryCanonicalInput.value = "";
+    glossaryVariantsInput.value = "";
+    glossaryHintInput.value = "";
+  };
+  const handleGlossaryListClick = async (event) => {
+    const button = event.target?.closest(
+      "button[data-glossary-action]"
+    );
+    if (!button) return;
+    const entry = state.glossary.find((item) => item.id === button.dataset.entryId);
+    if (!entry) return;
+    if (button.dataset.glossaryAction === "edit") {
+      editingGlossaryEntryId = entry.id;
+      glossaryCanonicalInput.value = entry.canonical;
+      glossaryVariantsInput.value = entry.variants.join(", ");
+      glossaryHintInput.value = entry.hint;
+      render();
+      return;
+    }
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "glossary.delete.request",
+      requestId: createRequestId("glossary-delete"),
+      entryId: entry.id
+    });
+    if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
+      applyPhaseFourResponse(outcome.value);
+    render();
+  };
+  const undoGlossary = async () => {
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "glossary.undo.request",
+      requestId: createRequestId("glossary-undo")
+    });
+    if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
+      applyPhaseFourResponse(outcome.value);
     render();
   };
   const finishRecording = async (runId, transcript) => {
@@ -549,7 +761,7 @@ function setup(ctx) {
       return;
     }
     state.voicePhase = "committing";
-    state.voiceMessage = "Transcription complete. Appending the final segment\u2026";
+    state.voiceMessage = "Transcription complete. Applying bounded context, punctuation, spelling, and glossary rules\u2026";
     render();
     await commitRecordingTranscript(transcript.text, recording.operationId);
   };
@@ -648,27 +860,37 @@ function setup(ctx) {
       }
     }
   };
-  const requestMediaPermission = async () => {
+  const requestRecordingPermissions = async () => {
+    const required = ["media", "chats", "generation"];
+    const missing = required.filter((permission) => !state.permissions.granted.includes(permission));
+    if (!missing.length) return true;
     try {
-      const granted = await ctx.permissions.request(["media"], {
-        reason: "Record a user-initiated message segment through Lumiverse\u2019s configured speech-to-text provider."
+      const granted = await ctx.permissions.request(missing, {
+        reason: "Record through Lumiverse speech-to-text, read bounded chat context, and normalize the transcript through your configured Lumiverse generation connection."
       });
       state.permissions = sanitizeGrantedPermissions(granted);
-      state.voiceMessage = granted.includes("media") ? "Microphone permission is ready. Select Record Message again to begin." : "Media permission was not granted. No recording started.";
+      const ready = required.every((permission) => granted.includes(permission));
+      state.voiceMessage = ready ? "Recording and normalization permissions are ready. Select Record Message again to begin." : "Required recording or normalization permission was not granted. No recording started.";
+      render();
+      return ready;
     } catch {
-      state.voiceMessage = "Media permission was not granted. No recording started.";
+      state.voiceMessage = "Required recording or normalization permission was not granted. No recording started.";
+      render();
+      return false;
     }
-    render();
   };
-  const handleRecordMessage = () => {
+  const handleRecordMessage = async () => {
     if (state.voicePhase === "starting" || state.voicePhase === "recording") {
       stopActiveRecording();
       return;
     }
     if (voiceBusy() || !state.snapshot || state.saving || state.activeChatId !== state.snapshot.chatId)
       return;
-    if (!state.permissions.granted.includes("media")) {
-      void requestMediaPermission();
+    const missingPermission = ["media", "chats", "generation"].some(
+      (permission) => !state.permissions.granted.includes(permission)
+    );
+    if (missingPermission) {
+      await requestRecordingPermissions();
       return;
     }
     startRecording();
@@ -794,6 +1016,7 @@ function setup(ctx) {
   };
   const handleChatSwitch = () => {
     cancelActiveRecording("Recording cancelled because the active chat changed.");
+    if (state.pendingProposal) rejectNormalizationProposal();
     void refreshHostState();
   };
   disposers.push(ctx.events.on("PERMISSION_CHANGED", handlePermissionChange));
@@ -821,10 +1044,19 @@ function setup(ctx) {
     render();
   };
   const handleUndoClick = () => void handleUndo();
-  const handleRecordClick = () => handleRecordMessage();
+  const handleRecordClick = () => void handleRecordMessage();
   const handleCancelRecordingClick = () => cancelActiveRecording("Recording cancelled. No transcript was appended.");
   const handleUndoRecordingClick = () => void handleUndoRecording();
   const handleSendClick = () => void handleSend();
+  const handleAcceptProposalClick = () => void acceptNormalizationProposal();
+  const handleRejectProposalClick = () => rejectNormalizationProposal();
+  const handleSaveSettingsClick = () => void saveSettings();
+  const handleSaveGlossaryClick = () => void saveGlossaryEntry();
+  const handleCancelGlossaryClick = () => {
+    clearGlossaryForm();
+    render();
+  };
+  const handleUndoGlossaryClick = () => void undoGlossary();
   document.addEventListener("visibilitychange", handleVisibility);
   window.addEventListener("pagehide", handlePageHide);
   window.addEventListener("focus", handleFocus);
@@ -837,6 +1069,13 @@ function setup(ctx) {
   undoButton.addEventListener("click", handleUndoClick);
   historyButton.addEventListener("click", handleHistoryToggle);
   sendButton.addEventListener("click", handleSendClick);
+  acceptProposalButton.addEventListener("click", handleAcceptProposalClick);
+  rejectProposalButton.addEventListener("click", handleRejectProposalClick);
+  saveSettingsButton.addEventListener("click", handleSaveSettingsClick);
+  glossarySaveButton.addEventListener("click", handleSaveGlossaryClick);
+  glossaryCancelButton.addEventListener("click", handleCancelGlossaryClick);
+  glossaryUndoButton.addEventListener("click", handleUndoGlossaryClick);
+  glossaryList.addEventListener("click", handleGlossaryListClick);
   render();
   void checkBackend();
   ctx.ready();
@@ -863,12 +1102,47 @@ function setup(ctx) {
     undoButton.removeEventListener("click", handleUndoClick);
     historyButton.removeEventListener("click", handleHistoryToggle);
     sendButton.removeEventListener("click", handleSendClick);
+    acceptProposalButton.removeEventListener("click", handleAcceptProposalClick);
+    rejectProposalButton.removeEventListener("click", handleRejectProposalClick);
+    saveSettingsButton.removeEventListener("click", handleSaveSettingsClick);
+    glossarySaveButton.removeEventListener("click", handleSaveGlossaryClick);
+    glossaryCancelButton.removeEventListener("click", handleCancelGlossaryClick);
+    glossaryUndoButton.removeEventListener("click", handleUndoGlossaryClick);
+    glossaryList.removeEventListener("click", handleGlossaryListClick);
     inputAction.destroy();
     tab.destroy();
   };
   const removeTeardownListener = ctx.onTeardown?.(cleanup);
   if (removeTeardownListener) disposers.push(removeTeardownListener);
   return cleanup;
+}
+function renderGlossary(container, entries) {
+  container.replaceChildren();
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "jt-empty";
+    empty.textContent = "No glossary entries yet. Confirmed explicit spelling can add them automatically.";
+    container.append(empty);
+    return;
+  }
+  for (const entry of entries) {
+    const row = document.createElement("div");
+    row.className = "jt-glossary-row";
+    const text = document.createElement("p");
+    text.textContent = `${entry.canonical}${entry.variants.length ? ` \u2014 heard as: ${entry.variants.join(", ")}` : ""}${entry.hint ? ` \u2014 ${entry.hint}` : ""}`;
+    const actions = document.createElement("div");
+    actions.className = "jt-actions";
+    for (const action of ["edit", "delete"]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.glossaryAction = action;
+      button.dataset.entryId = entry.id;
+      button.textContent = action === "edit" ? "Edit" : "Delete";
+      actions.append(button);
+    }
+    row.append(text, actions);
+    container.append(row);
+  }
 }
 function renderParagraphs(container, cleanText) {
   container.replaceChildren();
@@ -999,13 +1273,20 @@ function shellMarkup() {
       .jt-diff__line { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: .5rem; }
       .jt-diff del, .jt-diff ins { white-space: pre-wrap; overflow-wrap: anywhere; }
       .jt-history { max-height: 12rem; overflow: auto; padding-inline-start: 1.4rem; }
+      .jt-form-grid { display: grid; gap: .5rem; }
+      .jt-form-grid label { display: grid; gap: .25rem; font-size: .85rem; }
+      .jt-form-grid input { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
+      .jt-proposal { display: grid; gap: .55rem; padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
+      .jt-proposal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .55rem; background: color-mix(in srgb, currentColor 6%, transparent); }
+      .jt-glossary { display: grid; gap: .55rem; }
+      .jt-glossary-row { display: grid; gap: .35rem; padding: .55rem; border-radius: .45rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-wrap: anywhere; }
       .jt-empty { opacity: .65; font-style: italic; }
       [data-state="ready"] { color: #38a169; }
       [data-state="unavailable"] { color: #e53e3e; }
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
-        <p class="jt-shell__eyebrow">Phase 3 voice composition \xB7 v${APP_VERSION}</p>
+        <p class="jt-shell__eyebrow">Phase 4 context and vocabulary \xB7 v${APP_VERSION}</p>
         <h2 id="jt-title">JarvisType</h2>
         <p>Compose privately, review every change, and send only when you confirm.</p>
       </header>
@@ -1048,6 +1329,18 @@ function shellMarkup() {
           </div>
           <p class="jt-voice__transcript jt-voice__transcript--provisional" data-voice-provisional hidden></p>
           <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
+          <section class="jt-proposal" data-normalization-proposal hidden aria-labelledby="jt-proposal-title">
+            <h4 id="jt-proposal-title">Review normalized transcript</h4>
+            <p><strong>Raw provider transcript</strong></p>
+            <pre data-proposal-raw></pre>
+            <p><strong>Proposed text</strong></p>
+            <pre data-proposal-candidate></pre>
+            <p class="jt-draft-meta" data-proposal-meta></p>
+            <div class="jt-actions">
+              <button type="button" data-proposal-accept>Accept &amp; append</button>
+              <button type="button" data-proposal-reject>Reject</button>
+            </div>
+          </section>
           <div class="jt-actions" aria-label="Voice composition controls">
             <button type="button" data-record-message disabled>Record Message</button>
             <button type="button" data-cancel-recording hidden>Cancel Recording</button>
@@ -1078,6 +1371,30 @@ function shellMarkup() {
         <div class="jt-actions">
           <button type="button" data-send disabled>Confirm &amp; Send</button>
         </div>
+      </section>
+
+      <section class="jt-shell__card" aria-labelledby="jt-context-title">
+        <h3 id="jt-context-title">Context and glossary</h3>
+        <p class="jt-shell__notice">JarvisType sends the selected recent chat text, current draft tail, and glossary to your configured Lumiverse generation connection only for post-transcription normalization. Lumiverse STT receives no added context. Set recent messages to 0 to exclude chat history.</p>
+        <div class="jt-form-grid">
+          <label>Recent messages (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
+          <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
+        </div>
+        <div class="jt-actions"><button type="button" data-settings-save>Save context settings</button></div>
+        <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings\u2026</p>
+
+        <h4>Personal glossary</h4>
+        <div class="jt-form-grid">
+          <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-glossary-canonical></label>
+          <label>Heard-as variants, comma separated<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-glossary-variants></label>
+          <label>Optional reference or hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-glossary-hint></label>
+        </div>
+        <div class="jt-actions">
+          <button type="button" data-glossary-save>Add entry</button>
+          <button type="button" data-glossary-cancel hidden>Cancel edit</button>
+          <button type="button" data-glossary-undo disabled>Undo glossary change</button>
+        </div>
+        <div class="jt-glossary" data-glossary-list></div>
       </section>
     </main>
   `;

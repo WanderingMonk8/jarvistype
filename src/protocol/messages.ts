@@ -1,13 +1,35 @@
 import type { DraftSnapshot } from '../domain/draft-session'
+import type { GlossaryEntry } from '../domain/glossary'
+import type { SpellingLearningCandidate } from '../domain/normalization'
 
-export const PROTOCOL_VERSION = 3 as const
-export const APP_VERSION = '0.9.0'
+export const PROTOCOL_VERSION = 4 as const
+export const APP_VERSION = '1.0.0'
 export const REQUEST_TIMEOUT_MS = 15_000
 export const SEND_TIMEOUT_MS = 120_000
 
-export const PHASE_THREE_PERMISSIONS = ['media', 'chats', 'chat_mutation', 'generation'] as const
+export const PHASE_FOUR_PERMISSIONS = ['media', 'chats', 'chat_mutation', 'generation'] as const
 
-export type PermissionName = (typeof PHASE_THREE_PERMISSIONS)[number]
+export type PermissionName = (typeof PHASE_FOUR_PERMISSIONS)[number]
+
+export interface PhaseFourSettings {
+  contextMessageCount: number
+  contextualNormalizationEnabled: boolean
+}
+
+export interface NormalizationProposal {
+  operationId: string
+  chatId: string
+  expectedVersion: number
+  rawTranscript: string
+  candidateText: string
+  reasons: string[]
+  ambiguities: string[]
+  learningCandidates: SpellingLearningCandidate[]
+  contextMessageCount: number
+  contextCharacterCount: number
+  contextTruncated: boolean
+  contextualModelUsed: boolean
+}
 
 export interface PermissionSnapshot {
   declared: PermissionName[]
@@ -48,17 +70,44 @@ export type FrontendRequest =
       expectedVersion: number
     })
   | (RequestEnvelope & {
-      type: 'draft.recording.append.request'
+      type: 'transcript.normalize.request'
       operationId: string
       chatId: string
       expectedVersion: number
       rawTranscript: string
     })
   | (RequestEnvelope & {
+      type: 'transcript.confirm.request'
+      operationId: string
+      chatId: string
+      expectedVersion: number
+    })
+  | (RequestEnvelope & {
       type: 'draft.recording.undo.request'
       operationId: string
       chatId: string
       expectedVersion: number
+    })
+  | (RequestEnvelope & {
+      type: 'phase4.load.request'
+    })
+  | (RequestEnvelope & {
+      type: 'phase4.settings.update.request'
+      settings: PhaseFourSettings
+    })
+  | (RequestEnvelope & {
+      type: 'glossary.upsert.request'
+      entryId?: string
+      canonical: string
+      variants: string[]
+      hint: string
+    })
+  | (RequestEnvelope & {
+      type: 'glossary.delete.request'
+      entryId: string
+    })
+  | (RequestEnvelope & {
+      type: 'glossary.undo.request'
     })
   | (RequestEnvelope & {
       type: 'draft.send.request'
@@ -98,6 +147,22 @@ export type BackendResponse =
       snapshot: DraftSnapshot
     })
   | (RequestEnvelope & {
+      type: 'transcript.normalization.response'
+      ok: true
+      outcome: 'committed' | 'review'
+      proposal: NormalizationProposal
+      snapshot?: DraftSnapshot
+      glossaryLearned?: GlossaryEntry[]
+    })
+  | (RequestEnvelope & {
+      type: 'phase4.state.response'
+      ok: true
+      settings: PhaseFourSettings
+      glossary: GlossaryEntry[]
+      canUndoGlossary: boolean
+      notice?: string
+    })
+  | (RequestEnvelope & {
       type: 'app.error'
       ok: false
       code: AppErrorCode
@@ -116,6 +181,9 @@ export type AppErrorCode =
   | 'DRAFT_EMPTY'
   | 'DRAFT_PERSIST_FAILED'
   | 'TRANSCRIPT_EMPTY'
+  | 'NORMALIZATION_FAILED'
+  | 'NORMALIZATION_EXPIRED'
+  | 'GLOSSARY_CONFLICT'
   | 'RECORDING_UNDO_CONFLICT'
   | 'CHAT_MISMATCH'
   | 'PERMISSION_DENIED'

@@ -232,7 +232,6 @@ function resolveOperation(
   } else if (!paragraph) {
     return `${operation.type} requires exact text or one paragraph target`
   }
-  const before = cleanText.slice(start, end)
   const isParagraphInsertion =
     paragraph !== undefined &&
     operation.target.exactText === undefined &&
@@ -252,6 +251,13 @@ function resolveOperation(
       paragraphOrdinal: paragraph.ordinal,
     }
   }
+  if (operation.type === 'delete') {
+    const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
+    const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
+    if (hasSeparatorBefore && (hasSeparatorAfter || end === range.end)) start -= 1
+    else if (hasSeparatorAfter && start === range.start) end += 1
+  }
+  const adjustedBefore = cleanText.slice(start, end)
   const replacement =
     operation.type === 'replace'
       ? (operation.text ?? '')
@@ -260,8 +266,8 @@ function resolveOperation(
         : operation.type === 'insert_before'
           ? (operation.text ?? '')
           : operation.type === 'insert_after'
-            ? `${before}${operation.text ?? ''}`
-            : applyCase(before, operation.caseMode!)
+            ? `${adjustedBefore}${operation.text ?? ''}`
+            : applyCase(adjustedBefore, operation.caseMode!)
   if (operation.type === 'insert_before') end = start
   return {
     operation,

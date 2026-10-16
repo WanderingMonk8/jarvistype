@@ -640,7 +640,6 @@ function resolveOperation(cleanText, paragraphs, operation) {
   } else if (!paragraph) {
     return `${operation.type} requires exact text or one paragraph target`;
   }
-  const before = cleanText.slice(start, end);
   const isParagraphInsertion = paragraph !== void 0 && operation.target.exactText === void 0 && (operation.type === "insert_before" || operation.type === "insert_after");
   if (isParagraphInsertion) {
     const insertedParagraph = (operation.text ?? "").trim();
@@ -658,7 +657,14 @@ ${insertedParagraph}`,
       paragraphOrdinal: paragraph.ordinal
     };
   }
-  const replacement = operation.type === "replace" ? operation.text ?? "" : operation.type === "delete" ? "" : operation.type === "insert_before" ? operation.text ?? "" : operation.type === "insert_after" ? `${before}${operation.text ?? ""}` : applyCase(before, operation.caseMode);
+  if (operation.type === "delete") {
+    const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? "");
+    const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? "");
+    if (hasSeparatorBefore && (hasSeparatorAfter || end === range.end)) start -= 1;
+    else if (hasSeparatorAfter && start === range.start) end += 1;
+  }
+  const adjustedBefore = cleanText.slice(start, end);
+  const replacement = operation.type === "replace" ? operation.text ?? "" : operation.type === "delete" ? "" : operation.type === "insert_before" ? operation.text ?? "" : operation.type === "insert_after" ? `${adjustedBefore}${operation.text ?? ""}` : applyCase(adjustedBefore, operation.caseMode);
   if (operation.type === "insert_before") end = start;
   return {
     operation,
@@ -1001,7 +1007,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 6;
-var APP_VERSION = "1.3.2";
+var APP_VERSION = "1.3.3";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts

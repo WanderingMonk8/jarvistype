@@ -177,3 +177,46 @@ test('keeps exact-text insertions inline', () => {
     'First difficult mountain sentence.\n\nSecond paragraph here.',
   )
 })
+
+test('deletion consumes one adjacent horizontal separator without touching other text', () => {
+  const text = 'Keep this sentence. Remove this sentence.\n\nAnother paragraph.'
+  const seeded = applyManualEdit(createDraftSession('delete-chat'), text, {
+    expectedVersion: 0,
+    editGroupId: 'seed-delete',
+  })
+  const trailingSentence = executeEditPlan(seeded.session.cleanText, seeded.session.paragraphs, 1, {
+    schemaVersion: 1,
+    draftVersion: 1,
+    explanation: 'delete sentence',
+    operations: [
+      {
+        id: 'delete-sentence',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'Remove this sentence.' },
+      },
+    ],
+  })
+  assert.equal(
+    trailingSentence.ok && trailingSentence.afterText,
+    'Keep this sentence.\n\nAnother paragraph.',
+  )
+
+  const middleWord = executeEditPlan(
+    'Keep temporary wording.',
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text: 'Keep temporary wording.' }],
+    1,
+    {
+      schemaVersion: 1,
+      draftVersion: 1,
+      explanation: 'delete word',
+      operations: [
+        {
+          id: 'delete-word',
+          type: 'delete',
+          target: { paragraphOrdinal: 1, exactText: 'temporary' },
+        },
+      ],
+    },
+  )
+  assert.equal(middleWord.ok && middleWord.afterText, 'Keep wording.')
+})

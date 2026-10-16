@@ -9,6 +9,11 @@ const responses: Array<{ payload: BackendResponse; userId?: string }> = []
 const warnings: string[] = []
 const stored = new Map<string, unknown>()
 const appended: Array<{ chatId: string; content: string; triggerGeneration: boolean }> = []
+const generationRequests: Array<{
+  connection_id?: string
+  parameters?: Record<string, unknown>
+  messages?: Array<{ content: string }>
+}> = []
 let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
@@ -75,7 +80,12 @@ const spindleMock = {
     },
   },
   generate: {
-    quiet: (request: { messages?: Array<{ content: string }> }) => {
+    quiet: (request: {
+      connection_id?: string
+      parameters?: Record<string, unknown>
+      messages?: Array<{ content: string }>
+    }) => {
+      generationRequests.push(request)
       const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as {
         candidate?: string
         rawTranscript?: string
@@ -88,6 +98,11 @@ const spindleMock = {
         }),
       })
     },
+  },
+  connections: {
+    list: () => Promise.resolve([normalizationConnection]),
+    get: (connectionId: string) =>
+      Promise.resolve(connectionId === normalizationConnection.id ? normalizationConnection : null),
   },
   log: {
     info: () => undefined,
@@ -103,10 +118,26 @@ test.beforeEach(() => {
   responses.length = 0
   warnings.length = 0
   appended.length = 0
+  generationRequests.length = 0
   activeChatId = 'chat-default'
   appendShouldFail = false
   generationReturnsRawTranscript = false
 })
+
+const normalizationConnection = {
+  id: 'normalization-connection',
+  name: 'Fast Text Model',
+  provider: 'openai-compatible',
+  api_url: 'https://example.invalid',
+  model: 'configured-model',
+  preset_id: null,
+  is_default: false,
+  has_api_key: true,
+  metadata: {},
+  reasoning_bindings: null,
+  created_at: 0,
+  updated_at: 0,
+}
 
 test('loads and persists a chat-owned draft', async () => {
   const userId = 'draft-user'
@@ -146,6 +177,51 @@ test('loads and persists a chat-owned draft', async () => {
     [...stored.keys()].some((key) => key.startsWith(`${userId}:draft-`)),
     true,
   )
+})
+
+test('lists safe normalization connections and dispatches with selected connection and model', async () => {
+  const userId = 'connection-user'
+  const chatId = 'connection-chat'
+  activeChatId = chatId
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'settings-connection',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        normalizationConnectionId: normalizationConnection.id,
+        normalizationModelOverride: 'custom-text-model',
+      },
+    },
+    userId,
+  )
+  const settingsResponse = responses.at(-1)?.payload
+  assert.equal(settingsResponse?.type, 'phase4.state.response')
+  if (settingsResponse?.type === 'phase4.state.response') {
+    assert.deepEqual(settingsResponse.connections, [
+      {
+        id: normalizationConnection.id,
+        name: normalizationConnection.name,
+        provider: normalizationConnection.provider,
+        model: normalizationConnection.model,
+        isDefault: false,
+      },
+    ])
+  }
+
+  await seedDraft(userId, chatId, 'Existing draft')
+  generationRequests.length = 0
+  await dispatch(
+    recordingAppendRequest(chatId, 'selected-connection-segment', 1, 'Plain text'),
+    userId,
+  )
+
+  assert.equal(generationRequests.length, 1)
+  assert.equal(generationRequests[0]?.connection_id, normalizationConnection.id)
+  assert.equal(generationRequests[0]?.parameters?.model, 'custom-text-model')
 })
 
 test('blocks sending when the active chat does not own the draft', async () => {

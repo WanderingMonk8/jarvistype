@@ -151,6 +151,8 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
     return (
       value.ok === true &&
       isPhaseFourSettings(value.settings) &&
+      Array.isArray(value.connections) &&
+      value.connections.every(isNormalizationConnectionOption) &&
       Array.isArray(value.glossary) &&
       value.glossary.every(isGlossaryEntry) &&
       typeof value.canUndoGlossary === 'boolean' &&
@@ -284,7 +286,22 @@ function isPhaseFourSettings(value: unknown): boolean {
     isRecord(value) &&
     isNonNegativeInteger(value.contextMessageCount) &&
     value.contextMessageCount <= 20 &&
-    typeof value.contextualNormalizationEnabled === 'boolean'
+    typeof value.contextualNormalizationEnabled === 'boolean' &&
+    (value.normalizationConnectionId === null || isIdentifier(value.normalizationConnectionId)) &&
+    typeof value.normalizationModelOverride === 'string' &&
+    value.normalizationModelOverride.length <= 200
+  )
+}
+
+function isNormalizationConnectionOption(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isIdentifier(value.id) &&
+    isBoundedString(value.name, 1, 200) &&
+    isBoundedString(value.provider, 1, 200) &&
+    typeof value.model === 'string' &&
+    value.model.length <= 200 &&
+    typeof value.isDefault === 'boolean'
   )
 }
 

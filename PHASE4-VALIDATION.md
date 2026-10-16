@@ -4,12 +4,13 @@
 
 Phase 4 adds bounded post-transcription context normalization, spoken punctuation, explicit spelling and casing, per-user glossary learning and maintenance, visible review, and reversible glossary changes.
 
-Current candidate version: `1.0.3`
+Current candidate version: `1.1.0`
 
 ## Platform decision
 
 - Lumiverse `ctx.stt.start(...)` remains the authoritative audio and transcript path. JarvisType never receives raw audio or provider credentials.
-- The verified STT contract has no context or vocabulary-hint input. JarvisType therefore applies context after STT through the user's configured Lumiverse generation connection.
+- The verified STT contract has no context or vocabulary-hint input. JarvisType therefore applies context after STT through Main or a user-selected Lumiverse generation connection. The normalization model receives text, never audio.
+- Lumiverse supplies redacted connection metadata only; credentials remain host-owned. An optional custom model identifier overrides the selected connection's configured model for normalization only.
 - Recent chat context includes only eligible visible user/assistant text. The setting defaults to five, accepts zero, is capped at twenty messages, and is independently capped at 12,000 characters using newest-first retention.
 - Current draft continuity and glossary entries are supplied separately and do not consume the configured message count.
 - Deterministic spelling, punctuation, casing, and glossary rules run before optional contextual correction.
@@ -29,8 +30,9 @@ Current candidate version: `1.0.3`
 | F4-07 | Visible and reversible changes         | LOCAL-PASS | Review card shows raw/candidate/context details; learned-entry notice points to independent glossary undo.                |
 | F4-08 | Draft and chat safety                  | LOCAL-PASS | Version and active-chat checks guard normalization and confirmation; rejection leaves the draft unchanged.                |
 | F4-09 | Privacy disclosure                     | LOCAL-PASS | Drawer states exactly which data goes to Lumiverse generation and that STT receives no added context.                     |
-| F4-10 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 34 unit tests, both builds, and package validation pass.                                 |
-| F4-11 | Hosted Lumiverse verification          | PENDING    | Run the sequence below on the hosted installation.                                                                        |
+| F4-10 | Selectable normalization dispatch      | LOCAL-PASS | Settings list redacted connections and pass the selected connection ID plus optional model override to text generation.   |
+| F4-11 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 36 unit tests, both builds, and package validation pass.                                 |
+| F4-12 | Hosted Lumiverse verification          | PENDING    | Run the sequence below on the hosted installation.                                                                        |
 
 ## Hosted verification sequence
 
@@ -59,7 +61,17 @@ Verified on the hosted Lumiverse installation. Part A normalized spoken punctuat
 5. Record: “Use the word period here period”. Confirm the proposal preserves the first `period` literally and converts the final command to `.`.
 6. Reject this second proposal and confirm draft version, text, segment count, and glossary remain unchanged.
 
-### Test 3: Explicit spelling, casing, and automatic learning
+### Test 3: Normalization connection and custom model
+
+1. Confirm the disclosure states that normalization receives text rather than audio.
+2. Open **Normalization connection** and confirm it lists Main plus the accessible Lumiverse connection profiles without displaying credentials or API URLs.
+3. Select a non-Main text connection, leave the custom model blank, save, reload, and confirm the selection persists.
+4. Record a punctuation phrase and confirm normalization completes through the selected connection.
+5. Enter a valid custom model identifier for that connection, save, reload, and confirm it persists.
+6. Record another punctuation phrase and confirm normalization completes with the override.
+7. Clear the custom model, save, and confirm JarvisType returns to the selected connection's configured model.
+
+### Test 4: Explicit spelling, casing, and automatic learning
 
 1. Record: “Write capitalized C-A-E-S-A-R Caesar period”.
 2. Confirm the proposal contains exactly one `Caesar` for the spelled occurrence and does not duplicate the pronunciation cue.
@@ -68,14 +80,14 @@ Verified on the hosted Lumiverse installation. Part A normalized spoken punctuat
 5. Confirm the glossary contains canonical `Caesar`, its spoken spelling variant, source/usage behavior, and no duplicate entry.
 6. Repeat the spelling, accept it, and confirm the same entry is reused rather than duplicated.
 
-### Test 4: Casing and hyphenation variants
+### Test 5: Casing and hyphenation variants
 
 1. Record and review an all-caps spelling such as “all caps N-A-S-A”. Confirm the candidate uses `NASA`.
 2. Record and review a lowercase spelling such as “lowercase C-A-T”. Confirm the candidate uses `cat`.
 3. Record “P-I-P dash B-O-Y Pip-Boy”. Confirm the pronunciation cue yields one correctly hyphenated `Pip-Boy`.
 4. Reject one proposal and confirm its term is not learned; accept the others and confirm only accepted terms appear in the glossary.
 
-### Test 5: Context behavior and safety
+### Test 6: Context behavior and safety
 
 1. In a disposable chat, create recent messages containing an unusual proper noun, then record a sentence where the provider plausibly misrecognizes that name.
 2. Confirm the review card reports no more than the configured number of context messages and identifies whether contextual model correction was used through its change reasons.
@@ -84,7 +96,7 @@ Verified on the hosted Lumiverse installation. Part A normalized spoken punctuat
 5. Set the context count to `0`, repeat, and confirm the review metadata reports `0` context messages. Draft continuity and glossary substitution should still remain available.
 6. Include instruction-like text in chat history and confirm it is not followed as an instruction or added to the transcript.
 
-### Test 6: Manual glossary management, conflict, and undo
+### Test 7: Manual glossary management, conflict, and undo
 
 1. Add canonical `Pip-Boy`, variants `pip boy, Pipboy`, and hint `Fallout wrist device`.
 2. Reload and confirm the entry persists.
@@ -93,7 +105,7 @@ Verified on the hosted Lumiverse installation. Part A normalized spoken punctuat
 5. Delete `Pip-Boy`, confirm it disappears, then select **Undo glossary change** and confirm it returns without changing the draft.
 6. Record a phrase containing `pip boy`; confirm the proposed text uses `Pip-Boy`, then reject it and confirm the glossary itself remains unchanged.
 
-### Test 7: Ownership, cancellation, failure, and regression
+### Test 8: Ownership, cancellation, failure, and regression
 
 1. Begin a recording and cancel it. Confirm no proposal, draft mutation, or learned entry appears.
 2. Produce a review proposal, switch chats before accepting, and confirm the proposal is discarded and cannot mutate either chat.
@@ -103,7 +115,7 @@ Verified on the hosted Lumiverse installation. Part A normalized spoken punctuat
 
 ## Exit gate
 
-- All seven hosted groups are marked `REMOTE-PASS` or carry an explicitly accepted limitation.
+- All eight hosted groups are marked `REMOTE-PASS` or carry an explicitly accepted limitation.
 - No tested normalization path silently changes meaning.
 - Rejected, cancelled, failed, and unresolved spelling never enters the glossary.
 - Every automatic glossary change is visible and independently reversible.

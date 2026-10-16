@@ -46,8 +46,8 @@ var RequestRegistry = class {
 };
 
 // src/protocol/messages.ts
-var PROTOCOL_VERSION = 4;
-var APP_VERSION = "1.0.3";
+var PROTOCOL_VERSION = 5;
+var APP_VERSION = "1.1.0";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -92,7 +92,7 @@ function isBackendResponse(value) {
     return value.ok === true && (value.outcome === "committed" || value.outcome === "review") && isNormalizationProposal(value.proposal) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot)) && (value.glossaryLearned === void 0 || Array.isArray(value.glossaryLearned) && value.glossaryLearned.every(isGlossaryEntry));
   }
   if (value.type === "phase4.state.response") {
-    return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
+    return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.connections) && value.connections.every(isNormalizationConnectionOption) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
   }
   if (value.type === "app.error") {
     return value.ok === false && typeof value.code === "string" && ERROR_CODES.includes(value.code) && isBoundedString(value.message, 1, 2e3) && typeof value.retryable === "boolean" && (value.operationId === void 0 || isIdentifier(value.operationId)) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot));
@@ -130,7 +130,10 @@ function isPermissionSnapshot(value) {
   return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function isPhaseFourSettings(value) {
-  return isRecord(value) && isNonNegativeInteger(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean";
+  return isRecord(value) && isNonNegativeInteger(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.normalizationConnectionId === null || isIdentifier(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200;
+}
+function isNormalizationConnectionOption(value) {
+  return isRecord(value) && isIdentifier(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
 }
 function isNormalizationProposal(value) {
   return isRecord(value) && isIdentifier(value.operationId) && isIdentifier(value.chatId) && isNonNegativeInteger(value.expectedVersion) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) && isBoundedString(value.candidateText, 1, MAX_DRAFT_CHARACTERS) && Array.isArray(value.reasons) && value.reasons.every((reason) => isBoundedString(reason, 1, 200)) && Array.isArray(value.ambiguities) && value.ambiguities.every((reason) => isBoundedString(reason, 1, 500)) && Array.isArray(value.learningCandidates) && value.learningCandidates.every(
@@ -218,6 +221,14 @@ function setup(ctx) {
   const contextCountInput = requireElement(tab.root, "[data-context-count]");
   const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
   const saveSettingsButton = requireElement(tab.root, "[data-settings-save]");
+  const normalizationConnectionSelect = requireElement(
+    tab.root,
+    "[data-normalization-connection]"
+  );
+  const normalizationModelInput = requireElement(
+    tab.root,
+    "[data-normalization-model]"
+  );
   const glossaryCanonicalInput = requireElement(
     tab.root,
     "[data-glossary-canonical]"
@@ -256,7 +267,13 @@ function setup(ctx) {
     voiceFinalText: "",
     voiceMessage: "Ready to record a message segment.",
     pendingProposal: null,
-    settings: { contextMessageCount: 5, contextualNormalizationEnabled: true },
+    settings: {
+      contextMessageCount: 5,
+      contextualNormalizationEnabled: true,
+      normalizationConnectionId: null,
+      normalizationModelOverride: ""
+    },
+    normalizationConnections: [],
     glossary: [],
     canUndoGlossary: false,
     phaseFourMessage: "Loading context and glossary settings\u2026"
@@ -340,6 +357,12 @@ function setup(ctx) {
     rejectProposalButton.disabled = !proposal || state.automatedBusy;
     contextCountInput.value = String(state.settings.contextMessageCount);
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
+    renderConnectionOptions(
+      normalizationConnectionSelect,
+      state.normalizationConnections,
+      state.settings.normalizationConnectionId
+    );
+    normalizationModelInput.value = state.settings.normalizationModelOverride;
     phaseFourStatus.textContent = state.phaseFourMessage;
     glossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy;
     glossarySaveButton.textContent = editingGlossaryEntryId ? "Update entry" : "Add entry";
@@ -419,6 +442,7 @@ function setup(ctx) {
     if (!alive) return;
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
       state.settings = outcome.value.settings;
+      state.normalizationConnections = outcome.value.connections;
       state.glossary = outcome.value.glossary;
       state.canUndoGlossary = outcome.value.canUndoGlossary;
       state.phaseFourMessage = outcome.value.notice ?? "Context and glossary settings ready.";
@@ -670,6 +694,7 @@ function setup(ctx) {
   };
   const applyPhaseFourResponse = (response) => {
     state.settings = response.settings;
+    state.normalizationConnections = response.connections;
     state.glossary = response.glossary;
     state.canUndoGlossary = response.canUndoGlossary;
     state.phaseFourMessage = response.notice ?? "Context and glossary settings ready.";
@@ -683,7 +708,12 @@ function setup(ctx) {
       protocolVersion: PROTOCOL_VERSION,
       type: "phase4.settings.update.request",
       requestId: createRequestId("settings-update"),
-      settings: { contextMessageCount, contextualNormalizationEnabled: contextualToggle.checked }
+      settings: {
+        contextMessageCount,
+        contextualNormalizationEnabled: contextualToggle.checked,
+        normalizationConnectionId: normalizationConnectionSelect.value || null,
+        normalizationModelOverride: normalizationModelInput.value.trim()
+      }
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
       applyPhaseFourResponse(outcome.value);
@@ -1129,6 +1159,26 @@ function setup(ctx) {
   if (removeTeardownListener) disposers.push(removeTeardownListener);
   return cleanup;
 }
+function renderConnectionOptions(select, connections, selectedId) {
+  select.replaceChildren();
+  const main = document.createElement("option");
+  main.value = "";
+  main.textContent = "Main connection";
+  select.append(main);
+  for (const connection of connections) {
+    const option = document.createElement("option");
+    option.value = connection.id;
+    option.textContent = `${connection.name} \u2014 ${connection.provider}${connection.model ? ` \u2014 ${connection.model}` : ""}${connection.isDefault ? " (default)" : ""}`;
+    select.append(option);
+  }
+  if (selectedId && !connections.some((connection) => connection.id === selectedId)) {
+    const unavailable = document.createElement("option");
+    unavailable.value = selectedId;
+    unavailable.textContent = "Previously selected connection (unavailable)";
+    select.append(unavailable);
+  }
+  select.value = selectedId ?? "";
+}
 function renderGlossary(container, entries) {
   container.replaceChildren();
   if (!entries.length) {
@@ -1288,7 +1338,7 @@ function shellMarkup() {
       .jt-history { max-height: 12rem; overflow: auto; padding-inline-start: 1.4rem; }
       .jt-form-grid { display: grid; gap: .5rem; }
       .jt-form-grid label { display: grid; gap: .25rem; font-size: .85rem; }
-      .jt-form-grid input { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
+      .jt-form-grid input, .jt-form-grid select { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
       .jt-proposal { display: grid; gap: .55rem; padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
       .jt-proposal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .55rem; background: color-mix(in srgb, currentColor 6%, transparent); }
       .jt-glossary { display: grid; gap: .55rem; }
@@ -1389,10 +1439,12 @@ function shellMarkup() {
 
       <section class="jt-shell__card" aria-labelledby="jt-context-title">
         <h3 id="jt-context-title">Context and glossary</h3>
-        <p class="jt-shell__notice">JarvisType sends the selected recent chat text, current draft tail, and glossary to your configured Lumiverse generation connection only for post-transcription normalization. Lumiverse STT receives no added context. Set recent messages to 0 to exclude chat history.</p>
+        <p class="jt-shell__notice">JarvisType sends the selected recent chat text, current draft tail, and glossary to the normalization connection selected below only after speech-to-text finishes. The normalization model receives text, never audio. Lumiverse STT remains independently managed by the host and receives no added context. Set recent messages to 0 to exclude chat history.</p>
         <div class="jt-form-grid">
           <label>Recent messages (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
+          <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
+          <label>Custom model override (optional)<input type="text" maxlength="200" placeholder="Leave blank to use the connection\u2019s configured model" data-normalization-model></label>
         </div>
         <div class="jt-actions"><button type="button" data-settings-save>Save context settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings\u2026</p>

@@ -103,6 +103,23 @@ test('validates bounded draft mutations', () => {
   )
 })
 
+test('validates normalization connection and custom-model settings', () => {
+  assert.equal(
+    isFrontendRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'settings-request',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        normalizationConnectionId: 'connection-1',
+        normalizationModelOverride: 'custom-model',
+      },
+    }),
+    true,
+  )
+})
+
 test('validates transcript normalization and recording undo requests', () => {
   assert.equal(
     isFrontendRequest({

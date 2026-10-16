@@ -16,6 +16,7 @@ import {
   createRequestId,
   type BackendResponse,
   type FrontendRequest,
+  type NormalizationConnectionOption,
   type NormalizationProposal,
   type PhaseFourSettings,
   type PermissionSnapshot,
@@ -58,6 +59,7 @@ interface ComposerState {
   voiceMessage: string
   pendingProposal: NormalizationProposal | null
   settings: PhaseFourSettings
+  normalizationConnections: NormalizationConnectionOption[]
   glossary: GlossaryEntry[]
   canUndoGlossary: boolean
   phaseFourMessage: string
@@ -122,6 +124,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const contextCountInput = requireElement<HTMLInputElement>(tab.root, '[data-context-count]')
   const contextualToggle = requireElement<HTMLInputElement>(tab.root, '[data-context-enabled]')
   const saveSettingsButton = requireElement<HTMLButtonElement>(tab.root, '[data-settings-save]')
+  const normalizationConnectionSelect = requireElement<HTMLSelectElement>(
+    tab.root,
+    '[data-normalization-connection]',
+  )
+  const normalizationModelInput = requireElement<HTMLInputElement>(
+    tab.root,
+    '[data-normalization-model]',
+  )
   const glossaryCanonicalInput = requireElement<HTMLInputElement>(
     tab.root,
     '[data-glossary-canonical]',
@@ -161,7 +171,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     voiceFinalText: '',
     voiceMessage: 'Ready to record a message segment.',
     pendingProposal: null,
-    settings: { contextMessageCount: 5, contextualNormalizationEnabled: true },
+    settings: {
+      contextMessageCount: 5,
+      contextualNormalizationEnabled: true,
+      normalizationConnectionId: null,
+      normalizationModelOverride: '',
+    },
+    normalizationConnections: [],
     glossary: [],
     canUndoGlossary: false,
     phaseFourMessage: 'Loading context and glossary settings…',
@@ -320,6 +336,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     rejectProposalButton.disabled = !proposal || state.automatedBusy
     contextCountInput.value = String(state.settings.contextMessageCount)
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
+    renderConnectionOptions(
+      normalizationConnectionSelect,
+      state.normalizationConnections,
+      state.settings.normalizationConnectionId,
+    )
+    normalizationModelInput.value = state.settings.normalizationModelOverride
     phaseFourStatus.textContent = state.phaseFourMessage
     glossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy
     glossarySaveButton.textContent = editingGlossaryEntryId ? 'Update entry' : 'Add entry'
@@ -421,6 +443,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (!alive) return
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response') {
       state.settings = outcome.value.settings
+      state.normalizationConnections = outcome.value.connections
       state.glossary = outcome.value.glossary
       state.canUndoGlossary = outcome.value.canUndoGlossary
       state.phaseFourMessage = outcome.value.notice ?? 'Context and glossary settings ready.'
@@ -723,6 +746,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     response: Extract<BackendResponse, { type: 'phase4.state.response' }>,
   ) => {
     state.settings = response.settings
+    state.normalizationConnections = response.connections
     state.glossary = response.glossary
     state.canUndoGlossary = response.canUndoGlossary
     state.phaseFourMessage = response.notice ?? 'Context and glossary settings ready.'
@@ -737,7 +761,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       protocolVersion: PROTOCOL_VERSION,
       type: 'phase4.settings.update.request',
       requestId: createRequestId('settings-update'),
-      settings: { contextMessageCount, contextualNormalizationEnabled: contextualToggle.checked },
+      settings: {
+        contextMessageCount,
+        contextualNormalizationEnabled: contextualToggle.checked,
+        normalizationConnectionId: normalizationConnectionSelect.value || null,
+        normalizationModelOverride: normalizationModelInput.value.trim(),
+      },
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
       applyPhaseFourResponse(outcome.value)
@@ -1242,6 +1271,31 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   return cleanup
 }
 
+function renderConnectionOptions(
+  select: HTMLSelectElement,
+  connections: readonly NormalizationConnectionOption[],
+  selectedId: string | null,
+): void {
+  select.replaceChildren()
+  const main = document.createElement('option')
+  main.value = ''
+  main.textContent = 'Main connection'
+  select.append(main)
+  for (const connection of connections) {
+    const option = document.createElement('option')
+    option.value = connection.id
+    option.textContent = `${connection.name} — ${connection.provider}${connection.model ? ` — ${connection.model}` : ''}${connection.isDefault ? ' (default)' : ''}`
+    select.append(option)
+  }
+  if (selectedId && !connections.some((connection) => connection.id === selectedId)) {
+    const unavailable = document.createElement('option')
+    unavailable.value = selectedId
+    unavailable.textContent = 'Previously selected connection (unavailable)'
+    select.append(unavailable)
+  }
+  select.value = selectedId ?? ''
+}
+
 function renderGlossary(container: HTMLElement, entries: readonly GlossaryEntry[]): void {
   container.replaceChildren()
   if (!entries.length) {
@@ -1434,7 +1488,7 @@ function shellMarkup(): string {
       .jt-history { max-height: 12rem; overflow: auto; padding-inline-start: 1.4rem; }
       .jt-form-grid { display: grid; gap: .5rem; }
       .jt-form-grid label { display: grid; gap: .25rem; font-size: .85rem; }
-      .jt-form-grid input { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
+      .jt-form-grid input, .jt-form-grid select { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
       .jt-proposal { display: grid; gap: .55rem; padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
       .jt-proposal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .55rem; background: color-mix(in srgb, currentColor 6%, transparent); }
       .jt-glossary { display: grid; gap: .55rem; }
@@ -1535,10 +1589,12 @@ function shellMarkup(): string {
 
       <section class="jt-shell__card" aria-labelledby="jt-context-title">
         <h3 id="jt-context-title">Context and glossary</h3>
-        <p class="jt-shell__notice">JarvisType sends the selected recent chat text, current draft tail, and glossary to your configured Lumiverse generation connection only for post-transcription normalization. Lumiverse STT receives no added context. Set recent messages to 0 to exclude chat history.</p>
+        <p class="jt-shell__notice">JarvisType sends the selected recent chat text, current draft tail, and glossary to the normalization connection selected below only after speech-to-text finishes. The normalization model receives text, never audio. Lumiverse STT remains independently managed by the host and receives no added context. Set recent messages to 0 to exclude chat history.</p>
         <div class="jt-form-grid">
           <label>Recent messages (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
+          <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
+          <label>Custom model override (optional)<input type="text" maxlength="200" placeholder="Leave blank to use the connection’s configured model" data-normalization-model></label>
         </div>
         <div class="jt-actions"><button type="button" data-settings-save>Save context settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings…</p>

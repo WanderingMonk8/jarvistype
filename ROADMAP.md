@@ -443,7 +443,7 @@ Deliver bounded recording, genuine progressive display where supported, ordered 
 
 ### Status
 
-Implementation candidate ready for hosted validation as of 2026-10-16. Version `1.0.3` uses Lumiverse's authoritative STT result, then applies deterministic punctuation/spelling/glossary rules and an optional bounded `spindle.generate.quiet(...)` correction pass. The verified `ctx.stt` contract accepts no context or vocabulary hints, so JarvisType does not claim that recent messages are sent to the STT provider. Changed candidates always require visible confirmation in this phase.
+Implementation candidate ready for hosted validation as of 2026-10-16. Version `1.1.0` uses Lumiverse's authoritative STT result, then applies deterministic punctuation/spelling/glossary rules and an optional bounded `spindle.generate.quiet(...)` correction pass through Main or a user-selected Lumiverse connection and optional custom model. The verified `ctx.stt` contract accepts no context or vocabulary hints, so JarvisType does not claim that recent messages are sent to the STT provider. Changed candidates always require visible confirmation in this phase.
 
 ### Objective
 
@@ -451,7 +451,7 @@ Improve recognition using bounded chat context, draft continuity, spoken punctua
 
 ### PRD coverage
 
-- `FR-CTX-001` through `FR-CTX-008`
+- `FR-CTX-001` through `FR-CTX-010`
 - `FR-PUNC-001` through `FR-PUNC-004`
 - `FR-SPELL-001` through `FR-SPELL-015`
 - `FR-GLOSS-001` through `FR-GLOSS-006`
@@ -465,6 +465,8 @@ Improve recognition using bounded chat context, draft continuity, spoken punctua
 - Exclude hidden, non-text, and disallowed messages.
 - Enforce the hard ceiling before the provider call using a documented newest-first truncation policy.
 - Supply draft continuity and glossary vocabulary separately from message count.
+- List only Lumiverse's redacted connection profiles and allow Main or an accessible connection to be selected for text normalization.
+- Allow an optional custom model identifier; blank uses the selected connection's configured model.
 
 #### Conservative normalization
 

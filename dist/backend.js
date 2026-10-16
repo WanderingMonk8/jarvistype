@@ -715,8 +715,8 @@ function escapeRegExp(value) {
 }
 
 // src/protocol/messages.ts
-var PROTOCOL_VERSION = 4;
-var APP_VERSION = "1.0.3";
+var PROTOCOL_VERSION = 5;
+var APP_VERSION = "1.1.0";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts
@@ -757,7 +757,7 @@ function sanitizeGrantedPermissions(granted) {
   };
 }
 function isPhaseFourSettings(value) {
-  return isRecord3(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean";
+  return isRecord3(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.normalizationConnectionId === null || isIdentifier(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200;
 }
 function hasEnvelope(value) {
   return isRecord3(value) && value.protocolVersion === PROTOCOL_VERSION && isBoundedString(value.type, 1, 128) && isIdentifier(value.requestId);
@@ -787,7 +787,9 @@ var MAX_COMPLETED_SENDS = 100;
 var MAX_GLOSSARY_PROMPT_CHARACTERS = 8e3;
 var DEFAULT_SETTINGS = {
   contextMessageCount: DEFAULT_CONTEXT_MESSAGE_COUNT,
-  contextualNormalizationEnabled: true
+  contextualNormalizationEnabled: true,
+  normalizationConnectionId: null,
+  normalizationModelOverride: ""
 };
 function send(response, context) {
   spindle.sendToFrontend(response, context.userId, {
@@ -903,6 +905,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
         selected.messages,
         session.cleanText,
         glossary,
+        settings,
         context.userId
       );
       if (contextual && contextual !== candidateText) {
@@ -1089,13 +1092,17 @@ function appendProposal(session, proposal) {
     }
   });
 }
-async function normalizeWithContext(rawTranscript, deterministicCandidate, messages, draft, glossary, userId) {
+async function normalizeWithContext(rawTranscript, deterministicCandidate, messages, draft, glossary, settings, userId) {
   try {
     const response = await spindle.generate.quiet({
       type: "quiet",
       userId,
+      ...settings.normalizationConnectionId ? { connection_id: settings.normalizationConnectionId } : {},
       reasoning: { source: "off" },
-      parameters: { temperature: 0 },
+      parameters: {
+        temperature: 0,
+        ...settings.normalizationModelOverride ? { model: settings.normalizationModelOverride } : {}
+      },
       messages: [
         {
           role: "system",
@@ -1167,17 +1174,40 @@ async function handlePhaseFourLoad(request, context, activeRequest) {
     loadGlossary(context.userId)
   ]);
   if (activeRequest.cancelled) return;
-  sendPhaseFourState(request.requestId, context, settings, glossary);
+  await sendPhaseFourState(request.requestId, context, settings, glossary);
 }
 async function handleSettingsUpdate(request, context, activeRequest) {
   const settings = {
     contextMessageCount: clampContextMessageCount(request.settings.contextMessageCount),
-    contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled
+    contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled,
+    normalizationConnectionId: request.settings.normalizationConnectionId,
+    normalizationModelOverride: request.settings.normalizationModelOverride.trim()
   };
+  if (settings.normalizationConnectionId) {
+    const connection = await spindle.connections.get(
+      settings.normalizationConnectionId,
+      context.userId
+    );
+    if (!connection) {
+      send(
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          type: "app.error",
+          requestId: request.requestId,
+          ok: false,
+          code: "MALFORMED_REQUEST",
+          message: "The selected normalization connection is unavailable. Settings were not changed.",
+          retryable: false
+        },
+        context
+      );
+      return;
+    }
+  }
   await persistSettings(context.userId, settings);
   const glossary = await loadGlossary(context.userId);
   if (!activeRequest.cancelled)
-    sendPhaseFourState(
+    await sendPhaseFourState(
       request.requestId,
       context,
       settings,
@@ -1212,7 +1242,7 @@ async function handleGlossaryUpsert(request, context, activeRequest) {
   }
   if (mutation.changed) await persistGlossary(context.userId, mutation.state);
   if (!activeRequest.cancelled)
-    sendPhaseFourState(
+    await sendPhaseFourState(
       request.requestId,
       context,
       settings,
@@ -1225,7 +1255,7 @@ async function handleGlossaryDelete(request, context, activeRequest) {
   const mutation = deleteGlossaryEntry(await loadGlossary(context.userId), request.entryId);
   if (mutation.changed) await persistGlossary(context.userId, mutation.state);
   if (!activeRequest.cancelled)
-    sendPhaseFourState(
+    await sendPhaseFourState(
       request.requestId,
       context,
       settings,
@@ -1238,7 +1268,7 @@ async function handleGlossaryUndo(request, context, activeRequest) {
   const mutation = undoGlossaryMutation(await loadGlossary(context.userId));
   if (mutation.changed) await persistGlossary(context.userId, mutation.state);
   if (!activeRequest.cancelled)
-    sendPhaseFourState(
+    await sendPhaseFourState(
       request.requestId,
       context,
       settings,
@@ -1246,7 +1276,8 @@ async function handleGlossaryUndo(request, context, activeRequest) {
       mutation.changed ? "Latest glossary change undone." : "No glossary change to undo."
     );
 }
-function sendPhaseFourState(requestId, context, settings, glossary, notice) {
+async function sendPhaseFourState(requestId, context, settings, glossary, notice) {
+  const connections = await listNormalizationConnections(context.userId);
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -1254,12 +1285,27 @@ function sendPhaseFourState(requestId, context, settings, glossary, notice) {
       requestId,
       ok: true,
       settings,
+      connections,
       glossary: glossary.entries,
       canUndoGlossary: glossary.undoStack.length > 0,
       ...notice ? { notice } : {}
     },
     context
   );
+}
+async function listNormalizationConnections(userId) {
+  try {
+    return (await spindle.connections.list(userId)).map((connection) => ({
+      id: connection.id,
+      name: connection.name,
+      provider: connection.provider,
+      model: connection.model,
+      isDefault: connection.is_default
+    }));
+  } catch (error) {
+    spindle.log.warn(`JarvisType could not list normalization connections: ${describeError(error)}`);
+    return [];
+  }
 }
 async function handleRecordingUndo(request, context, activeRequest) {
   const result = await withDraftLock(context.userId, request.chatId, async () => {
@@ -1546,7 +1592,9 @@ async function loadSettings(userId) {
   });
   const settings = isRecord4(raw) && typeof raw.contextualNormalizationEnabled === "boolean" ? {
     contextMessageCount: clampContextMessageCount(raw.contextMessageCount),
-    contextualNormalizationEnabled: raw.contextualNormalizationEnabled
+    contextualNormalizationEnabled: raw.contextualNormalizationEnabled,
+    normalizationConnectionId: typeof raw.normalizationConnectionId === "string" && raw.normalizationConnectionId.length > 0 ? raw.normalizationConnectionId.slice(0, 256) : null,
+    normalizationModelOverride: typeof raw.normalizationModelOverride === "string" ? raw.normalizationModelOverride.trim().slice(0, 200) : ""
   } : { ...DEFAULT_SETTINGS };
   settingsCache.set(userId, settings);
   return settings;

@@ -2,8 +2,8 @@ import type { DraftSnapshot } from '../domain/draft-session'
 import type { GlossaryEntry } from '../domain/glossary'
 import type { SpellingLearningCandidate } from '../domain/normalization'
 
-export const PROTOCOL_VERSION = 4 as const
-export const APP_VERSION = '1.0.3'
+export const PROTOCOL_VERSION = 5 as const
+export const APP_VERSION = '1.1.0'
 export const REQUEST_TIMEOUT_MS = 15_000
 export const NORMALIZATION_TIMEOUT_MS = 120_000
 export const SEND_TIMEOUT_MS = 120_000
@@ -15,6 +15,16 @@ export type PermissionName = (typeof PHASE_FOUR_PERMISSIONS)[number]
 export interface PhaseFourSettings {
   contextMessageCount: number
   contextualNormalizationEnabled: boolean
+  normalizationConnectionId: string | null
+  normalizationModelOverride: string
+}
+
+export interface NormalizationConnectionOption {
+  id: string
+  name: string
+  provider: string
+  model: string
+  isDefault: boolean
 }
 
 export interface NormalizationProposal {
@@ -159,6 +169,7 @@ export type BackendResponse =
       type: 'phase4.state.response'
       ok: true
       settings: PhaseFourSettings
+      connections: NormalizationConnectionOption[]
       glossary: GlossaryEntry[]
       canUndoGlossary: boolean
       notice?: string

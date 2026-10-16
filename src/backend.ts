@@ -30,6 +30,7 @@ import {
   APP_VERSION,
   PROTOCOL_VERSION,
   type NormalizationProposal,
+  type NormalizationConnectionOption,
   type PhaseFourSettings,
   type BackendResponse,
   type FrontendRequest,
@@ -66,6 +67,8 @@ const MAX_GLOSSARY_PROMPT_CHARACTERS = 8_000
 const DEFAULT_SETTINGS: PhaseFourSettings = {
   contextMessageCount: DEFAULT_CONTEXT_MESSAGE_COUNT,
   contextualNormalizationEnabled: true,
+  normalizationConnectionId: null,
+  normalizationModelOverride: '',
 }
 
 function send(response: BackendResponse, context: RequestContext): void {
@@ -194,6 +197,7 @@ async function handleTranscriptNormalization(
         selected.messages,
         session.cleanText,
         glossary,
+        settings,
         context.userId,
       )
       if (contextual && contextual !== candidateText) {
@@ -406,14 +410,23 @@ async function normalizeWithContext(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   draft: string,
   glossary: GlossaryState,
+  settings: PhaseFourSettings,
   userId: string,
 ): Promise<string | null> {
   try {
     const response = await spindle.generate.quiet({
       type: 'quiet',
       userId,
+      ...(settings.normalizationConnectionId
+        ? { connection_id: settings.normalizationConnectionId }
+        : {}),
       reasoning: { source: 'off' },
-      parameters: { temperature: 0 },
+      parameters: {
+        temperature: 0,
+        ...(settings.normalizationModelOverride
+          ? { model: settings.normalizationModelOverride }
+          : {}),
+      },
       messages: [
         {
           role: 'system',
@@ -510,7 +523,7 @@ async function handlePhaseFourLoad(
     loadGlossary(context.userId),
   ])
   if (activeRequest.cancelled) return
-  sendPhaseFourState(request.requestId, context, settings, glossary)
+  await sendPhaseFourState(request.requestId, context, settings, glossary)
 }
 
 async function handleSettingsUpdate(
@@ -521,11 +534,35 @@ async function handleSettingsUpdate(
   const settings = {
     contextMessageCount: clampContextMessageCount(request.settings.contextMessageCount),
     contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled,
+    normalizationConnectionId: request.settings.normalizationConnectionId,
+    normalizationModelOverride: request.settings.normalizationModelOverride.trim(),
+  }
+  if (settings.normalizationConnectionId) {
+    const connection = await spindle.connections.get(
+      settings.normalizationConnectionId,
+      context.userId,
+    )
+    if (!connection) {
+      send(
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          type: 'app.error',
+          requestId: request.requestId,
+          ok: false,
+          code: 'MALFORMED_REQUEST',
+          message:
+            'The selected normalization connection is unavailable. Settings were not changed.',
+          retryable: false,
+        },
+        context,
+      )
+      return
+    }
   }
   await persistSettings(context.userId, settings)
   const glossary = await loadGlossary(context.userId)
   if (!activeRequest.cancelled)
-    sendPhaseFourState(
+    await sendPhaseFourState(
       request.requestId,
       context,
       settings,
@@ -565,7 +602,7 @@ async function handleGlossaryUpsert(
   }
   if (mutation.changed) await persistGlossary(context.userId, mutation.state)
   if (!activeRequest.cancelled)
-    sendPhaseFourState(
+    await sendPhaseFourState(
       request.requestId,
       context,
       settings,
@@ -585,7 +622,7 @@ async function handleGlossaryDelete(
   const mutation = deleteGlossaryEntry(await loadGlossary(context.userId), request.entryId)
   if (mutation.changed) await persistGlossary(context.userId, mutation.state)
   if (!activeRequest.cancelled)
-    sendPhaseFourState(
+    await sendPhaseFourState(
       request.requestId,
       context,
       settings,
@@ -605,7 +642,7 @@ async function handleGlossaryUndo(
   const mutation = undoGlossaryMutation(await loadGlossary(context.userId))
   if (mutation.changed) await persistGlossary(context.userId, mutation.state)
   if (!activeRequest.cancelled)
-    sendPhaseFourState(
+    await sendPhaseFourState(
       request.requestId,
       context,
       settings,
@@ -614,13 +651,14 @@ async function handleGlossaryUndo(
     )
 }
 
-function sendPhaseFourState(
+async function sendPhaseFourState(
   requestId: string,
   context: RequestContext,
   settings: PhaseFourSettings,
   glossary: GlossaryState,
   notice?: string,
-): void {
+): Promise<void> {
+  const connections = await listNormalizationConnections(context.userId)
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -628,12 +666,30 @@ function sendPhaseFourState(
       requestId,
       ok: true,
       settings,
+      connections,
       glossary: glossary.entries,
       canUndoGlossary: glossary.undoStack.length > 0,
       ...(notice ? { notice } : {}),
     },
     context,
   )
+}
+
+async function listNormalizationConnections(
+  userId: string,
+): Promise<NormalizationConnectionOption[]> {
+  try {
+    return (await spindle.connections.list(userId)).map((connection) => ({
+      id: connection.id,
+      name: connection.name,
+      provider: connection.provider,
+      model: connection.model,
+      isDefault: connection.is_default,
+    }))
+  } catch (error) {
+    spindle.log.warn(`JarvisType could not list normalization connections: ${describeError(error)}`)
+    return []
+  }
 }
 
 async function handleRecordingUndo(
@@ -989,6 +1045,15 @@ async function loadSettings(userId: string): Promise<PhaseFourSettings> {
       ? {
           contextMessageCount: clampContextMessageCount(raw.contextMessageCount),
           contextualNormalizationEnabled: raw.contextualNormalizationEnabled,
+          normalizationConnectionId:
+            typeof raw.normalizationConnectionId === 'string' &&
+            raw.normalizationConnectionId.length > 0
+              ? raw.normalizationConnectionId.slice(0, 256)
+              : null,
+          normalizationModelOverride:
+            typeof raw.normalizationModelOverride === 'string'
+              ? raw.normalizationModelOverride.trim().slice(0, 200)
+              : '',
         }
       : { ...DEFAULT_SETTINGS }
   settingsCache.set(userId, settings)

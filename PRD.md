@@ -174,6 +174,10 @@ The user is not required to dictate a complete message in one session.
 
 **FR-CTX-008:** The settings interface shall disclose when recent conversation content may be transmitted to the configured provider.
 
+**FR-CTX-009:** The user shall be able to select Main or another accessible Lumiverse connection for post-transcription context normalization without exposing connection credentials to JarvisType.
+
+**FR-CTX-010:** The user shall be able to supply an optional custom model identifier for normalization. A blank override shall use the selected connection's configured model.
+
 ### 7.3 Transcription display
 
 **FR-STT-001:** JarvisType shall visibly distinguish recording, uploading, transcribing, and completed states.

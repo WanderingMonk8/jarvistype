@@ -47,7 +47,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 5;
-var APP_VERSION = "1.1.0";
+var APP_VERSION = "1.2.0";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -225,10 +225,7 @@ function setup(ctx) {
     tab.root,
     "[data-normalization-connection]"
   );
-  const normalizationModelInput = requireElement(
-    tab.root,
-    "[data-normalization-model]"
-  );
+  const normalizationModelSlot = requireElement(tab.root, "[data-normalization-model]");
   const glossaryCanonicalInput = requireElement(
     tab.root,
     "[data-glossary-canonical]"
@@ -278,6 +275,19 @@ function setup(ctx) {
     canUndoGlossary: false,
     phaseFourMessage: "Loading context and glossary settings\u2026"
   };
+  const normalizationModelPicker = ctx.components.mountModelCombobox(normalizationModelSlot, {
+    value: state.settings.normalizationModelOverride,
+    connection: { kind: "llm" },
+    appearance: "standard",
+    placeholder: "Use the connection model or search available models",
+    emptyMessage: "No models were returned for this connection.",
+    loadingMessage: "Loading available models\u2026",
+    browseHint: "Search models available through the selected Lumiverse connection.",
+    onChange: (model) => {
+      state.settings.normalizationModelOverride = model;
+    }
+  });
+  let modelPickerConnectionId = null;
   let alive = true;
   let currentHealthRequestId = null;
   let desiredText = "";
@@ -362,7 +372,15 @@ function setup(ctx) {
       state.normalizationConnections,
       state.settings.normalizationConnectionId
     );
-    normalizationModelInput.value = state.settings.normalizationModelOverride;
+    if (modelPickerConnectionId !== state.settings.normalizationConnectionId) {
+      modelPickerConnectionId = state.settings.normalizationConnectionId;
+      normalizationModelPicker.update({
+        connection: modelPickerConnectionId ? { kind: "llm", id: modelPickerConnectionId } : { kind: "llm" }
+      });
+    }
+    if (normalizationModelPicker.getValue() !== state.settings.normalizationModelOverride) {
+      normalizationModelPicker.update({ value: state.settings.normalizationModelOverride });
+    }
     phaseFourStatus.textContent = state.phaseFourMessage;
     glossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy;
     glossarySaveButton.textContent = editingGlossaryEntryId ? "Update entry" : "Add entry";
@@ -711,8 +729,8 @@ function setup(ctx) {
       settings: {
         contextMessageCount,
         contextualNormalizationEnabled: contextualToggle.checked,
-        normalizationConnectionId: normalizationConnectionSelect.value || null,
-        normalizationModelOverride: normalizationModelInput.value.trim()
+        normalizationConnectionId: state.settings.normalizationConnectionId,
+        normalizationModelOverride: normalizationModelPicker.getValue().trim()
       }
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
@@ -1093,6 +1111,12 @@ function setup(ctx) {
   const handleAcceptProposalClick = () => void acceptNormalizationProposal();
   const handleRejectProposalClick = () => rejectNormalizationProposal();
   const handleSaveSettingsClick = () => void saveSettings();
+  const handleNormalizationConnectionChange = () => {
+    state.settings.normalizationConnectionId = normalizationConnectionSelect.value || null;
+    state.settings.normalizationModelOverride = "";
+    render();
+    normalizationModelPicker.refresh();
+  };
   const handleSaveGlossaryClick = () => void saveGlossaryEntry();
   const handleCancelGlossaryClick = () => {
     clearGlossaryForm();
@@ -1114,6 +1138,7 @@ function setup(ctx) {
   acceptProposalButton.addEventListener("click", handleAcceptProposalClick);
   rejectProposalButton.addEventListener("click", handleRejectProposalClick);
   saveSettingsButton.addEventListener("click", handleSaveSettingsClick);
+  normalizationConnectionSelect.addEventListener("change", handleNormalizationConnectionChange);
   glossarySaveButton.addEventListener("click", handleSaveGlossaryClick);
   glossaryCancelButton.addEventListener("click", handleCancelGlossaryClick);
   glossaryUndoButton.addEventListener("click", handleUndoGlossaryClick);
@@ -1148,10 +1173,12 @@ function setup(ctx) {
     acceptProposalButton.removeEventListener("click", handleAcceptProposalClick);
     rejectProposalButton.removeEventListener("click", handleRejectProposalClick);
     saveSettingsButton.removeEventListener("click", handleSaveSettingsClick);
+    normalizationConnectionSelect.removeEventListener("change", handleNormalizationConnectionChange);
     glossarySaveButton.removeEventListener("click", handleSaveGlossaryClick);
     glossaryCancelButton.removeEventListener("click", handleCancelGlossaryClick);
     glossaryUndoButton.removeEventListener("click", handleUndoGlossaryClick);
     glossaryList.removeEventListener("click", handleGlossaryListClick);
+    normalizationModelPicker.destroy();
     inputAction.destroy();
     tab.destroy();
   };
@@ -1444,7 +1471,7 @@ function shellMarkup() {
           <label>Recent messages (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
-          <label>Custom model override (optional)<input type="text" maxlength="200" placeholder="Leave blank to use the connection\u2019s configured model" data-normalization-model></label>
+          <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
         <div class="jt-actions"><button type="button" data-settings-save>Save context settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings\u2026</p>

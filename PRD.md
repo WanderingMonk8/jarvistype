@@ -176,7 +176,7 @@ The user is not required to dictate a complete message in one session.
 
 **FR-CTX-009:** The user shall be able to select Main or another accessible Lumiverse connection for post-transcription context normalization without exposing connection credentials to JarvisType.
 
-**FR-CTX-010:** The user shall be able to supply an optional custom model identifier for normalization. A blank override shall use the selected connection's configured model.
+**FR-CTX-010:** The user shall be able to search the models available through the selected Lumiverse text connection and optionally choose one as the normalization override. Model discovery and refresh shall use Lumiverse's host-managed connection-aware picker so provider credentials remain unavailable to JarvisType. A blank override shall use the selected connection's configured model.
 
 ### 7.3 Transcription display
 

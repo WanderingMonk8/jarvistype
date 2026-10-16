@@ -128,10 +128,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     tab.root,
     '[data-normalization-connection]',
   )
-  const normalizationModelInput = requireElement<HTMLInputElement>(
-    tab.root,
-    '[data-normalization-model]',
-  )
+  const normalizationModelSlot = requireElement<HTMLElement>(tab.root, '[data-normalization-model]')
   const glossaryCanonicalInput = requireElement<HTMLInputElement>(
     tab.root,
     '[data-glossary-canonical]',
@@ -182,6 +179,20 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     canUndoGlossary: false,
     phaseFourMessage: 'Loading context and glossary settings…',
   }
+
+  const normalizationModelPicker = ctx.components.mountModelCombobox(normalizationModelSlot, {
+    value: state.settings.normalizationModelOverride,
+    connection: { kind: 'llm' },
+    appearance: 'standard',
+    placeholder: 'Use the connection model or search available models',
+    emptyMessage: 'No models were returned for this connection.',
+    loadingMessage: 'Loading available models…',
+    browseHint: 'Search models available through the selected Lumiverse connection.',
+    onChange: (model) => {
+      state.settings.normalizationModelOverride = model
+    },
+  })
+  let modelPickerConnectionId: string | null = null
 
   let alive = true
   let currentHealthRequestId: string | null = null
@@ -341,7 +352,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.normalizationConnections,
       state.settings.normalizationConnectionId,
     )
-    normalizationModelInput.value = state.settings.normalizationModelOverride
+    if (modelPickerConnectionId !== state.settings.normalizationConnectionId) {
+      modelPickerConnectionId = state.settings.normalizationConnectionId
+      normalizationModelPicker.update({
+        connection: modelPickerConnectionId
+          ? { kind: 'llm', id: modelPickerConnectionId }
+          : { kind: 'llm' },
+      })
+    }
+    if (normalizationModelPicker.getValue() !== state.settings.normalizationModelOverride) {
+      normalizationModelPicker.update({ value: state.settings.normalizationModelOverride })
+    }
     phaseFourStatus.textContent = state.phaseFourMessage
     glossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy
     glossarySaveButton.textContent = editingGlossaryEntryId ? 'Update entry' : 'Add entry'
@@ -764,8 +785,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       settings: {
         contextMessageCount,
         contextualNormalizationEnabled: contextualToggle.checked,
-        normalizationConnectionId: normalizationConnectionSelect.value || null,
-        normalizationModelOverride: normalizationModelInput.value.trim(),
+        normalizationConnectionId: state.settings.normalizationConnectionId,
+        normalizationModelOverride: normalizationModelPicker.getValue().trim(),
       },
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
@@ -1202,6 +1223,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const handleAcceptProposalClick = () => void acceptNormalizationProposal()
   const handleRejectProposalClick = () => rejectNormalizationProposal()
   const handleSaveSettingsClick = () => void saveSettings()
+  const handleNormalizationConnectionChange = () => {
+    state.settings.normalizationConnectionId = normalizationConnectionSelect.value || null
+    state.settings.normalizationModelOverride = ''
+    render()
+    normalizationModelPicker.refresh()
+  }
   const handleSaveGlossaryClick = () => void saveGlossaryEntry()
   const handleCancelGlossaryClick = () => {
     clearGlossaryForm()
@@ -1223,6 +1250,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   acceptProposalButton.addEventListener('click', handleAcceptProposalClick)
   rejectProposalButton.addEventListener('click', handleRejectProposalClick)
   saveSettingsButton.addEventListener('click', handleSaveSettingsClick)
+  normalizationConnectionSelect.addEventListener('change', handleNormalizationConnectionChange)
   glossarySaveButton.addEventListener('click', handleSaveGlossaryClick)
   glossaryCancelButton.addEventListener('click', handleCancelGlossaryClick)
   glossaryUndoButton.addEventListener('click', handleUndoGlossaryClick)
@@ -1259,10 +1287,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     acceptProposalButton.removeEventListener('click', handleAcceptProposalClick)
     rejectProposalButton.removeEventListener('click', handleRejectProposalClick)
     saveSettingsButton.removeEventListener('click', handleSaveSettingsClick)
+    normalizationConnectionSelect.removeEventListener('change', handleNormalizationConnectionChange)
     glossarySaveButton.removeEventListener('click', handleSaveGlossaryClick)
     glossaryCancelButton.removeEventListener('click', handleCancelGlossaryClick)
     glossaryUndoButton.removeEventListener('click', handleUndoGlossaryClick)
     glossaryList.removeEventListener('click', handleGlossaryListClick)
+    normalizationModelPicker.destroy()
     inputAction.destroy()
     tab.destroy()
   }
@@ -1594,7 +1624,7 @@ function shellMarkup(): string {
           <label>Recent messages (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
-          <label>Custom model override (optional)<input type="text" maxlength="200" placeholder="Leave blank to use the connection’s configured model" data-normalization-model></label>
+          <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
         <div class="jt-actions"><button type="button" data-settings-save>Save context settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings…</p>

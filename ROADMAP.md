@@ -443,7 +443,7 @@ Deliver bounded recording, genuine progressive display where supported, ordered 
 
 ### Status
 
-Implementation candidate ready for hosted validation as of 2026-10-16. Version `1.1.0` uses Lumiverse's authoritative STT result, then applies deterministic punctuation/spelling/glossary rules and an optional bounded `spindle.generate.quiet(...)` correction pass through Main or a user-selected Lumiverse connection and optional custom model. The verified `ctx.stt` contract accepts no context or vocabulary hints, so JarvisType does not claim that recent messages are sent to the STT provider. Changed candidates always require visible confirmation in this phase.
+Implementation candidate ready for hosted validation as of 2026-10-16. Version `1.2.0` uses Lumiverse's authoritative STT result, then applies deterministic punctuation/spelling/glossary rules and an optional bounded `spindle.generate.quiet(...)` correction pass through Main or a user-selected Lumiverse connection and optional model selected from Lumiverse's host-managed searchable catalog. The verified `ctx.stt` contract accepts no context or vocabulary hints, so JarvisType does not claim that recent messages are sent to the STT provider. Changed candidates always require visible confirmation in this phase.
 
 ### Objective
 
@@ -466,7 +466,8 @@ Improve recognition using bounded chat context, draft continuity, spoken punctua
 - Enforce the hard ceiling before the provider call using a documented newest-first truncation policy.
 - Supply draft continuity and glossary vocabulary separately from message count.
 - List only Lumiverse's redacted connection profiles and allow Main or an accessible connection to be selected for text normalization.
-- Allow an optional custom model identifier; blank uses the selected connection's configured model.
+- Mount Lumiverse's connection-aware model combobox so the user can search and refresh models available through Main or the selected text connection without exposing credentials.
+- Clear the unsaved model override when the normalization connection changes; a blank choice uses that connection's configured model.
 
 #### Conservative normalization
 

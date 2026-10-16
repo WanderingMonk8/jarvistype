@@ -4,13 +4,13 @@
 
 Phase 4 adds bounded post-transcription context normalization, spoken punctuation, explicit spelling and casing, per-user glossary learning and maintenance, visible review, and reversible glossary changes.
 
-Current candidate version: `1.1.0`
+Current candidate version: `1.2.0`
 
 ## Platform decision
 
 - Lumiverse `ctx.stt.start(...)` remains the authoritative audio and transcript path. JarvisType never receives raw audio or provider credentials.
 - The verified STT contract has no context or vocabulary-hint input. JarvisType therefore applies context after STT through Main or a user-selected Lumiverse generation connection. The normalization model receives text, never audio.
-- Lumiverse supplies redacted connection metadata only; credentials remain host-owned. An optional custom model identifier overrides the selected connection's configured model for normalization only.
+- Lumiverse supplies redacted connection metadata only; credentials remain host-owned. Its connection-aware model combobox searches and refreshes the selected text connection's host-managed model catalog. An optional selection overrides the connection's configured model for normalization only.
 - Recent chat context includes only eligible visible user/assistant text. The setting defaults to five, accepts zero, is capped at twenty messages, and is independently capped at 12,000 characters using newest-first retention.
 - Current draft continuity and glossary entries are supplied separately and do not consume the configured message count.
 - Deterministic spelling, punctuation, casing, and glossary rules run before optional contextual correction.
@@ -30,7 +30,7 @@ Current candidate version: `1.1.0`
 | F4-07 | Visible and reversible changes         | LOCAL-PASS | Review card shows raw/candidate/context details; learned-entry notice points to independent glossary undo.                |
 | F4-08 | Draft and chat safety                  | LOCAL-PASS | Version and active-chat checks guard normalization and confirmation; rejection leaves the draft unchanged.                |
 | F4-09 | Privacy disclosure                     | LOCAL-PASS | Drawer states exactly which data goes to Lumiverse generation and that STT receives no added context.                     |
-| F4-10 | Selectable normalization dispatch      | LOCAL-PASS | Settings list redacted connections and pass the selected connection ID plus optional model override to text generation.   |
+| F4-10 | Searchable normalization dispatch      | LOCAL-PASS | Settings use Lumiverse's connection-aware searchable model picker and pass the selected connection ID and model override. |
 | F4-11 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 36 unit tests, both builds, and package validation pass.                                 |
 | F4-12 | Hosted Lumiverse verification          | PENDING    | Run the sequence below on the hosted installation.                                                                        |
 
@@ -61,15 +61,18 @@ Verified on the hosted Lumiverse installation. Part A normalized spoken punctuat
 5. Record: “Use the word period here period”. Confirm the proposal preserves the first `period` literally and converts the final command to `.`.
 6. Reject this second proposal and confirm draft version, text, segment count, and glossary remain unchanged.
 
-### Test 3: Normalization connection and custom model
+### Test 3: Normalization connection and searchable model
+
+**Status:** PARTIAL — 2026-10-16. Connection selection, persistence, and dispatch were remotely confirmed on `1.1.0`; the searchable host model picker added in `1.2.0` requires the focused retest below.
 
 1. Confirm the disclosure states that normalization receives text rather than audio.
 2. Open **Normalization connection** and confirm it lists Main plus the accessible Lumiverse connection profiles without displaying credentials or API URLs.
-3. Select a non-Main text connection, leave the custom model blank, save, reload, and confirm the selection persists.
+3. Select a non-Main text connection. Confirm the model control clears and rebinds to that connection.
 4. Record a punctuation phrase and confirm normalization completes through the selected connection.
-5. Enter a valid custom model identifier for that connection, save, reload, and confirm it persists.
-6. Record another punctuation phrase and confirm normalization completes with the override.
-7. Clear the custom model, save, and confirm JarvisType returns to the selected connection's configured model.
+5. Open the model control, search for a model known to be available on that connection, and select it. Confirm the list can be refreshed without JarvisType requesting an API key or showing credentials.
+6. Save, reload, and confirm both the connection and selected model persist.
+7. Record another punctuation phrase and confirm normalization completes with the override.
+8. Clear the selected model, save, and confirm JarvisType returns to the selected connection's configured model.
 
 ### Test 4: Explicit spelling, casing, and automatic learning
 

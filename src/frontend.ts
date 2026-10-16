@@ -16,6 +16,7 @@ import {
   createRequestId,
   type BackendResponse,
   type EditProposal,
+  type EditCandidateSet,
   type FrontendRequest,
   type NormalizationConnectionOption,
   type NormalizationProposal,
@@ -61,6 +62,7 @@ interface ComposerState {
   voiceMessage: string
   pendingProposal: NormalizationProposal | null
   pendingEditProposal: EditProposal | null
+  pendingEditCandidates: EditCandidateSet | null
   settings: PhaseFourSettings
   normalizationConnections: NormalizationConnectionOption[]
   glossary: GlossaryEntry[]
@@ -130,6 +132,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const acceptProposalButton = requireElement<HTMLButtonElement>(tab.root, '[data-proposal-accept]')
   const rejectProposalButton = requireElement<HTMLButtonElement>(tab.root, '[data-proposal-reject]')
   const editProposalPanel = requireElement<HTMLElement>(tab.root, '[data-edit-proposal]')
+  const editCandidatesPanel = requireElement<HTMLElement>(tab.root, '[data-edit-candidates]')
+  const editCandidatesInstruction = requireElement<HTMLElement>(
+    tab.root,
+    '[data-edit-candidates-instruction]',
+  )
+  const editCandidatesList = requireElement<HTMLElement>(tab.root, '[data-edit-candidates-list]')
+  const cancelEditCandidatesButton = requireElement<HTMLButtonElement>(
+    tab.root,
+    '[data-edit-candidates-cancel]',
+  )
   const editProposalInstruction = requireElement<HTMLElement>(tab.root, '[data-edit-instruction]')
   const editProposalOperations = requireElement<HTMLElement>(tab.root, '[data-edit-operations]')
   const editProposalBefore = requireElement<HTMLElement>(tab.root, '[data-edit-before]')
@@ -184,6 +196,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     voiceMessage: 'Ready to record a message segment.',
     pendingProposal: null,
     pendingEditProposal: null,
+    pendingEditCandidates: null,
     settings: {
       contextMessageCount: 5,
       contextualNormalizationEnabled: true,
@@ -386,7 +399,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       ? editProposal.operations
           .map(
             (operation) =>
-              `${operation.type} · paragraph ${operation.paragraphOrdinal} · ${operation.beforeText || '∅'} → ${operation.afterText || '∅'}`,
+              `${operation.type} · paragraph ${operation.paragraphOrdinal}${operation.destination?.paragraphOrdinal ? ` → paragraph ${operation.destination.paragraphOrdinal}` : ''} · ${operation.beforeText || '∅'} → ${operation.afterText || '∅'}`,
           )
           .join('\n')
       : ''
@@ -394,6 +407,19 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     editProposalAfter.textContent = editProposal?.afterText ?? ''
     acceptEditButton.disabled = !editProposal || state.automatedBusy
     rejectEditButton.disabled = !editProposal || state.automatedBusy
+    const editCandidates = state.pendingEditCandidates
+    editCandidatesPanel.hidden = !editCandidates
+    editCandidatesInstruction.textContent = editCandidates?.instructionTranscript ?? ''
+    editCandidatesList.replaceChildren()
+    for (const candidate of editCandidates?.candidates ?? []) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.dataset.editCandidateId = candidate.id
+      button.textContent = `Paragraph ${candidate.paragraphOrdinal}: ${candidate.preview}`
+      button.disabled = state.automatedBusy
+      editCandidatesList.append(button)
+    }
+    cancelEditCandidatesButton.disabled = !editCandidates || state.automatedBusy
     contextCountInput.value = String(state.settings.contextMessageCount)
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
     renderConnectionOptions(
@@ -463,6 +489,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (!alive || state.loading) return
     state.pendingProposal = null
     state.pendingEditProposal = null
+    state.pendingEditCandidates = null
     if (state.voicePhase === 'review') state.voicePhase = 'idle'
     state.loading = true
     state.statusMessage = 'Loading the chat-owned draft…'
@@ -791,6 +818,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.pendingEditProposal = outcome.value.proposal
       state.voicePhase = 'review'
       state.voiceMessage = 'Review the interpreted operations and complete proposed draft.'
+    } else if (outcome.status === 'resolved' && outcome.value.type === 'edit.candidates.response') {
+      state.pendingEditCandidates = outcome.value.candidateSet
+      state.voicePhase = 'review'
+      state.voiceMessage = 'More than one target matches. Choose the intended paragraph.'
     } else {
       state.voicePhase = 'error'
       state.voiceMessage =
@@ -826,6 +857,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.pendingEditProposal = null
       state.voicePhase = 'idle'
       state.voiceMessage = 'Approved edit applied. You can undo it as one change.'
+      if (outcome.value.glossaryLearned?.length) {
+        const learnedNames = outcome.value.glossaryLearned
+          .map((entry) => entry.canonical)
+          .join(', ')
+        await loadPhaseFourState()
+        state.phaseFourMessage = `Learned ${learnedNames} from the approved edit spelling. The glossary change is undoable.`
+      }
     } else {
       state.voicePhase = 'error'
       state.voiceMessage =
@@ -840,6 +878,45 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.pendingEditProposal = null
     state.voicePhase = 'idle'
     state.voiceMessage = 'Edit proposal rejected. The draft was not changed.'
+    render()
+  }
+
+  const selectEditCandidate = async (candidateId: string) => {
+    const candidateSet = state.pendingEditCandidates
+    if (!candidateSet || state.automatedBusy) return
+    state.automatedBusy = true
+    state.voiceMessage = 'Resolving the selected target…'
+    render()
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.candidate.select.request',
+      requestId: createRequestId('edit-candidate-select'),
+      operationId: candidateSet.operationId,
+      chatId: candidateSet.chatId,
+      expectedVersion: candidateSet.expectedVersion,
+      candidateId,
+    })
+    state.automatedBusy = false
+    if (!alive) return
+    if (outcome.status === 'resolved' && outcome.value.type === 'edit.proposal.response') {
+      state.pendingEditCandidates = null
+      state.pendingEditProposal = outcome.value.proposal
+      state.voicePhase = 'review'
+      state.voiceMessage = 'Target selected. Review the complete proposed edit before approval.'
+    } else {
+      state.voicePhase = 'error'
+      state.voiceMessage =
+        outcome.status === 'resolved' && outcome.value.type === 'app.error'
+          ? outcome.value.message
+          : 'Target selection timed out. The draft was not changed.'
+    }
+    render()
+  }
+
+  const cancelEditCandidateSelection = () => {
+    state.pendingEditCandidates = null
+    state.voicePhase = 'idle'
+    state.voiceMessage = 'Target selection cancelled. The draft was not changed.'
     render()
   }
 
@@ -1362,6 +1439,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const handleRejectProposalClick = () => rejectNormalizationProposal()
   const handleAcceptEditClick = () => void acceptEditProposal()
   const handleRejectEditClick = () => rejectEditProposal()
+  const handleEditCandidateClick = (event: Event) => {
+    const button = (event.target as Element | null)?.closest<HTMLButtonElement>(
+      '[data-edit-candidate-id]',
+    )
+    if (button?.dataset.editCandidateId) void selectEditCandidate(button.dataset.editCandidateId)
+  }
+  const handleCancelEditCandidatesClick = () => cancelEditCandidateSelection()
   const handleSaveSettingsClick = () => void saveSettings()
   const handleNormalizationConnectionChange = () => {
     state.settings.normalizationConnectionId = normalizationConnectionSelect.value || null
@@ -1393,6 +1477,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   rejectProposalButton.addEventListener('click', handleRejectProposalClick)
   acceptEditButton.addEventListener('click', handleAcceptEditClick)
   rejectEditButton.addEventListener('click', handleRejectEditClick)
+  editCandidatesList.addEventListener('click', handleEditCandidateClick)
+  cancelEditCandidatesButton.addEventListener('click', handleCancelEditCandidatesClick)
   saveSettingsButton.addEventListener('click', handleSaveSettingsClick)
   normalizationConnectionSelect.addEventListener('change', handleNormalizationConnectionChange)
   glossarySaveButton.addEventListener('click', handleSaveGlossaryClick)
@@ -1434,6 +1520,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     rejectProposalButton.removeEventListener('click', handleRejectProposalClick)
     acceptEditButton.removeEventListener('click', handleAcceptEditClick)
     rejectEditButton.removeEventListener('click', handleRejectEditClick)
+    editCandidatesList.removeEventListener('click', handleEditCandidateClick)
+    cancelEditCandidatesButton.removeEventListener('click', handleCancelEditCandidatesClick)
     saveSettingsButton.removeEventListener('click', handleSaveSettingsClick)
     normalizationConnectionSelect.removeEventListener('change', handleNormalizationConnectionChange)
     glossarySaveButton.removeEventListener('click', handleSaveGlossaryClick)
@@ -1671,6 +1759,8 @@ function shellMarkup(): string {
       .jt-form-grid input, .jt-form-grid select { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
       .jt-proposal { display: grid; gap: .55rem; padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
       .jt-proposal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .55rem; background: color-mix(in srgb, currentColor 6%, transparent); }
+      .jt-candidate-list { display: grid; gap: .5rem; }
+      .jt-candidate-list button { text-align: start; white-space: normal; }
       .jt-glossary { display: grid; gap: .55rem; }
       .jt-glossary-row { display: grid; gap: .35rem; padding: .55rem; border-radius: .45rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-wrap: anywhere; }
       .jt-empty { opacity: .65; font-style: italic; }
@@ -1680,7 +1770,7 @@ function shellMarkup(): string {
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
-        <p class="jt-shell__eyebrow">Phase 5 semantic editing · v${APP_VERSION}</p>
+        <p class="jt-shell__eyebrow">Phase 6 advanced editing · v${APP_VERSION}</p>
         <h2 id="jt-title">JarvisType</h2>
         <p>Compose privately, review every change, and send only when you confirm.</p>
       </header>
@@ -1742,6 +1832,15 @@ function shellMarkup(): string {
           </div>
         </section>
 
+        <section class="jt-proposal" data-edit-candidates hidden aria-labelledby="jt-edit-candidates-title">
+          <h4 id="jt-edit-candidates-title">Choose the intended edit target</h4>
+          <p><strong>Spoken instruction</strong></p>
+          <pre data-edit-candidates-instruction></pre>
+          <div class="jt-candidate-list" data-edit-candidates-list></div>
+          <div class="jt-actions">
+            <button type="button" data-edit-candidates-cancel>Cancel selection</button>
+          </div>
+        </section>
         <section class="jt-proposal" data-edit-proposal hidden aria-labelledby="jt-edit-proposal-title">
           <h4 id="jt-edit-proposal-title">Review interpreted edit</h4>
           <p><strong>Spoken instruction</strong></p>

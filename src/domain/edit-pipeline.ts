@@ -1,16 +1,28 @@
 import { MAX_DRAFT_CHARACTERS, type DraftParagraph } from './draft-session'
 
-export const EDIT_SCHEMA_VERSION = 1 as const
+export const EDIT_SCHEMA_VERSION = 2 as const
 export const MAX_EDIT_OPERATIONS = 8
 export const MAX_EDIT_TEXT_LENGTH = 10_000
 
 export type EditOperationType =
-  'replace' | 'insert_before' | 'insert_after' | 'delete' | 'append' | 'prepend' | 'case'
+  | 'replace'
+  | 'insert_before'
+  | 'insert_after'
+  | 'delete'
+  | 'append'
+  | 'prepend'
+  | 'case'
+  | 'split'
+  | 'join_next'
+  | 'move_before'
+  | 'move_after'
 
 export interface EditTarget {
   paragraphId?: string
   paragraphOrdinal?: number
   exactText?: string
+  approximateText?: string
+  scope?: 'draft'
 }
 
 export interface EditOperation {
@@ -19,6 +31,7 @@ export interface EditOperation {
   target: EditTarget
   text?: string
   caseMode?: 'capitalize' | 'uppercase' | 'lowercase'
+  destination?: EditTarget
 }
 
 export interface EditPlan {
@@ -42,6 +55,7 @@ export type EditPipelineResult =
       afterText: string
       operations: ResolvedEditOperation[]
       affectedParagraphOrdinals: number[]
+      resultingParagraphIds?: string[]
     }
   | { ok: false; reason: string }
 
@@ -79,6 +93,12 @@ export function executeEditPlan(
   plan: EditPlan,
 ): EditPipelineResult {
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
+  const structural = plan.operations.filter(isStructuralOperation)
+  if (structural.length) {
+    if (structural.length !== plan.operations.length)
+      return { ok: false, reason: 'structural and inline operations cannot be mixed' }
+    return executeStructuralPlan(cleanText, paragraphs, structural)
+  }
   const patches: Patch[] = []
   for (const operation of plan.operations) {
     const patch = resolveOperation(cleanText, paragraphs, operation)
@@ -123,7 +143,7 @@ export function executeEditPlan(
 
 function parseOperation(value: unknown): EditOperation | null {
   if (!isRecord(value) || !isIdentifier(value.id) || !isRecord(value.target)) return null
-  const allowedOperationKeys = new Set(['id', 'type', 'target', 'text', 'caseMode'])
+  const allowedOperationKeys = new Set(['id', 'type', 'target', 'text', 'caseMode', 'destination'])
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null
   const type = value.type
   if (
@@ -133,23 +153,54 @@ function parseOperation(value: unknown): EditOperation | null {
     type !== 'delete' &&
     type !== 'append' &&
     type !== 'prepend' &&
-    type !== 'case'
+    type !== 'case' &&
+    type !== 'split' &&
+    type !== 'join_next' &&
+    type !== 'move_before' &&
+    type !== 'move_after'
   )
     return null
   const target = parseTarget(value.target)
   if (!target) return null
   const text = value.text
   const caseMode = value.caseMode
+  const destination =
+    value.destination === undefined
+      ? undefined
+      : isRecord(value.destination)
+        ? parseTarget(value.destination)
+        : null
+  if (value.destination !== undefined && !destination) return null
   if (type === 'case') {
     if (caseMode !== 'capitalize' && caseMode !== 'uppercase' && caseMode !== 'lowercase')
       return null
-    if (text !== undefined) return null
-  } else if (type === 'delete') {
+    if (text !== undefined || destination !== undefined) return null
+  } else if (type === 'delete' || type === 'split' || type === 'join_next') {
     if (text !== undefined || caseMode !== undefined) return null
+    if (destination !== undefined) return null
+    if (
+      type === 'join_next' &&
+      (target.exactText !== undefined ||
+        target.approximateText !== undefined ||
+        target.scope !== undefined)
+    )
+      return null
+  } else if (type === 'move_before' || type === 'move_after') {
+    if (text !== undefined || caseMode !== undefined || !destination) return null
+    if (
+      target.exactText !== undefined ||
+      target.approximateText !== undefined ||
+      target.scope !== undefined ||
+      destination.exactText !== undefined ||
+      destination.approximateText !== undefined ||
+      destination.scope !== undefined
+    )
+      return null
   } else if (
     typeof text !== 'string' ||
     text.length > MAX_EDIT_TEXT_LENGTH ||
-    caseMode !== undefined
+    caseMode !== undefined ||
+    destination !== undefined
   ) {
     return null
   }
@@ -159,11 +210,18 @@ function parseOperation(value: unknown): EditOperation | null {
     target,
     ...(typeof text === 'string' ? { text } : {}),
     ...(typeof caseMode === 'string' ? { caseMode } : {}),
+    ...(destination ? { destination } : {}),
   }
 }
 
 function parseTarget(value: Record<string, unknown>): EditTarget | null {
-  const allowed = new Set(['paragraphId', 'paragraphOrdinal', 'exactText'])
+  const allowed = new Set([
+    'paragraphId',
+    'paragraphOrdinal',
+    'exactText',
+    'approximateText',
+    'scope',
+  ])
   if (Object.keys(value).some((key) => !allowed.has(key))) return null
   const target: EditTarget = {}
   if (value.paragraphId !== undefined) {
@@ -183,6 +241,28 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
       return null
     target.exactText = value.exactText
   }
+  if (value.approximateText !== undefined) {
+    if (
+      typeof value.approximateText !== 'string' ||
+      value.approximateText.length < 1 ||
+      value.approximateText.length > MAX_EDIT_TEXT_LENGTH
+    )
+      return null
+    target.approximateText = value.approximateText
+  }
+  if (target.exactText !== undefined && target.approximateText !== undefined) return null
+  if (value.scope !== undefined) {
+    if (value.scope !== 'draft') return null
+    target.scope = 'draft'
+  }
+  if (
+    target.scope === 'draft' &&
+    (target.paragraphId !== undefined ||
+      target.paragraphOrdinal !== undefined ||
+      target.exactText !== undefined ||
+      target.approximateText !== undefined)
+  )
+    return null
   return Object.keys(target).length ? target : null
 }
 
@@ -229,12 +309,23 @@ function resolveOperation(
       return matches.length ? 'text target is ambiguous' : 'text target was not found'
     start = matches[0]!
     end = start + operation.target.exactText.length
-  } else if (!paragraph) {
+  } else if (operation.target.approximateText !== undefined) {
+    const match = findApproximateMatch(
+      cleanText,
+      operation.target.approximateText,
+      range.start,
+      range.end,
+    )
+    if (typeof match === 'string') return match
+    start = match.start
+    end = match.end
+  } else if (!paragraph && operation.target.scope !== 'draft') {
     return `${operation.type} requires exact text or one paragraph target`
   }
   const isParagraphInsertion =
     paragraph !== undefined &&
     operation.target.exactText === undefined &&
+    operation.target.approximateText === undefined &&
     (operation.type === 'insert_before' || operation.type === 'insert_after')
   if (isParagraphInsertion) {
     const insertedParagraph = (operation.text ?? '').trim()
@@ -278,6 +369,130 @@ function resolveOperation(
   }
 }
 
+type StructuralEditOperation = EditOperation & {
+  type: 'split' | 'join_next' | 'move_before' | 'move_after'
+}
+
+interface StructuralParagraph {
+  id: string
+  originalOrdinal: number
+  text: string
+}
+
+function isStructuralOperation(operation: EditOperation): operation is StructuralEditOperation {
+  return (
+    operation.type === 'split' ||
+    operation.type === 'join_next' ||
+    operation.type === 'move_before' ||
+    operation.type === 'move_after'
+  )
+}
+
+function executeStructuralPlan(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  operations: readonly StructuralEditOperation[],
+): EditPipelineResult {
+  const working: StructuralParagraph[] = paragraphs.map((paragraph) => ({
+    id: paragraph.id,
+    originalOrdinal: paragraph.ordinal,
+    text: paragraph.text,
+  }))
+  const resolved: ResolvedEditOperation[] = []
+  const affected = new Set<number>()
+
+  for (const operation of operations) {
+    const sourceResult = resolveStructuralParagraph(working, operation.target)
+    if (typeof sourceResult === 'string') return { ok: false, reason: sourceResult }
+    const sourceIndex = working.indexOf(sourceResult)
+    const original = paragraphs.find((paragraph) => paragraph.id === sourceResult.id)
+    const originalRange = original
+      ? paragraphRange(cleanText, original)
+      : { start: 0, end: cleanText.length }
+    let afterText = sourceResult.text
+
+    if (operation.type === 'split') {
+      const anchor = operation.target.exactText
+      if (!anchor) return { ok: false, reason: 'split requires an exact anchor' }
+      const matches = findAll(sourceResult.text, anchor, 0, sourceResult.text.length)
+      if (matches.length !== 1)
+        return {
+          ok: false,
+          reason: matches.length ? 'split anchor is ambiguous' : 'split anchor was not found',
+        }
+      const splitAt = matches[0]! + anchor.length
+      const left = sourceResult.text.slice(0, splitAt).trimEnd()
+      const right = sourceResult.text.slice(splitAt).trimStart()
+      if (!left || !right) return { ok: false, reason: 'split would create an empty paragraph' }
+      sourceResult.text = left
+      working.splice(sourceIndex + 1, 0, {
+        id: `${sourceResult.id}:split:${operation.id}`,
+        originalOrdinal: sourceResult.originalOrdinal,
+        text: right,
+      })
+      afterText = `${left}\n\n${right}`
+    } else if (operation.type === 'join_next') {
+      const next = working[sourceIndex + 1]
+      if (!next) return { ok: false, reason: 'join target has no following paragraph' }
+      sourceResult.text = `${sourceResult.text.trimEnd()} ${next.text.trimStart()}`
+      working.splice(sourceIndex + 1, 1)
+      afterText = sourceResult.text
+      affected.add(next.originalOrdinal)
+    } else {
+      const destinationResult = resolveStructuralParagraph(working, operation.destination!)
+      if (typeof destinationResult === 'string') return { ok: false, reason: destinationResult }
+      if (destinationResult.id === sourceResult.id)
+        return { ok: false, reason: 'move source and destination are the same paragraph' }
+      working.splice(sourceIndex, 1)
+      const destinationIndex = working.indexOf(destinationResult)
+      const insertionIndex =
+        operation.type === 'move_before' ? destinationIndex : destinationIndex + 1
+      working.splice(insertionIndex, 0, sourceResult)
+      affected.add(destinationResult.originalOrdinal)
+    }
+
+    affected.add(sourceResult.originalOrdinal)
+    resolved.push({
+      ...operation,
+      startOffset: originalRange.start,
+      endOffset: originalRange.end,
+      beforeText: original?.text ?? sourceResult.text,
+      afterText,
+      paragraphOrdinal: sourceResult.originalOrdinal,
+    })
+  }
+
+  const afterText = working.map((paragraph) => paragraph.text).join('\n\n')
+  if (afterText.length > MAX_DRAFT_CHARACTERS)
+    return { ok: false, reason: 'edited draft is too large' }
+  if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
+  return {
+    ok: true,
+    afterText,
+    operations: resolved,
+    affectedParagraphOrdinals: [...affected].sort((left, right) => left - right),
+    resultingParagraphIds: working.map((paragraph) => paragraph.id),
+  }
+}
+
+function resolveStructuralParagraph(
+  paragraphs: readonly StructuralParagraph[],
+  target: EditTarget,
+): StructuralParagraph | string {
+  if (target.scope === 'draft') return 'structural operation requires one paragraph target'
+  const matches = paragraphs.filter(
+    (paragraph) =>
+      (target.paragraphId === undefined || paragraph.id === target.paragraphId) &&
+      (target.paragraphOrdinal === undefined ||
+        paragraph.originalOrdinal === target.paragraphOrdinal),
+  )
+  if (target.paragraphId === undefined && target.paragraphOrdinal === undefined)
+    return 'structural operation requires one paragraph target'
+  if (matches.length !== 1)
+    return matches.length ? 'paragraph target is ambiguous' : 'paragraph target was not found'
+  return matches[0]!
+}
+
 function paragraphRange(text: string, paragraph: DraftParagraph): { start: number; end: number } {
   const lines = text.split('\n')
   let start = 0
@@ -295,6 +510,72 @@ function findAll(text: string, search: string, start: number, end: number): numb
     offset = index + Math.max(search.length, 1)
   }
   return matches
+}
+
+function findApproximateMatch(
+  text: string,
+  search: string,
+  start: number,
+  end: number,
+): { start: number; end: number } | string {
+  const wanted = tokenizeWithOffsets(search, 0, search.length)
+  if (!wanted.length) return 'approximate text target was not found'
+  const available = tokenizeWithOffsets(text, start, end)
+  if (available.length < wanted.length) return 'approximate text target was not found'
+  const wantedText = wanted.map(({ value }) => value).join(' ')
+  const candidates: Array<{ start: number; end: number; score: number }> = []
+  for (let index = 0; index <= available.length - wanted.length; index += 1) {
+    const window = available.slice(index, index + wanted.length)
+    const candidateText = window.map(({ value }) => value).join(' ')
+    candidates.push({
+      start: window[0]!.start,
+      end: window.at(-1)!.end,
+      score: stringSimilarity(wantedText, candidateText),
+    })
+  }
+  candidates.sort((left, right) => right.score - left.score)
+  const best = candidates[0]
+  if (!best || best.score < 0.78) return 'approximate text target was not found'
+  const runnerUp = candidates[1]
+  if (runnerUp && best.score - runnerUp.score < 0.12) return 'approximate text target is ambiguous'
+  return { start: best.start, end: best.end }
+}
+
+function tokenizeWithOffsets(
+  text: string,
+  start: number,
+  end: number,
+): Array<{ value: string; start: number; end: number }> {
+  const tokens: Array<{ value: string; start: number; end: number }> = []
+  const segment = text.slice(start, end)
+  for (const match of segment.matchAll(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)) {
+    const offset = start + (match.index ?? 0)
+    tokens.push({
+      value: match[0].toLocaleLowerCase(),
+      start: offset,
+      end: offset + match[0].length,
+    })
+  }
+  return tokens
+}
+
+function stringSimilarity(left: string, right: string): number {
+  const rows = left.length + 1
+  const columns = right.length + 1
+  const previous = Array.from({ length: columns }, (_, index) => index)
+  for (let row = 1; row < rows; row += 1) {
+    const current = new Array<number>(columns)
+    current[0] = row
+    for (let column = 1; column < columns; column += 1) {
+      current[column] = Math.min(
+        current[column - 1]! + 1,
+        previous[column]! + 1,
+        previous[column - 1]! + (left[row - 1] === right[column - 1] ? 0 : 1),
+      )
+    }
+    for (let column = 0; column < columns; column += 1) previous[column] = current[column]!
+  }
+  return 1 - previous[columns - 1]! / Math.max(left.length, right.length, 1)
 }
 
 function applyCase(value: string, mode: NonNullable<EditOperation['caseMode']>): string {

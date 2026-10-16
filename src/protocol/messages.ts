@@ -3,8 +3,8 @@ import type { GlossaryEntry } from '../domain/glossary'
 import type { SpellingLearningCandidate } from '../domain/normalization'
 import type { EditPlan, ResolvedEditOperation } from '../domain/edit-pipeline'
 
-export const PROTOCOL_VERSION = 6 as const
-export const APP_VERSION = '1.3.3'
+export const PROTOCOL_VERSION = 7 as const
+export const APP_VERSION = '1.4.0'
 export const REQUEST_TIMEOUT_MS = 15_000
 export const NORMALIZATION_TIMEOUT_MS = 120_000
 export const SEND_TIMEOUT_MS = 120_000
@@ -54,6 +54,25 @@ export interface EditProposal {
   afterText: string
   affectedParagraphOrdinals: number[]
   explanation: string
+  learningCandidates: SpellingLearningCandidate[]
+  resultingParagraphIds?: string[]
+}
+
+export interface EditTargetCandidate {
+  id: string
+  operationId: string
+  paragraphId: string
+  paragraphOrdinal: number
+  exactText: string
+  preview: string
+}
+
+export interface EditCandidateSet {
+  operationId: string
+  chatId: string
+  expectedVersion: number
+  instructionTranscript: string
+  candidates: EditTargetCandidate[]
 }
 
 export interface PermissionSnapshot {
@@ -119,6 +138,13 @@ export type FrontendRequest =
       operationId: string
       chatId: string
       expectedVersion: number
+    })
+  | (RequestEnvelope & {
+      type: 'edit.candidate.select.request'
+      operationId: string
+      chatId: string
+      expectedVersion: number
+      candidateId: string
     })
   | (RequestEnvelope & {
       type: 'draft.recording.undo.request'
@@ -198,6 +224,13 @@ export type BackendResponse =
       outcome: 'review' | 'committed'
       proposal: EditProposal
       snapshot?: DraftSnapshot
+      glossaryLearned?: GlossaryEntry[]
+    })
+  | (RequestEnvelope & {
+      type: 'edit.candidates.response'
+      ok: true
+      outcome: 'selection-required'
+      candidateSet: EditCandidateSet
     })
   | (RequestEnvelope & {
       type: 'phase4.state.response'

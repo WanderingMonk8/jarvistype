@@ -32,6 +32,7 @@ export interface AutomatedEditOptions {
   operationId: string
   now?: string
   createId?: () => string
+  paragraphIdOrder?: string[]
 }
 
 export interface RecordingSegment {
@@ -172,6 +173,25 @@ export function applyManualEdit(
   }
 }
 
+function hasValidParagraphIdOrder(cleanText: string, ids: string[]): boolean {
+  const paragraphCount = cleanText.split('\n').filter(isNonEmptyParagraph).length
+  return ids.length === paragraphCount && new Set(ids).size === ids.length && ids.every(Boolean)
+}
+
+function paragraphsWithIdOrder(cleanText: string, ids: string[]): DraftParagraph[] {
+  const paragraphs: DraftParagraph[] = []
+  for (const [lineIndex, text] of cleanText.split('\n').entries()) {
+    if (!isNonEmptyParagraph(text)) continue
+    paragraphs.push({
+      id: ids[paragraphs.length]!,
+      ordinal: paragraphs.length + 1,
+      lineIndex,
+      text,
+    })
+  }
+  return paragraphs
+}
+
 export function applyAutomatedEdit(
   session: PersistedDraftSession,
   nextText: string,
@@ -199,7 +219,10 @@ export function applyAutomatedEdit(
       ...session,
       draftVersion: nextVersion,
       cleanText: nextText,
-      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      paragraphs:
+        options.paragraphIdOrder && hasValidParagraphIdOrder(nextText, options.paragraphIdOrder)
+          ? paragraphsWithIdOrder(nextText, options.paragraphIdOrder)
+          : reconcileParagraphs(session.paragraphs, nextText, createId),
       history: [
         ...session.history,
         {

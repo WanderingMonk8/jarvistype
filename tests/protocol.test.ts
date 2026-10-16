@@ -194,4 +194,43 @@ test('validates semantic edit interpretation and confirmation requests', () => {
     }),
     true,
   )
+  assert.equal(
+    isFrontendRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.candidate.select.request',
+      requestId: 'edit-candidate-select',
+      operationId: 'edit-operation',
+      chatId: 'chat-1',
+      expectedVersion: 4,
+      candidateId: 'candidate-2',
+    }),
+    true,
+  )
+})
+
+test('validates an edit ambiguity candidate response', () => {
+  assert.equal(
+    isBackendResponse({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.candidates.response',
+      requestId: 'candidate-response',
+      ok: true,
+      outcome: 'selection-required',
+      candidateSet: {
+        operationId: 'edit-operation',
+        chatId: 'chat-1',
+        expectedVersion: 2,
+        instructionTranscript: 'Change the repeated phrase.',
+        candidates: [1, 2].map((paragraphOrdinal) => ({
+          id: `candidate-${paragraphOrdinal}`,
+          operationId: 'replace-phrase',
+          paragraphId: `paragraph-${paragraphOrdinal}`,
+          paragraphOrdinal,
+          exactText: 'repeated phrase',
+          preview: `The repeated phrase in paragraph ${paragraphOrdinal}.`,
+        })),
+      },
+    }),
+    true,
+  )
 })

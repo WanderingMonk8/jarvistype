@@ -46,8 +46,8 @@ var RequestRegistry = class {
 };
 
 // src/protocol/messages.ts
-var PROTOCOL_VERSION = 6;
-var APP_VERSION = "1.3.3";
+var PROTOCOL_VERSION = 7;
+var APP_VERSION = "1.4.0";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -57,7 +57,7 @@ function createRequestId(prefix = "request") {
 }
 
 // src/domain/edit-pipeline.ts
-var EDIT_SCHEMA_VERSION = 1;
+var EDIT_SCHEMA_VERSION = 2;
 var MAX_EDIT_OPERATIONS = 8;
 var MAX_EDIT_TEXT_LENGTH = 1e4;
 function parseEditPlan(value) {
@@ -80,22 +80,31 @@ function parseEditPlan(value) {
 }
 function parseOperation(value) {
   if (!isRecord(value) || !isIdentifier(value.id) || !isRecord(value.target)) return null;
-  const allowedOperationKeys = /* @__PURE__ */ new Set(["id", "type", "target", "text", "caseMode"]);
+  const allowedOperationKeys = /* @__PURE__ */ new Set(["id", "type", "target", "text", "caseMode", "destination"]);
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null;
   const type = value.type;
-  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "append" && type !== "prepend" && type !== "case")
+  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "move_before" && type !== "move_after")
     return null;
   const target = parseTarget(value.target);
   if (!target) return null;
   const text = value.text;
   const caseMode = value.caseMode;
+  const destination = value.destination === void 0 ? void 0 : isRecord(value.destination) ? parseTarget(value.destination) : null;
+  if (value.destination !== void 0 && !destination) return null;
   if (type === "case") {
     if (caseMode !== "capitalize" && caseMode !== "uppercase" && caseMode !== "lowercase")
       return null;
-    if (text !== void 0) return null;
-  } else if (type === "delete") {
+    if (text !== void 0 || destination !== void 0) return null;
+  } else if (type === "delete" || type === "split" || type === "join_next") {
     if (text !== void 0 || caseMode !== void 0) return null;
-  } else if (typeof text !== "string" || text.length > MAX_EDIT_TEXT_LENGTH || caseMode !== void 0) {
+    if (destination !== void 0) return null;
+    if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
+      return null;
+  } else if (type === "move_before" || type === "move_after") {
+    if (text !== void 0 || caseMode !== void 0 || !destination) return null;
+    if (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0 || destination.exactText !== void 0 || destination.approximateText !== void 0 || destination.scope !== void 0)
+      return null;
+  } else if (typeof text !== "string" || text.length > MAX_EDIT_TEXT_LENGTH || caseMode !== void 0 || destination !== void 0) {
     return null;
   }
   return {
@@ -103,11 +112,18 @@ function parseOperation(value) {
     type,
     target,
     ...typeof text === "string" ? { text } : {},
-    ...typeof caseMode === "string" ? { caseMode } : {}
+    ...typeof caseMode === "string" ? { caseMode } : {},
+    ...destination ? { destination } : {}
   };
 }
 function parseTarget(value) {
-  const allowed = /* @__PURE__ */ new Set(["paragraphId", "paragraphOrdinal", "exactText"]);
+  const allowed = /* @__PURE__ */ new Set([
+    "paragraphId",
+    "paragraphOrdinal",
+    "exactText",
+    "approximateText",
+    "scope"
+  ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return null;
   const target = {};
   if (value.paragraphId !== void 0) {
@@ -123,6 +139,18 @@ function parseTarget(value) {
       return null;
     target.exactText = value.exactText;
   }
+  if (value.approximateText !== void 0) {
+    if (typeof value.approximateText !== "string" || value.approximateText.length < 1 || value.approximateText.length > MAX_EDIT_TEXT_LENGTH)
+      return null;
+    target.approximateText = value.approximateText;
+  }
+  if (target.exactText !== void 0 && target.approximateText !== void 0) return null;
+  if (value.scope !== void 0) {
+    if (value.scope !== "draft") return null;
+    target.scope = "draft";
+  }
+  if (target.scope === "draft" && (target.paragraphId !== void 0 || target.paragraphOrdinal !== void 0 || target.exactText !== void 0 || target.approximateText !== void 0))
+    return null;
   return Object.keys(target).length ? target : null;
 }
 function isRecord(value) {
@@ -177,7 +205,10 @@ function isBackendResponse(value) {
     return value.ok === true && (value.outcome === "committed" || value.outcome === "review") && isNormalizationProposal(value.proposal) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot)) && (value.glossaryLearned === void 0 || Array.isArray(value.glossaryLearned) && value.glossaryLearned.every(isGlossaryEntry));
   }
   if (value.type === "edit.proposal.response") {
-    return value.ok === true && (value.outcome === "review" || value.outcome === "committed") && isEditProposal(value.proposal) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot));
+    return value.ok === true && (value.outcome === "review" || value.outcome === "committed") && isEditProposal(value.proposal) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot)) && (value.glossaryLearned === void 0 || Array.isArray(value.glossaryLearned) && value.glossaryLearned.every(isGlossaryEntry));
+  }
+  if (value.type === "edit.candidates.response") {
+    return value.ok === true && value.outcome === "selection-required" && isEditCandidateSet(value.candidateSet);
   }
   if (value.type === "phase4.state.response") {
     return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.connections) && value.connections.every(isNormalizationConnectionOption) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
@@ -231,7 +262,14 @@ function isNormalizationProposal(value) {
 function isEditProposal(value) {
   return isRecord2(value) && isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger2(value.expectedVersion) && isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) && parseEditPlan(value.plan) !== null && Array.isArray(value.operations) && value.operations.length > 0 && value.operations.every(
     (operation) => isRecord2(operation) && isIdentifier2(operation.id) && typeof operation.type === "string" && isNonNegativeInteger2(operation.startOffset) && isNonNegativeInteger2(operation.endOffset) && typeof operation.beforeText === "string" && typeof operation.afterText === "string" && isPositiveInteger2(operation.paragraphOrdinal)
-  ) && typeof value.beforeText === "string" && value.beforeText.length <= MAX_DRAFT_CHARACTERS && typeof value.afterText === "string" && value.afterText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.affectedParagraphOrdinals) && value.affectedParagraphOrdinals.every(isPositiveInteger2) && typeof value.explanation === "string" && value.explanation.length <= 1e3;
+  ) && typeof value.beforeText === "string" && value.beforeText.length <= MAX_DRAFT_CHARACTERS && typeof value.afterText === "string" && value.afterText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.affectedParagraphOrdinals) && value.affectedParagraphOrdinals.every(isPositiveInteger2) && typeof value.explanation === "string" && value.explanation.length <= 1e3 && Array.isArray(value.learningCandidates) && value.learningCandidates.every(
+    (candidate) => isRecord2(candidate) && isBoundedString(candidate.canonical, 1, 200) && typeof candidate.spokenVariant === "string" && candidate.spokenVariant.length <= 500
+  ) && (value.resultingParagraphIds === void 0 || Array.isArray(value.resultingParagraphIds) && value.resultingParagraphIds.length <= MAX_DRAFT_CHARACTERS && value.resultingParagraphIds.every(isIdentifier2) && new Set(value.resultingParagraphIds).size === value.resultingParagraphIds.length);
+}
+function isEditCandidateSet(value) {
+  return isRecord2(value) && isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger2(value.expectedVersion) && isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) && Array.isArray(value.candidates) && value.candidates.length >= 2 && value.candidates.length <= 20 && value.candidates.every(
+    (candidate) => isRecord2(candidate) && isIdentifier2(candidate.id) && isIdentifier2(candidate.operationId) && isIdentifier2(candidate.paragraphId) && isPositiveInteger2(candidate.paragraphOrdinal) && isBoundedString(candidate.exactText, 1, MAX_DRAFT_CHARACTERS) && isBoundedString(candidate.preview, 1, MAX_DRAFT_CHARACTERS)
+  );
 }
 function isGlossaryEntry(value) {
   return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && typeof value.hint === "string" && value.hint.length <= 500 && (value.source === "explicit-spelling" || value.source === "manual") && isNonNegativeInteger2(value.useCount) && isBoundedString(value.createdAt, 1, 128) && isBoundedString(value.updatedAt, 1, 128);
@@ -317,6 +355,16 @@ function setup(ctx) {
   const acceptProposalButton = requireElement(tab.root, "[data-proposal-accept]");
   const rejectProposalButton = requireElement(tab.root, "[data-proposal-reject]");
   const editProposalPanel = requireElement(tab.root, "[data-edit-proposal]");
+  const editCandidatesPanel = requireElement(tab.root, "[data-edit-candidates]");
+  const editCandidatesInstruction = requireElement(
+    tab.root,
+    "[data-edit-candidates-instruction]"
+  );
+  const editCandidatesList = requireElement(tab.root, "[data-edit-candidates-list]");
+  const cancelEditCandidatesButton = requireElement(
+    tab.root,
+    "[data-edit-candidates-cancel]"
+  );
   const editProposalInstruction = requireElement(tab.root, "[data-edit-instruction]");
   const editProposalOperations = requireElement(tab.root, "[data-edit-operations]");
   const editProposalBefore = requireElement(tab.root, "[data-edit-before]");
@@ -370,6 +418,7 @@ function setup(ctx) {
     voiceMessage: "Ready to record a message segment.",
     pendingProposal: null,
     pendingEditProposal: null,
+    pendingEditCandidates: null,
     settings: {
       contextMessageCount: 5,
       contextualNormalizationEnabled: true,
@@ -480,12 +529,25 @@ function setup(ctx) {
     editProposalPanel.hidden = !editProposal;
     editProposalInstruction.textContent = editProposal?.instructionTranscript ?? "";
     editProposalOperations.textContent = editProposal ? editProposal.operations.map(
-      (operation) => `${operation.type} \xB7 paragraph ${operation.paragraphOrdinal} \xB7 ${operation.beforeText || "\u2205"} \u2192 ${operation.afterText || "\u2205"}`
+      (operation) => `${operation.type} \xB7 paragraph ${operation.paragraphOrdinal}${operation.destination?.paragraphOrdinal ? ` \u2192 paragraph ${operation.destination.paragraphOrdinal}` : ""} \xB7 ${operation.beforeText || "\u2205"} \u2192 ${operation.afterText || "\u2205"}`
     ).join("\n") : "";
     editProposalBefore.textContent = editProposal?.beforeText ?? "";
     editProposalAfter.textContent = editProposal?.afterText ?? "";
     acceptEditButton.disabled = !editProposal || state.automatedBusy;
     rejectEditButton.disabled = !editProposal || state.automatedBusy;
+    const editCandidates = state.pendingEditCandidates;
+    editCandidatesPanel.hidden = !editCandidates;
+    editCandidatesInstruction.textContent = editCandidates?.instructionTranscript ?? "";
+    editCandidatesList.replaceChildren();
+    for (const candidate of editCandidates?.candidates ?? []) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.editCandidateId = candidate.id;
+      button.textContent = `Paragraph ${candidate.paragraphOrdinal}: ${candidate.preview}`;
+      button.disabled = state.automatedBusy;
+      editCandidatesList.append(button);
+    }
+    cancelEditCandidatesButton.disabled = !editCandidates || state.automatedBusy;
     contextCountInput.value = String(state.settings.contextMessageCount);
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
     renderConnectionOptions(
@@ -535,6 +597,7 @@ function setup(ctx) {
     if (!alive || state.loading) return;
     state.pendingProposal = null;
     state.pendingEditProposal = null;
+    state.pendingEditCandidates = null;
     if (state.voicePhase === "review") state.voicePhase = "idle";
     state.loading = true;
     state.statusMessage = "Loading the chat-owned draft\u2026";
@@ -818,6 +881,10 @@ function setup(ctx) {
       state.pendingEditProposal = outcome.value.proposal;
       state.voicePhase = "review";
       state.voiceMessage = "Review the interpreted operations and complete proposed draft.";
+    } else if (outcome.status === "resolved" && outcome.value.type === "edit.candidates.response") {
+      state.pendingEditCandidates = outcome.value.candidateSet;
+      state.voicePhase = "review";
+      state.voiceMessage = "More than one target matches. Choose the intended paragraph.";
     } else {
       state.voicePhase = "error";
       state.voiceMessage = outcome.status === "resolved" && outcome.value.type === "app.error" ? outcome.value.message : "Edit interpretation timed out. The draft was not changed.";
@@ -845,6 +912,11 @@ function setup(ctx) {
       state.pendingEditProposal = null;
       state.voicePhase = "idle";
       state.voiceMessage = "Approved edit applied. You can undo it as one change.";
+      if (outcome.value.glossaryLearned?.length) {
+        const learnedNames = outcome.value.glossaryLearned.map((entry) => entry.canonical).join(", ");
+        await loadPhaseFourState();
+        state.phaseFourMessage = `Learned ${learnedNames} from the approved edit spelling. The glossary change is undoable.`;
+      }
     } else {
       state.voicePhase = "error";
       state.voiceMessage = outcome.status === "resolved" && outcome.value.type === "app.error" ? outcome.value.message : "Edit confirmation timed out. The draft was not changed.";
@@ -855,6 +927,40 @@ function setup(ctx) {
     state.pendingEditProposal = null;
     state.voicePhase = "idle";
     state.voiceMessage = "Edit proposal rejected. The draft was not changed.";
+    render();
+  };
+  const selectEditCandidate = async (candidateId) => {
+    const candidateSet = state.pendingEditCandidates;
+    if (!candidateSet || state.automatedBusy) return;
+    state.automatedBusy = true;
+    state.voiceMessage = "Resolving the selected target\u2026";
+    render();
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "edit.candidate.select.request",
+      requestId: createRequestId("edit-candidate-select"),
+      operationId: candidateSet.operationId,
+      chatId: candidateSet.chatId,
+      expectedVersion: candidateSet.expectedVersion,
+      candidateId
+    });
+    state.automatedBusy = false;
+    if (!alive) return;
+    if (outcome.status === "resolved" && outcome.value.type === "edit.proposal.response") {
+      state.pendingEditCandidates = null;
+      state.pendingEditProposal = outcome.value.proposal;
+      state.voicePhase = "review";
+      state.voiceMessage = "Target selected. Review the complete proposed edit before approval.";
+    } else {
+      state.voicePhase = "error";
+      state.voiceMessage = outcome.status === "resolved" && outcome.value.type === "app.error" ? outcome.value.message : "Target selection timed out. The draft was not changed.";
+    }
+    render();
+  };
+  const cancelEditCandidateSelection = () => {
+    state.pendingEditCandidates = null;
+    state.voicePhase = "idle";
+    state.voiceMessage = "Target selection cancelled. The draft was not changed.";
     render();
   };
   const acceptNormalizationProposal = async () => {
@@ -1302,6 +1408,13 @@ function setup(ctx) {
   const handleRejectProposalClick = () => rejectNormalizationProposal();
   const handleAcceptEditClick = () => void acceptEditProposal();
   const handleRejectEditClick = () => rejectEditProposal();
+  const handleEditCandidateClick = (event) => {
+    const button = event.target?.closest(
+      "[data-edit-candidate-id]"
+    );
+    if (button?.dataset.editCandidateId) void selectEditCandidate(button.dataset.editCandidateId);
+  };
+  const handleCancelEditCandidatesClick = () => cancelEditCandidateSelection();
   const handleSaveSettingsClick = () => void saveSettings();
   const handleNormalizationConnectionChange = () => {
     state.settings.normalizationConnectionId = normalizationConnectionSelect.value || null;
@@ -1333,6 +1446,8 @@ function setup(ctx) {
   rejectProposalButton.addEventListener("click", handleRejectProposalClick);
   acceptEditButton.addEventListener("click", handleAcceptEditClick);
   rejectEditButton.addEventListener("click", handleRejectEditClick);
+  editCandidatesList.addEventListener("click", handleEditCandidateClick);
+  cancelEditCandidatesButton.addEventListener("click", handleCancelEditCandidatesClick);
   saveSettingsButton.addEventListener("click", handleSaveSettingsClick);
   normalizationConnectionSelect.addEventListener("change", handleNormalizationConnectionChange);
   glossarySaveButton.addEventListener("click", handleSaveGlossaryClick);
@@ -1372,6 +1487,8 @@ function setup(ctx) {
     rejectProposalButton.removeEventListener("click", handleRejectProposalClick);
     acceptEditButton.removeEventListener("click", handleAcceptEditClick);
     rejectEditButton.removeEventListener("click", handleRejectEditClick);
+    editCandidatesList.removeEventListener("click", handleEditCandidateClick);
+    cancelEditCandidatesButton.removeEventListener("click", handleCancelEditCandidatesClick);
     saveSettingsButton.removeEventListener("click", handleSaveSettingsClick);
     normalizationConnectionSelect.removeEventListener("change", handleNormalizationConnectionChange);
     glossarySaveButton.removeEventListener("click", handleSaveGlossaryClick);
@@ -1568,6 +1685,8 @@ function shellMarkup() {
       .jt-form-grid input, .jt-form-grid select { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
       .jt-proposal { display: grid; gap: .55rem; padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
       .jt-proposal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .55rem; background: color-mix(in srgb, currentColor 6%, transparent); }
+      .jt-candidate-list { display: grid; gap: .5rem; }
+      .jt-candidate-list button { text-align: start; white-space: normal; }
       .jt-glossary { display: grid; gap: .55rem; }
       .jt-glossary-row { display: grid; gap: .35rem; padding: .55rem; border-radius: .45rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-wrap: anywhere; }
       .jt-empty { opacity: .65; font-style: italic; }
@@ -1577,7 +1696,7 @@ function shellMarkup() {
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
-        <p class="jt-shell__eyebrow">Phase 5 semantic editing \xB7 v${APP_VERSION}</p>
+        <p class="jt-shell__eyebrow">Phase 6 advanced editing \xB7 v${APP_VERSION}</p>
         <h2 id="jt-title">JarvisType</h2>
         <p>Compose privately, review every change, and send only when you confirm.</p>
       </header>
@@ -1639,6 +1758,15 @@ function shellMarkup() {
           </div>
         </section>
 
+        <section class="jt-proposal" data-edit-candidates hidden aria-labelledby="jt-edit-candidates-title">
+          <h4 id="jt-edit-candidates-title">Choose the intended edit target</h4>
+          <p><strong>Spoken instruction</strong></p>
+          <pre data-edit-candidates-instruction></pre>
+          <div class="jt-candidate-list" data-edit-candidates-list></div>
+          <div class="jt-actions">
+            <button type="button" data-edit-candidates-cancel>Cancel selection</button>
+          </div>
+        </section>
         <section class="jt-proposal" data-edit-proposal hidden aria-labelledby="jt-edit-proposal-title">
           <h4 id="jt-edit-proposal-title">Review interpreted edit</h4>
           <p><strong>Spoken instruction</strong></p>

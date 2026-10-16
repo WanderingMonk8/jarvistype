@@ -488,7 +488,7 @@ test('keeps spoken edit instructions out of the draft until the structured propo
   await seedDraft(userId, chatId, 'We hiked up the mountain.\n\nThe weather changed.')
   responses.length = 0
   editPlanResponse = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     draftVersion: 1,
     explanation: 'Correct the requested phrase in paragraph one.',
     operations: [
@@ -541,14 +541,14 @@ test('keeps spoken edit instructions out of the draft until the structured propo
   }
 })
 
-test('rejects malformed or unresolved semantic edits without mutating the draft', async () => {
+test('offers explicit choices for paragraph-resolvable ambiguity without mutating the draft', async () => {
   const userId = 'unsafe-edit-user'
   const chatId = 'unsafe-edit-chat'
   activeChatId = chatId
   await seedDraft(userId, chatId, 'Same phrase.\n\nSame phrase.')
   responses.length = 0
   editPlanResponse = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     draftVersion: 1,
     explanation: 'Ambiguous replacement.',
     operations: [
@@ -568,10 +568,143 @@ test('rejects malformed or unresolved semantic edits without mutating the draft'
     userId,
   )
   const response = responses.at(-1)?.payload
-  assert.equal(response?.type, 'app.error')
-  if (response?.type === 'app.error') {
-    assert.equal(response.code, 'EDIT_TARGET_UNRESOLVED')
-    assert.equal(response.snapshot?.cleanText, 'Same phrase.\n\nSame phrase.')
+  assert.equal(response?.type, 'edit.candidates.response')
+  if (response?.type !== 'edit.candidates.response') return
+  assert.deepEqual(
+    response.candidateSet.candidates.map(({ paragraphOrdinal }) => paragraphOrdinal),
+    [1, 2],
+  )
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.candidate.select.request',
+      requestId: 'unsafe-edit-select',
+      operationId: 'unsafe-edit-operation',
+      chatId,
+      expectedVersion: 1,
+      candidateId: response.candidateSet.candidates[1]!.id,
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.beforeText, 'Same phrase.\n\nSame phrase.')
+    assert.equal(proposal.proposal.afterText, 'Same phrase.\n\nChanged.')
+    assert.equal(proposal.snapshot, undefined)
+  }
+})
+
+test('learns explicit spelling from an approved edit but not from its proposal', async () => {
+  const userId = 'edit-spelling-user'
+  const chatId = 'edit-spelling-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'The project codename is Cesar.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Apply the explicitly spelled codename.',
+    operations: [
+      {
+        id: 'spell-caesar',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'Cesar' },
+        text: 'Caesar',
+      },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-spelling-interpret',
+      operationId: 'edit-spelling-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace Cesar with C-A-E-S-A-R, Caesar.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.learningCandidates.some(({ canonical }) => canonical === 'Caesar'),
+    true,
+  )
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.load.request',
+      requestId: 'glossary-before-edit-confirm',
+    },
+    userId,
+  )
+  const before = responses.at(-1)?.payload
+  assert.equal(before?.type === 'phase4.state.response' && before.glossary.length, 0)
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'edit-spelling-confirm',
+      operationId: 'edit-spelling-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type === 'edit.proposal.response') {
+    assert.equal(committed.snapshot?.cleanText, 'The project codename is Caesar.')
+    assert.equal(
+      committed.glossaryLearned?.some(({ canonical }) => canonical === 'Caesar'),
+      true,
+    )
+  }
+})
+
+test('keeps a one-time explanatory reference out of replacement text and glossary learning', async () => {
+  const userId = 'reference-edit-user'
+  const chatId = 'reference-edit-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Please ask can the worker for help.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Use the Barbie reference only to disambiguate Ken.',
+    operations: [
+      {
+        id: 'reference-ken',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'can the worker' },
+        text: 'Ken the worker',
+      },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'reference-edit-interpret',
+      operationId: 'reference-edit-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Where I said can the worker, I meant Ken the worker, as in Barbie and Ken.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'Please ask Ken the worker for help.')
+    assert.equal(proposal.proposal.afterText.includes('Barbie'), false)
+    assert.equal(proposal.proposal.learningCandidates.length, 0)
   }
 })
 

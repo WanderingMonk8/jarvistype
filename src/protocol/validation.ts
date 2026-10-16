@@ -86,6 +86,14 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS)
     )
   }
+  if (value.type === 'edit.candidate.select.request') {
+    return (
+      isIdentifier(value.operationId) &&
+      isIdentifier(value.chatId) &&
+      isNonNegativeInteger(value.expectedVersion) &&
+      isIdentifier(value.candidateId)
+    )
+  }
   if (value.type === 'draft.recording.undo.request') {
     return (
       isIdentifier(value.operationId) &&
@@ -164,7 +172,16 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
       value.ok === true &&
       (value.outcome === 'review' || value.outcome === 'committed') &&
       isEditProposal(value.proposal) &&
-      (value.snapshot === undefined || isDraftSnapshot(value.snapshot))
+      (value.snapshot === undefined || isDraftSnapshot(value.snapshot)) &&
+      (value.glossaryLearned === undefined ||
+        (Array.isArray(value.glossaryLearned) && value.glossaryLearned.every(isGlossaryEntry)))
+    )
+  }
+  if (value.type === 'edit.candidates.response') {
+    return (
+      value.ok === true &&
+      value.outcome === 'selection-required' &&
+      isEditCandidateSet(value.candidateSet)
     )
   }
   if (value.type === 'phase4.state.response') {
@@ -381,7 +398,43 @@ function isEditProposal(value: unknown): boolean {
     Array.isArray(value.affectedParagraphOrdinals) &&
     value.affectedParagraphOrdinals.every(isPositiveInteger) &&
     typeof value.explanation === 'string' &&
-    value.explanation.length <= 1_000
+    value.explanation.length <= 1_000 &&
+    Array.isArray(value.learningCandidates) &&
+    value.learningCandidates.every(
+      (candidate) =>
+        isRecord(candidate) &&
+        isBoundedString(candidate.canonical, 1, 200) &&
+        typeof candidate.spokenVariant === 'string' &&
+        candidate.spokenVariant.length <= 500,
+    ) &&
+    (value.resultingParagraphIds === undefined ||
+      (Array.isArray(value.resultingParagraphIds) &&
+        value.resultingParagraphIds.length <= MAX_DRAFT_CHARACTERS &&
+        value.resultingParagraphIds.every(isIdentifier) &&
+        new Set(value.resultingParagraphIds).size === value.resultingParagraphIds.length))
+  )
+}
+
+function isEditCandidateSet(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isIdentifier(value.operationId) &&
+    isIdentifier(value.chatId) &&
+    isNonNegativeInteger(value.expectedVersion) &&
+    isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) &&
+    Array.isArray(value.candidates) &&
+    value.candidates.length >= 2 &&
+    value.candidates.length <= 20 &&
+    value.candidates.every(
+      (candidate) =>
+        isRecord(candidate) &&
+        isIdentifier(candidate.id) &&
+        isIdentifier(candidate.operationId) &&
+        isIdentifier(candidate.paragraphId) &&
+        isPositiveInteger(candidate.paragraphOrdinal) &&
+        isBoundedString(candidate.exactText, 1, MAX_DRAFT_CHARACTERS) &&
+        isBoundedString(candidate.preview, 1, MAX_DRAFT_CHARACTERS),
+    )
   )
 }
 

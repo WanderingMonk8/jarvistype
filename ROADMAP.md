@@ -644,6 +644,8 @@ Deliver flexible natural-language editing while allowing only resolved, validate
 
 ## Phase 6: Advanced conversational editing and language controls
 
+Implementation candidate `1.4.0` prepared on 2026-10-16. Hosted verification remains required before this phase is marked complete.
+
 ### Objective
 
 Complete semantic references, paragraph restructuring, referential wording, scoped casing, explicit spelling in edits, and multi-operation commands.

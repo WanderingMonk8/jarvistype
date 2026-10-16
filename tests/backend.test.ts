@@ -18,6 +18,7 @@ let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
 let generationReturnsRawTranscript = false
+let generationNormalizedText: string | null = null
 
 const spindleMock = {
   onFrontendMessage(handler: FrontendHandler) {
@@ -94,7 +95,7 @@ const spindleMock = {
         content: JSON.stringify({
           normalizedText: generationReturnsRawTranscript
             ? (input.rawTranscript ?? '')
-            : (input.candidate ?? ''),
+            : (generationNormalizedText ?? input.candidate ?? ''),
         }),
       })
     },
@@ -122,6 +123,7 @@ test.beforeEach(() => {
   activeChatId = 'chat-default'
   appendShouldFail = false
   generationReturnsRawTranscript = false
+  generationNormalizedText = null
 })
 
 const normalizationConnection = {
@@ -419,6 +421,36 @@ test('re-applies deterministic commands when contextual output returns the raw p
     assert.equal(response.proposal.rawTranscript, 'Use the word period here, period.')
     assert.equal(response.proposal.candidateText, 'Use period here.')
     assert.equal(response.snapshot, undefined)
+  }
+})
+
+test('does not let contextual normalization override authoritative explicit spelling', async () => {
+  const userId = 'authoritative-spelling-user'
+  const chatId = 'authoritative-spelling-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationNormalizedText = 'Write PIP-BOY.'
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'authoritative-spelling-segment',
+      1,
+      'Write capitalized PIP-BOY, PIP-BOY.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(response.proposal.candidateText, 'Write Pip-Boy.')
+    assert.equal(response.proposal.contextualModelUsed, false)
+    assert.deepEqual(response.proposal.learningCandidates, [
+      { canonical: 'Pip-Boy', spokenVariant: 'PIP-BOY' },
+    ])
   }
 })
 

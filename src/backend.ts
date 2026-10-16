@@ -200,7 +200,11 @@ async function handleTranscriptNormalization(
         settings,
         context.userId,
       )
-      if (contextual && contextual !== candidateText) {
+      if (
+        contextual &&
+        contextual !== candidateText &&
+        preservesAuthoritativeSpellings(candidateText, contextual, deterministic.learningCandidates)
+      ) {
         const enforced = normalizeDeterministically(contextual, glossary.entries)
         candidateText = enforced.text
         reasons.push(...enforced.reasons)
@@ -306,6 +310,33 @@ async function handleTranscriptNormalization(
     },
     context,
   )
+}
+
+function preservesAuthoritativeSpellings(
+  deterministicCandidate: string,
+  contextualCandidate: string,
+  spellings: ReadonlyArray<{ canonical: string }>,
+): boolean {
+  for (const canonical of new Set(spellings.map((spelling) => spelling.canonical))) {
+    if (
+      countExactOccurrences(contextualCandidate, canonical) !==
+      countExactOccurrences(deterministicCandidate, canonical)
+    )
+      return false
+  }
+  return true
+}
+
+function countExactOccurrences(value: string, search: string): number {
+  if (!search) return 0
+  let count = 0
+  let offset = 0
+  while (true) {
+    const index = value.indexOf(search, offset)
+    if (index < 0) return count
+    count += 1
+    offset = index + search.length
+  }
 }
 
 async function handleTranscriptConfirmation(

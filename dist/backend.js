@@ -737,7 +737,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 5;
-var APP_VERSION = "1.2.1";
+var APP_VERSION = "1.2.2";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts
@@ -929,7 +929,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
         settings,
         context.userId
       );
-      if (contextual && contextual !== candidateText) {
+      if (contextual && contextual !== candidateText && preservesAuthoritativeSpellings(candidateText, contextual, deterministic.learningCandidates)) {
         const enforced = normalizeDeterministically(contextual, glossary.entries);
         candidateText = enforced.text;
         reasons.push(...enforced.reasons);
@@ -1026,6 +1026,24 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     },
     context
   );
+}
+function preservesAuthoritativeSpellings(deterministicCandidate, contextualCandidate, spellings) {
+  for (const canonical of new Set(spellings.map((spelling) => spelling.canonical))) {
+    if (countExactOccurrences(contextualCandidate, canonical) !== countExactOccurrences(deterministicCandidate, canonical))
+      return false;
+  }
+  return true;
+}
+function countExactOccurrences(value, search) {
+  if (!search) return 0;
+  let count = 0;
+  let offset = 0;
+  while (true) {
+    const index = value.indexOf(search, offset);
+    if (index < 0) return count;
+    count += 1;
+    offset = index + search.length;
+  }
 }
 async function handleTranscriptConfirmation(request, context, activeRequest) {
   const proposal = normalizationProposals.get(proposalKey(context.userId, request.operationId));

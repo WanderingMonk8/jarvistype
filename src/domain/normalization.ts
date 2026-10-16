@@ -95,7 +95,7 @@ function replaceExplicitSpelling(
   const learningCandidates: SpellingLearningCandidate[] = []
   const ambiguities: string[] = []
   const pattern =
-    /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash)\s*){2,}[A-Za-z])|(?:(?:[A-Za-z]\s+){2,}[A-Za-z]))(?:\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*))?/gi
+    /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash)\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*))?/gi
   const text = input.replace(
     pattern,
     (whole, casing: string | undefined, spoken: string, cue: string | undefined) => {

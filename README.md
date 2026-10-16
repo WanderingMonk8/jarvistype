@@ -2,7 +2,7 @@
 
 JarvisType is a [Lumiverse](https://lumiverse.chat/) extension for composing chat messages by voice. It provides a private working draft where users can dictate a message in multiple recordings, inspect context-aware normalization, manage a personal glossary, and approve the final text before it is sent.
 
-> **Project status:** Phase 4 test candidate (`1.0.2`). Phases 0–3 are complete; bounded post-transcription context normalization, spoken punctuation, explicit spelling, and personal glossary management are ready for hosted validation on the `development` branch.
+> **Project status:** Phase 4 test candidate (`1.0.3`). Phases 0–3 are complete; bounded post-transcription context normalization, spoken punctuation, explicit spelling, and personal glossary management are ready for hosted validation on the `development` branch.
 
 ## What JarvisType is designed to do
 

@@ -29,6 +29,10 @@ test('collapses explicit spelling, obeys casing, and creates a learning candidat
   assert.deepEqual(result.learningCandidates, [
     { canonical: 'Caesar', spokenVariant: 'C-A-E-S-A-R' },
   ])
+  assert.equal(
+    normalizeDeterministically('Write capitalized C A E S A R, Caesar period', []).text,
+    'Write Caesar.',
+  )
 })
 
 test('uses glossary variants without paraphrasing surrounding content', () => {

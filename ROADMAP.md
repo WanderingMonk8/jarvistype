@@ -443,7 +443,7 @@ Deliver bounded recording, genuine progressive display where supported, ordered 
 
 ### Status
 
-Implementation candidate ready for hosted validation as of 2026-10-16. Version `1.0.2` uses Lumiverse's authoritative STT result, then applies deterministic punctuation/spelling/glossary rules and an optional bounded `spindle.generate.quiet(...)` correction pass. The verified `ctx.stt` contract accepts no context or vocabulary hints, so JarvisType does not claim that recent messages are sent to the STT provider. Changed candidates always require visible confirmation in this phase.
+Implementation candidate ready for hosted validation as of 2026-10-16. Version `1.0.3` uses Lumiverse's authoritative STT result, then applies deterministic punctuation/spelling/glossary rules and an optional bounded `spindle.generate.quiet(...)` correction pass. The verified `ctx.stt` contract accepts no context or vocabulary hints, so JarvisType does not claim that recent messages are sent to the STT provider. Changed candidates always require visible confirmation in this phase.
 
 ### Objective
 

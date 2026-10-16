@@ -685,7 +685,7 @@ function normalizeDeterministically(raw, glossary) {
 function replaceExplicitSpelling(input) {
   const learningCandidates = [];
   const ambiguities = [];
-  const pattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash)\s*){2,}[A-Za-z])|(?:(?:[A-Za-z]\s+){2,}[A-Za-z]))(?:\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*))?/gi;
+  const pattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash)\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*))?/gi;
   const text = input.replace(
     pattern,
     (whole, casing, spoken, cue) => {
@@ -716,7 +716,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 4;
-var APP_VERSION = "1.0.2";
+var APP_VERSION = "1.0.3";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts

@@ -3,7 +3,7 @@ import type { GlossaryEntry } from '../domain/glossary'
 import type { SpellingLearningCandidate } from '../domain/normalization'
 
 export const PROTOCOL_VERSION = 4 as const
-export const APP_VERSION = '1.0.2'
+export const APP_VERSION = '1.0.3'
 export const REQUEST_TIMEOUT_MS = 15_000
 export const NORMALIZATION_TIMEOUT_MS = 120_000
 export const SEND_TIMEOUT_MS = 120_000

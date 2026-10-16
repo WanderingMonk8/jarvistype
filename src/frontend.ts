@@ -696,8 +696,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.voicePhase = 'idle'
       state.voiceMessage = 'Reviewed transcript appended to the draft.'
       if (outcome.value.glossaryLearned?.length) {
-        state.phaseFourMessage = `Learned ${outcome.value.glossaryLearned.map((entry) => entry.canonical).join(', ')} from confirmed spelling. The glossary change is undoable.`
+        const learnedNames = outcome.value.glossaryLearned
+          .map((entry) => entry.canonical)
+          .join(', ')
         await loadPhaseFourState()
+        state.phaseFourMessage = `Learned ${learnedNames} from confirmed spelling. The glossary change is undoable.`
       }
     } else {
       state.voicePhase = 'error'
@@ -1253,7 +1256,7 @@ function renderGlossary(container: HTMLElement, entries: readonly GlossaryEntry[
     const row = document.createElement('div')
     row.className = 'jt-glossary-row'
     const text = document.createElement('p')
-    text.textContent = `${entry.canonical}${entry.variants.length ? ` — heard as: ${entry.variants.join(', ')}` : ''}${entry.hint ? ` — ${entry.hint}` : ''}`
+    text.textContent = `${entry.canonical}${entry.variants.length ? ` — heard as: ${entry.variants.join(', ')}` : ''}${entry.hint ? ` — ${entry.hint}` : ''} — source: ${entry.source === 'explicit-spelling' ? 'explicit spelling' : 'manual'} — used ${entry.useCount} ${entry.useCount === 1 ? 'time' : 'times'}`
     const actions = document.createElement('div')
     actions.className = 'jt-actions'
     for (const action of ['edit', 'delete'] as const) {

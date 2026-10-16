@@ -4,7 +4,7 @@
 
 Phase 4 adds bounded post-transcription context normalization, spoken punctuation, explicit spelling and casing, per-user glossary learning and maintenance, visible review, and reversible glossary changes.
 
-Current candidate version: `1.0.2`
+Current candidate version: `1.0.3`
 
 ## Platform decision
 

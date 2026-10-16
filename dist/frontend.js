@@ -47,7 +47,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 4;
-var APP_VERSION = "1.0.2";
+var APP_VERSION = "1.0.3";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -652,8 +652,9 @@ function setup(ctx) {
       state.voicePhase = "idle";
       state.voiceMessage = "Reviewed transcript appended to the draft.";
       if (outcome.value.glossaryLearned?.length) {
-        state.phaseFourMessage = `Learned ${outcome.value.glossaryLearned.map((entry) => entry.canonical).join(", ")} from confirmed spelling. The glossary change is undoable.`;
+        const learnedNames = outcome.value.glossaryLearned.map((entry) => entry.canonical).join(", ");
         await loadPhaseFourState();
+        state.phaseFourMessage = `Learned ${learnedNames} from confirmed spelling. The glossary change is undoable.`;
       }
     } else {
       state.voicePhase = "error";
@@ -1141,7 +1142,7 @@ function renderGlossary(container, entries) {
     const row = document.createElement("div");
     row.className = "jt-glossary-row";
     const text = document.createElement("p");
-    text.textContent = `${entry.canonical}${entry.variants.length ? ` \u2014 heard as: ${entry.variants.join(", ")}` : ""}${entry.hint ? ` \u2014 ${entry.hint}` : ""}`;
+    text.textContent = `${entry.canonical}${entry.variants.length ? ` \u2014 heard as: ${entry.variants.join(", ")}` : ""}${entry.hint ? ` \u2014 ${entry.hint}` : ""} \u2014 source: ${entry.source === "explicit-spelling" ? "explicit spelling" : "manual"} \u2014 used ${entry.useCount} ${entry.useCount === 1 ? "time" : "times"}`;
     const actions = document.createElement("div");
     actions.className = "jt-actions";
     for (const action of ["edit", "delete"]) {

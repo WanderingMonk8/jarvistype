@@ -102,6 +102,10 @@ Verified on the hosted Lumiverse installation: all-caps `NASA` was accepted and 
 
 ### Test 6: Context behavior and safety
 
+**Status:** REMOTE-PASS — 2026-10-16
+
+Verified on the hosted Lumiverse installation: a two-message bounded context used 88 characters and corrected `Zephyron K` to the contextual `Zephyron-K`; setting the count to zero reported zero messages and zero characters while retaining review; and instruction-like context was treated as data rather than replacing or contaminating the transcript. Rejected proposals left the draft and glossary unchanged.
+
 1. In a disposable chat, create recent messages containing an unusual proper noun, then record a sentence where the provider plausibly misrecognizes that name.
 2. Confirm the review card reports no more than the configured number of context messages and identifies whether contextual model correction was used through its change reasons.
 3. Confirm no proposed change is appended until accepted.

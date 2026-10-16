@@ -21,7 +21,7 @@ for (const entry of [manifest.entry_backend, manifest.entry_frontend]) {
   await access(entry)
 }
 
-if (manifest.name !== 'JarvisType' || manifest.version !== '1.3.0') {
+if (manifest.name !== 'JarvisType' || manifest.version !== '1.3.1') {
   throw new Error('Phase 5 manifest name and version are invalid')
 }
 

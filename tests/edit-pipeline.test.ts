@@ -117,3 +117,63 @@ test('supports insert, append, prepend, delete, and casing through the same pipe
     'FIRST mountain sentence.\n\nSecond paragraph here. Appended.',
   )
 })
+
+test('adds deterministic paragraph boundaries for paragraph-targeted insertions', () => {
+  const session = fixture()
+  const after = executeEditPlan(session.cleanText, session.paragraphs, 1, {
+    schemaVersion: 1,
+    draftVersion: 1,
+    explanation: 'insert a paragraph',
+    operations: [
+      {
+        id: 'after-paragraph',
+        type: 'insert_after',
+        target: { paragraphOrdinal: 1 },
+        text: 'Inserted paragraph.',
+      },
+    ],
+  })
+  assert.equal(
+    after.ok && after.afterText,
+    'First mountain sentence.\n\nInserted paragraph.\n\nSecond paragraph here.',
+  )
+
+  const before = executeEditPlan(session.cleanText, session.paragraphs, 1, {
+    schemaVersion: 1,
+    draftVersion: 1,
+    explanation: 'insert a paragraph',
+    operations: [
+      {
+        id: 'before-paragraph',
+        type: 'insert_before',
+        target: { paragraphOrdinal: 1 },
+        text: 'Opening paragraph.',
+      },
+    ],
+  })
+  assert.equal(
+    before.ok && before.afterText,
+    'Opening paragraph.\n\nFirst mountain sentence.\n\nSecond paragraph here.',
+  )
+})
+
+test('keeps exact-text insertions inline', () => {
+  const session = fixture()
+  const result = executeEditPlan(session.cleanText, session.paragraphs, 1, {
+    schemaVersion: 1,
+    draftVersion: 1,
+    explanation: 'insert inline',
+    operations: [
+      {
+        id: 'inline',
+        type: 'insert_after',
+        target: { paragraphOrdinal: 1, exactText: 'First' },
+        text: ' difficult',
+      },
+    ],
+  })
+  assert.equal(
+    result.ok && result.afterText,
+    'First difficult mountain sentence.\n\nSecond paragraph here.',
+  )
+})

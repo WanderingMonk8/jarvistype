@@ -233,6 +233,25 @@ function resolveOperation(
     return `${operation.type} requires exact text or one paragraph target`
   }
   const before = cleanText.slice(start, end)
+  const isParagraphInsertion =
+    paragraph !== undefined &&
+    operation.target.exactText === undefined &&
+    (operation.type === 'insert_before' || operation.type === 'insert_after')
+  if (isParagraphInsertion) {
+    const insertedParagraph = (operation.text ?? '').trim()
+    if (!insertedParagraph) return 'paragraph insertion text is empty'
+    const point = operation.type === 'insert_before' ? range.start : range.end
+    return {
+      operation,
+      start: point,
+      end: point,
+      replacement:
+        operation.type === 'insert_before'
+          ? `${insertedParagraph}\n\n`
+          : `\n\n${insertedParagraph}`,
+      paragraphOrdinal: paragraph.ordinal,
+    }
+  }
   const replacement =
     operation.type === 'replace'
       ? (operation.text ?? '')

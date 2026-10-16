@@ -47,7 +47,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 6;
-var APP_VERSION = "1.3.1";
+var APP_VERSION = "1.3.2";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -286,6 +286,10 @@ function setup(ctx) {
   const paragraphList = requireElement(tab.root, "[data-paragraph-list]");
   const recordButton = requireElement(tab.root, "[data-record-message]");
   const recordEditButton = requireElement(tab.root, "[data-record-edit]");
+  const cancelEditRecordingButton = requireElement(
+    tab.root,
+    "[data-cancel-edit-recording]"
+  );
   const cancelRecordingButton = requireElement(
     tab.root,
     "[data-cancel-recording]"
@@ -451,8 +455,11 @@ function setup(ctx) {
     recordButton.disabled = !hasNativeStt() || !recordingOwnerReady || voiceBusy() && activeRecording?.mode !== "message" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
     recordEditButton.textContent = (state.voicePhase === "starting" || state.voicePhase === "recording") && activeRecording?.mode === "edit" ? "Stop Edit Recording" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Record Edit";
     recordEditButton.disabled = !hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() && activeRecording?.mode !== "edit" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
-    cancelRecordingButton.hidden = !(state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing");
-    cancelRecordingButton.disabled = !activeRecording;
+    const recordingCanBeCancelled = state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing";
+    cancelRecordingButton.hidden = !recordingCanBeCancelled || activeRecording?.mode !== "message";
+    cancelRecordingButton.disabled = !activeRecording || activeRecording.mode !== "message";
+    cancelEditRecordingButton.hidden = !recordingCanBeCancelled || activeRecording?.mode !== "edit";
+    cancelEditRecordingButton.disabled = !activeRecording || activeRecording.mode !== "edit";
     undoRecordingButton.disabled = !recordingOwnerReady || voiceBusy() || !state.snapshot?.canUndoRecording;
     voiceStatus.textContent = state.voiceMessage;
     voiceStatus.dataset.phase = state.voicePhase;
@@ -1288,6 +1295,7 @@ function setup(ctx) {
   const handleRecordClick = () => void handleRecording("message");
   const handleRecordEditClick = () => void handleRecording("edit");
   const handleCancelRecordingClick = () => cancelActiveRecording("Recording cancelled. No transcript was appended.");
+  const handleCancelEditRecordingClick = () => cancelActiveRecording("Edit recording cancelled. The draft was not changed.");
   const handleUndoRecordingClick = () => void handleUndoRecording();
   const handleSendClick = () => void handleSend();
   const handleAcceptProposalClick = () => void acceptNormalizationProposal();
@@ -1315,6 +1323,7 @@ function setup(ctx) {
   editor.addEventListener("input", handleEditorInput);
   recordButton.addEventListener("click", handleRecordClick);
   recordEditButton.addEventListener("click", handleRecordEditClick);
+  cancelEditRecordingButton.addEventListener("click", handleCancelEditRecordingClick);
   cancelRecordingButton.addEventListener("click", handleCancelRecordingClick);
   undoRecordingButton.addEventListener("click", handleUndoRecordingClick);
   undoButton.addEventListener("click", handleUndoClick);
@@ -1353,6 +1362,7 @@ function setup(ctx) {
     editor.removeEventListener("input", handleEditorInput);
     recordButton.removeEventListener("click", handleRecordClick);
     recordEditButton.removeEventListener("click", handleRecordEditClick);
+    cancelEditRecordingButton.removeEventListener("click", handleCancelEditRecordingClick);
     cancelRecordingButton.removeEventListener("click", handleCancelRecordingClick);
     undoRecordingButton.removeEventListener("click", handleUndoRecordingClick);
     undoButton.removeEventListener("click", handleUndoClick);
@@ -1646,6 +1656,7 @@ function shellMarkup() {
         </section>
         <div class="jt-actions" aria-label="Editing voice controls">
           <button type="button" data-record-edit disabled>Record Edit</button>
+          <button type="button" data-cancel-edit-recording hidden>Cancel Edit Recording</button>
         </div>
         <div class="jt-actions">
           <button type="button" data-undo disabled>Undo</button>

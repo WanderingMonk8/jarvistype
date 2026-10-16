@@ -99,6 +99,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const paragraphList = requireElement<HTMLElement>(tab.root, '[data-paragraph-list]')
   const recordButton = requireElement<HTMLButtonElement>(tab.root, '[data-record-message]')
   const recordEditButton = requireElement<HTMLButtonElement>(tab.root, '[data-record-edit]')
+  const cancelEditRecordingButton = requireElement<HTMLButtonElement>(
+    tab.root,
+    '[data-cancel-edit-recording]',
+  )
   const cancelRecordingButton = requireElement<HTMLButtonElement>(
     tab.root,
     '[data-cancel-recording]',
@@ -344,12 +348,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.voicePhase === 'processing' ||
       state.voicePhase === 'committing' ||
       state.voicePhase === 'review'
-    cancelRecordingButton.hidden = !(
+    const recordingCanBeCancelled =
       state.voicePhase === 'starting' ||
       state.voicePhase === 'recording' ||
       state.voicePhase === 'processing'
-    )
-    cancelRecordingButton.disabled = !activeRecording
+    cancelRecordingButton.hidden = !recordingCanBeCancelled || activeRecording?.mode !== 'message'
+    cancelRecordingButton.disabled = !activeRecording || activeRecording.mode !== 'message'
+    cancelEditRecordingButton.hidden = !recordingCanBeCancelled || activeRecording?.mode !== 'edit'
+    cancelEditRecordingButton.disabled = !activeRecording || activeRecording.mode !== 'edit'
     undoRecordingButton.disabled =
       !recordingOwnerReady || voiceBusy() || !state.snapshot?.canUndoRecording
     voiceStatus.textContent = state.voiceMessage
@@ -1348,6 +1354,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const handleRecordEditClick = () => void handleRecording('edit')
   const handleCancelRecordingClick = () =>
     cancelActiveRecording('Recording cancelled. No transcript was appended.')
+  const handleCancelEditRecordingClick = () =>
+    cancelActiveRecording('Edit recording cancelled. The draft was not changed.')
   const handleUndoRecordingClick = () => void handleUndoRecording()
   const handleSendClick = () => void handleSend()
   const handleAcceptProposalClick = () => void acceptNormalizationProposal()
@@ -1375,6 +1383,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   editor.addEventListener('input', handleEditorInput)
   recordButton.addEventListener('click', handleRecordClick)
   recordEditButton.addEventListener('click', handleRecordEditClick)
+  cancelEditRecordingButton.addEventListener('click', handleCancelEditRecordingClick)
   cancelRecordingButton.addEventListener('click', handleCancelRecordingClick)
   undoRecordingButton.addEventListener('click', handleUndoRecordingClick)
   undoButton.addEventListener('click', handleUndoClick)
@@ -1415,6 +1424,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     editor.removeEventListener('input', handleEditorInput)
     recordButton.removeEventListener('click', handleRecordClick)
     recordEditButton.removeEventListener('click', handleRecordEditClick)
+    cancelEditRecordingButton.removeEventListener('click', handleCancelEditRecordingClick)
     cancelRecordingButton.removeEventListener('click', handleCancelRecordingClick)
     undoRecordingButton.removeEventListener('click', handleUndoRecordingClick)
     undoButton.removeEventListener('click', handleUndoClick)
@@ -1749,6 +1759,7 @@ function shellMarkup(): string {
         </section>
         <div class="jt-actions" aria-label="Editing voice controls">
           <button type="button" data-record-edit disabled>Record Edit</button>
+          <button type="button" data-cancel-edit-recording hidden>Cancel Edit Recording</button>
         </div>
         <div class="jt-actions">
           <button type="button" data-undo disabled>Undo</button>

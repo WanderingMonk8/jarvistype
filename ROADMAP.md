@@ -539,7 +539,7 @@ Improve recognition using bounded chat context, draft continuity, spoken punctua
 
 ## Phase 5: Semantic editing and deterministic patch pipeline
 
-Implementation candidate `1.3.1` prepared on 2026-10-16. Hosted Test 1 passed. Test 2 exposed missing paragraph boundaries for paragraph-targeted insertion in `1.3.0`; the deterministic engine now owns those boundaries, with hosted retesting pending.
+Implementation candidate `1.3.2` prepared on 2026-10-16. Hosted Tests 1–4 passed, including the corrected paragraph insertion path, multi-operation casing, ambiguity rejection, precise retry, approval, rejection, and undo. A dedicated edit-recording cancellation control has been added for hosted verification.
 
 ### Objective
 

@@ -36,6 +36,10 @@ Current candidate version: `1.0.0`
 
 ### Test 1: Upgrade, migration, settings, and disclosure
 
+**Status:** REMOTE-PASS — 2026-10-16
+
+Verified on the hosted Lumiverse installation: version `1.0.0` loaded successfully, the Phase 3 draft state migrated intact, the context/glossary controls and post-STT disclosure were present, and context-count values `0` and `5` both persisted across reloads.
+
 1. Update the extension from `development` and verify version `1.0.0` loads with backend status **Ready**.
 2. Open a chat with an existing Phase 3 draft. Confirm its exact text, paragraph numbering, history, and recording segment count still load.
 3. Find **Context and glossary** and confirm the recent-message value is `5` and bounded context normalization is enabled.

@@ -63,7 +63,9 @@ Verified on the hosted Lumiverse installation. Part A normalized spoken punctuat
 
 ### Test 3: Normalization connection and searchable model
 
-**Status:** PARTIAL — 2026-10-16. Connection selection, persistence, and dispatch were remotely confirmed on `1.1.0`; the searchable host model picker added in `1.2.0` requires the focused retest below.
+**Status:** REMOTE-PASS — 2026-10-16
+
+Verified on the hosted Lumiverse installation: accessible text connections were listed without credentials, the host-managed model control searched and refreshed the selected connection's catalog, the connection and model persisted across reload, normalization completed with the selected override, and clearing the override returned to the connection's configured model. The accepted test segment appended exactly once.
 
 1. Confirm the disclosure states that normalization receives text rather than audio.
 2. Open **Normalization connection** and confirm it lists Main plus the accessible Lumiverse connection profiles without displaying credentials or API URLs.

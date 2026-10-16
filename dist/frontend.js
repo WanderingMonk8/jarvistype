@@ -46,14 +46,96 @@ var RequestRegistry = class {
 };
 
 // src/protocol/messages.ts
-var PROTOCOL_VERSION = 5;
-var APP_VERSION = "1.2.3";
+var PROTOCOL_VERSION = 6;
+var APP_VERSION = "1.3.0";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 function createRequestId(prefix = "request") {
   return `${prefix}-${Date.now().toString(36)}-${crypto.randomUUID()}`;
+}
+
+// src/domain/edit-pipeline.ts
+var EDIT_SCHEMA_VERSION = 1;
+var MAX_EDIT_OPERATIONS = 8;
+var MAX_EDIT_TEXT_LENGTH = 1e4;
+function parseEditPlan(value) {
+  if (!isRecord(value) || value.schemaVersion !== EDIT_SCHEMA_VERSION) return null;
+  const allowedPlanKeys = /* @__PURE__ */ new Set(["schemaVersion", "draftVersion", "operations", "explanation"]);
+  if (Object.keys(value).some((key) => !allowedPlanKeys.has(key))) return null;
+  if (!isNonNegativeInteger(value.draftVersion)) return null;
+  if (!Array.isArray(value.operations) || value.operations.length < 1) return null;
+  if (value.operations.length > MAX_EDIT_OPERATIONS) return null;
+  if (typeof value.explanation !== "string" || value.explanation.length > 1e3) return null;
+  const operations = value.operations.map(parseOperation);
+  if (operations.some((operation) => operation === null)) return null;
+  if (new Set(operations.map((operation) => operation.id)).size !== operations.length) return null;
+  return {
+    schemaVersion: EDIT_SCHEMA_VERSION,
+    draftVersion: value.draftVersion,
+    operations,
+    explanation: value.explanation
+  };
+}
+function parseOperation(value) {
+  if (!isRecord(value) || !isIdentifier(value.id) || !isRecord(value.target)) return null;
+  const allowedOperationKeys = /* @__PURE__ */ new Set(["id", "type", "target", "text", "caseMode"]);
+  if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null;
+  const type = value.type;
+  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "append" && type !== "prepend" && type !== "case")
+    return null;
+  const target = parseTarget(value.target);
+  if (!target) return null;
+  const text = value.text;
+  const caseMode = value.caseMode;
+  if (type === "case") {
+    if (caseMode !== "capitalize" && caseMode !== "uppercase" && caseMode !== "lowercase")
+      return null;
+    if (text !== void 0) return null;
+  } else if (type === "delete") {
+    if (text !== void 0 || caseMode !== void 0) return null;
+  } else if (typeof text !== "string" || text.length > MAX_EDIT_TEXT_LENGTH || caseMode !== void 0) {
+    return null;
+  }
+  return {
+    id: value.id,
+    type,
+    target,
+    ...typeof text === "string" ? { text } : {},
+    ...typeof caseMode === "string" ? { caseMode } : {}
+  };
+}
+function parseTarget(value) {
+  const allowed = /* @__PURE__ */ new Set(["paragraphId", "paragraphOrdinal", "exactText"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) return null;
+  const target = {};
+  if (value.paragraphId !== void 0) {
+    if (!isIdentifier(value.paragraphId)) return null;
+    target.paragraphId = value.paragraphId;
+  }
+  if (value.paragraphOrdinal !== void 0) {
+    if (!isPositiveInteger(value.paragraphOrdinal)) return null;
+    target.paragraphOrdinal = value.paragraphOrdinal;
+  }
+  if (value.exactText !== void 0) {
+    if (typeof value.exactText !== "string" || value.exactText.length < 1 || value.exactText.length > MAX_EDIT_TEXT_LENGTH)
+      return null;
+    target.exactText = value.exactText;
+  }
+  return Object.keys(target).length ? target : null;
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+function isIdentifier(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 256;
+}
+function isNonNegativeInteger(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+function isPositiveInteger(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 // src/protocol/validation.ts
@@ -68,6 +150,9 @@ var ERROR_CODES = [
   "TRANSCRIPT_EMPTY",
   "NORMALIZATION_FAILED",
   "NORMALIZATION_EXPIRED",
+  "EDIT_INTERPRETATION_FAILED",
+  "EDIT_TARGET_UNRESOLVED",
+  "EDIT_PROPOSAL_EXPIRED",
   "GLOSSARY_CONFLICT",
   "RECORDING_UNDO_CONFLICT",
   "CHAT_MISMATCH",
@@ -80,22 +165,25 @@ function isBackendResponse(value) {
     return value.ok === true && isBoundedString(value.backendVersion, 1, 128) && isBoundedString(value.frontendVersion, 1, 128) && isBoundedString(value.serverTimestamp, 1, 128) && isPermissionSnapshot(value.permissions);
   }
   if (value.type === "app.operation.cancelled") {
-    return value.ok === true && isIdentifier(value.targetRequestId) && typeof value.cancellationAccepted === "boolean";
+    return value.ok === true && isIdentifier2(value.targetRequestId) && typeof value.cancellationAccepted === "boolean";
   }
   if (value.type === "draft.snapshot.response") {
-    return value.ok === true && (value.outcome === "loaded" || value.outcome === "applied" || value.outcome === "unchanged" || value.outcome === "stale-version") && (value.operationId === void 0 || isIdentifier(value.operationId)) && isDraftSnapshot(value.snapshot);
+    return value.ok === true && (value.outcome === "loaded" || value.outcome === "applied" || value.outcome === "unchanged" || value.outcome === "stale-version") && (value.operationId === void 0 || isIdentifier2(value.operationId)) && isDraftSnapshot(value.snapshot);
   }
   if (value.type === "draft.send.response") {
-    return value.ok === true && isIdentifier(value.operationId) && value.messageIdPresent === true && typeof value.generationIdPresent === "boolean" && isDraftSnapshot(value.snapshot);
+    return value.ok === true && isIdentifier2(value.operationId) && value.messageIdPresent === true && typeof value.generationIdPresent === "boolean" && isDraftSnapshot(value.snapshot);
   }
   if (value.type === "transcript.normalization.response") {
     return value.ok === true && (value.outcome === "committed" || value.outcome === "review") && isNormalizationProposal(value.proposal) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot)) && (value.glossaryLearned === void 0 || Array.isArray(value.glossaryLearned) && value.glossaryLearned.every(isGlossaryEntry));
+  }
+  if (value.type === "edit.proposal.response") {
+    return value.ok === true && (value.outcome === "review" || value.outcome === "committed") && isEditProposal(value.proposal) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot));
   }
   if (value.type === "phase4.state.response") {
     return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.connections) && value.connections.every(isNormalizationConnectionOption) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
   }
   if (value.type === "app.error") {
-    return value.ok === false && typeof value.code === "string" && ERROR_CODES.includes(value.code) && isBoundedString(value.message, 1, 2e3) && typeof value.retryable === "boolean" && (value.operationId === void 0 || isIdentifier(value.operationId)) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot));
+    return value.ok === false && typeof value.code === "string" && ERROR_CODES.includes(value.code) && isBoundedString(value.message, 1, 2e3) && typeof value.retryable === "boolean" && (value.operationId === void 0 || isIdentifier2(value.operationId)) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot));
   }
   return false;
 }
@@ -106,59 +194,64 @@ function sanitizeGrantedPermissions(granted) {
   };
 }
 function isDraftSnapshot(value) {
-  if (!isRecord(value)) return false;
-  return isIdentifier(value.chatId) && isNonNegativeInteger(value.draftVersion) && typeof value.cleanText === "string" && value.cleanText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.paragraphs) && value.paragraphs.every(
-    (paragraph) => isRecord(paragraph) && isIdentifier(paragraph.id) && isPositiveInteger(paragraph.ordinal) && isNonNegativeInteger(paragraph.lineIndex) && typeof paragraph.text === "string" && paragraph.text.trim().length > 0
+  if (!isRecord2(value)) return false;
+  return isIdentifier2(value.chatId) && isNonNegativeInteger2(value.draftVersion) && typeof value.cleanText === "string" && value.cleanText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.paragraphs) && value.paragraphs.every(
+    (paragraph) => isRecord2(paragraph) && isIdentifier2(paragraph.id) && isPositiveInteger2(paragraph.ordinal) && isNonNegativeInteger2(paragraph.lineIndex) && typeof paragraph.text === "string" && paragraph.text.trim().length > 0
   ) && Array.isArray(value.history) && value.history.length <= MAX_HISTORY_ENTRIES && value.history.every(isHistoryEntry) && (value.latestDiff === null || isDiff(value.latestDiff)) && typeof value.canUndo === "boolean" && Array.isArray(value.recordingSegments) && value.recordingSegments.length <= MAX_RECORDING_SEGMENTS && value.recordingSegments.every(isRecordingSegment) && typeof value.canUndoRecording === "boolean" && typeof value.dirty === "boolean" && isBoundedString(value.updatedAt, 1, 128);
 }
 function isHistoryEntry(value) {
-  return isRecord(value) && isIdentifier(value.id) && (value.kind === "manual-edit" || value.kind === "undo" || value.kind === "recording-append" || value.kind === "recording-undo") && (value.editGroupId === void 0 || isIdentifier(value.editGroupId)) && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.afterVersion) && isBoundedString(value.timestamp, 1, 128) && isDiff(value.diff);
+  return isRecord2(value) && isIdentifier2(value.id) && (value.kind === "manual-edit" || value.kind === "automated-edit" || value.kind === "undo" || value.kind === "recording-append" || value.kind === "recording-undo") && (value.editGroupId === void 0 || isIdentifier2(value.editGroupId)) && isNonNegativeInteger2(value.beforeVersion) && isPositiveInteger2(value.afterVersion) && isBoundedString(value.timestamp, 1, 128) && isDiff(value.diff);
 }
 function isRecordingSegment(value) {
-  return isRecord(value) && isIdentifier(value.id) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) && isBoundedString(value.normalizedTranscript, 1, MAX_DRAFT_CHARACTERS) && isRecordingNormalization(value.normalization) && isBoundedString(value.committedText, 1, MAX_DRAFT_CHARACTERS) && isNonNegativeInteger(value.startOffset) && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.resultingVersion) && value.resultingVersion === value.beforeVersion + 1 && isBoundedString(value.committedAt, 1, 128);
+  return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) && isBoundedString(value.normalizedTranscript, 1, MAX_DRAFT_CHARACTERS) && isRecordingNormalization(value.normalization) && isBoundedString(value.committedText, 1, MAX_DRAFT_CHARACTERS) && isNonNegativeInteger2(value.startOffset) && isNonNegativeInteger2(value.beforeVersion) && isPositiveInteger2(value.resultingVersion) && value.resultingVersion === value.beforeVersion + 1 && isBoundedString(value.committedAt, 1, 128);
 }
 function isRecordingNormalization(value) {
-  return isRecord(value) && Array.isArray(value.reasons) && value.reasons.every((reason) => isBoundedString(reason, 1, 200)) && isNonNegativeInteger(value.contextMessageCount) && isNonNegativeInteger(value.contextCharacterCount) && typeof value.contextTruncated === "boolean" && typeof value.contextualModelUsed === "boolean";
+  return isRecord2(value) && Array.isArray(value.reasons) && value.reasons.every((reason) => isBoundedString(reason, 1, 200)) && isNonNegativeInteger2(value.contextMessageCount) && isNonNegativeInteger2(value.contextCharacterCount) && typeof value.contextTruncated === "boolean" && typeof value.contextualModelUsed === "boolean";
 }
 function isDiff(value) {
-  return isRecord(value) && typeof value.removed === "string" && typeof value.added === "string" && value.removed.length <= MAX_DRAFT_CHARACTERS && value.added.length <= MAX_DRAFT_CHARACTERS && isNonNegativeInteger(value.startOffset) && Array.isArray(value.affectedParagraphOrdinals) && value.affectedParagraphOrdinals.every(isPositiveInteger);
+  return isRecord2(value) && typeof value.removed === "string" && typeof value.added === "string" && value.removed.length <= MAX_DRAFT_CHARACTERS && value.added.length <= MAX_DRAFT_CHARACTERS && isNonNegativeInteger2(value.startOffset) && Array.isArray(value.affectedParagraphOrdinals) && value.affectedParagraphOrdinals.every(isPositiveInteger2);
 }
 function isPermissionSnapshot(value) {
-  if (!isRecord(value) || !Array.isArray(value.declared) || !Array.isArray(value.granted)) {
+  if (!isRecord2(value) || !Array.isArray(value.declared) || !Array.isArray(value.granted)) {
     return false;
   }
   return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function isPhaseFourSettings(value) {
-  return isRecord(value) && isNonNegativeInteger(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.normalizationConnectionId === null || isIdentifier(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200;
+  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200;
 }
 function isNormalizationConnectionOption(value) {
-  return isRecord(value) && isIdentifier(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
+  return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
 }
 function isNormalizationProposal(value) {
-  return isRecord(value) && isIdentifier(value.operationId) && isIdentifier(value.chatId) && isNonNegativeInteger(value.expectedVersion) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) && isBoundedString(value.candidateText, 1, MAX_DRAFT_CHARACTERS) && Array.isArray(value.reasons) && value.reasons.every((reason) => isBoundedString(reason, 1, 200)) && Array.isArray(value.ambiguities) && value.ambiguities.every((reason) => isBoundedString(reason, 1, 500)) && Array.isArray(value.learningCandidates) && value.learningCandidates.every(
-    (candidate) => isRecord(candidate) && isBoundedString(candidate.canonical, 1, 200) && typeof candidate.spokenVariant === "string" && candidate.spokenVariant.length <= 500
-  ) && isNonNegativeInteger(value.contextMessageCount) && isNonNegativeInteger(value.contextCharacterCount) && typeof value.contextTruncated === "boolean" && typeof value.contextualModelUsed === "boolean";
+  return isRecord2(value) && isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger2(value.expectedVersion) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) && isBoundedString(value.candidateText, 1, MAX_DRAFT_CHARACTERS) && Array.isArray(value.reasons) && value.reasons.every((reason) => isBoundedString(reason, 1, 200)) && Array.isArray(value.ambiguities) && value.ambiguities.every((reason) => isBoundedString(reason, 1, 500)) && Array.isArray(value.learningCandidates) && value.learningCandidates.every(
+    (candidate) => isRecord2(candidate) && isBoundedString(candidate.canonical, 1, 200) && typeof candidate.spokenVariant === "string" && candidate.spokenVariant.length <= 500
+  ) && isNonNegativeInteger2(value.contextMessageCount) && isNonNegativeInteger2(value.contextCharacterCount) && typeof value.contextTruncated === "boolean" && typeof value.contextualModelUsed === "boolean";
+}
+function isEditProposal(value) {
+  return isRecord2(value) && isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger2(value.expectedVersion) && isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) && parseEditPlan(value.plan) !== null && Array.isArray(value.operations) && value.operations.length > 0 && value.operations.every(
+    (operation) => isRecord2(operation) && isIdentifier2(operation.id) && typeof operation.type === "string" && isNonNegativeInteger2(operation.startOffset) && isNonNegativeInteger2(operation.endOffset) && typeof operation.beforeText === "string" && typeof operation.afterText === "string" && isPositiveInteger2(operation.paragraphOrdinal)
+  ) && typeof value.beforeText === "string" && value.beforeText.length <= MAX_DRAFT_CHARACTERS && typeof value.afterText === "string" && value.afterText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.affectedParagraphOrdinals) && value.affectedParagraphOrdinals.every(isPositiveInteger2) && typeof value.explanation === "string" && value.explanation.length <= 1e3;
 }
 function isGlossaryEntry(value) {
-  return isRecord(value) && isIdentifier(value.id) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && typeof value.hint === "string" && value.hint.length <= 500 && (value.source === "explicit-spelling" || value.source === "manual") && isNonNegativeInteger(value.useCount) && isBoundedString(value.createdAt, 1, 128) && isBoundedString(value.updatedAt, 1, 128);
+  return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && typeof value.hint === "string" && value.hint.length <= 500 && (value.source === "explicit-spelling" || value.source === "manual") && isNonNegativeInteger2(value.useCount) && isBoundedString(value.createdAt, 1, 128) && isBoundedString(value.updatedAt, 1, 128);
 }
 function hasEnvelope(value) {
-  return isRecord(value) && value.protocolVersion === PROTOCOL_VERSION && isBoundedString(value.type, 1, 128) && isIdentifier(value.requestId);
+  return isRecord2(value) && value.protocolVersion === PROTOCOL_VERSION && isBoundedString(value.type, 1, 128) && isIdentifier2(value.requestId);
 }
-function isRecord(value) {
+function isRecord2(value) {
   return typeof value === "object" && value !== null;
 }
-function isIdentifier(value) {
+function isIdentifier2(value) {
   return isBoundedString(value, 1, 256);
 }
 function isBoundedString(value, minimum, maximum) {
   return typeof value === "string" && value.length >= minimum && value.length <= maximum;
 }
-function isNonNegativeInteger(value) {
+function isNonNegativeInteger2(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
-function isPositiveInteger(value) {
+function isPositiveInteger2(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
@@ -192,6 +285,7 @@ function setup(ctx) {
   const draftMeta = requireElement(tab.root, "[data-draft-meta]");
   const paragraphList = requireElement(tab.root, "[data-paragraph-list]");
   const recordButton = requireElement(tab.root, "[data-record-message]");
+  const recordEditButton = requireElement(tab.root, "[data-record-edit]");
   const cancelRecordingButton = requireElement(
     tab.root,
     "[data-cancel-recording]"
@@ -218,6 +312,13 @@ function setup(ctx) {
   const proposalMeta = requireElement(tab.root, "[data-proposal-meta]");
   const acceptProposalButton = requireElement(tab.root, "[data-proposal-accept]");
   const rejectProposalButton = requireElement(tab.root, "[data-proposal-reject]");
+  const editProposalPanel = requireElement(tab.root, "[data-edit-proposal]");
+  const editProposalInstruction = requireElement(tab.root, "[data-edit-instruction]");
+  const editProposalOperations = requireElement(tab.root, "[data-edit-operations]");
+  const editProposalBefore = requireElement(tab.root, "[data-edit-before]");
+  const editProposalAfter = requireElement(tab.root, "[data-edit-after]");
+  const acceptEditButton = requireElement(tab.root, "[data-edit-accept]");
+  const rejectEditButton = requireElement(tab.root, "[data-edit-reject]");
   const contextCountInput = requireElement(tab.root, "[data-context-count]");
   const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
   const saveSettingsButton = requireElement(tab.root, "[data-settings-save]");
@@ -264,6 +365,7 @@ function setup(ctx) {
     voiceFinalText: "",
     voiceMessage: "Ready to record a message segment.",
     pendingProposal: null,
+    pendingEditProposal: null,
     settings: {
       contextMessageCount: 5,
       contextualNormalizationEnabled: true,
@@ -346,7 +448,9 @@ function setup(ctx) {
     undoButton.disabled = !editorEnabled || state.saving || !state.snapshot?.canUndo || desiredText !== state.snapshot.cleanText;
     const recordingOwnerReady = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.saving && !state.automatedBusy && !state.sending && !mismatch && state.activeChatId === state.snapshot.chatId && desiredText === state.snapshot.cleanText;
     recordButton.textContent = state.voicePhase === "starting" || state.voicePhase === "recording" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record Message";
-    recordButton.disabled = !hasNativeStt() || !recordingOwnerReady || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
+    recordButton.disabled = !hasNativeStt() || !recordingOwnerReady || voiceBusy() && activeRecording?.mode !== "message" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
+    recordEditButton.textContent = (state.voicePhase === "starting" || state.voicePhase === "recording") && activeRecording?.mode === "edit" ? "Stop Edit Recording" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Record Edit";
+    recordEditButton.disabled = !hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() && activeRecording?.mode !== "edit" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
     cancelRecordingButton.hidden = !(state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing");
     cancelRecordingButton.disabled = !activeRecording;
     undoRecordingButton.disabled = !recordingOwnerReady || voiceBusy() || !state.snapshot?.canUndoRecording;
@@ -365,6 +469,16 @@ function setup(ctx) {
     proposalMeta.textContent = proposal ? `${proposal.contextMessageCount} context message(s), ${proposal.contextCharacterCount} characters${proposal.contextTruncated ? ", truncated to the privacy limit" : ""}. ${proposal.reasons.length ? `Changes: ${proposal.reasons.join(", ")}.` : ""}${proposal.ambiguities.length ? ` Review: ${proposal.ambiguities.join(" ")}` : ""}` : "";
     acceptProposalButton.disabled = !proposal || state.automatedBusy;
     rejectProposalButton.disabled = !proposal || state.automatedBusy;
+    const editProposal = state.pendingEditProposal;
+    editProposalPanel.hidden = !editProposal;
+    editProposalInstruction.textContent = editProposal?.instructionTranscript ?? "";
+    editProposalOperations.textContent = editProposal ? editProposal.operations.map(
+      (operation) => `${operation.type} \xB7 paragraph ${operation.paragraphOrdinal} \xB7 ${operation.beforeText || "\u2205"} \u2192 ${operation.afterText || "\u2205"}`
+    ).join("\n") : "";
+    editProposalBefore.textContent = editProposal?.beforeText ?? "";
+    editProposalAfter.textContent = editProposal?.afterText ?? "";
+    acceptEditButton.disabled = !editProposal || state.automatedBusy;
+    rejectEditButton.disabled = !editProposal || state.automatedBusy;
     contextCountInput.value = String(state.settings.contextMessageCount);
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
     renderConnectionOptions(
@@ -412,6 +526,9 @@ function setup(ctx) {
   };
   const loadDraft = async (chatId) => {
     if (!alive || state.loading) return;
+    state.pendingProposal = null;
+    state.pendingEditProposal = null;
+    if (state.voicePhase === "review") state.voicePhase = "idle";
     state.loading = true;
     state.statusMessage = "Loading the chat-owned draft\u2026";
     render();
@@ -672,6 +789,67 @@ function setup(ctx) {
     }
     render();
   };
+  const interpretEditTranscript = async (instructionTranscript, operationId) => {
+    const snapshot = state.snapshot;
+    if (!snapshot || ctx.getActiveChat().chatId !== snapshot.chatId) {
+      state.voicePhase = "error";
+      state.voiceMessage = "The active chat changed. The edit instruction was discarded.";
+      render();
+      return;
+    }
+    const outcome = await performNormalizationRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "edit.interpret.request",
+      requestId: createRequestId("edit-interpret"),
+      operationId,
+      chatId: snapshot.chatId,
+      expectedVersion: snapshot.draftVersion,
+      instructionTranscript
+    });
+    if (!alive) return;
+    if (outcome.status === "resolved" && outcome.value.type === "edit.proposal.response") {
+      state.pendingEditProposal = outcome.value.proposal;
+      state.voicePhase = "review";
+      state.voiceMessage = "Review the interpreted operations and complete proposed draft.";
+    } else {
+      state.voicePhase = "error";
+      state.voiceMessage = outcome.status === "resolved" && outcome.value.type === "app.error" ? outcome.value.message : "Edit interpretation timed out. The draft was not changed.";
+    }
+    render();
+  };
+  const acceptEditProposal = async () => {
+    const proposal = state.pendingEditProposal;
+    if (!proposal || state.automatedBusy) return;
+    state.automatedBusy = true;
+    state.voiceMessage = "Applying the approved edit atomically\u2026";
+    render();
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "edit.confirm.request",
+      requestId: createRequestId("edit-confirm"),
+      operationId: proposal.operationId,
+      chatId: proposal.chatId,
+      expectedVersion: proposal.expectedVersion
+    });
+    state.automatedBusy = false;
+    if (!alive) return;
+    if (outcome.status === "resolved" && outcome.value.type === "edit.proposal.response" && outcome.value.snapshot) {
+      applySnapshot(outcome.value.snapshot, true);
+      state.pendingEditProposal = null;
+      state.voicePhase = "idle";
+      state.voiceMessage = "Approved edit applied. You can undo it as one change.";
+    } else {
+      state.voicePhase = "error";
+      state.voiceMessage = outcome.status === "resolved" && outcome.value.type === "app.error" ? outcome.value.message : "Edit confirmation timed out. The draft was not changed.";
+    }
+    render();
+  };
+  const rejectEditProposal = () => {
+    state.pendingEditProposal = null;
+    state.voicePhase = "idle";
+    state.voiceMessage = "Edit proposal rejected. The draft was not changed.";
+    render();
+  };
   const acceptNormalizationProposal = async () => {
     const proposal = state.pendingProposal;
     if (!proposal || state.automatedBusy) return;
@@ -820,9 +998,11 @@ function setup(ctx) {
       return;
     }
     state.voicePhase = "committing";
-    state.voiceMessage = "Transcription complete. Applying bounded context, punctuation, spelling, and glossary rules\u2026";
+    state.voiceMessage = recording.mode === "edit" ? "Transcription complete. Interpreting the edit as structured operations\u2026" : "Transcription complete. Applying bounded context, punctuation, spelling, and glossary rules\u2026";
     render();
-    await commitRecordingTranscript(transcript.text, recording.operationId);
+    if (recording.mode === "edit")
+      await interpretEditTranscript(transcript.text, recording.operationId);
+    else await commitRecordingTranscript(transcript.text, recording.operationId);
   };
   const failRecording = (runId, error) => {
     if (activeRecording?.runId !== runId) return;
@@ -842,7 +1022,7 @@ function setup(ctx) {
     void recording.session.stop().catch(() => {
     });
   };
-  const startRecording = () => {
+  const startRecording = (mode) => {
     const stt = ctx.stt;
     const snapshot = state.snapshot;
     if (!stt || !hasNativeStt() || !snapshot) return;
@@ -884,14 +1064,15 @@ function setup(ctx) {
         operationId,
         session,
         finalSegments,
-        interimText: ""
+        interimText: "",
+        mode
       };
       recordingStartedAt = Date.now();
       state.voicePhase = "starting";
       state.voiceElapsedMs = 0;
       state.voiceProvider = session.provider;
       state.voiceProvisionalText = "";
-      state.voiceMessage = "Starting microphone capture\u2026";
+      state.voiceMessage = mode === "edit" ? "Starting edit-instruction capture\u2026" : "Starting microphone capture\u2026";
       recordingTimer = setInterval(() => {
         if (!activeRecording || activeRecording.runId !== runId) return;
         state.voiceElapsedMs = Date.now() - recordingStartedAt;
@@ -938,9 +1119,9 @@ function setup(ctx) {
       return false;
     }
   };
-  const handleRecordMessage = async () => {
+  const handleRecording = async (mode) => {
     if (state.voicePhase === "starting" || state.voicePhase === "recording") {
-      stopActiveRecording();
+      if (activeRecording?.mode === mode) stopActiveRecording();
       return;
     }
     if (voiceBusy() || !state.snapshot || state.saving || state.activeChatId !== state.snapshot.chatId)
@@ -952,7 +1133,7 @@ function setup(ctx) {
       await requestRecordingPermissions();
       return;
     }
-    startRecording();
+    startRecording(mode);
   };
   const handleUndoRecording = async () => {
     const snapshot = state.snapshot;
@@ -1104,12 +1285,15 @@ function setup(ctx) {
     render();
   };
   const handleUndoClick = () => void handleUndo();
-  const handleRecordClick = () => void handleRecordMessage();
+  const handleRecordClick = () => void handleRecording("message");
+  const handleRecordEditClick = () => void handleRecording("edit");
   const handleCancelRecordingClick = () => cancelActiveRecording("Recording cancelled. No transcript was appended.");
   const handleUndoRecordingClick = () => void handleUndoRecording();
   const handleSendClick = () => void handleSend();
   const handleAcceptProposalClick = () => void acceptNormalizationProposal();
   const handleRejectProposalClick = () => rejectNormalizationProposal();
+  const handleAcceptEditClick = () => void acceptEditProposal();
+  const handleRejectEditClick = () => rejectEditProposal();
   const handleSaveSettingsClick = () => void saveSettings();
   const handleNormalizationConnectionChange = () => {
     state.settings.normalizationConnectionId = normalizationConnectionSelect.value || null;
@@ -1130,6 +1314,7 @@ function setup(ctx) {
   switchDraftButton.addEventListener("click", handleSwitchDraft);
   editor.addEventListener("input", handleEditorInput);
   recordButton.addEventListener("click", handleRecordClick);
+  recordEditButton.addEventListener("click", handleRecordEditClick);
   cancelRecordingButton.addEventListener("click", handleCancelRecordingClick);
   undoRecordingButton.addEventListener("click", handleUndoRecordingClick);
   undoButton.addEventListener("click", handleUndoClick);
@@ -1137,6 +1322,8 @@ function setup(ctx) {
   sendButton.addEventListener("click", handleSendClick);
   acceptProposalButton.addEventListener("click", handleAcceptProposalClick);
   rejectProposalButton.addEventListener("click", handleRejectProposalClick);
+  acceptEditButton.addEventListener("click", handleAcceptEditClick);
+  rejectEditButton.addEventListener("click", handleRejectEditClick);
   saveSettingsButton.addEventListener("click", handleSaveSettingsClick);
   normalizationConnectionSelect.addEventListener("change", handleNormalizationConnectionChange);
   glossarySaveButton.addEventListener("click", handleSaveGlossaryClick);
@@ -1165,6 +1352,7 @@ function setup(ctx) {
     switchDraftButton.removeEventListener("click", handleSwitchDraft);
     editor.removeEventListener("input", handleEditorInput);
     recordButton.removeEventListener("click", handleRecordClick);
+    recordEditButton.removeEventListener("click", handleRecordEditClick);
     cancelRecordingButton.removeEventListener("click", handleCancelRecordingClick);
     undoRecordingButton.removeEventListener("click", handleUndoRecordingClick);
     undoButton.removeEventListener("click", handleUndoClick);
@@ -1172,6 +1360,8 @@ function setup(ctx) {
     sendButton.removeEventListener("click", handleSendClick);
     acceptProposalButton.removeEventListener("click", handleAcceptProposalClick);
     rejectProposalButton.removeEventListener("click", handleRejectProposalClick);
+    acceptEditButton.removeEventListener("click", handleAcceptEditClick);
+    rejectEditButton.removeEventListener("click", handleRejectEditClick);
     saveSettingsButton.removeEventListener("click", handleSaveSettingsClick);
     normalizationConnectionSelect.removeEventListener("change", handleNormalizationConnectionChange);
     glossarySaveButton.removeEventListener("click", handleSaveGlossaryClick);
@@ -1277,7 +1467,7 @@ function renderHistory(list, snapshot) {
   list.replaceChildren();
   for (const entry of snapshot?.history ?? []) {
     const item = document.createElement("li");
-    const kind = entry.kind === "undo" ? "Undo" : entry.kind === "recording-append" ? "Recording appended" : entry.kind === "recording-undo" ? "Recording removed" : "Manual edit";
+    const kind = entry.kind === "undo" ? "Undo" : entry.kind === "recording-append" ? "Recording appended" : entry.kind === "automated-edit" ? "Approved voice edit" : entry.kind === "recording-undo" ? "Recording removed" : "Manual edit";
     const affected = entry.diff.affectedParagraphOrdinals.length ? ` \xB7 paragraph ${entry.diff.affectedParagraphOrdinals.join(", ")}` : "";
     item.textContent = `${kind} \xB7 v${entry.beforeVersion} \u2192 v${entry.afterVersion}${affected}`;
     list.append(item);
@@ -1377,7 +1567,7 @@ function shellMarkup() {
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
-        <p class="jt-shell__eyebrow">Phase 4 context and vocabulary \xB7 v${APP_VERSION}</p>
+        <p class="jt-shell__eyebrow">Phase 5 semantic editing \xB7 v${APP_VERSION}</p>
         <h2 id="jt-title">JarvisType</h2>
         <p>Compose privately, review every change, and send only when you confirm.</p>
       </header>
@@ -1439,8 +1629,23 @@ function shellMarkup() {
           </div>
         </section>
 
+        <section class="jt-proposal" data-edit-proposal hidden aria-labelledby="jt-edit-proposal-title">
+          <h4 id="jt-edit-proposal-title">Review interpreted edit</h4>
+          <p><strong>Spoken instruction</strong></p>
+          <pre data-edit-instruction></pre>
+          <p><strong>Structured operations</strong></p>
+          <pre data-edit-operations></pre>
+          <p><strong>Before</strong></p>
+          <pre data-edit-before></pre>
+          <p><strong>Proposed draft</strong></p>
+          <pre data-edit-after></pre>
+          <div class="jt-actions">
+            <button type="button" data-edit-accept>Accept edit</button>
+            <button type="button" data-edit-reject>Reject</button>
+          </div>
+        </section>
         <div class="jt-actions" aria-label="Editing voice controls">
-          <button type="button" disabled>Record Edit \xB7 Phase 5</button>
+          <button type="button" data-record-edit disabled>Record Edit</button>
         </div>
         <div class="jt-actions">
           <button type="button" data-undo disabled>Undo</button>

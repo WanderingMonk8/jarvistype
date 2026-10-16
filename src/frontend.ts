@@ -15,6 +15,7 @@ import {
   SEND_TIMEOUT_MS,
   createRequestId,
   type BackendResponse,
+  type EditProposal,
   type FrontendRequest,
   type NormalizationConnectionOption,
   type NormalizationProposal,
@@ -35,6 +36,7 @@ interface ActiveRecording {
   session: SpindleSTTSession
   finalSegments: string[]
   interimText: string
+  mode: 'message' | 'edit'
 }
 
 interface ComposerState {
@@ -58,6 +60,7 @@ interface ComposerState {
   voiceFinalText: string
   voiceMessage: string
   pendingProposal: NormalizationProposal | null
+  pendingEditProposal: EditProposal | null
   settings: PhaseFourSettings
   normalizationConnections: NormalizationConnectionOption[]
   glossary: GlossaryEntry[]
@@ -95,6 +98,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const draftMeta = requireElement<HTMLElement>(tab.root, '[data-draft-meta]')
   const paragraphList = requireElement<HTMLElement>(tab.root, '[data-paragraph-list]')
   const recordButton = requireElement<HTMLButtonElement>(tab.root, '[data-record-message]')
+  const recordEditButton = requireElement<HTMLButtonElement>(tab.root, '[data-record-edit]')
   const cancelRecordingButton = requireElement<HTMLButtonElement>(
     tab.root,
     '[data-cancel-recording]',
@@ -121,6 +125,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const proposalMeta = requireElement<HTMLElement>(tab.root, '[data-proposal-meta]')
   const acceptProposalButton = requireElement<HTMLButtonElement>(tab.root, '[data-proposal-accept]')
   const rejectProposalButton = requireElement<HTMLButtonElement>(tab.root, '[data-proposal-reject]')
+  const editProposalPanel = requireElement<HTMLElement>(tab.root, '[data-edit-proposal]')
+  const editProposalInstruction = requireElement<HTMLElement>(tab.root, '[data-edit-instruction]')
+  const editProposalOperations = requireElement<HTMLElement>(tab.root, '[data-edit-operations]')
+  const editProposalBefore = requireElement<HTMLElement>(tab.root, '[data-edit-before]')
+  const editProposalAfter = requireElement<HTMLElement>(tab.root, '[data-edit-after]')
+  const acceptEditButton = requireElement<HTMLButtonElement>(tab.root, '[data-edit-accept]')
+  const rejectEditButton = requireElement<HTMLButtonElement>(tab.root, '[data-edit-reject]')
   const contextCountInput = requireElement<HTMLInputElement>(tab.root, '[data-context-count]')
   const contextualToggle = requireElement<HTMLInputElement>(tab.root, '[data-context-enabled]')
   const saveSettingsButton = requireElement<HTMLButtonElement>(tab.root, '[data-settings-save]')
@@ -168,6 +179,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     voiceFinalText: '',
     voiceMessage: 'Ready to record a message segment.',
     pendingProposal: null,
+    pendingEditProposal: null,
     settings: {
       contextMessageCount: 5,
       contextualNormalizationEnabled: true,
@@ -313,6 +325,22 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     recordButton.disabled =
       !hasNativeStt() ||
       !recordingOwnerReady ||
+      (voiceBusy() && activeRecording?.mode !== 'message') ||
+      state.voicePhase === 'processing' ||
+      state.voicePhase === 'committing' ||
+      state.voicePhase === 'review'
+    recordEditButton.textContent =
+      (state.voicePhase === 'starting' || state.voicePhase === 'recording') &&
+      activeRecording?.mode === 'edit'
+        ? 'Stop Edit Recording'
+        : state.voicePhase === 'review' && state.pendingEditProposal
+          ? 'Review required'
+          : 'Record Edit'
+    recordEditButton.disabled =
+      !hasNativeStt() ||
+      !recordingOwnerReady ||
+      !desiredText.trim() ||
+      (voiceBusy() && activeRecording?.mode !== 'edit') ||
       state.voicePhase === 'processing' ||
       state.voicePhase === 'committing' ||
       state.voicePhase === 'review'
@@ -345,6 +373,21 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       : ''
     acceptProposalButton.disabled = !proposal || state.automatedBusy
     rejectProposalButton.disabled = !proposal || state.automatedBusy
+    const editProposal = state.pendingEditProposal
+    editProposalPanel.hidden = !editProposal
+    editProposalInstruction.textContent = editProposal?.instructionTranscript ?? ''
+    editProposalOperations.textContent = editProposal
+      ? editProposal.operations
+          .map(
+            (operation) =>
+              `${operation.type} · paragraph ${operation.paragraphOrdinal} · ${operation.beforeText || '∅'} → ${operation.afterText || '∅'}`,
+          )
+          .join('\n')
+      : ''
+    editProposalBefore.textContent = editProposal?.beforeText ?? ''
+    editProposalAfter.textContent = editProposal?.afterText ?? ''
+    acceptEditButton.disabled = !editProposal || state.automatedBusy
+    rejectEditButton.disabled = !editProposal || state.automatedBusy
     contextCountInput.value = String(state.settings.contextMessageCount)
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
     renderConnectionOptions(
@@ -412,6 +455,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const loadDraft = async (chatId: string) => {
     if (!alive || state.loading) return
+    state.pendingProposal = null
+    state.pendingEditProposal = null
+    if (state.voicePhase === 'review') state.voicePhase = 'idle'
     state.loading = true
     state.statusMessage = 'Loading the chat-owned draft…'
     render()
@@ -714,6 +760,83 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     render()
   }
 
+  const interpretEditTranscript = async (
+    instructionTranscript: string,
+    operationId: string,
+  ): Promise<void> => {
+    const snapshot = state.snapshot
+    if (!snapshot || ctx.getActiveChat().chatId !== snapshot.chatId) {
+      state.voicePhase = 'error'
+      state.voiceMessage = 'The active chat changed. The edit instruction was discarded.'
+      render()
+      return
+    }
+    const outcome = await performNormalizationRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: createRequestId('edit-interpret'),
+      operationId,
+      chatId: snapshot.chatId,
+      expectedVersion: snapshot.draftVersion,
+      instructionTranscript,
+    })
+    if (!alive) return
+    if (outcome.status === 'resolved' && outcome.value.type === 'edit.proposal.response') {
+      state.pendingEditProposal = outcome.value.proposal
+      state.voicePhase = 'review'
+      state.voiceMessage = 'Review the interpreted operations and complete proposed draft.'
+    } else {
+      state.voicePhase = 'error'
+      state.voiceMessage =
+        outcome.status === 'resolved' && outcome.value.type === 'app.error'
+          ? outcome.value.message
+          : 'Edit interpretation timed out. The draft was not changed.'
+    }
+    render()
+  }
+
+  const acceptEditProposal = async () => {
+    const proposal = state.pendingEditProposal
+    if (!proposal || state.automatedBusy) return
+    state.automatedBusy = true
+    state.voiceMessage = 'Applying the approved edit atomically…'
+    render()
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: createRequestId('edit-confirm'),
+      operationId: proposal.operationId,
+      chatId: proposal.chatId,
+      expectedVersion: proposal.expectedVersion,
+    })
+    state.automatedBusy = false
+    if (!alive) return
+    if (
+      outcome.status === 'resolved' &&
+      outcome.value.type === 'edit.proposal.response' &&
+      outcome.value.snapshot
+    ) {
+      applySnapshot(outcome.value.snapshot, true)
+      state.pendingEditProposal = null
+      state.voicePhase = 'idle'
+      state.voiceMessage = 'Approved edit applied. You can undo it as one change.'
+    } else {
+      state.voicePhase = 'error'
+      state.voiceMessage =
+        outcome.status === 'resolved' && outcome.value.type === 'app.error'
+          ? outcome.value.message
+          : 'Edit confirmation timed out. The draft was not changed.'
+    }
+    render()
+  }
+
+  const rejectEditProposal = () => {
+    state.pendingEditProposal = null
+    state.voicePhase = 'idle'
+    state.voiceMessage = 'Edit proposal rejected. The draft was not changed.'
+    render()
+  }
+
   const acceptNormalizationProposal = async () => {
     const proposal = state.pendingProposal
     if (!proposal || state.automatedBusy) return
@@ -886,9 +1009,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
     state.voicePhase = 'committing'
     state.voiceMessage =
-      'Transcription complete. Applying bounded context, punctuation, spelling, and glossary rules…'
+      recording.mode === 'edit'
+        ? 'Transcription complete. Interpreting the edit as structured operations…'
+        : 'Transcription complete. Applying bounded context, punctuation, spelling, and glossary rules…'
     render()
-    await commitRecordingTranscript(transcript.text, recording.operationId)
+    if (recording.mode === 'edit')
+      await interpretEditTranscript(transcript.text, recording.operationId)
+    else await commitRecordingTranscript(transcript.text, recording.operationId)
   }
 
   const failRecording = (runId: string, error: unknown) => {
@@ -912,7 +1039,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     })
   }
 
-  const startRecording = () => {
+  const startRecording = (mode: 'message' | 'edit') => {
     const stt = ctx.stt
     const snapshot = state.snapshot
     if (!stt || !hasNativeStt() || !snapshot) return
@@ -955,13 +1082,15 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         session,
         finalSegments,
         interimText: '',
+        mode,
       }
       recordingStartedAt = Date.now()
       state.voicePhase = 'starting'
       state.voiceElapsedMs = 0
       state.voiceProvider = session.provider
       state.voiceProvisionalText = ''
-      state.voiceMessage = 'Starting microphone capture…'
+      state.voiceMessage =
+        mode === 'edit' ? 'Starting edit-instruction capture…' : 'Starting microphone capture…'
       recordingTimer = setInterval(() => {
         if (!activeRecording || activeRecording.runId !== runId) return
         state.voiceElapsedMs = Date.now() - recordingStartedAt
@@ -1018,9 +1147,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
   }
 
-  const handleRecordMessage = async () => {
+  const handleRecording = async (mode: 'message' | 'edit') => {
     if (state.voicePhase === 'starting' || state.voicePhase === 'recording') {
-      stopActiveRecording()
+      if (activeRecording?.mode === mode) stopActiveRecording()
       return
     }
     if (
@@ -1038,7 +1167,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       await requestRecordingPermissions()
       return
     }
-    startRecording()
+    startRecording(mode)
   }
 
   const handleUndoRecording = async () => {
@@ -1215,13 +1344,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     render()
   }
   const handleUndoClick = () => void handleUndo()
-  const handleRecordClick = () => void handleRecordMessage()
+  const handleRecordClick = () => void handleRecording('message')
+  const handleRecordEditClick = () => void handleRecording('edit')
   const handleCancelRecordingClick = () =>
     cancelActiveRecording('Recording cancelled. No transcript was appended.')
   const handleUndoRecordingClick = () => void handleUndoRecording()
   const handleSendClick = () => void handleSend()
   const handleAcceptProposalClick = () => void acceptNormalizationProposal()
   const handleRejectProposalClick = () => rejectNormalizationProposal()
+  const handleAcceptEditClick = () => void acceptEditProposal()
+  const handleRejectEditClick = () => rejectEditProposal()
   const handleSaveSettingsClick = () => void saveSettings()
   const handleNormalizationConnectionChange = () => {
     state.settings.normalizationConnectionId = normalizationConnectionSelect.value || null
@@ -1242,6 +1374,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   switchDraftButton.addEventListener('click', handleSwitchDraft)
   editor.addEventListener('input', handleEditorInput)
   recordButton.addEventListener('click', handleRecordClick)
+  recordEditButton.addEventListener('click', handleRecordEditClick)
   cancelRecordingButton.addEventListener('click', handleCancelRecordingClick)
   undoRecordingButton.addEventListener('click', handleUndoRecordingClick)
   undoButton.addEventListener('click', handleUndoClick)
@@ -1249,6 +1382,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   sendButton.addEventListener('click', handleSendClick)
   acceptProposalButton.addEventListener('click', handleAcceptProposalClick)
   rejectProposalButton.addEventListener('click', handleRejectProposalClick)
+  acceptEditButton.addEventListener('click', handleAcceptEditClick)
+  rejectEditButton.addEventListener('click', handleRejectEditClick)
   saveSettingsButton.addEventListener('click', handleSaveSettingsClick)
   normalizationConnectionSelect.addEventListener('change', handleNormalizationConnectionChange)
   glossarySaveButton.addEventListener('click', handleSaveGlossaryClick)
@@ -1279,6 +1414,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     switchDraftButton.removeEventListener('click', handleSwitchDraft)
     editor.removeEventListener('input', handleEditorInput)
     recordButton.removeEventListener('click', handleRecordClick)
+    recordEditButton.removeEventListener('click', handleRecordEditClick)
     cancelRecordingButton.removeEventListener('click', handleCancelRecordingClick)
     undoRecordingButton.removeEventListener('click', handleUndoRecordingClick)
     undoButton.removeEventListener('click', handleUndoClick)
@@ -1286,6 +1422,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     sendButton.removeEventListener('click', handleSendClick)
     acceptProposalButton.removeEventListener('click', handleAcceptProposalClick)
     rejectProposalButton.removeEventListener('click', handleRejectProposalClick)
+    acceptEditButton.removeEventListener('click', handleAcceptEditClick)
+    rejectEditButton.removeEventListener('click', handleRejectEditClick)
     saveSettingsButton.removeEventListener('click', handleSaveSettingsClick)
     normalizationConnectionSelect.removeEventListener('change', handleNormalizationConnectionChange)
     glossarySaveButton.removeEventListener('click', handleSaveGlossaryClick)
@@ -1415,9 +1553,11 @@ function renderHistory(list: HTMLOListElement, snapshot: DraftSnapshot | null): 
         ? 'Undo'
         : entry.kind === 'recording-append'
           ? 'Recording appended'
-          : entry.kind === 'recording-undo'
-            ? 'Recording removed'
-            : 'Manual edit'
+          : entry.kind === 'automated-edit'
+            ? 'Approved voice edit'
+            : entry.kind === 'recording-undo'
+              ? 'Recording removed'
+              : 'Manual edit'
     const affected = entry.diff.affectedParagraphOrdinals.length
       ? ` · paragraph ${entry.diff.affectedParagraphOrdinals.join(', ')}`
       : ''
@@ -1530,7 +1670,7 @@ function shellMarkup(): string {
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
-        <p class="jt-shell__eyebrow">Phase 4 context and vocabulary · v${APP_VERSION}</p>
+        <p class="jt-shell__eyebrow">Phase 5 semantic editing · v${APP_VERSION}</p>
         <h2 id="jt-title">JarvisType</h2>
         <p>Compose privately, review every change, and send only when you confirm.</p>
       </header>
@@ -1592,8 +1732,23 @@ function shellMarkup(): string {
           </div>
         </section>
 
+        <section class="jt-proposal" data-edit-proposal hidden aria-labelledby="jt-edit-proposal-title">
+          <h4 id="jt-edit-proposal-title">Review interpreted edit</h4>
+          <p><strong>Spoken instruction</strong></p>
+          <pre data-edit-instruction></pre>
+          <p><strong>Structured operations</strong></p>
+          <pre data-edit-operations></pre>
+          <p><strong>Before</strong></p>
+          <pre data-edit-before></pre>
+          <p><strong>Proposed draft</strong></p>
+          <pre data-edit-after></pre>
+          <div class="jt-actions">
+            <button type="button" data-edit-accept>Accept edit</button>
+            <button type="button" data-edit-reject>Reject</button>
+          </div>
+        </section>
         <div class="jt-actions" aria-label="Editing voice controls">
-          <button type="button" disabled>Record Edit · Phase 5</button>
+          <button type="button" data-record-edit disabled>Record Edit</button>
         </div>
         <div class="jt-actions">
           <button type="button" data-undo disabled>Undo</button>

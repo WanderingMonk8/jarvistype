@@ -19,6 +19,7 @@ let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
 let generationReturnsRawTranscript = false
 let generationNormalizedText: string | null = null
+let editPlanResponse: unknown = null
 
 const spindleMock = {
   onFrontendMessage(handler: FrontendHandler) {
@@ -90,7 +91,10 @@ const spindleMock = {
       const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as {
         candidate?: string
         rawTranscript?: string
+        task?: string
       }
+      if (input.task === 'Interpret this edit instruction against the numbered draft.')
+        return Promise.resolve({ content: JSON.stringify(editPlanResponse) })
       return Promise.resolve({
         content: JSON.stringify({
           normalizedText: generationReturnsRawTranscript
@@ -124,6 +128,7 @@ test.beforeEach(() => {
   appendShouldFail = false
   generationReturnsRawTranscript = false
   generationNormalizedText = null
+  editPlanResponse = null
 })
 
 const normalizationConnection = {
@@ -473,6 +478,100 @@ test('does not let contextual normalization override authoritative explicit spel
     assert.deepEqual(response.proposal.learningCandidates, [
       { canonical: 'Pip-Boy', spokenVariant: 'PIP-BOY' },
     ])
+  }
+})
+
+test('keeps spoken edit instructions out of the draft until the structured proposal is approved', async () => {
+  const userId = 'edit-user'
+  const chatId = 'edit-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'We hiked up the mountain.\n\nThe weather changed.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 1,
+    draftVersion: 1,
+    explanation: 'Correct the requested phrase in paragraph one.',
+    operations: [
+      {
+        id: 'replace-1',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'hiked up the mountain' },
+        text: 'climbed the mountain',
+      },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-interpret-1',
+      operationId: 'edit-operation-1',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'In paragraph one, replace hiked up the mountain with climbed the mountain.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.outcome, 'review')
+  assert.equal(proposal.snapshot, undefined)
+  assert.equal(proposal.proposal.beforeText, 'We hiked up the mountain.\n\nThe weather changed.')
+  assert.equal(proposal.proposal.afterText, 'We climbed the mountain.\n\nThe weather changed.')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'edit-confirm-1',
+      operationId: 'edit-operation-1',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type === 'edit.proposal.response') {
+    assert.equal(committed.outcome, 'committed')
+    assert.equal(committed.snapshot?.cleanText, 'We climbed the mountain.\n\nThe weather changed.')
+    assert.equal(committed.snapshot?.history.at(-1)?.kind, 'automated-edit')
+  }
+})
+
+test('rejects malformed or unresolved semantic edits without mutating the draft', async () => {
+  const userId = 'unsafe-edit-user'
+  const chatId = 'unsafe-edit-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Same phrase.\n\nSame phrase.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 1,
+    draftVersion: 1,
+    explanation: 'Ambiguous replacement.',
+    operations: [
+      { id: 'ambiguous', type: 'replace', target: { exactText: 'Same phrase' }, text: 'Changed' },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'unsafe-edit-interpret',
+      operationId: 'unsafe-edit-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace same phrase with changed.',
+    },
+    userId,
+  )
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'app.error')
+  if (response?.type === 'app.error') {
+    assert.equal(response.code, 'EDIT_TARGET_UNRESOLVED')
+    assert.equal(response.snapshot?.cleanText, 'Same phrase.\n\nSame phrase.')
   }
 })
 

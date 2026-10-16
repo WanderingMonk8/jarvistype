@@ -1,9 +1,10 @@
 import type { DraftSnapshot } from '../domain/draft-session'
 import type { GlossaryEntry } from '../domain/glossary'
 import type { SpellingLearningCandidate } from '../domain/normalization'
+import type { EditPlan, ResolvedEditOperation } from '../domain/edit-pipeline'
 
-export const PROTOCOL_VERSION = 5 as const
-export const APP_VERSION = '1.2.3'
+export const PROTOCOL_VERSION = 6 as const
+export const APP_VERSION = '1.3.0'
 export const REQUEST_TIMEOUT_MS = 15_000
 export const NORMALIZATION_TIMEOUT_MS = 120_000
 export const SEND_TIMEOUT_MS = 120_000
@@ -40,6 +41,19 @@ export interface NormalizationProposal {
   contextCharacterCount: number
   contextTruncated: boolean
   contextualModelUsed: boolean
+}
+
+export interface EditProposal {
+  operationId: string
+  chatId: string
+  expectedVersion: number
+  instructionTranscript: string
+  plan: EditPlan
+  operations: ResolvedEditOperation[]
+  beforeText: string
+  afterText: string
+  affectedParagraphOrdinals: number[]
+  explanation: string
 }
 
 export interface PermissionSnapshot {
@@ -89,6 +103,19 @@ export type FrontendRequest =
     })
   | (RequestEnvelope & {
       type: 'transcript.confirm.request'
+      operationId: string
+      chatId: string
+      expectedVersion: number
+    })
+  | (RequestEnvelope & {
+      type: 'edit.interpret.request'
+      operationId: string
+      chatId: string
+      expectedVersion: number
+      instructionTranscript: string
+    })
+  | (RequestEnvelope & {
+      type: 'edit.confirm.request'
       operationId: string
       chatId: string
       expectedVersion: number
@@ -166,6 +193,13 @@ export type BackendResponse =
       glossaryLearned?: GlossaryEntry[]
     })
   | (RequestEnvelope & {
+      type: 'edit.proposal.response'
+      ok: true
+      outcome: 'review' | 'committed'
+      proposal: EditProposal
+      snapshot?: DraftSnapshot
+    })
+  | (RequestEnvelope & {
       type: 'phase4.state.response'
       ok: true
       settings: PhaseFourSettings
@@ -195,6 +229,9 @@ export type AppErrorCode =
   | 'TRANSCRIPT_EMPTY'
   | 'NORMALIZATION_FAILED'
   | 'NORMALIZATION_EXPIRED'
+  | 'EDIT_INTERPRETATION_FAILED'
+  | 'EDIT_TARGET_UNRESOLVED'
+  | 'EDIT_PROPOSAL_EXPIRED'
   | 'GLOSSARY_CONFLICT'
   | 'RECORDING_UNDO_CONFLICT'
   | 'CHAT_MISMATCH'

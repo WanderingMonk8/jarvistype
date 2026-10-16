@@ -539,6 +539,8 @@ Improve recognition using bounded chat context, draft continuity, spoken punctua
 
 ## Phase 5: Semantic editing and deterministic patch pipeline
 
+Implementation candidate `1.3.0` prepared on 2026-10-16. Hosted verification remains required before this phase is marked complete.
+
 ### Objective
 
 Deliver flexible natural-language editing while allowing only resolved, validated, allowlisted operations to mutate the draft.

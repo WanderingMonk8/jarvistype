@@ -4,6 +4,7 @@ import {
   MAX_RECORDING_SEGMENTS,
   type DraftSnapshot,
 } from '../domain/draft-session'
+import { parseEditPlan } from '../domain/edit-pipeline'
 import {
   PHASE_FOUR_PERMISSIONS,
   PROTOCOL_VERSION,
@@ -24,6 +25,9 @@ const ERROR_CODES: readonly AppErrorCode[] = [
   'TRANSCRIPT_EMPTY',
   'NORMALIZATION_FAILED',
   'NORMALIZATION_EXPIRED',
+  'EDIT_INTERPRETATION_FAILED',
+  'EDIT_TARGET_UNRESOLVED',
+  'EDIT_PROPOSAL_EXPIRED',
   'GLOSSARY_CONFLICT',
   'RECORDING_UNDO_CONFLICT',
   'CHAT_MISMATCH',
@@ -67,11 +71,19 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS)
     )
   }
-  if (value.type === 'transcript.confirm.request') {
+  if (value.type === 'transcript.confirm.request' || value.type === 'edit.confirm.request') {
     return (
       isIdentifier(value.operationId) &&
       isIdentifier(value.chatId) &&
       isNonNegativeInteger(value.expectedVersion)
+    )
+  }
+  if (value.type === 'edit.interpret.request') {
+    return (
+      isIdentifier(value.operationId) &&
+      isIdentifier(value.chatId) &&
+      isNonNegativeInteger(value.expectedVersion) &&
+      isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS)
     )
   }
   if (value.type === 'draft.recording.undo.request') {
@@ -147,6 +159,14 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
         (Array.isArray(value.glossaryLearned) && value.glossaryLearned.every(isGlossaryEntry)))
     )
   }
+  if (value.type === 'edit.proposal.response') {
+    return (
+      value.ok === true &&
+      (value.outcome === 'review' || value.outcome === 'committed') &&
+      isEditProposal(value.proposal) &&
+      (value.snapshot === undefined || isDraftSnapshot(value.snapshot))
+    )
+  }
   if (value.type === 'phase4.state.response') {
     return (
       value.ok === true &&
@@ -216,6 +236,7 @@ function isHistoryEntry(value: unknown): boolean {
     isRecord(value) &&
     isIdentifier(value.id) &&
     (value.kind === 'manual-edit' ||
+      value.kind === 'automated-edit' ||
       value.kind === 'undo' ||
       value.kind === 'recording-append' ||
       value.kind === 'recording-undo') &&
@@ -329,6 +350,38 @@ function isNormalizationProposal(value: unknown): boolean {
     isNonNegativeInteger(value.contextCharacterCount) &&
     typeof value.contextTruncated === 'boolean' &&
     typeof value.contextualModelUsed === 'boolean'
+  )
+}
+
+function isEditProposal(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isIdentifier(value.operationId) &&
+    isIdentifier(value.chatId) &&
+    isNonNegativeInteger(value.expectedVersion) &&
+    isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) &&
+    parseEditPlan(value.plan) !== null &&
+    Array.isArray(value.operations) &&
+    value.operations.length > 0 &&
+    value.operations.every(
+      (operation) =>
+        isRecord(operation) &&
+        isIdentifier(operation.id) &&
+        typeof operation.type === 'string' &&
+        isNonNegativeInteger(operation.startOffset) &&
+        isNonNegativeInteger(operation.endOffset) &&
+        typeof operation.beforeText === 'string' &&
+        typeof operation.afterText === 'string' &&
+        isPositiveInteger(operation.paragraphOrdinal),
+    ) &&
+    typeof value.beforeText === 'string' &&
+    value.beforeText.length <= MAX_DRAFT_CHARACTERS &&
+    typeof value.afterText === 'string' &&
+    value.afterText.length <= MAX_DRAFT_CHARACTERS &&
+    Array.isArray(value.affectedParagraphOrdinals) &&
+    value.affectedParagraphOrdinals.every(isPositiveInteger) &&
+    typeof value.explanation === 'string' &&
+    value.explanation.length <= 1_000
   )
 }
 

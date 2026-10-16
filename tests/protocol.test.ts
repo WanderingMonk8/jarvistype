@@ -157,3 +157,41 @@ test('validates transcript normalization and recording undo requests', () => {
     true,
   )
 })
+
+test('validates semantic edit interpretation and confirmation requests', () => {
+  assert.equal(
+    isFrontendRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-request',
+      operationId: 'edit-operation',
+      chatId: 'chat-1',
+      expectedVersion: 4,
+      instructionTranscript: 'Replace the first sentence in paragraph two.',
+    }),
+    true,
+  )
+  assert.equal(
+    isFrontendRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-request-empty',
+      operationId: 'edit-operation-empty',
+      chatId: 'chat-1',
+      expectedVersion: 4,
+      instructionTranscript: '',
+    }),
+    false,
+  )
+  assert.equal(
+    isFrontendRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'edit-confirm',
+      operationId: 'edit-operation',
+      chatId: 'chat-1',
+      expectedVersion: 4,
+    }),
+    true,
+  )
+})

@@ -19,12 +19,19 @@ export interface DraftDiff {
 
 export interface DraftHistoryEntry {
   id: string
-  kind: 'manual-edit' | 'undo' | 'recording-append' | 'recording-undo'
+  kind: 'manual-edit' | 'automated-edit' | 'undo' | 'recording-append' | 'recording-undo'
   editGroupId?: string
   beforeVersion: number
   afterVersion: number
   timestamp: string
   diff: DraftDiff
+}
+
+export interface AutomatedEditOptions {
+  expectedVersion: number
+  operationId: string
+  now?: string
+  createId?: () => string
 }
 
 export interface RecordingSegment {
@@ -159,6 +166,55 @@ export function applyManualEdit(
       undoStack,
       canUndo: undoStack.length > 0,
       canUndoRecording: canUndoLatestRecording(session, nextText, undoStack),
+      dirty: nextText.length > 0,
+      updatedAt: now,
+    },
+  }
+}
+
+export function applyAutomatedEdit(
+  session: PersistedDraftSession,
+  nextText: string,
+  options: AutomatedEditOptions,
+): DraftMutationResult {
+  if (options.expectedVersion !== session.draftVersion) {
+    return { applied: false, reason: 'stale-version', session }
+  }
+  if (nextText.length > MAX_DRAFT_CHARACTERS) {
+    return { applied: false, reason: 'too-large', session }
+  }
+  if (nextText === session.cleanText) {
+    return { applied: false, reason: 'unchanged', session }
+  }
+
+  const now = options.now ?? new Date().toISOString()
+  const createId = options.createId ?? defaultId
+  const beforeText = session.cleanText
+  const nextVersion = session.draftVersion + 1
+  const diff = createDiff(beforeText, nextText)
+  const undoStack = [...session.undoStack, beforeText].slice(-MAX_HISTORY_ENTRIES)
+  return {
+    applied: true,
+    session: {
+      ...session,
+      draftVersion: nextVersion,
+      cleanText: nextText,
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      history: [
+        ...session.history,
+        {
+          id: options.operationId,
+          kind: 'automated-edit' as const,
+          beforeVersion: session.draftVersion,
+          afterVersion: nextVersion,
+          timestamp: now,
+          diff,
+        },
+      ].slice(-MAX_HISTORY_ENTRIES),
+      latestDiff: diff,
+      undoStack,
+      canUndo: true,
+      canUndoRecording: false,
       dirty: nextText.length > 0,
       updatedAt: now,
     },
@@ -588,6 +644,7 @@ function isHistoryEntry(value: unknown): value is DraftHistoryEntry {
   return (
     typeof value.id === 'string' &&
     (value.kind === 'manual-edit' ||
+      value.kind === 'automated-edit' ||
       value.kind === 'undo' ||
       value.kind === 'recording-append' ||
       value.kind === 'recording-undo') &&

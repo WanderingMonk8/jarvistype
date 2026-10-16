@@ -47,7 +47,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 4;
-var APP_VERSION = "1.0.1";
+var APP_VERSION = "1.0.2";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;

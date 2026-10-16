@@ -179,17 +179,11 @@ async function handleTranscriptNormalization(
     ])
     const selected = selectRecentContext(messages, settings.contextMessageCount)
     const deterministic = normalizeDeterministically(request.rawTranscript, glossary.entries)
-    const learningConflicts = deterministic.learningCandidates.flatMap((candidate) => {
-      const preview = learnExplicitSpelling(glossary, candidate.canonical, candidate.spokenVariant)
-      return preview.conflict
-        ? [
-            `“${candidate.canonical}” conflicts with glossary entry “${preview.conflict.canonical}” and will not be learned.`,
-          ]
-        : []
-    })
     let candidateText = deterministic.text
     let contextualModelUsed = false
     const reasons = [...deterministic.reasons]
+    const ambiguities = [...deterministic.ambiguities]
+    const learningCandidates = [...deterministic.learningCandidates]
     if (
       settings.contextualNormalizationEnabled &&
       (selected.messages.length > 0 || session.cleanText || glossary.entries.length > 0)
@@ -203,11 +197,33 @@ async function handleTranscriptNormalization(
         context.userId,
       )
       if (contextual && contextual !== candidateText) {
-        candidateText = contextual
-        contextualModelUsed = true
-        reasons.push('bounded conversational context')
+        const enforced = normalizeDeterministically(contextual, glossary.entries)
+        candidateText = enforced.text
+        reasons.push(...enforced.reasons)
+        ambiguities.push(...enforced.ambiguities)
+        learningCandidates.push(...enforced.learningCandidates)
+        if (candidateText !== deterministic.text) {
+          contextualModelUsed = true
+          reasons.push('bounded conversational context')
+        }
       }
     }
+    const uniqueLearningCandidates = [
+      ...new Map(
+        learningCandidates.map((candidate) => [
+          `${candidate.canonical}\u0000${candidate.spokenVariant}`,
+          candidate,
+        ]),
+      ).values(),
+    ]
+    const learningConflicts = uniqueLearningCandidates.flatMap((candidate) => {
+      const preview = learnExplicitSpelling(glossary, candidate.canonical, candidate.spokenVariant)
+      return preview.conflict
+        ? [
+            `“${candidate.canonical}” conflicts with glossary entry “${preview.conflict.canonical}” and will not be learned.`,
+          ]
+        : []
+    })
     if (activeRequest.cancelled) return { kind: 'cancelled' as const, session }
     const proposal: NormalizationProposal = {
       operationId: request.operationId,
@@ -216,14 +232,17 @@ async function handleTranscriptNormalization(
       rawTranscript: request.rawTranscript,
       candidateText,
       reasons: [...new Set(reasons)],
-      ambiguities: [...deterministic.ambiguities, ...learningConflicts],
-      learningCandidates: deterministic.learningCandidates,
+      ambiguities: [...new Set([...ambiguities, ...learningConflicts])],
+      learningCandidates: uniqueLearningCandidates,
       contextMessageCount: selected.selectedCount,
       contextCharacterCount: selected.characterCount,
       contextTruncated: selected.truncated,
       contextualModelUsed,
     }
-    const needsReview = candidateText !== request.rawTranscript || proposal.ambiguities.length > 0
+    const needsReview =
+      deterministic.changed ||
+      candidateText !== request.rawTranscript ||
+      proposal.ambiguities.length > 0
     if (needsReview) {
       rememberProposal(context.userId, proposal)
       return { kind: 'proposal' as const, proposal }

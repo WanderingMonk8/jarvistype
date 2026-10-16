@@ -17,6 +17,10 @@ test('preserves explicitly literal punctuation words', () => {
     normalizeDeterministically('Use the word period here period', []).text,
     'Use period here.',
   )
+  assert.equal(
+    normalizeDeterministically('Use the word period here, period.', []).text,
+    'Use period here.',
+  )
 })
 
 test('collapses explicit spelling, obeys casing, and creates a learning candidate', () => {

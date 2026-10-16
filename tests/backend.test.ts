@@ -12,6 +12,7 @@ const appended: Array<{ chatId: string; content: string; triggerGeneration: bool
 let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
+let generationReturnsRawTranscript = false
 
 const spindleMock = {
   onFrontendMessage(handler: FrontendHandler) {
@@ -75,8 +76,17 @@ const spindleMock = {
   },
   generate: {
     quiet: (request: { messages?: Array<{ content: string }> }) => {
-      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { candidate?: string }
-      return Promise.resolve({ content: JSON.stringify({ normalizedText: input.candidate ?? '' }) })
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as {
+        candidate?: string
+        rawTranscript?: string
+      }
+      return Promise.resolve({
+        content: JSON.stringify({
+          normalizedText: generationReturnsRawTranscript
+            ? (input.rawTranscript ?? '')
+            : (input.candidate ?? ''),
+        }),
+      })
     },
   },
   log: {
@@ -95,6 +105,7 @@ test.beforeEach(() => {
   appended.length = 0
   activeChatId = 'chat-default'
   appendShouldFail = false
+  generationReturnsRawTranscript = false
 })
 
 test('loads and persists a chat-owned draft', async () => {
@@ -304,6 +315,34 @@ test('requires review before committing explicit spelling and learns only after 
       'Write capitalized C-A-E-S-A-R Caesar period',
     )
     assert.equal(committed.glossaryLearned?.[0]?.canonical, 'Caesar')
+  }
+})
+
+test('re-applies deterministic commands when contextual output returns the raw provider text', async () => {
+  const userId = 'provider-punctuation-user'
+  const chatId = 'provider-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationReturnsRawTranscript = true
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'provider-punctuation-segment',
+      1,
+      'Use the word period here, period.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(response.proposal.rawTranscript, 'Use the word period here, period.')
+    assert.equal(response.proposal.candidateText, 'Use period here.')
+    assert.equal(response.snapshot, undefined)
   }
 })
 

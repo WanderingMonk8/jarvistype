@@ -4,7 +4,7 @@
 
 Phase 4 adds bounded post-transcription context normalization, spoken punctuation, explicit spelling and casing, per-user glossary learning and maintenance, visible review, and reversible glossary changes.
 
-Current candidate version: `1.0.1`
+Current candidate version: `1.0.2`
 
 ## Platform decision
 
@@ -29,7 +29,7 @@ Current candidate version: `1.0.1`
 | F4-07 | Visible and reversible changes         | LOCAL-PASS | Review card shows raw/candidate/context details; learned-entry notice points to independent glossary undo.                |
 | F4-08 | Draft and chat safety                  | LOCAL-PASS | Version and active-chat checks guard normalization and confirmation; rejection leaves the draft unchanged.                |
 | F4-09 | Privacy disclosure                     | LOCAL-PASS | Drawer states exactly which data goes to Lumiverse generation and that STT receives no added context.                     |
-| F4-10 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 33 unit tests, both builds, and package validation pass.                                 |
+| F4-10 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 34 unit tests, both builds, and package validation pass.                                 |
 | F4-11 | Hosted Lumiverse verification          | PENDING    | Run the sequence below on the hosted installation.                                                                        |
 
 ## Hosted verification sequence
@@ -50,7 +50,7 @@ Verified on the hosted Lumiverse installation: version `1.0.0` loaded successful
 
 **Status:** PARTIAL — 2026-10-16
 
-Part A is `REMOTE-PASS`: spoken punctuation and the paragraph break normalized correctly, the review was accepted, and the committed segment behaved as expected. Part B exposed a 15-second contextual-normalization timeout and a CSS rule that left an empty disabled proposal card visible after timeout. Both defects are fixed in the next `development` candidate; Part B must be repeated after updating.
+Part A is `REMOTE-PASS`: spoken punctuation and the paragraph break normalized correctly, the review was accepted, and the committed segment behaved as expected. Part B first exposed a 15-second contextual-normalization timeout and a CSS rule that left an empty disabled proposal card visible. Version `1.0.1` fixed those defects, then revealed that contextual output could restore the raw provider-punctuated transcript after deterministic command handling and bypass review. Version `1.0.2` re-applies deterministic rules after contextual output and collapses adjacent provider punctuation; Part B must be repeated after updating.
 
 1. Start with an empty disposable draft.
 2. Record: “Hello comma world question mark new paragraph Next period”.

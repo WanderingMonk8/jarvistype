@@ -127,6 +127,9 @@ function cleanupPunctuationSpacing(value: string): string {
   return value
     .replace(/[ \t]+([,.;:!?)\]])/g, '$1')
     .replace(/([([])\s+/g, '$1')
+    .replace(/[,;:]\s*([.!?])/g, '$1')
+    .replace(/([,.;:!?])(?:\s*\1)+/g, '$1')
+    .replace(/…(?:\s*\.){1,3}/g, '…')
     .replace(/[ \t]*\n[ \t]*/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/([,.;:!?])(?=[A-Za-z])/g, '$1 ')

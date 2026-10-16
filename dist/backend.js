@@ -708,7 +708,7 @@ function replaceExplicitSpelling(input) {
   return { text, learningCandidates, ambiguities };
 }
 function cleanupPunctuationSpacing(value) {
-  return value.replace(/[ \t]+([,.;:!?)\]])/g, "$1").replace(/([([])\s+/g, "$1").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").trim();
+  return value.replace(/[ \t]+([,.;:!?)\]])/g, "$1").replace(/([([])\s+/g, "$1").replace(/[,;:]\s*([.!?])/g, "$1").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").trim();
 }
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -716,7 +716,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 4;
-var APP_VERSION = "1.0.1";
+var APP_VERSION = "1.0.2";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts
@@ -891,15 +891,11 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     ]);
     const selected = selectRecentContext(messages, settings.contextMessageCount);
     const deterministic = normalizeDeterministically(request.rawTranscript, glossary.entries);
-    const learningConflicts = deterministic.learningCandidates.flatMap((candidate) => {
-      const preview = learnExplicitSpelling(glossary, candidate.canonical, candidate.spokenVariant);
-      return preview.conflict ? [
-        `\u201C${candidate.canonical}\u201D conflicts with glossary entry \u201C${preview.conflict.canonical}\u201D and will not be learned.`
-      ] : [];
-    });
     let candidateText = deterministic.text;
     let contextualModelUsed = false;
     const reasons = [...deterministic.reasons];
+    const ambiguities = [...deterministic.ambiguities];
+    const learningCandidates = [...deterministic.learningCandidates];
     if (settings.contextualNormalizationEnabled && (selected.messages.length > 0 || session.cleanText || glossary.entries.length > 0)) {
       const contextual = await normalizeWithContext(
         request.rawTranscript,
@@ -910,11 +906,31 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
         context.userId
       );
       if (contextual && contextual !== candidateText) {
-        candidateText = contextual;
-        contextualModelUsed = true;
-        reasons.push("bounded conversational context");
+        const enforced = normalizeDeterministically(contextual, glossary.entries);
+        candidateText = enforced.text;
+        reasons.push(...enforced.reasons);
+        ambiguities.push(...enforced.ambiguities);
+        learningCandidates.push(...enforced.learningCandidates);
+        if (candidateText !== deterministic.text) {
+          contextualModelUsed = true;
+          reasons.push("bounded conversational context");
+        }
       }
     }
+    const uniqueLearningCandidates = [
+      ...new Map(
+        learningCandidates.map((candidate) => [
+          `${candidate.canonical}\0${candidate.spokenVariant}`,
+          candidate
+        ])
+      ).values()
+    ];
+    const learningConflicts = uniqueLearningCandidates.flatMap((candidate) => {
+      const preview = learnExplicitSpelling(glossary, candidate.canonical, candidate.spokenVariant);
+      return preview.conflict ? [
+        `\u201C${candidate.canonical}\u201D conflicts with glossary entry \u201C${preview.conflict.canonical}\u201D and will not be learned.`
+      ] : [];
+    });
     if (activeRequest.cancelled) return { kind: "cancelled", session };
     const proposal = {
       operationId: request.operationId,
@@ -923,14 +939,14 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       rawTranscript: request.rawTranscript,
       candidateText,
       reasons: [...new Set(reasons)],
-      ambiguities: [...deterministic.ambiguities, ...learningConflicts],
-      learningCandidates: deterministic.learningCandidates,
+      ambiguities: [.../* @__PURE__ */ new Set([...ambiguities, ...learningConflicts])],
+      learningCandidates: uniqueLearningCandidates,
       contextMessageCount: selected.selectedCount,
       contextCharacterCount: selected.characterCount,
       contextTruncated: selected.truncated,
       contextualModelUsed
     };
-    const needsReview = candidateText !== request.rawTranscript || proposal.ambiguities.length > 0;
+    const needsReview = deterministic.changed || candidateText !== request.rawTranscript || proposal.ambiguities.length > 0;
     if (needsReview) {
       rememberProposal(context.userId, proposal);
       return { kind: "proposal", proposal };

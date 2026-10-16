@@ -3,8 +3,9 @@ import type { GlossaryEntry } from '../domain/glossary'
 import type { SpellingLearningCandidate } from '../domain/normalization'
 
 export const PROTOCOL_VERSION = 4 as const
-export const APP_VERSION = '1.0.0'
+export const APP_VERSION = '1.0.1'
 export const REQUEST_TIMEOUT_MS = 15_000
+export const NORMALIZATION_TIMEOUT_MS = 120_000
 export const SEND_TIMEOUT_MS = 120_000
 
 export const PHASE_FOUR_PERMISSIONS = ['media', 'chats', 'chat_mutation', 'generation'] as const

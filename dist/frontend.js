@@ -47,8 +47,9 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 4;
-var APP_VERSION = "1.0.0";
+var APP_VERSION = "1.0.1";
 var REQUEST_TIMEOUT_MS = 15e3;
+var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 function createRequestId(prefix = "request") {
@@ -283,6 +284,10 @@ function setup(ctx) {
     });
   };
   const registry = new RequestRegistry(REQUEST_TIMEOUT_MS, sendCancellation);
+  const normalizationRegistry = new RequestRegistry(
+    NORMALIZATION_TIMEOUT_MS,
+    sendCancellation
+  );
   const sendRegistry = new RequestRegistry(SEND_TIMEOUT_MS, sendCancellation);
   const hasChatMismatch = () => Boolean(
     state.snapshot?.dirty && state.snapshot.chatId && state.activeChatId !== state.snapshot.chatId
@@ -348,6 +353,11 @@ function setup(ctx) {
   const performRequest = async (request, isSend = false) => {
     const targetRegistry = isSend ? sendRegistry : registry;
     const outcome = targetRegistry.wait(request.requestId);
+    send(request);
+    return outcome;
+  };
+  const performNormalizationRequest = async (request) => {
+    const outcome = normalizationRegistry.wait(request.requestId);
     send(request);
     return outcome;
   };
@@ -584,7 +594,7 @@ function setup(ctx) {
       render();
       return;
     }
-    const outcome = await performRequest({
+    const outcome = await performNormalizationRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: "transcript.normalize.request",
       requestId: createRequestId("transcript-normalize"),
@@ -1003,8 +1013,9 @@ function setup(ctx) {
   };
   const removeBackendListener = ctx.onBackendMessage((payload) => {
     if (!alive || !isBackendResponse(payload)) return;
-    if (!registry.resolve(payload.requestId, payload))
+    if (!registry.resolve(payload.requestId, payload) && !normalizationRegistry.resolve(payload.requestId, payload)) {
       sendRegistry.resolve(payload.requestId, payload);
+    }
   });
   disposers.push(removeBackendListener);
   const refreshFromHost = () => void refreshHostState();
@@ -1088,6 +1099,7 @@ function setup(ctx) {
     clearRecordingTimers();
     if (editGroupTimer) clearTimeout(editGroupTimer);
     registry.cancelAll();
+    normalizationRegistry.cancelAll();
     sendRegistry.cancelAll();
     for (const dispose of disposers.splice(0)) dispose();
     document.removeEventListener("visibilitychange", handleVisibility);
@@ -1281,6 +1293,7 @@ function shellMarkup() {
       .jt-glossary { display: grid; gap: .55rem; }
       .jt-glossary-row { display: grid; gap: .35rem; padding: .55rem; border-radius: .45rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-wrap: anywhere; }
       .jt-empty { opacity: .65; font-style: italic; }
+      .jt-shell [hidden] { display: none !important; }
       [data-state="ready"] { color: #38a169; }
       [data-state="unavailable"] { color: #e53e3e; }
     </style>

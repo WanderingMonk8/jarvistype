@@ -4,7 +4,7 @@
 
 Phase 4 adds bounded post-transcription context normalization, spoken punctuation, explicit spelling and casing, per-user glossary learning and maintenance, visible review, and reversible glossary changes.
 
-Current candidate version: `1.0.0`
+Current candidate version: `1.0.1`
 
 ## Platform decision
 
@@ -29,7 +29,7 @@ Current candidate version: `1.0.0`
 | F4-07 | Visible and reversible changes         | LOCAL-PASS | Review card shows raw/candidate/context details; learned-entry notice points to independent glossary undo.                |
 | F4-08 | Draft and chat safety                  | LOCAL-PASS | Version and active-chat checks guard normalization and confirmation; rejection leaves the draft unchanged.                |
 | F4-09 | Privacy disclosure                     | LOCAL-PASS | Drawer states exactly which data goes to Lumiverse generation and that STT receives no added context.                     |
-| F4-10 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 32 unit tests, both builds, and package validation pass.                                 |
+| F4-10 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 33 unit tests, both builds, and package validation pass.                                 |
 | F4-11 | Hosted Lumiverse verification          | PENDING    | Run the sequence below on the hosted installation.                                                                        |
 
 ## Hosted verification sequence
@@ -40,13 +40,17 @@ Current candidate version: `1.0.0`
 
 Verified on the hosted Lumiverse installation: version `1.0.0` loaded successfully, the Phase 3 draft state migrated intact, the context/glossary controls and post-STT disclosure were present, and context-count values `0` and `5` both persisted across reloads.
 
-1. Update the extension from `development` and verify version `1.0.0` loads with backend status **Ready**.
+1. Update the extension from `development` and verify the current candidate loads with backend status **Ready**.
 2. Open a chat with an existing Phase 3 draft. Confirm its exact text, paragraph numbering, history, and recording segment count still load.
 3. Find **Context and glossary** and confirm the recent-message value is `5` and bounded context normalization is enabled.
 4. Read the disclosure and confirm it says recent chat text, the draft tail, and glossary go to the configured Lumiverse generation connection after STT; it must not claim context is sent to STT.
 5. Set recent messages to `0`, save, reload JarvisType, and confirm `0` persists. Restore `5`, save, reload, and confirm `5` persists.
 
 ### Test 2: Spoken punctuation and literal wording
+
+**Status:** PARTIAL — 2026-10-16
+
+Part A is `REMOTE-PASS`: spoken punctuation and the paragraph break normalized correctly, the review was accepted, and the committed segment behaved as expected. Part B exposed a 15-second contextual-normalization timeout and a CSS rule that left an empty disabled proposal card visible after timeout. Both defects are fixed in the next `development` candidate; Part B must be repeated after updating.
 
 1. Start with an empty disposable draft.
 2. Record: “Hello comma world question mark new paragraph Next period”.

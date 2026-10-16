@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { PROTOCOL_VERSION } from '../src/protocol/messages'
+import {
+  NORMALIZATION_TIMEOUT_MS,
+  PROTOCOL_VERSION,
+  REQUEST_TIMEOUT_MS,
+} from '../src/protocol/messages'
 import {
   isBackendResponse,
   isFrontendRequest,
@@ -19,6 +23,11 @@ test('accepts a valid health request', () => {
     }),
     true,
   )
+})
+
+test('allows contextual normalization longer than ordinary requests', () => {
+  assert.equal(NORMALIZATION_TIMEOUT_MS, 120_000)
+  assert.ok(NORMALIZATION_TIMEOUT_MS > REQUEST_TIMEOUT_MS)
 })
 
 test('rejects malformed and future-version requests', () => {

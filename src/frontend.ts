@@ -9,6 +9,7 @@ import type { GlossaryEntry } from './domain/glossary'
 import { RequestRegistry, type RequestOutcome } from './domain/request-registry'
 import {
   APP_VERSION,
+  NORMALIZATION_TIMEOUT_MS,
   PROTOCOL_VERSION,
   REQUEST_TIMEOUT_MS,
   SEND_TIMEOUT_MS,
@@ -190,6 +191,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     })
   }
   const registry = new RequestRegistry<BackendResponse>(REQUEST_TIMEOUT_MS, sendCancellation)
+  const normalizationRegistry = new RequestRegistry<BackendResponse>(
+    NORMALIZATION_TIMEOUT_MS,
+    sendCancellation,
+  )
   const sendRegistry = new RequestRegistry<BackendResponse>(SEND_TIMEOUT_MS, sendCancellation)
 
   const hasChatMismatch = () =>
@@ -341,6 +346,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   ): Promise<RequestOutcome<BackendResponse>> => {
     const targetRegistry = isSend ? sendRegistry : registry
     const outcome = targetRegistry.wait(request.requestId)
+    send(request)
+    return outcome
+  }
+
+  const performNormalizationRequest = async (
+    request: FrontendRequest,
+  ): Promise<RequestOutcome<BackendResponse>> => {
+    const outcome = normalizationRegistry.wait(request.requestId)
     send(request)
     return outcome
   }
@@ -613,7 +626,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       return
     }
 
-    const outcome = await performRequest({
+    const outcome = await performNormalizationRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: 'transcript.normalize.request',
       requestId: createRequestId('transcript-normalize'),
@@ -1101,8 +1114,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const removeBackendListener = ctx.onBackendMessage((payload: unknown) => {
     if (!alive || !isBackendResponse(payload)) return
-    if (!registry.resolve(payload.requestId, payload))
+    if (
+      !registry.resolve(payload.requestId, payload) &&
+      !normalizationRegistry.resolve(payload.requestId, payload)
+    ) {
       sendRegistry.resolve(payload.requestId, payload)
+    }
   })
   disposers.push(removeBackendListener)
 
@@ -1192,6 +1209,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     clearRecordingTimers()
     if (editGroupTimer) clearTimeout(editGroupTimer)
     registry.cancelAll()
+    normalizationRegistry.cancelAll()
     sendRegistry.cancelAll()
     for (const dispose of disposers.splice(0)) dispose()
     document.removeEventListener('visibilitychange', handleVisibility)
@@ -1419,6 +1437,7 @@ function shellMarkup(): string {
       .jt-glossary { display: grid; gap: .55rem; }
       .jt-glossary-row { display: grid; gap: .35rem; padding: .55rem; border-radius: .45rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-wrap: anywhere; }
       .jt-empty { opacity: .65; font-style: italic; }
+      .jt-shell [hidden] { display: none !important; }
       [data-state="ready"] { color: #38a169; }
       [data-state="unavailable"] { color: #e53e3e; }
     </style>

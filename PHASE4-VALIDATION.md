@@ -91,7 +91,9 @@ Verified on the hosted Lumiverse installation: the spelled letters and pronuncia
 
 ### Test 5: Casing and hyphenation variants
 
-**Status:** PARTIAL — 2026-10-16. All-caps `NASA` passed and was accepted; lowercase `cat` passed and was rejected without learning. Hyphenation testing exposed realistic STT compaction, pause punctuation, a contextual casing override, and an unchanged-candidate path that bypassed review. Candidate `1.2.3` tolerates those punctuation forms, enforces explicit spelling after context, and requires review for every segment; Part C and the rejection safeguard require a focused retest.
+**Status:** REMOTE-PASS — 2026-10-16
+
+Verified on the hosted Lumiverse installation: all-caps `NASA` was accepted and learned, lowercase `cat` was rejected without learning, and `Pip-Boy` retained its requested capitalization and hyphenation despite STT compaction and pause punctuation. Candidate `1.2.3` always displayed review, rejection left the draft unchanged, acceptance appended `Write Pip-Boy.` once, and the glossary learned one canonical entry without a `PIP-BOY` duplicate.
 
 1. Record and review an all-caps spelling such as “all caps N-A-S-A”. Confirm the candidate uses `NASA`.
 2. Record and review a lowercase spelling such as “lowercase C-A-T”. Confirm the candidate uses `cat`.

@@ -247,17 +247,8 @@ async function handleTranscriptNormalization(
       contextTruncated: selected.truncated,
       contextualModelUsed,
     }
-    const needsReview =
-      deterministic.changed ||
-      candidateText !== request.rawTranscript ||
-      proposal.ambiguities.length > 0
-    if (needsReview) {
-      rememberProposal(context.userId, proposal)
-      return { kind: 'proposal' as const, proposal }
-    }
-    const mutation = appendProposal(session, proposal)
-    if (mutation.applied) await persistDraft(context.userId, mutation.session)
-    return { kind: 'committed' as const, proposal, mutation, glossaryLearned: [] }
+    rememberProposal(context.userId, proposal)
+    return { kind: 'proposal' as const, proposal }
   })
   if (activeRequest.cancelled) return
   if (result.kind === 'cancelled') return
@@ -283,30 +274,14 @@ async function handleTranscriptNormalization(
     )
     return
   }
-  if (result.kind === 'committed' && result.mutation.reason === 'too-large') {
-    sendDraftError(
-      request,
-      context,
-      'DRAFT_TOO_LARGE',
-      'The transcript would exceed the safe draft size limit. It was not appended.',
-      result.mutation.session,
-    )
-    return
-  }
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
       type: 'transcript.normalization.response',
       requestId: request.requestId,
       ok: true,
-      outcome: result.kind === 'proposal' ? 'review' : 'committed',
+      outcome: 'review',
       proposal: result.proposal,
-      ...(result.kind === 'committed'
-        ? {
-            snapshot: toDraftSnapshot(result.mutation.session),
-            glossaryLearned: result.glossaryLearned,
-          }
-        : {}),
     },
     context,
   )
@@ -371,7 +346,12 @@ async function handleTranscriptConfirmation(
     if (!activeChat || activeChat.id !== request.chatId) return { error: 'chat' as const, session }
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
     const mutation = appendProposal(session, proposal)
-    if (!mutation.applied) return { error: 'mutation' as const, session: mutation.session }
+    if (!mutation.applied)
+      return {
+        error: 'mutation' as const,
+        reason: mutation.reason,
+        session: mutation.session,
+      }
     let glossary = await loadGlossary(context.userId)
     const learned = []
     for (const candidate of proposal.learningCandidates) {
@@ -396,11 +376,18 @@ async function handleTranscriptConfirmation(
   })
   if (activeRequest.cancelled) return
   if ('error' in result && result.session) {
+    const tooLarge = result.error === 'mutation' && result.reason === 'too-large'
     sendDraftError(
       request,
       context,
-      result.error === 'chat' ? 'CHAT_MISMATCH' : 'NORMALIZATION_EXPIRED',
-      'The proposal could not be committed because the chat or draft changed.',
+      result.error === 'chat'
+        ? 'CHAT_MISMATCH'
+        : tooLarge
+          ? 'DRAFT_TOO_LARGE'
+          : 'NORMALIZATION_EXPIRED',
+      tooLarge
+        ? 'The transcript would exceed the safe draft size limit. It was not appended.'
+        : 'The proposal could not be committed because the chat or draft changed.',
       result.session,
     )
     return

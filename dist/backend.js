@@ -685,10 +685,10 @@ function normalizeDeterministically(raw, glossary) {
 function replaceExplicitSpelling(input) {
   const learningCandidates = [];
   const ambiguities = [];
-  const separatedPattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash)\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*))?/gi;
+  const separatedPattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash|[.,](?:\s+dash)?)\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/gi;
   let text = input.replace(
     separatedPattern,
-    (whole, casing, spoken, cue) => {
+    (whole, casing, spoken, separator, cue) => {
       const letters = extractLetters(spoken);
       if (letters.length < 3) return whole;
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : void 0;
@@ -697,21 +697,32 @@ function replaceExplicitSpelling(input) {
         ambiguities.push(`Confirm the casing of \u201C${letters}\u201D.`);
       }
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
-      return canonical;
+      return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
     }
   );
-  const compactHyphenatedPattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)((?:[A-Za-z]{2,}-)+[A-Za-z]{2,})\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*)/gi;
+  const compactHyphenatedPattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:[A-Za-z]{2,}-)+[A-Za-z]{2,})(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/gi;
   text = text.replace(
     compactHyphenatedPattern,
-    (whole, casing, spoken, cue) => {
+    (whole, casing, spoken, separator, cue) => {
       const letters = extractLetters(spoken);
-      if (!/[A-Z]{2,}/.test(spoken) || !cueMatchesLetters(cue, letters)) return whole;
-      const canonical = applySpellingCasing(cue, casing);
+      const matchingCue = cueMatchesLetters(cue, letters) ? cue : void 0;
+      if (!/[A-Z]{2,}/.test(spoken) || !casing && !matchingCue) return whole;
+      const canonical = applySpellingCasing(matchingCue ?? spoken, casing);
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
-      return canonical;
+      return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
     }
   );
+  for (const candidate of learningCandidates) {
+    text = text.replace(
+      new RegExp(`\\b(write|type|spell)\\s*,\\s+(?=${escapeRegExp(candidate.canonical)}\\b)`, "gi"),
+      "$1 "
+    );
+  }
   return { text, learningCandidates, ambiguities };
+}
+function unmatchedCueSuffix(separator, cue, matchingCue) {
+  if (!cue || matchingCue) return "";
+  return `${separator ?? ""} ${cue}`;
 }
 function extractLetters(value) {
   return value.replace(/\bdash\b/gi, "-").match(/[A-Za-z]/g)?.join("") ?? "";
@@ -737,7 +748,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 5;
-var APP_VERSION = "1.2.2";
+var APP_VERSION = "1.2.3";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts
@@ -970,14 +981,8 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       contextTruncated: selected.truncated,
       contextualModelUsed
     };
-    const needsReview = deterministic.changed || candidateText !== request.rawTranscript || proposal.ambiguities.length > 0;
-    if (needsReview) {
-      rememberProposal(context.userId, proposal);
-      return { kind: "proposal", proposal };
-    }
-    const mutation = appendProposal(session, proposal);
-    if (mutation.applied) await persistDraft(context.userId, mutation.session);
-    return { kind: "committed", proposal, mutation, glossaryLearned: [] };
+    rememberProposal(context.userId, proposal);
+    return { kind: "proposal", proposal };
   });
   if (activeRequest.cancelled) return;
   if (result.kind === "cancelled") return;
@@ -1001,28 +1006,14 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     );
     return;
   }
-  if (result.kind === "committed" && result.mutation.reason === "too-large") {
-    sendDraftError(
-      request,
-      context,
-      "DRAFT_TOO_LARGE",
-      "The transcript would exceed the safe draft size limit. It was not appended.",
-      result.mutation.session
-    );
-    return;
-  }
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
       type: "transcript.normalization.response",
       requestId: request.requestId,
       ok: true,
-      outcome: result.kind === "proposal" ? "review" : "committed",
-      proposal: result.proposal,
-      ...result.kind === "committed" ? {
-        snapshot: toDraftSnapshot(result.mutation.session),
-        glossaryLearned: result.glossaryLearned
-      } : {}
+      outcome: "review",
+      proposal: result.proposal
     },
     context
   );
@@ -1069,7 +1060,12 @@ async function handleTranscriptConfirmation(request, context, activeRequest) {
     if (!activeChat || activeChat.id !== request.chatId) return { error: "chat", session };
     if (activeRequest.cancelled) return { error: "cancelled", session };
     const mutation = appendProposal(session, proposal);
-    if (!mutation.applied) return { error: "mutation", session: mutation.session };
+    if (!mutation.applied)
+      return {
+        error: "mutation",
+        reason: mutation.reason,
+        session: mutation.session
+      };
     let glossary = await loadGlossary(context.userId);
     const learned = [];
     for (const candidate of proposal.learningCandidates) {
@@ -1094,11 +1090,12 @@ async function handleTranscriptConfirmation(request, context, activeRequest) {
   });
   if (activeRequest.cancelled) return;
   if ("error" in result && result.session) {
+    const tooLarge = result.error === "mutation" && result.reason === "too-large";
     sendDraftError(
       request,
       context,
-      result.error === "chat" ? "CHAT_MISMATCH" : "NORMALIZATION_EXPIRED",
-      "The proposal could not be committed because the chat or draft changed.",
+      result.error === "chat" ? "CHAT_MISMATCH" : tooLarge ? "DRAFT_TOO_LARGE" : "NORMALIZATION_EXPIRED",
+      tooLarge ? "The transcript would exceed the safe draft size limit. It was not appended." : "The proposal could not be committed because the chat or draft changed.",
       result.session
     );
     return;

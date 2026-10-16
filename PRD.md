@@ -106,8 +106,9 @@ Important use cases include:
 2. JarvisType records until the user stops the recording.
 3. JarvisType submits the recording for transcription with the configured context.
 4. Provisional transcription appears progressively if partial results are available.
-5. When transcription completes, the new segment is committed to the end of the working draft.
-6. Each subsequent use of **Record Message** repeats this process and appends another segment.
+5. When transcription and normalization complete, JarvisType displays the raw transcript and proposed segment with **Accept & append** and **Reject** controls.
+6. The segment remains outside the working draft until the user explicitly accepts it. Rejecting it leaves the draft and glossary unchanged.
+7. Each subsequent use of **Record Message** repeats this review-first process and appends only an accepted segment.
 
 The user is not required to dictate a complete message in one session.
 
@@ -139,7 +140,7 @@ The user is not required to dictate a complete message in one session.
 
 **FR-DRAFT-001:** JarvisType shall maintain one working draft for the active composition session.
 
-**FR-DRAFT-002:** Selecting **Record Message** shall always append the resulting committed transcription to the end of the working draft.
+**FR-DRAFT-002:** Selecting **Record Message** shall offer the resulting transcription for review and append an accepted transcription to the end of the working draft.
 
 **FR-DRAFT-003:** JarvisType shall retain an internal ordered record of appended segments even though the user sees one continuous draft.
 
@@ -155,6 +156,8 @@ The user is not required to dictate a complete message in one session.
 **FR-DRAFT-006:** The user shall be able to edit the draft manually with a keyboard.
 
 **FR-DRAFT-007:** A processing error shall not remove or replace previously committed draft text.
+
+**FR-DRAFT-008:** Every completed **Record Message** segment shall require explicit **Accept & append** confirmation, even when normalization proposes no textual change. **Reject** shall leave the draft and glossary unchanged.
 
 ### 7.2 Context-aware transcription
 

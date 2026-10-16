@@ -290,9 +290,11 @@ test('commits recording segments once, in order, and undoes only the latest segm
   responses.length = 0
 
   const first = recordingAppendRequest(chatId, 'segment-one', 1, 'First')
-  await dispatch(first, userId)
-  await dispatch({ ...first, requestId: 'duplicate-recording-request' }, userId)
-  await dispatch(recordingAppendRequest(chatId, 'segment-two', 2, 'Second'), userId)
+  await normalizeAndConfirmRecording(first, userId)
+  await normalizeAndConfirmRecording(
+    recordingAppendRequest(chatId, 'segment-two', 2, 'Second'),
+    userId,
+  )
 
   const appendedResponse = responses.at(-1)?.payload
   assert.equal(appendedResponse?.type, 'transcript.normalization.response')
@@ -321,6 +323,26 @@ test('commits recording segments once, in order, and undoes only the latest segm
     assert.equal(undoResponse.snapshot.cleanText, 'Typed First')
     assert.equal(undoResponse.snapshot.recordingSegments.length, 1)
     assert.equal(undoResponse.snapshot.canUndoRecording, true)
+  }
+})
+
+test('requires review even when a transcript needs no normalization', async () => {
+  const userId = 'unchanged-review-user'
+  const chatId = 'unchanged-review-chat'
+  activeChatId = chatId
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'unchanged-review-segment', 0, 'Plain unchanged text'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(response.proposal.rawTranscript, 'Plain unchanged text')
+    assert.equal(response.proposal.candidateText, 'Plain unchanged text')
+    assert.equal(response.snapshot, undefined)
   }
 })
 
@@ -502,6 +524,29 @@ function recordingAppendRequest(
     expectedVersion,
     rawTranscript,
   }
+}
+
+async function normalizeAndConfirmRecording(
+  request: ReturnType<typeof recordingAppendRequest>,
+  userId: string,
+): Promise<void> {
+  await dispatch(request, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'transcript.normalization.response')
+  if (proposal?.type !== 'transcript.normalization.response') return
+  assert.equal(proposal.outcome, 'review')
+  assert.equal(proposal.snapshot, undefined)
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.confirm.request',
+      requestId: `confirm-${request.operationId}`,
+      operationId: request.operationId,
+      chatId: request.chatId,
+      expectedVersion: request.expectedVersion,
+    },
+    userId,
+  )
 }
 
 async function dispatch(payload: unknown, userId: string): Promise<void> {

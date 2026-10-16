@@ -4,7 +4,7 @@
 
 Phase 4 adds bounded post-transcription context normalization, spoken punctuation, explicit spelling and casing, per-user glossary learning and maintenance, visible review, and reversible glossary changes.
 
-Current candidate version: `1.2.2`
+Current candidate version: `1.2.3`
 
 ## Platform decision
 
@@ -14,7 +14,7 @@ Current candidate version: `1.2.2`
 - Recent chat context includes only eligible visible user/assistant text. The setting defaults to five, accepts zero, is capped at twenty messages, and is independently capped at 12,000 characters using newest-first retention.
 - Current draft continuity and glossary entries are supplied separately and do not consume the configured message count.
 - Deterministic spelling, punctuation, casing, and glossary rules run before optional contextual correction.
-- Any candidate that differs from the raw provider transcript requires visible user confirmation. Rejecting or cancelling changes neither the draft nor glossary.
+- Every completed message segment requires visible acceptance or rejection, including a candidate identical to the raw provider transcript. Rejecting or cancelling changes neither the draft nor glossary.
 - Raw and normalized transcripts are retained separately in recording-segment metadata. Logs contain neither transcript nor context values.
 
 ## Implemented baseline
@@ -22,7 +22,7 @@ Current candidate version: `1.2.2`
 | ID    | Requirement                            | Status     | Evidence                                                                                                                  |
 | ----- | -------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
 | F4-01 | Configurable bounded context           | LOCAL-PASS | Unit tests cover default five, zero, maximum clamping, eligibility, ordering, and hard-character truncation.              |
-| F4-02 | Conservative post-STT normalization    | LOCAL-PASS | Backend preserves raw text, validates model output, falls back safely, and routes every changed result through review.    |
+| F4-02 | Conservative post-STT normalization    | LOCAL-PASS | Backend preserves raw text, validates model output, falls back safely, and routes every completed segment through review. |
 | F4-03 | Spoken punctuation and literal wording | LOCAL-PASS | Deterministic tests cover punctuation, paragraph breaks, and explicit `literal`/`the word` escape wording.                |
 | F4-04 | Explicit spelling and casing           | LOCAL-PASS | Tests cover separated letters, pronunciation cue collapse, casing, and learning-candidate creation.                       |
 | F4-05 | Personal glossary lifecycle            | LOCAL-PASS | Per-user storage supports inspect, add, edit, delete, conflicts, usage metadata, and undo.                                |
@@ -31,7 +31,7 @@ Current candidate version: `1.2.2`
 | F4-08 | Draft and chat safety                  | LOCAL-PASS | Version and active-chat checks guard normalization and confirmation; rejection leaves the draft unchanged.                |
 | F4-09 | Privacy disclosure                     | LOCAL-PASS | Drawer states exactly which data goes to Lumiverse generation and that STT receives no added context.                     |
 | F4-10 | Searchable normalization dispatch      | LOCAL-PASS | Settings use Lumiverse's connection-aware searchable model picker and pass the selected connection ID and model override. |
-| F4-11 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 38 unit tests, both builds, and package validation pass.                                 |
+| F4-11 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 39 unit tests, both builds, and package validation pass.                                 |
 | F4-12 | Hosted Lumiverse verification          | PENDING    | Run the sequence below on the hosted installation.                                                                        |
 
 ## Hosted verification sequence
@@ -91,7 +91,7 @@ Verified on the hosted Lumiverse installation: the spelled letters and pronuncia
 
 ### Test 5: Casing and hyphenation variants
 
-**Status:** PARTIAL — 2026-10-16. All-caps `NASA` passed and was accepted; lowercase `cat` passed and was rejected without learning. The initial hyphenation attempt exposed realistic STT compaction (`PIP-Boy, Pip-Boy`). Candidate `1.2.1` recognized the compact form, but hosted retesting showed the contextual model could overwrite deterministic `Pip-Boy` casing. Candidate `1.2.2` enforces explicit spelling after contextual normalization; Part C requires a focused retest.
+**Status:** PARTIAL — 2026-10-16. All-caps `NASA` passed and was accepted; lowercase `cat` passed and was rejected without learning. Hyphenation testing exposed realistic STT compaction, pause punctuation, a contextual casing override, and an unchanged-candidate path that bypassed review. Candidate `1.2.3` tolerates those punctuation forms, enforces explicit spelling after context, and requires review for every segment; Part C and the rejection safeguard require a focused retest.
 
 1. Record and review an all-caps spelling such as “all caps N-A-S-A”. Confirm the candidate uses `NASA`.
 2. Record and review a lowercase spelling such as “lowercase C-A-T”. Confirm the candidate uses `cat`.

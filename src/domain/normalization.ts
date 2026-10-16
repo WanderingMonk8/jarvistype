@@ -95,10 +95,16 @@ function replaceExplicitSpelling(
   const learningCandidates: SpellingLearningCandidate[] = []
   const ambiguities: string[] = []
   const separatedPattern =
-    /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash)\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*))?/gi
+    /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash|[.,](?:\s+dash)?)\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/gi
   let text = input.replace(
     separatedPattern,
-    (whole, casing: string | undefined, spoken: string, cue: string | undefined) => {
+    (
+      whole,
+      casing: string | undefined,
+      spoken: string,
+      separator: string | undefined,
+      cue: string | undefined,
+    ) => {
       const letters = extractLetters(spoken)
       if (letters.length < 3) return whole
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : undefined
@@ -107,23 +113,46 @@ function replaceExplicitSpelling(
         ambiguities.push(`Confirm the casing of “${letters}”.`)
       }
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
-      return canonical
+      return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`
     },
   )
 
   const compactHyphenatedPattern =
-    /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)((?:[A-Za-z]{2,}-)+[A-Za-z]{2,})\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*)/gi
+    /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:[A-Za-z]{2,}-)+[A-Za-z]{2,})(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/gi
   text = text.replace(
     compactHyphenatedPattern,
-    (whole, casing: string | undefined, spoken: string, cue: string) => {
+    (
+      whole,
+      casing: string | undefined,
+      spoken: string,
+      separator: string | undefined,
+      cue: string | undefined,
+    ) => {
       const letters = extractLetters(spoken)
-      if (!/[A-Z]{2,}/.test(spoken) || !cueMatchesLetters(cue, letters)) return whole
-      const canonical = applySpellingCasing(cue, casing)
+      const matchingCue = cueMatchesLetters(cue, letters) ? cue : undefined
+      if (!/[A-Z]{2,}/.test(spoken) || (!casing && !matchingCue)) return whole
+      const canonical = applySpellingCasing(matchingCue ?? spoken, casing)
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
-      return canonical
+      return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`
     },
   )
+
+  for (const candidate of learningCandidates) {
+    text = text.replace(
+      new RegExp(`\\b(write|type|spell)\\s*,\\s+(?=${escapeRegExp(candidate.canonical)}\\b)`, 'gi'),
+      '$1 ',
+    )
+  }
   return { text, learningCandidates, ambiguities }
+}
+
+function unmatchedCueSuffix(
+  separator: string | undefined,
+  cue: string | undefined,
+  matchingCue: string | undefined,
+): string {
+  if (!cue || matchingCue) return ''
+  return `${separator ?? ''} ${cue}`
 }
 
 function extractLetters(value: string): string {

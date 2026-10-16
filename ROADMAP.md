@@ -443,7 +443,7 @@ Deliver bounded recording, genuine progressive display where supported, ordered 
 
 ### Status
 
-Implementation candidate ready for hosted validation as of 2026-10-16. Version `1.2.2` uses Lumiverse's authoritative STT result, then applies deterministic punctuation/spelling/glossary rules and an optional bounded `spindle.generate.quiet(...)` correction pass through Main or a user-selected Lumiverse connection and optional model selected from Lumiverse's host-managed searchable catalog. The verified `ctx.stt` contract accepts no context or vocabulary hints, so JarvisType does not claim that recent messages are sent to the STT provider. Changed candidates always require visible confirmation in this phase.
+Implementation candidate ready for hosted validation as of 2026-10-16. Version `1.2.3` uses Lumiverse's authoritative STT result, then applies deterministic punctuation/spelling/glossary rules and an optional bounded `spindle.generate.quiet(...)` correction pass through Main or a user-selected Lumiverse connection and optional model selected from Lumiverse's host-managed searchable catalog. The verified `ctx.stt` contract accepts no context or vocabulary hints, so JarvisType does not claim that recent messages are sent to the STT provider. Every completed message segment requires visible acceptance or rejection before draft mutation.
 
 ### Objective
 
@@ -485,10 +485,12 @@ Improve recognition using bounded chat context, draft continuity, spoken punctua
 #### Explicit spelling
 
 - Recognize separated letters, pauses, and spoken separators.
+- Tolerate provider-inserted periods and commas between spelled letters and immediately before a spoken separator.
 - Recognize guarded compact hyphenated spellings emitted by STT only when a matching pronunciation cue follows.
 - Treat a following whole word as a pronunciation cue when unambiguous.
 - Support capitalization, all caps, lowercase, and hyphenation.
 - Give explicit letters precedence for that occurrence and reject contextual output that changes the exact canonical spelling or its occurrence count.
+- Require explicit review for every completed message segment, including candidates identical to the provider transcript.
 - Confirm uncertain sequences, case, separator, or content boundary.
 
 #### Personal spelling glossary

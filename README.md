@@ -2,14 +2,14 @@
 
 JarvisType is a [Lumiverse](https://lumiverse.chat/) extension for composing chat messages by voice. It provides a private working draft where users can dictate a message in multiple recordings, inspect context-aware normalization, manage a personal glossary, and approve the final text before it is sent.
 
-> **Project status:** Phase 4 test candidate (`1.2.2`). Phases 0–3 are complete; selectable post-transcription normalization, searchable connection model selection, spoken punctuation, explicit spelling, and personal glossary management are ready for hosted validation on the `development` branch.
+> **Project status:** Phase 4 test candidate (`1.2.3`). Phases 0–3 are complete; selectable post-transcription normalization, searchable connection model selection, spoken punctuation, explicit spelling, and personal glossary management are ready for hosted validation on the `development` branch.
 
 ## What JarvisType is designed to do
 
 - Use recent Lumiverse messages to improve transcription accuracy.
 - Let the user select a dedicated Lumiverse text connection and search its available models for post-transcription normalization.
 - Build one message progressively across multiple recordings.
-- Append each new **Record Message** transcription to the current draft.
+- Review and accept or reject every **Record Message** transcription before it can enter the current draft.
 - Interpret separate **Record Edit** recordings as editing instructions.
 - Number paragraphs for precise spoken references.
 - Show the current message and the latest diff after every change.
@@ -26,10 +26,10 @@ JarvisType is a [Lumiverse](https://lumiverse.chat/) extension for composing cha
 ```text
 Open JarvisType
       |
-Record Message ----> Append transcription to working draft
-      |                              |
-      +------------------------------+
-                                     |
+Record Message ----> Transcribe and normalize ----> Accept / Reject
+                                                       |
+                                              Append accepted segment
+                                                       |
 Record Edit ------> Transcribe -> Interpret intent -> Validate patch
                                                     |
                                              Show draft + diff

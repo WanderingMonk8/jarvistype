@@ -78,6 +78,10 @@ Verified on the hosted Lumiverse installation: accessible text connections were 
 
 ### Test 4: Explicit spelling, casing, and automatic learning
 
+**Status:** REMOTE-PASS — 2026-10-16
+
+Verified on the hosted Lumiverse installation: the spelled letters and pronunciation cue produced one correctly capitalized `Caesar`, the term was absent before confirmation, acceptance appended the segment once and learned the entry visibly, and repeating the accepted spelling reused the existing glossary entry without duplication.
+
 1. Record: “Write capitalized C-A-E-S-A-R Caesar period”.
 2. Confirm the proposal contains exactly one `Caesar` for the spelled occurrence and does not duplicate the pronunciation cue.
 3. Before accepting, inspect the glossary and confirm `Caesar` is absent.

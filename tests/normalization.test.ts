@@ -33,6 +33,20 @@ test('collapses explicit spelling, obeys casing, and creates a learning candidat
     normalizeDeterministically('Write capitalized C A E S A R, Caesar period', []).text,
     'Write Caesar.',
   )
+  assert.equal(
+    normalizeDeterministically('Write capitalized P-I-P dash B-O-Y Pip-Boy period', []).text,
+    'Write Pip-Boy.',
+  )
+})
+
+test('collapses guarded compact spelling emitted by speech-to-text', () => {
+  const result = normalizeDeterministically('Write, capitalize PIP-Boy, Pip-Boy, period.', [])
+  assert.equal(result.text, 'Write, Pip-Boy.')
+  assert.deepEqual(result.learningCandidates, [{ canonical: 'Pip-Boy', spokenVariant: 'PIP-Boy' }])
+  assert.equal(
+    normalizeDeterministically('Please capitalize API-client without a pronunciation cue', []).text,
+    'Please capitalize API-client without a pronunciation cue',
+  )
 })
 
 test('uses glossary variants without paraphrasing surrounding content', () => {

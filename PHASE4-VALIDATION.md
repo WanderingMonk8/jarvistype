@@ -4,7 +4,7 @@
 
 Phase 4 adds bounded post-transcription context normalization, spoken punctuation, explicit spelling and casing, per-user glossary learning and maintenance, visible review, and reversible glossary changes.
 
-Current candidate version: `1.2.0`
+Current candidate version: `1.2.1`
 
 ## Platform decision
 
@@ -31,7 +31,7 @@ Current candidate version: `1.2.0`
 | F4-08 | Draft and chat safety                  | LOCAL-PASS | Version and active-chat checks guard normalization and confirmation; rejection leaves the draft unchanged.                |
 | F4-09 | Privacy disclosure                     | LOCAL-PASS | Drawer states exactly which data goes to Lumiverse generation and that STT receives no added context.                     |
 | F4-10 | Searchable normalization dispatch      | LOCAL-PASS | Settings use Lumiverse's connection-aware searchable model picker and pass the selected connection ID and model override. |
-| F4-11 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 36 unit tests, both builds, and package validation pass.                                 |
+| F4-11 | Automated quality gate                 | LOCAL-PASS | Formatting, lint, strict typing, 37 unit tests, both builds, and package validation pass.                                 |
 | F4-12 | Hosted Lumiverse verification          | PENDING    | Run the sequence below on the hosted installation.                                                                        |
 
 ## Hosted verification sequence
@@ -90,6 +90,8 @@ Verified on the hosted Lumiverse installation: the spelled letters and pronuncia
 6. Repeat the spelling, accept it, and confirm the same entry is reused rather than duplicated.
 
 ### Test 5: Casing and hyphenation variants
+
+**Status:** PARTIAL — 2026-10-16. All-caps `NASA` passed and was accepted; lowercase `cat` passed and was rejected without learning. The initial hyphenation attempt exposed realistic STT compaction (`PIP-Boy, Pip-Boy`) that was not recognized as explicit spelling. Candidate `1.2.1` adds guarded compact-form recognition and separator-preserving casing; Part C requires a focused retest.
 
 1. Record and review an all-caps spelling such as “all caps N-A-S-A”. Confirm the candidate uses `NASA`.
 2. Record and review a lowercase spelling such as “lowercase C-A-T”. Confirm the candidate uses `cat`.

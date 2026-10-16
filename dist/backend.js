@@ -685,27 +685,48 @@ function normalizeDeterministically(raw, glossary) {
 function replaceExplicitSpelling(input) {
   const learningCandidates = [];
   const ambiguities = [];
-  const pattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash)\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*))?/gi;
-  const text = input.replace(
-    pattern,
+  const separatedPattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash)\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*))?/gi;
+  let text = input.replace(
+    separatedPattern,
     (whole, casing, spoken, cue) => {
-      const letters = spoken.replace(/\bdash\b/gi, "-").match(/[A-Za-z]/g)?.join("") ?? "";
+      const letters = extractLetters(spoken);
       if (letters.length < 3) return whole;
-      let canonical = cue && cue.replace(/[-']/g, "").toLowerCase() === letters.toLowerCase() ? cue : letters;
-      if (casing) {
-        const normalized = casing.toLowerCase();
-        if (normalized === "all caps" || normalized === "uppercase")
-          canonical = letters.toUpperCase();
-        else if (normalized === "lowercase") canonical = letters.toLowerCase();
-        else canonical = letters[0].toUpperCase() + letters.slice(1).toLowerCase();
-      } else if (!cue) {
+      const matchingCue = cueMatchesLetters(cue, letters) ? cue : void 0;
+      const canonical = applySpellingCasing(matchingCue ?? letters, casing);
+      if (!casing && !matchingCue) {
         ambiguities.push(`Confirm the casing of \u201C${letters}\u201D.`);
       }
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
       return canonical;
     }
   );
+  const compactHyphenatedPattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)((?:[A-Za-z]{2,}-)+[A-Za-z]{2,})\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*)/gi;
+  text = text.replace(
+    compactHyphenatedPattern,
+    (whole, casing, spoken, cue) => {
+      const letters = extractLetters(spoken);
+      if (!/[A-Z]{2,}/.test(spoken) || !cueMatchesLetters(cue, letters)) return whole;
+      const canonical = applySpellingCasing(cue, casing);
+      learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
+      return canonical;
+    }
+  );
   return { text, learningCandidates, ambiguities };
+}
+function extractLetters(value) {
+  return value.replace(/\bdash\b/gi, "-").match(/[A-Za-z]/g)?.join("") ?? "";
+}
+function cueMatchesLetters(cue, letters) {
+  return Boolean(cue && cue.replace(/[-']/g, "").toLowerCase() === letters.toLowerCase());
+}
+function applySpellingCasing(value, casing) {
+  if (!casing) return value;
+  const normalized = casing.toLowerCase();
+  if (normalized === "all caps" || normalized === "uppercase") return value.toUpperCase();
+  if (normalized === "lowercase") return value.toLowerCase();
+  return value.split(/([-'])/).map(
+    (part) => part === "-" || part === "'" ? part : `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`
+  ).join("");
 }
 function cleanupPunctuationSpacing(value) {
   return value.replace(/[ \t]+([,.;:!?)\]])/g, "$1").replace(/([([])\s+/g, "$1").replace(/[,;:]\s*([.!?])/g, "$1").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").trim();
@@ -716,7 +737,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 5;
-var APP_VERSION = "1.2.0";
+var APP_VERSION = "1.2.1";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts

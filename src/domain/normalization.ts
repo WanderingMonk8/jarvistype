@@ -94,33 +94,64 @@ function replaceExplicitSpelling(
 ): Pick<DeterministicNormalization, 'text' | 'learningCandidates' | 'ambiguities'> {
   const learningCandidates: SpellingLearningCandidate[] = []
   const ambiguities: string[] = []
-  const pattern =
+  const separatedPattern =
     /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash)\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*))?/gi
-  const text = input.replace(
-    pattern,
+  let text = input.replace(
+    separatedPattern,
     (whole, casing: string | undefined, spoken: string, cue: string | undefined) => {
-      const letters =
-        spoken
-          .replace(/\bdash\b/gi, '-')
-          .match(/[A-Za-z]/g)
-          ?.join('') ?? ''
+      const letters = extractLetters(spoken)
       if (letters.length < 3) return whole
-      let canonical =
-        cue && cue.replace(/[-']/g, '').toLowerCase() === letters.toLowerCase() ? cue : letters
-      if (casing) {
-        const normalized = casing.toLowerCase()
-        if (normalized === 'all caps' || normalized === 'uppercase')
-          canonical = letters.toUpperCase()
-        else if (normalized === 'lowercase') canonical = letters.toLowerCase()
-        else canonical = letters[0]!.toUpperCase() + letters.slice(1).toLowerCase()
-      } else if (!cue) {
+      const matchingCue = cueMatchesLetters(cue, letters) ? cue : undefined
+      const canonical = applySpellingCasing(matchingCue ?? letters, casing)
+      if (!casing && !matchingCue) {
         ambiguities.push(`Confirm the casing of “${letters}”.`)
       }
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
       return canonical
     },
   )
+
+  const compactHyphenatedPattern =
+    /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)((?:[A-Za-z]{2,}-)+[A-Za-z]{2,})\s*[,;:]?\s+([A-Za-z][A-Za-z'-]*)/gi
+  text = text.replace(
+    compactHyphenatedPattern,
+    (whole, casing: string | undefined, spoken: string, cue: string) => {
+      const letters = extractLetters(spoken)
+      if (!/[A-Z]{2,}/.test(spoken) || !cueMatchesLetters(cue, letters)) return whole
+      const canonical = applySpellingCasing(cue, casing)
+      learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
+      return canonical
+    },
+  )
   return { text, learningCandidates, ambiguities }
+}
+
+function extractLetters(value: string): string {
+  return (
+    value
+      .replace(/\bdash\b/gi, '-')
+      .match(/[A-Za-z]/g)
+      ?.join('') ?? ''
+  )
+}
+
+function cueMatchesLetters(cue: string | undefined, letters: string): cue is string {
+  return Boolean(cue && cue.replace(/[-']/g, '').toLowerCase() === letters.toLowerCase())
+}
+
+function applySpellingCasing(value: string, casing: string | undefined): string {
+  if (!casing) return value
+  const normalized = casing.toLowerCase()
+  if (normalized === 'all caps' || normalized === 'uppercase') return value.toUpperCase()
+  if (normalized === 'lowercase') return value.toLowerCase()
+  return value
+    .split(/([-'])/)
+    .map((part) =>
+      part === '-' || part === "'"
+        ? part
+        : `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`,
+    )
+    .join('')
 }
 
 function cleanupPunctuationSpacing(value: string): string {

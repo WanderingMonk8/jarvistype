@@ -50,7 +50,9 @@ The hosted retest confirmed upgrade preservation, toolbar and drawer launch path
 
 ### Test 2: Microphone privacy and terminal cleanup
 
-**Status:** PENDING
+**Status:** REMOTE-PASS — October 17, 2026, version `1.6.7` through commit `a40f0a8`
+
+The hosted test confirmed textual recording state, cancellation without mutation, capture cleanup on floating-workspace close, edit-capture cleanup on chat switch, reload cleanup, safe microphone-permission revocation, absence of late transcript/proposal/segment/glossary mutations, and successful recording after permission restoration.
 
 1. Start recording from a direct **Record Message** action and confirm the visible recording state includes text as well as styling.
 2. Cancel during capture and confirm no proposal, segment, glossary entry, or draft mutation appears.

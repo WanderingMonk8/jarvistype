@@ -816,7 +816,7 @@ Move the complete composition workflow into a minimal floating surface near the 
 
 ## Phase 7: Release-candidate hardening
 
-In progress as of October 17, 2026. Candidate `1.6.2` includes privacy-safe diagnostic references and redacted provider failures. It corrects the `1.6.0` startup regression caused by transferring the composer before control discovery completed and the `1.6.1` cross-platform scrolling defect by using one workspace scroll owner, visual-viewport sizing, and viewport position clamping. The complete local quality gate passes with 66 automated tests. Hosted accessibility, compatibility, performance, and safe-send verification remains open in `PHASE7-VALIDATION.md`.
+In progress as of October 17, 2026. Candidate `1.6.3` includes privacy-safe diagnostic references and redacted provider failures. It corrects the `1.6.0` startup regression caused by transferring the composer before control discovery completed. After hosted `1.6.2` testing showed that a nested workspace scroller remained clipped on both desktop and mobile, `1.6.3` assigns scrolling directly to the Lumiverse-owned widget root, keeps its header sticky, follows the visual viewport, and clamps the widget onscreen. The complete local quality gate passes with 66 automated tests. Hosted accessibility, compatibility, performance, and safe-send verification remains open in `PHASE7-VALIDATION.md`.
 
 ### Objective
 

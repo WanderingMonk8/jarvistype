@@ -23,7 +23,7 @@ for (const entry of [manifest.entry_backend, manifest.entry_frontend]) {
   await access(entry)
 }
 
-if (manifest.name !== 'JarvisType' || manifest.version !== '1.6.2') {
+if (manifest.name !== 'JarvisType' || manifest.version !== '1.6.3') {
   throw new Error('Phase 7 manifest name and version are invalid')
 }
 

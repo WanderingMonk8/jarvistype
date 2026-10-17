@@ -195,6 +195,19 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     chromeless: true,
     touchScrollMode: 'native',
   })
+  floatingWidget.root.classList.add('jt-floating-host')
+  floatingWidget.root.tabIndex = 0
+  floatingWidget.root.setAttribute('aria-label', 'Scrollable JarvisType workspace')
+  floatingWidget.root.style.boxSizing = 'border-box'
+  floatingWidget.root.style.width = '100%'
+  floatingWidget.root.style.height = '100%'
+  floatingWidget.root.style.minHeight = '0'
+  floatingWidget.root.style.overflowX = 'hidden'
+  floatingWidget.root.style.setProperty('overflow-y', 'auto', 'important')
+  floatingWidget.root.style.overscrollBehavior = 'contain'
+  floatingWidget.root.style.touchAction = 'pan-y'
+  floatingWidget.root.style.scrollbarGutter = 'stable'
+  floatingWidget.root.style.setProperty('-webkit-overflow-scrolling', 'touch')
   floatingWidget.root.innerHTML = floatingMarkup()
   floatingWidget.setVisible(false)
 
@@ -2172,10 +2185,11 @@ function shellMarkup(): string {
       .jt-glossary-row { display: grid; gap: .35rem; padding: .55rem; border-radius: .45rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-wrap: anywhere; }
       .jt-launch { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: center; padding: .8rem; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: .75rem; }
       .jt-launch button { font-weight: 700; }
-      .jt-floating { box-sizing: border-box; display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100%; min-width: 0; min-height: 0; max-height: 100%; overflow: hidden; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: .9rem; background: var(--background, #171717); color: var(--foreground, inherit); box-shadow: 0 18px 55px rgb(0 0 0 / .38); }
-      .jt-floating__bar { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .55rem .7rem; border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent); cursor: move; }
+      .jt-floating-host { scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; }
+      .jt-floating { box-sizing: border-box; display: grid; grid-template-rows: auto auto; width: 100%; min-width: 0; min-height: 100%; overflow: visible; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: .9rem; background: var(--background, #171717); color: var(--foreground, inherit); box-shadow: 0 18px 55px rgb(0 0 0 / .38); }
+      .jt-floating__bar { position: sticky; z-index: 10; top: 0; display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .55rem .7rem; border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent); background: var(--background, #171717); cursor: move; }
       .jt-floating__bar h2 { font-size: 1rem; }
-      .jt-floating__body { min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+      .jt-floating__body { min-height: 0; overflow: visible; }
       .jt-floating__body > .jt-shell__card { margin: .75rem; }
       .jt-floating__tools { display: grid; gap: .65rem; padding: 0 .75rem .75rem; }
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }

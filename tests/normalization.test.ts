@@ -174,6 +174,25 @@ test('drops a provider period attached to a closing quote command after terminal
   assert.equal(normalizeDeterministically('quote Good morning quote.', []).text, '“Good morning”.')
 })
 
+test('prunes provider punctuation attached to every spoken command family', () => {
+  assert.equal(normalizeDeterministically('Hello comma.', []).text, 'Hello,')
+  assert.equal(normalizeDeterministically('Ready question mark.', []).text, 'Ready?')
+  assert.equal(
+    normalizeDeterministically('First period. new paragraph. Second period.', []).text,
+    'First.\n\nSecond.',
+  )
+  assert.equal(
+    normalizeDeterministically('Alpha open parenthesis. aside period close parenthesis.', []).text,
+    'Alpha (aside.)',
+  )
+  assert.equal(
+    normalizeDeterministically('Alpha open bracket. beta close bracket.', []).text,
+    'Alpha [beta].',
+  )
+  assert.equal(normalizeDeterministically('Use punctuation colon.', []).text, 'Use:')
+  assert.equal(normalizeDeterministically('Use punctuation open quote.', []).text, 'Use “')
+})
+
 test('recovers a standalone phonetic new-paragraph command without changing natural prose', () => {
   assert.equal(
     recoverHighConfidenceContextualCommands(

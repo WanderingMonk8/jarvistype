@@ -56,25 +56,25 @@ export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
 ] as const
 
 const PUNCTUATION: Array<[RegExp, string, string]> = [
-  [/\bnew paragraph\b[.,;:!?]?/gi, '\n\n', 'new paragraph'],
-  [/\bnew line\b[.,;:!?]?/gi, '\n', 'new line'],
-  [/\bopen (?:parenthesis|paren)\b/gi, '(', 'open parenthesis'],
-  [/\bclose (?:parenthesis|paren)\b/gi, ')', 'close parenthesis'],
-  [/\bopen bracket\b/gi, '[', 'open bracket'],
-  [/\bclose bracket\b/gi, ']', 'close bracket'],
-  [/\bquestion mark\b/gi, '?', 'question mark'],
-  [/\bexclamation (?:mark|point)\b/gi, '!', 'exclamation mark'],
-  [/\bsemi[ -]?colon\b/gi, ';', 'semicolon'],
-  [/\bcolon\b/gi, ':', 'colon'],
-  [/\bcomma\b/gi, ',', 'comma'],
-  [/\bfull stop\b/gi, '.', 'period'],
-  [/\bperiod\b/gi, '.', 'period'],
-  [/\b(?:ellipsis|dot dot dot|three dots)\b/gi, '…', 'ellipsis'],
-  [/\bem dash\b/gi, '—', 'em dash'],
-  [/\ben dash\b/gi, '–', 'en dash'],
-  [/\bhyphen\b/gi, '-', 'hyphen'],
-  [/\bdash\b/gi, '—', 'em dash'],
-  [/\bapostrophe\b/gi, '’', 'apostrophe'],
+  [/\bnew paragraph\b([.,;:!?…—–-]*)/gi, '\n\n', 'new paragraph'],
+  [/\bnew line\b([.,;:!?…—–-]*)/gi, '\n', 'new line'],
+  [/\bopen (?:parenthesis|paren)\b([.,;:!?…—–-]*)/gi, '(', 'open parenthesis'],
+  [/\bclose (?:parenthesis|paren)\b([.,;:!?…—–-]*)/gi, ')', 'close parenthesis'],
+  [/\bopen bracket\b([.,;:!?…—–-]*)/gi, '[', 'open bracket'],
+  [/\bclose bracket\b([.,;:!?…—–-]*)/gi, ']', 'close bracket'],
+  [/\bquestion mark\b([.,;:!?…—–-]*)/gi, '?', 'question mark'],
+  [/\bexclamation (?:mark|point)\b([.,;:!?…—–-]*)/gi, '!', 'exclamation mark'],
+  [/\bsemi[ -]?colon\b([.,;:!?…—–-]*)/gi, ';', 'semicolon'],
+  [/\bcolon\b([.,;:!?…—–-]*)/gi, ':', 'colon'],
+  [/\bcomma\b([.,;:!?…—–-]*)/gi, ',', 'comma'],
+  [/\bfull stop\b([.,;:!?…—–-]*)/gi, '.', 'period'],
+  [/\bperiod\b([.,;:!?…—–-]*)/gi, '.', 'period'],
+  [/\b(?:ellipsis|dot dot dot|three dots)\b([.,;:!?…—–-]*)/gi, '…', 'ellipsis'],
+  [/\bem dash\b([.,;:!?…—–-]*)/gi, '—', 'em dash'],
+  [/\ben dash\b([.,;:!?…—–-]*)/gi, '–', 'en dash'],
+  [/\bhyphen\b([.,;:!?…—–-]*)/gi, '-', 'hyphen'],
+  [/\bdash\b([.,;:!?…—–-]*)/gi, '—', 'em dash'],
+  [/\bapostrophe\b([.,;:!?…—–-]*)/gi, '’', 'apostrophe'],
 ]
 
 const SPOKEN_PUNCTUATION_TERM_SOURCE =
@@ -151,7 +151,11 @@ export function normalizeDeterministically(
 
   for (const [pattern, replacement, reason] of PUNCTUATION) {
     const count = text.match(pattern)?.length ?? 0
-    const next = text.replace(pattern, replacement)
+    const next = text.replace(
+      pattern,
+      (_whole: string, attachedPunctuation: string, offset: number) =>
+        `${replacement}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`,
+    )
     if (next !== text) reasons.push(reason)
     for (let index = 0; index < count; index += 1) authoritativePunctuationMarks.push(replacement)
     text = next
@@ -229,13 +233,28 @@ function replaceExplicitPunctuationCommands(input: string): {
     `\\b(?:insert|punctuation|command)\\s+(${SPOKEN_PUNCTUATION_TERM_SOURCE})\\b`,
     'gi',
   )
-  const text = input.replace(pattern, (_, phrase: string) => {
-    const command = punctuationCommand(phrase)
-    if (!command) return phrase
-    marks.push(command.mark)
-    reasons.push(command.reason)
-    return command.mark
-  })
+  const text = input.replace(
+    new RegExp(`${pattern.source}([.,;:!?…—–-]*)`, pattern.flags),
+    (_whole: string, phrase: string, attachedPunctuation: string, offset: number) => {
+      const command = punctuationCommand(phrase)
+      if (!command) return phrase
+      marks.push(command.mark)
+      reasons.push(command.reason)
+      const normalizedPhrase = phrase.toLocaleLowerCase().replace(/^semi[ -]?colon$/, 'semicolon')
+      const closingReason =
+        /^(?:close (?:parenthesis|paren|bracket|quote|single quote)|quote|single quote)$/u.test(
+          normalizedPhrase,
+        )
+          ? command.reason
+          : ''
+      return `${command.mark}${punctuationAfterSpokenCommand(
+        input,
+        offset,
+        closingReason,
+        attachedPunctuation,
+      )}`
+    },
+  )
   return { text, marks, reasons }
 }
 
@@ -288,7 +307,7 @@ function replaceSpokenQuotationCommands(
       marks.push(mark)
       reasons.push(reason)
       if (opening) return `${generatedOpeningMarker}${mark}`
-      return `${mark}${punctuationAfterGeneratedClosingQuote(text, offset, attachedPunctuation)}`
+      return `${mark}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`
     })
   }
   replaceFixed(/\bopen single quote\b([.,;:!?…—–-]*)/gi, '‘', 'single quote', true)
@@ -309,7 +328,7 @@ function replaceSpokenQuotationCommands(
       reasons.push(reason)
       return isOpening
         ? `${generatedOpeningMarker}${mark}`
-        : `${mark}${punctuationAfterGeneratedClosingQuote(text, offset, attachedPunctuation)}`
+        : `${mark}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`
     })
   }
   replacePaired(/\bsingle quote\b([.,;:!?…—–-]*)/gi, '‘', '’', 'single quote')
@@ -320,13 +339,25 @@ function replaceSpokenQuotationCommands(
   return { text, marks, reasons }
 }
 
-function punctuationAfterGeneratedClosingQuote(
+function punctuationAfterSpokenCommand(
   source: string,
   commandOffset: number,
+  commandReason: string,
   attachedPunctuation: string,
 ): string {
-  const quotedContentAlreadyEndsSentence = /[.?!…]$/u.test(source.slice(0, commandOffset).trimEnd())
-  if (quotedContentAlreadyEndsSentence && /^\.+$/u.test(attachedPunctuation)) return ''
+  const isClosingDelimiter =
+    commandReason === 'quote' ||
+    commandReason === 'single quote' ||
+    commandReason === 'close parenthesis' ||
+    commandReason === 'close bracket'
+  if (!isClosingDelimiter) return ''
+  const contentBeforeCommand = source.slice(0, commandOffset).trimEnd()
+  const contentAlreadyEndsSentence =
+    /[.?!…]$/u.test(contentBeforeCommand) ||
+    /\b(?:period|full stop|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots)$/iu.test(
+      contentBeforeCommand,
+    )
+  if (contentAlreadyEndsSentence && /^\.+$/u.test(attachedPunctuation)) return ''
   return attachedPunctuation
 }
 

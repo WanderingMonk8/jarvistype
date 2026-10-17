@@ -2062,9 +2062,10 @@ function shellMarkup() {
       .jt-shell__warning { padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
       .jt-draft-editor { width: 100%; min-height: 11rem; resize: vertical; border-radius: .55rem; padding: .75rem; font: inherit; line-height: 1.5; }
       .jt-draft-meta { font-size: .78rem; opacity: .75; overflow-wrap: anywhere; }
-      .jt-paragraphs { display: grid; gap: .25rem; max-height: min(18rem, 34vh); padding: .6rem; border-radius: .5rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+      .jt-paragraphs { display: block; max-height: min(18rem, 34vh); padding: .6rem; border-radius: .5rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
       .jt-paragraphs:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
-      .jt-paragraph-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: .5rem; min-height: 1.5rem; }
+      .jt-paragraph-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: .5rem; min-width: 0; min-height: 1.5rem; align-items: start; line-height: 1.5; }
+      .jt-paragraph-row + .jt-paragraph-row { margin-top: .25rem; }
       .jt-paragraph-row--separator { min-height: .8rem; }
       .jt-paragraph-number { text-align: right; opacity: .6; user-select: none; }
       .jt-paragraph-text { white-space: pre-wrap; overflow-wrap: anywhere; }

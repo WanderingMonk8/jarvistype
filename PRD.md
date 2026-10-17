@@ -320,7 +320,7 @@ The user is not required to dictate a complete message in one session.
 
 **FR-PUNC-006:** Provider-supplied punctuation shall take precedence. Pause or timing metadata may strengthen punctuation intent when the selected transcription provider exposes it, but correct handling shall not depend on timing metadata being available.
 
-A bare spoken terminal-punctuation command immediately following provider-supplied `.`, `?`, `!`, or `…` shall be treated as redundant rather than appended as a second mark. An explicit cue such as `insert`, `punctuation`, or `command` may still request an intentional additional mark.
+A bare spoken `period` or `full stop` immediately following provider-supplied `.`, `?`, `!`, or `…` shall be treated as redundant rather than appended as a second mark. Other bare terminal commands shall be deduplicated when they repeat the same provider mark, while cross-type combinations such as `?!` remain available. An explicit cue such as `insert`, `punctuation`, or `command` may still request an intentional additional mark. A period following a closed parenthetical may terminate the outer sentence and shall not be suppressed by punctuation inside the parentheses.
 
 **FR-PUNC-007:** Every spoken punctuation and layout command shall have an explicit literal form using `literal`, `the word`, `the words`, or `the phrase`. Common noun and verb contexts, including articles, descriptive uses, and punctuation terminology, shall remain literal without requiring an escape phrase.
 

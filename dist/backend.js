@@ -1551,10 +1551,7 @@ function removeRedundantProviderTerminalMarks(input) {
   return input.replace(/([.?!…][”’"']?)\s+\.(?=\s|[”’"']|$)/gu, "$1");
 }
 function removeRedundantTerminalPunctuationCommands(input) {
-  return input.replace(
-    /([.?!…][”’"']?)\s+(?:period|full stop|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots)\b[.,]?/giu,
-    "$1"
-  );
+  return input.replace(/([.?!…][”’"']?)\s+(?:period|full stop)\b[.,]?/giu, "$1").replace(/(\?[”’"']?)\s+question mark\b[.,]?/giu, "$1").replace(/(![”’"']?)\s+exclamation (?:mark|point)\b[.,]?/giu, "$1").replace(/(…[”’"']?)\s+(?:ellipsis|dot dot dot|three dots)\b[.,]?/giu, "$1");
 }
 function replaceExplicitPunctuationCommands(input) {
   const marks = [];

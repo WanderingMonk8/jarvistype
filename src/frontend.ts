@@ -68,7 +68,7 @@ export const COMMAND_GROUPS = [
       ['Record Edit', 'Record Edit, then describe a change to the existing draft.'],
       [
         'Spoken punctuation',
-        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “hyphen,” “dash,” “en dash,” “em dash,” “quote” at both ends of a quotation, “single quote” at both ends of a single quotation, “new line,” or “new paragraph.”',
+        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “quote” at both ends of a quotation, “single quote” at both ends of a single quotation, “new line,” or “new paragraph.”',
       ],
       [
         'Literal punctuation word',

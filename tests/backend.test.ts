@@ -20,6 +20,7 @@ let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
 let generationReturnsRawTranscript = false
 let generationNormalizedText: string | null = null
+let generationCommandDecisions: unknown[] = []
 let editPlanResponse: unknown = null
 
 const spindleMock = {
@@ -101,6 +102,7 @@ const spindleMock = {
           normalizedText: generationReturnsRawTranscript
             ? (input.rawTranscript ?? '')
             : (generationNormalizedText ?? input.candidate ?? ''),
+          commandDecisions: generationCommandDecisions,
         }),
       })
     },
@@ -130,6 +132,7 @@ test.beforeEach(() => {
   appendShouldFail = false
   generationReturnsRawTranscript = false
   generationNormalizedText = null
+  generationCommandDecisions = []
   editPlanResponse = null
 })
 
@@ -654,6 +657,73 @@ test('re-applies deterministic commands when contextual output returns the raw p
     assert.equal(response.proposal.rawTranscript, 'Use the word period here, period.')
     assert.equal(response.proposal.candidateText, 'Use period here.')
     assert.equal(response.snapshot, undefined)
+  }
+})
+
+test('contextually recovers a standout spoken command without prior chat or draft context', async () => {
+  const userId = 'contextual-command-user'
+  const chatId = 'contextual-command-chat'
+  activeChatId = chatId
+  generationNormalizedText =
+    'That completes the introduction new paragraph Our second concern is cost.'
+  generationCommandDecisions = [
+    {
+      sourceText: 'new pair of graph',
+      interpretation: 'command',
+      command: 'new paragraph',
+    },
+  ]
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'contextual-command-segment',
+      0,
+      'That completes the introduction new pair of graph Our second concern is cost period',
+    ),
+    userId,
+  )
+
+  assert.equal(generationRequests.length, 1)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(
+      response.proposal.candidateText,
+      'That completes the introduction\n\nOur second concern is cost.',
+    )
+    assert.equal(response.proposal.contextualModelUsed, true)
+    assert.ok(response.proposal.reasons.includes('contextual spoken command: new paragraph'))
+  }
+
+  const systemPrompt = generationRequests[0]?.messages?.[0]?.content ?? ''
+  assert.match(systemPrompt, /natural noun, verb, descriptive/)
+  assert.match(systemPrompt, /commandDecisions/)
+})
+
+test('rejects contextual command decisions that do not quote the raw transcript', async () => {
+  const userId = 'invented-command-user'
+  const chatId = 'invented-command-chat'
+  activeChatId = chatId
+  generationNormalizedText = 'Ordinary prose new paragraph More prose'
+  generationCommandDecisions = [
+    {
+      sourceText: 'words that were never spoken',
+      interpretation: 'command',
+      command: 'new paragraph',
+    },
+  ]
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'invented-command-segment', 0, 'Ordinary prose period'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.candidateText, 'Ordinary prose.')
+    assert.equal(response.proposal.contextualModelUsed, false)
   }
 })
 

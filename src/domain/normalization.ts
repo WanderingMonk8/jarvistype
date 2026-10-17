@@ -15,6 +15,41 @@ export interface DeterministicNormalization {
   authoritativePunctuationMarks: string[]
 }
 
+export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
+  'new paragraph',
+  'new line',
+  'open parenthesis',
+  'open paren',
+  'close parenthesis',
+  'close paren',
+  'open bracket',
+  'close bracket',
+  'question mark',
+  'exclamation mark',
+  'exclamation point',
+  'semicolon',
+  'semi colon',
+  'semi-colon',
+  'comma',
+  'colon',
+  'full stop',
+  'period',
+  'ellipsis',
+  'dot dot dot',
+  'three dots',
+  'em dash',
+  'en dash',
+  'hyphen',
+  'dash',
+  'apostrophe',
+  'open quote',
+  'close quote',
+  'quote',
+  'open single quote',
+  'close single quote',
+  'single quote',
+] as const
+
 const PUNCTUATION: Array<[RegExp, string, string]> = [
   [/\bnew paragraph\b[.,;:!?]?/gi, '\n\n', 'new paragraph'],
   [/\bnew line\b[.,;:!?]?/gi, '\n', 'new line'],

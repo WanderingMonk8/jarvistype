@@ -322,6 +322,8 @@ The user is not required to dictate a complete message in one session.
 
 **FR-PUNC-008:** Explicit `insert`, `punctuation`, or `command` cues shall activate any supported punctuation or layout mark. Bare `quote` and `single quote` shall activate only as a complete even pair; unmatched or odd bare occurrences remain literal. Marks produced by deterministic commands shall be authoritative and cannot be removed by contextual normalization.
 
+**FR-PUNC-009:** When contextual normalization is enabled, every completed **Record Message** transcript shall receive a conservative contextual command-detection pass, even when no prior chat, draft, or glossary context exists. The model may recover a likely supported command from a minor transcription error only by identifying an exact source span from the raw transcript and returning an allow-listed canonical command. Natural or uncertain usage shall remain literal, all model decisions shall be validated before execution, and the resulting segment shall still require user approval.
+
 ### 7.8 Explicit spelling
 
 **FR-SPELL-001:** During **Record Message**, JarvisType shall recognize an explicitly separated sequence of spoken letters as the spelling of one intended word.

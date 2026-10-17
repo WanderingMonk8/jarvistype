@@ -2240,6 +2240,7 @@ function shellMarkup(): string {
         <div class="jt-actions" aria-label="Editing voice controls">
           <button type="button" data-record-edit disabled>Record Edit</button>
           <button type="button" data-cancel-edit-recording hidden>Cancel Edit Recording</button>
+          <button type="button" data-send disabled>Confirm &amp; Send</button>
         </div>
         <div class="jt-actions">
           <button type="button" data-undo disabled>Undo</button>
@@ -2258,10 +2259,6 @@ function shellMarkup(): string {
           <h4 id="jt-history-title">Draft history</h4>
           <ol class="jt-history" data-history-list></ol>
         </section>
-
-        <div class="jt-actions">
-          <button type="button" data-send disabled>Confirm &amp; Send</button>
-        </div>
         </div>
       </section>
       </div>

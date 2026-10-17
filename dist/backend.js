@@ -1299,6 +1299,33 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
   }
   return references;
 }
+function correctFromConversationReferences(text, references, protectedTerms = []) {
+  const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()));
+  const referenceByKey = /* @__PURE__ */ new Map();
+  for (const reference of references) {
+    if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(reference)) continue;
+    referenceByKey.set(reference.toLocaleLowerCase(), reference);
+  }
+  const correctedTerms = [];
+  const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard) => {
+    const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? "";
+    const base = possessive ? heard.slice(0, -possessive.length) : heard;
+    const baseKey = base.toLocaleLowerCase();
+    if (base.length < 4 || !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
+      return heard;
+    const candidates = [...referenceByKey.values()].filter(
+      (reference) => reference.charAt(0).toLocaleLowerCase() === base.charAt(0).toLocaleLowerCase() && Math.abs(reference.length - base.length) <= 1 && editDistanceAtMostOne(baseKey, reference.toLocaleLowerCase())
+    );
+    const uniqueCandidates = [
+      ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values()
+    ];
+    if (uniqueCandidates.length !== 1) return heard;
+    const canonical = uniqueCandidates[0];
+    correctedTerms.push({ heard: base, canonical });
+    return `${canonical}${possessive}`;
+  });
+  return { text: correctedText, correctedTerms };
+}
 function eligibleCount(source) {
   return source.filter(isEligible).length;
 }
@@ -1349,6 +1376,33 @@ var COMMON_CAPITALIZED_WORDS = /* @__PURE__ */ new Set([
 function isReferenceTerm(term) {
   if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(term.toLocaleLowerCase())) return false;
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1));
+}
+function editDistanceAtMostOne(left, right) {
+  if (left === right) return true;
+  if (Math.abs(left.length - right.length) > 1) return false;
+  if (left.length === right.length) {
+    let differences = 0;
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index] && ++differences > 1) return false;
+    }
+    return differences === 1;
+  }
+  const shorter = left.length < right.length ? left : right;
+  const longer = left.length < right.length ? right : left;
+  let shortIndex = 0;
+  let longIndex = 0;
+  let skipped = false;
+  while (shortIndex < shorter.length && longIndex < longer.length) {
+    if (shorter[shortIndex] === longer[longIndex]) {
+      shortIndex += 1;
+      longIndex += 1;
+      continue;
+    }
+    if (skipped) return false;
+    skipped = true;
+    longIndex += 1;
+  }
+  return true;
 }
 
 // src/domain/glossary.ts
@@ -2051,6 +2105,22 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
           contextualModelUsed = true;
           reasons.push("bounded conversational context");
         }
+      }
+      const referenceCorrection = correctFromConversationReferences(
+        candidateText,
+        conversationReferences,
+        [
+          ...glossary.entries.map((entry) => entry.canonical),
+          ...deterministic.learningCandidates.map((candidate) => candidate.canonical)
+        ]
+      );
+      if (referenceCorrection.text !== candidateText) {
+        candidateText = referenceCorrection.text;
+        reasons.push(
+          ...referenceCorrection.correctedTerms.map(
+            ({ heard, canonical }) => `recent conversation spelling: ${heard} \u2192 ${canonical}`
+          )
+        );
       }
     }
     const recoveredCommands = recoverHighConfidenceContextualCommands(candidateText);

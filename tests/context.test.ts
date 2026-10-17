@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   clampContextMessageCount,
+  correctFromConversationReferences,
   extractConversationReferences,
   selectRecentContext,
 } from '../src/domain/context'
@@ -60,5 +61,35 @@ test('extracts compact proper-name and specialized-term references from conversa
   assert.deepEqual(
     extractConversationReferences([{ role: 'user', content: 'Ordinary sentence.' }], 0),
     [],
+  )
+})
+
+test('corrects only a unique one-character proper-name match from conversation references', () => {
+  assert.deepEqual(
+    correctFromConversationReferences('Yanniko waved while Kensai picked up Kensai’s plate.', [
+      'Yaniko',
+      'Kansai',
+      'Kenji',
+      'Northern Survey',
+    ]),
+    {
+      text: 'Yaniko waved while Kansai picked up Kansai’s plate.',
+      correctedTerms: [
+        { heard: 'Yanniko', canonical: 'Yaniko' },
+        { heard: 'Kensai', canonical: 'Kansai' },
+        { heard: 'Kensai', canonical: 'Kansai' },
+      ],
+    },
+  )
+})
+
+test('leaves ambiguous, lowercase, and protected wording unchanged', () => {
+  assert.equal(
+    correctFromConversationReferences(
+      'Kensai met kansai and Yaneko.',
+      ['Kansai', 'Kensai', 'Yaniko'],
+      ['Yaneko'],
+    ).text,
+    'Kensai met kansai and Yaneko.',
   )
 })

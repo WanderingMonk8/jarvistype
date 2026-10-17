@@ -25,6 +25,11 @@ export interface ContextSelection {
   truncated: boolean
 }
 
+export interface ConversationReferenceCorrection {
+  text: string
+  correctedTerms: Array<{ heard: string; canonical: string }>
+}
+
 export function clampContextMessageCount(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_CONTEXT_MESSAGE_COUNT
   return Math.min(MAX_CONTEXT_MESSAGE_COUNT, Math.max(0, Math.trunc(value)))
@@ -115,6 +120,50 @@ export function extractConversationReferences(
   return references
 }
 
+export function correctFromConversationReferences(
+  text: string,
+  references: readonly string[],
+  protectedTerms: readonly string[] = [],
+): ConversationReferenceCorrection {
+  const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()))
+  const referenceByKey = new Map<string, string>()
+  for (const reference of references) {
+    if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(reference)) continue
+    referenceByKey.set(reference.toLocaleLowerCase(), reference)
+  }
+
+  const correctedTerms: Array<{ heard: string; canonical: string }> = []
+  const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard) => {
+    const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
+    const base = possessive ? heard.slice(0, -possessive.length) : heard
+    const baseKey = base.toLocaleLowerCase()
+    if (
+      base.length < 4 ||
+      !/^\p{Lu}/u.test(base) ||
+      protectedKeys.has(baseKey) ||
+      referenceByKey.has(baseKey)
+    )
+      return heard
+
+    const candidates = [...referenceByKey.values()].filter(
+      (reference) =>
+        reference.charAt(0).toLocaleLowerCase() === base.charAt(0).toLocaleLowerCase() &&
+        Math.abs(reference.length - base.length) <= 1 &&
+        editDistanceAtMostOne(baseKey, reference.toLocaleLowerCase()),
+    )
+    const uniqueCandidates = [
+      ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values(),
+    ]
+    if (uniqueCandidates.length !== 1) return heard
+
+    const canonical = uniqueCandidates[0]
+    correctedTerms.push({ heard: base, canonical })
+    return `${canonical}${possessive}`
+  })
+
+  return { text: correctedText, correctedTerms }
+}
+
 function eligibleCount(source: readonly ContextSourceMessage[]): number {
   return source.filter(isEligible).length
 }
@@ -182,4 +231,34 @@ const COMMON_CAPITALIZED_WORDS = new Set([
 function isReferenceTerm(term: string): boolean {
   if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(term.toLocaleLowerCase())) return false
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1))
+}
+
+function editDistanceAtMostOne(left: string, right: string): boolean {
+  if (left === right) return true
+  if (Math.abs(left.length - right.length) > 1) return false
+
+  if (left.length === right.length) {
+    let differences = 0
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index] && ++differences > 1) return false
+    }
+    return differences === 1
+  }
+
+  const shorter = left.length < right.length ? left : right
+  const longer = left.length < right.length ? right : left
+  let shortIndex = 0
+  let longIndex = 0
+  let skipped = false
+  while (shortIndex < shorter.length && longIndex < longer.length) {
+    if (shorter[shortIndex] === longer[longIndex]) {
+      shortIndex += 1
+      longIndex += 1
+      continue
+    }
+    if (skipped) return false
+    skipped = true
+    longIndex += 1
+  }
+  return true
 }

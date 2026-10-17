@@ -315,6 +315,39 @@ test('uses local command context with compact conversational spelling references
   assert.equal(JSON.stringify(prompt).includes('This draft content must not enter'), false)
 })
 
+test('uses an unambiguous recent-chat proper name when the model leaves the STT spelling unchanged', async () => {
+  const userId = 'recent-name-user'
+  const chatId = 'recent-name-chat'
+  activeChatId = chatId
+  chatMessages = [
+    {
+      role: 'assistant',
+      content:
+        'Yaniko opened her mouth. Kansai raised both hands, then Kansai offered to help with the dishes.',
+    },
+  ]
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'recent-name-segment',
+      0,
+      'And Kensai looks at me for half a second before getting up to pick up the dishes.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(
+      response.proposal.candidateText,
+      'And Kansai looks at me for half a second before getting up to pick up the dishes.',
+    )
+    assert.ok(response.proposal.reasons.includes('recent conversation spelling: Kensai → Kansai'))
+  }
+})
+
 test('blocks sending when the active chat does not own the draft', async () => {
   const userId = 'mismatch-user'
   const chatId = 'owner-chat'

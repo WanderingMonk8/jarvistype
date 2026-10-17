@@ -19,6 +19,7 @@ import {
   NORMALIZATION_RECENT_CONTEXT_CHARACTERS,
   NORMALIZATION_RECENT_MESSAGE_COUNT,
   clampContextMessageCount,
+  correctFromConversationReferences,
   extractConversationReferences,
   selectRecentContext,
 } from './domain/context'
@@ -263,6 +264,23 @@ async function handleTranscriptNormalization(
           contextualModelUsed = true
           reasons.push('bounded conversational context')
         }
+      }
+
+      const referenceCorrection = correctFromConversationReferences(
+        candidateText,
+        conversationReferences,
+        [
+          ...glossary.entries.map((entry) => entry.canonical),
+          ...deterministic.learningCandidates.map((candidate) => candidate.canonical),
+        ],
+      )
+      if (referenceCorrection.text !== candidateText) {
+        candidateText = referenceCorrection.text
+        reasons.push(
+          ...referenceCorrection.correctedTerms.map(
+            ({ heard, canonical }) => `recent conversation spelling: ${heard} → ${canonical}`,
+          ),
+        )
       }
     }
     const recoveredCommands = recoverHighConfidenceContextualCommands(candidateText)

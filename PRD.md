@@ -420,11 +420,13 @@ The user is not required to dictate a complete message in one session.
 
 **FR-UI-002:** The floating surface shall provide functional parity with the existing drawer composition workflow before any composition control is retired from the drawer.
 
-**FR-UI-003:** Parity shall include manual draft editing, paragraph numbering, message and edit recording, stop and cancel, processing status, proposal review, target selection, accept and reject, undo and conditional redo, latest diff, history, chat ownership, confirmed send, context settings, provider and model selection, glossary management, permission errors, and retry behavior.
+**FR-UI-003:** Routine-composition parity shall include manual draft editing, paragraph numbering, message and edit recording, stop and cancel, processing status, proposal review, target selection, accept and reject, undo and conditional redo, latest diff, history, chat ownership, confirmed send, command discovery, and expandable glossary management. The drawer shall retain context settings, provider and model selection, permission diagnostics, retry behavior, and permanent glossary management.
 
 **FR-UI-004:** The floating and drawer surfaces shall use one shared composer state and operation controller. They shall not create independent drafts, simultaneous recordings, duplicate proposals, or competing send operations.
 
 **FR-UI-005:** After hosted parity verification, routine composition controls shall be retired from the drawer. The drawer shall permanently retain personal-glossary management and may retain non-routine settings, privacy disclosures, and diagnostics.
+
+**Implementation status (October 16, 2026):** Hosted parity was accepted and the drawer composition workflow was retired. One composer surface is now permanently owned by the floating workspace. Closing it preserves draft and review state, cancels active capture safely, and restores focus to the invoking launcher.
 
 **FR-UI-006:** The ready view shall prioritize the numbered draft and labeled actions for **Record Message**, **Record Edit**, **Undo**, conditional **Redo**, **History**, **Commands**, and **Confirm & Send**.
 

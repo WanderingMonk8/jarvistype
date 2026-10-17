@@ -735,7 +735,7 @@ Complete semantic references, paragraph restructuring, referential wording, scop
 
 ## Phase 6.5: Floating composition surface and drawer transition
 
-Implementation candidate `1.5.0` is ready for hosted parity verification. It adds one unique JarvisType waveform-J icon across the drawer, Extras fallback, composer toolbar, launch controls, and floating header; provides an always-visible composer-toolbar launcher through Lumiverse's documented mount API; relocates the one live composer surface between drawer and floating mounts to prevent divergent state during migration; provides searchable command discovery; and synchronizes searchable glossary management in both locations. The drawer composition fallback remains in place until the hosted parity exit gate passes.
+Version `1.5.0` completed hosted parity review on October 16, 2026. It adds one unique JarvisType waveform-J icon across the drawer, Extras fallback, composer toolbar, launch controls, and floating header; provides an always-visible composer-toolbar launcher through Lumiverse's documented mount API; permanently mounts the one live composer surface in the floating workspace; provides searchable command discovery; and synchronizes searchable glossary management in both locations. Routine drawer composition controls have been retired.
 
 ### Objective
 
@@ -759,10 +759,10 @@ Move the complete composition workflow into a minimal floating surface near the 
 
 #### Shared controller and staged migration
 
-- Extract recording, proposal, draft, history, send, settings, and glossary behavior into one shared controller used by both renderers during migration.
+- Keep recording, proposal, draft, history, send, settings, and glossary behavior in one shared controller throughout the transition.
 - Forbid simultaneous recordings, duplicate proposals, divergent draft state, or duplicate sends across surfaces.
-- Keep the existing drawer composition workflow available until the parity checklist and hosted verification pass.
-- After parity, retire routine composition controls from the drawer while permanently retaining glossary management and optionally retaining non-routine settings, privacy disclosures, and diagnostics.
+- Hosted parity was accepted on October 16, 2026; the composer is now permanently mounted in the floating workspace.
+- Routine composition controls are retired from the drawer. Glossary management, non-routine settings, privacy disclosures, diagnostics, and launch controls remain there.
 
 #### Minimal state-driven composer
 
@@ -793,8 +793,8 @@ Move the complete composition workflow into a minimal floating surface near the 
 - Responsive floating composer.
 - Searchable generated command catalog.
 - Expandable floating glossary and permanent searchable drawer glossary.
-- Drawer-composition retirement migration.
-- Parity checklist and hosted verification record.
+- Completed drawer-composition retirement migration.
+- Accepted parity checklist and hosted verification record (October 16, 2026).
 
 ### Tests
 
@@ -807,10 +807,10 @@ Move the complete composition workflow into a minimal floating surface near the 
 
 ### Exit gate
 
-- The floating UI has 100% functional parity with the Phase 6 drawer workflow.
-- Hosted desktop and narrow-layout verification passes without a critical or high-severity accessibility, data-loss, privacy, or duplicate-action defect.
-- Routine user composition controls are retired from the drawer only after the parity record is complete.
-- Permanent drawer glossary management and expandable floating glossary management operate on identical state.
+- Complete: the floating UI has 100% routine-composition parity with the Phase 6 drawer workflow.
+- Complete: hosted desktop and narrow-layout review was accepted without an outstanding critical or high-severity accessibility, data-loss, privacy, or duplicate-action defect.
+- Complete: routine user composition controls are retired from the drawer after parity acceptance.
+- Complete: permanent drawer glossary management and expandable floating glossary management operate on identical state.
 
 ---
 

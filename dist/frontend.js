@@ -412,12 +412,14 @@ function setup(ctx) {
   const shellStyle = tab.root.querySelector("style");
   if (shellStyle) floatingWidget.root.prepend(shellStyle.cloneNode(true));
   const composerSurface = requireElement(tab.root, "[data-composer-surface]");
-  const drawerComposerMount = requireElement(tab.root, "[data-drawer-composer-mount]");
+  const composerBootstrap = requireElement(tab.root, "[data-composer-bootstrap]");
   const drawerOpenButton = requireElement(tab.root, "[data-open-floating]");
   const floatingComposerMount = requireElement(
     floatingWidget.root,
     "[data-floating-composer-mount]"
   );
+  floatingComposerMount.append(composerSurface);
+  composerBootstrap.remove();
   const floatingCloseButton = requireElement(
     floatingWidget.root,
     "[data-close-floating]"
@@ -1576,8 +1578,12 @@ function setup(ctx) {
     if (state.pendingProposal) rejectNormalizationProposal();
     void refreshHostState();
   };
+  let floatingLaunchReturnTarget = null;
   const openFloatingComposer = () => {
-    floatingComposerMount.append(composerSurface);
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement && !floatingWidget.root.contains(activeElement)) {
+      floatingLaunchReturnTarget = activeElement;
+    }
     floatingWidget.setVisible(true);
     void refreshHostState();
     window.setTimeout(() => editor.focus(), 0);
@@ -1586,8 +1592,13 @@ function setup(ctx) {
     if (activeRecording) {
       cancelActiveRecording("Recording cancelled because the floating composer was closed.");
     }
-    drawerComposerMount.append(composerSurface);
     floatingWidget.setVisible(false);
+    const returnTarget = floatingLaunchReturnTarget;
+    floatingLaunchReturnTarget = null;
+    window.setTimeout(() => {
+      if (returnTarget?.isConnected) returnTarget.focus();
+      else composerLauncher.focus();
+    }, 0);
   };
   disposers.push(ctx.events.on("PERMISSION_CHANGED", handlePermissionChange));
   disposers.push(ctx.events.on("CHAT_SWITCHED", handleChatSwitch));
@@ -2094,7 +2105,7 @@ function shellMarkup() {
         </div>
       </section>
 
-      <div data-drawer-composer-mount>
+      <div data-composer-bootstrap hidden>
       <section class="jt-shell__card" data-composer-surface aria-labelledby="jt-draft-title">
         <div class="jt-composer__pane jt-composer__draft-pane">
         <h3 id="jt-draft-title">Working draft</h3>

@@ -1,6 +1,6 @@
 # JarvisType Project Roadmap
 
-- **Status:** Active implementation — Phases 0–4 complete
+- **Status:** Active implementation — Phases 0–6 complete
 - **Last updated:** 2026-10-16
 - **Branch:** `development`
 - **Authority:** Execution plan derived from `PRD.md`
@@ -644,7 +644,7 @@ Deliver flexible natural-language editing while allowing only resolved, validate
 
 ## Phase 6: Advanced conversational editing and language controls
 
-Implementation candidate `1.4.4` prepared on 2026-10-16. Hosted verification remains required before this phase is marked complete. Candidate `1.4.1` clarifies that repeated exact targets must reach the explicit candidate-selection UI instead of being discarded during model interpretation. Candidate `1.4.2` deterministically maps explicit new-paragraph commands to the closed structural operation schema before model interpretation. Candidate `1.4.3` safely recovers a unique draft-scoped homophone when speech-to-text collapses a referential target and replacement to the same phrase. Candidate `1.4.4` makes explicit spelling authoritative in edit replacements before review, preventing letter-by-letter cues from entering the draft.
+Complete as of 2026-10-16. Version `1.4.4` passed the complete local quality gate and all six hosted Phase 6 verification groups on Lumiverse 1.2.5. Hosted coverage confirmed unique, ambiguous, and absent semantic targets; paragraph split, join, move, and insertion with updated ordinals and atomic undo; one-time referential wording without explanation leakage or silent persistence; full-draft, paragraph, and phrase casing with punctuation preservation; explicit edit spelling learned only after approval; and atomic multi-operation success and conflict rejection. During verification, candidates `1.4.1` through `1.4.4` corrected ambiguity routing, deterministic paragraph insertion, collapsed referential homophones, and authoritative edit spelling before final acceptance.
 
 ### Objective
 

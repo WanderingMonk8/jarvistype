@@ -1313,7 +1313,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.6";
+var APP_VERSION = "1.6.7";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts
@@ -1495,10 +1495,6 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     if (!spindle.permissions.has("chats") || !spindle.permissions.has("generation")) {
       return { kind: "error", error: "permission", session };
     }
-    const activeChat = await spindle.chats.getActive(context.userId);
-    if (!activeChat || activeChat.id !== request.chatId) {
-      return { kind: "error", error: "chat-mismatch", session };
-    }
     if (session.draftVersion !== request.expectedVersion) return { kind: "stale", session };
     const [settings, glossary, messages] = await Promise.all([
       loadSettings(context.userId),
@@ -1580,8 +1576,8 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     sendDraftError(
       request,
       context,
-      result.error === "permission" ? "PERMISSION_DENIED" : "CHAT_MISMATCH",
-      result.error === "permission" ? "Chat and generation access are required for bounded transcript normalization." : "The active chat changed before normalization completed. Nothing was appended.",
+      "PERMISSION_DENIED",
+      "Chat and generation access are required for bounded transcript normalization.",
       result.session
     );
     return;
@@ -1730,8 +1726,6 @@ async function handleEditInterpretation(request, context, activeRequest) {
     const session = await loadDraft(context.userId, request.chatId);
     if (!spindle.permissions.has("chats") || !spindle.permissions.has("generation"))
       return { error: "permission", session };
-    const activeChat = await spindle.chats.getActive(context.userId);
-    if (!activeChat || activeChat.id !== request.chatId) return { error: "chat", session };
     if (session.draftVersion !== request.expectedVersion)
       return { error: "stale", session };
     if (!session.cleanText.trim()) return { error: "empty", session };
@@ -1800,7 +1794,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
     return;
   }
   if ("error" in result) {
-    const code = result.error === "permission" ? "PERMISSION_DENIED" : result.error === "chat" ? "CHAT_MISMATCH" : result.error === "empty" ? "DRAFT_EMPTY" : result.error === "target" ? "EDIT_TARGET_UNRESOLVED" : "EDIT_INTERPRETATION_FAILED";
+    const code = result.error === "permission" ? "PERMISSION_DENIED" : result.error === "empty" ? "DRAFT_EMPTY" : result.error === "target" ? "EDIT_TARGET_UNRESOLVED" : "EDIT_INTERPRETATION_FAILED";
     const message = result.error === "target" ? `The edit target could not be resolved safely: ${result.detail}. Nothing changed.` : result.error === "interpretation" ? "The edit instruction did not produce a valid structured edit. Nothing changed." : "The edit could not be prepared because the chat, draft, or permissions changed.";
     sendDraftError(request, context, code, message, result.session);
     return;

@@ -4,7 +4,7 @@
 
 Phase 7 hardens the accepted floating-composer beta for release across recovery, privacy, security, accessibility, performance, compatibility, and exactly-once sending.
 
-Candidate version: `1.6.6`
+Candidate version: `1.6.7`
 
 Minimum supported Lumiverse version: `1.2.5`
 
@@ -34,9 +34,9 @@ Minimum supported Lumiverse version: `1.2.5`
 
 ### Test 1: Upgrade, recovery, and permanent floating ownership
 
-**Status:** PENDING RETEST — `1.6.6` chat-switch, long-draft accessibility, and punctuation fixes
+**Status:** PENDING RETEST — `1.6.7` proposal-review ownership fix
 
-1. Update the extension from `development` and confirm version `1.6.6` reports backend **Ready**. Candidates `1.6.0` through `1.6.5` are superseded by startup, viewport, active-chat draft-loading, long-draft accessibility, and spoken-punctuation fixes.
+1. Update the extension from `development` and confirm version `1.6.7` reports backend **Ready**. Candidates `1.6.0` through `1.6.6` are superseded by startup, viewport, active-chat draft-loading, long-draft accessibility, spoken-punctuation, and proposal-review ownership fixes.
 2. Open a chat that already has a non-empty saved draft, recording history, and glossary entries. Confirm all survive the upgrade exactly.
 3. Open JarvisType from the icon-only composer-toolbar button. Confirm the floating workspace contains the draft and all routine composition controls.
 4. Close the floating workspace. Confirm routine composition controls do not reappear in the drawer; the drawer still contains launch, connection/ownership diagnostics, context/model settings, and searchable glossary management.

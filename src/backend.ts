@@ -188,10 +188,6 @@ async function handleTranscriptNormalization(
     if (!spindle.permissions.has('chats') || !spindle.permissions.has('generation')) {
       return { kind: 'error' as const, error: 'permission' as const, session }
     }
-    const activeChat = await spindle.chats.getActive(context.userId)
-    if (!activeChat || activeChat.id !== request.chatId) {
-      return { kind: 'error' as const, error: 'chat-mismatch' as const, session }
-    }
     if (session.draftVersion !== request.expectedVersion) return { kind: 'stale' as const, session }
 
     const [settings, glossary, messages] = await Promise.all([
@@ -284,10 +280,8 @@ async function handleTranscriptNormalization(
     sendDraftError(
       request,
       context,
-      result.error === 'permission' ? 'PERMISSION_DENIED' : 'CHAT_MISMATCH',
-      result.error === 'permission'
-        ? 'Chat and generation access are required for bounded transcript normalization.'
-        : 'The active chat changed before normalization completed. Nothing was appended.',
+      'PERMISSION_DENIED',
+      'Chat and generation access are required for bounded transcript normalization.',
       result.session,
     )
     return
@@ -474,8 +468,6 @@ async function handleEditInterpretation(
     const session = await loadDraft(context.userId, request.chatId)
     if (!spindle.permissions.has('chats') || !spindle.permissions.has('generation'))
       return { error: 'permission' as const, session }
-    const activeChat = await spindle.chats.getActive(context.userId)
-    if (!activeChat || activeChat.id !== request.chatId) return { error: 'chat' as const, session }
     if (session.draftVersion !== request.expectedVersion)
       return { error: 'stale' as const, session }
     if (!session.cleanText.trim()) return { error: 'empty' as const, session }
@@ -550,13 +542,11 @@ async function handleEditInterpretation(
     const code =
       result.error === 'permission'
         ? 'PERMISSION_DENIED'
-        : result.error === 'chat'
-          ? 'CHAT_MISMATCH'
-          : result.error === 'empty'
-            ? 'DRAFT_EMPTY'
-            : result.error === 'target'
-              ? 'EDIT_TARGET_UNRESOLVED'
-              : 'EDIT_INTERPRETATION_FAILED'
+        : result.error === 'empty'
+          ? 'DRAFT_EMPTY'
+          : result.error === 'target'
+            ? 'EDIT_TARGET_UNRESOLVED'
+            : 'EDIT_INTERPRETATION_FAILED'
     const message =
       result.error === 'target'
         ? `The edit target could not be resolved safely: ${result.detail}. Nothing changed.`

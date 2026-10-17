@@ -165,6 +165,8 @@ The user is not required to dictate a complete message in one session.
 
 **FR-DRAFT-009:** After a draft mutation is undone, JarvisType shall expose **Redo** only while that mutation can still be restored. Redo shall create an inspectable history entry and remain undoable. Any newly committed draft mutation shall clear the redo path.
 
+**FR-DRAFT-010:** Preparing a non-mutating transcript or edit proposal shall not fail solely because the backend active-chat lookup is temporarily unavailable or stale. The frontend shall discard a proposal after an observed chat transition, and every approval that would mutate a draft shall revalidate the active chat, draft owner, and expected version on the backend.
+
 ### 7.2 Context-aware transcription
 
 **FR-CTX-001:** JarvisType shall use the five most recent eligible Lumiverse messages as transcription context by default.

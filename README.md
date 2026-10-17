@@ -2,7 +2,7 @@
 
 JarvisType is a [Lumiverse](https://lumiverse.chat/) extension for composing chat messages by voice. It provides a private working draft where users can dictate a message in multiple recordings, inspect context-aware normalization, manage a personal glossary, and approve the final text before it is sent.
 
-> **Project status:** Phase 7 release-candidate hardening is underway in `1.6.6`. Phases 0–6.5 passed local and hosted validation. Routine composition lives exclusively in the floating workspace; the drawer retains launch, diagnostics, context settings, and permanent searchable glossary management.
+> **Project status:** Phase 7 release-candidate hardening is underway in `1.6.7`. Phases 0–6.5 passed local and hosted validation. Routine composition lives exclusively in the floating workspace; the drawer retains launch, diagnostics, context settings, and permanent searchable glossary management.
 
 ## What JarvisType is designed to do
 
@@ -122,7 +122,7 @@ The validated primary placement is an extension-owned floating workspace opened 
 
 ## Current development build
 
-Version `1.6.6` is the Phase 7 release-candidate hardening build. It retains the accepted Phase 6.5 floating workflow and adds:
+Version `1.6.7` is the Phase 7 release-candidate hardening build. It retains the accepted Phase 6.5 floating workflow and adds:
 
 - Redacted operational failures with bounded diagnostic references instead of provider exception text.
 - Failure-injection and protocol-hardening coverage for draft preservation and safe retries.
@@ -130,6 +130,7 @@ Version `1.6.6` is the Phase 7 release-candidate hardening build. It retains the
 - Automatic loading of each chat's own saved draft when the active Lumiverse chat changes, including race-safe rapid switching and completion of an in-flight private save.
 - A bounded, keyboard-focusable numbered-paragraph region so long drafts do not expand the floating workspace indefinitely.
 - Context-aware spoken punctuation with literal-word protection, explicit punctuation fallbacks, paired single quotes, ellipsis aliases, semicolon variants, and distinct hyphen/en-dash/em-dash commands.
+- Reliable proposal review when Lumiverse's backend active-chat lookup is transient: non-mutating normalization may complete, while the frontend discards proposals after a real chat transition and confirmation still revalidates backend ownership before any draft mutation.
 - The existing review-first recording, structured editing, glossary, undo/redo, and exactly-once confirmed-send safeguards.
 
 See [PHASE7-VALIDATION.md](./PHASE7-VALIDATION.md) for current automated evidence and the hosted release-candidate test sequence.

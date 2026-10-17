@@ -408,7 +408,7 @@ test('requires review even when a transcript needs no normalization', async () =
   }
 })
 
-test('blocks recording commit after the active chat changes', async () => {
+test('allows non-mutating transcript review but blocks confirmation after the active chat changes', async () => {
   const userId = 'recording-mismatch-user'
   const chatId = 'recording-owner-chat'
   await seedDraft(userId, chatId, 'Preserve this')
@@ -417,12 +417,29 @@ test('blocks recording commit after the active chat changes', async () => {
 
   await dispatch(recordingAppendRequest(chatId, 'blocked-segment', 1, 'Do not append'), userId)
 
-  const response = responses.at(-1)?.payload
-  assert.equal(response?.type, 'app.error')
-  if (response?.type === 'app.error') {
-    assert.equal(response.code, 'CHAT_MISMATCH')
-    assert.equal(response.snapshot?.cleanText, 'Preserve this')
-    assert.equal(response.snapshot?.recordingSegments.length, 0)
+  const proposalResponse = responses.at(-1)?.payload
+  assert.equal(proposalResponse?.type, 'transcript.normalization.response')
+  if (proposalResponse?.type !== 'transcript.normalization.response') return
+  assert.equal(proposalResponse.outcome, 'review')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.confirm.request',
+      requestId: 'blocked-confirm-request',
+      operationId: proposalResponse.proposal.operationId,
+      chatId,
+      expectedVersion: proposalResponse.proposal.expectedVersion,
+    },
+    userId,
+  )
+
+  const confirmation = responses.at(-1)?.payload
+  assert.equal(confirmation?.type, 'app.error')
+  if (confirmation?.type === 'app.error') {
+    assert.equal(confirmation.code, 'CHAT_MISMATCH')
+    assert.equal(confirmation.snapshot?.cleanText, 'Preserve this')
+    assert.equal(confirmation.snapshot?.recordingSegments.length, 0)
   }
 })
 

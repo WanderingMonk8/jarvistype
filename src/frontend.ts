@@ -997,6 +997,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     operationId: string,
   ): Promise<void> => {
     const snapshot = state.snapshot
+    const requestTransitionId = chatTransitionId
     if (!snapshot || ctx.getActiveChat().chatId !== snapshot.chatId) {
       state.voicePhase = 'error'
       state.voiceMessage =
@@ -1015,6 +1016,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       rawTranscript,
     })
     if (!alive) return
+    if (
+      requestTransitionId !== chatTransitionId ||
+      state.activeChatId !== snapshot.chatId ||
+      state.snapshot?.chatId !== snapshot.chatId
+    ) {
+      state.voicePhase = 'error'
+      state.voiceMessage =
+        'The active chat changed before normalization completed. The proposal was discarded.'
+      render()
+      return
+    }
     if (
       outcome.status === 'resolved' &&
       outcome.value.type === 'transcript.normalization.response'
@@ -1054,6 +1066,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     operationId: string,
   ): Promise<void> => {
     const snapshot = state.snapshot
+    const requestTransitionId = chatTransitionId
     if (!snapshot || ctx.getActiveChat().chatId !== snapshot.chatId) {
       state.voicePhase = 'error'
       state.voiceMessage = 'The active chat changed. The edit instruction was discarded.'
@@ -1070,6 +1083,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       instructionTranscript,
     })
     if (!alive) return
+    if (
+      requestTransitionId !== chatTransitionId ||
+      state.activeChatId !== snapshot.chatId ||
+      state.snapshot?.chatId !== snapshot.chatId
+    ) {
+      state.voicePhase = 'error'
+      state.voiceMessage = 'The active chat changed. The edit proposal was discarded.'
+      render()
+      return
+    }
     if (outcome.status === 'resolved' && outcome.value.type === 'edit.proposal.response') {
       state.pendingEditProposal = outcome.value.proposal
       state.voicePhase = 'review'

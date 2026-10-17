@@ -47,7 +47,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.6";
+var APP_VERSION = "1.6.7";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -1058,6 +1058,7 @@ function setup(ctx) {
   };
   const commitRecordingTranscript = async (rawTranscript, operationId) => {
     const snapshot = state.snapshot;
+    const requestTransitionId = chatTransitionId;
     if (!snapshot || ctx.getActiveChat().chatId !== snapshot.chatId) {
       state.voicePhase = "error";
       state.voiceMessage = "The active chat changed before the transcript could be appended. No text was committed.";
@@ -1074,6 +1075,12 @@ function setup(ctx) {
       rawTranscript
     });
     if (!alive) return;
+    if (requestTransitionId !== chatTransitionId || state.activeChatId !== snapshot.chatId || state.snapshot?.chatId !== snapshot.chatId) {
+      state.voicePhase = "error";
+      state.voiceMessage = "The active chat changed before normalization completed. The proposal was discarded.";
+      render();
+      return;
+    }
     if (outcome.status === "resolved" && outcome.value.type === "transcript.normalization.response") {
       if (outcome.value.outcome === "review") {
         state.pendingProposal = outcome.value.proposal;
@@ -1102,6 +1109,7 @@ function setup(ctx) {
   };
   const interpretEditTranscript = async (instructionTranscript, operationId) => {
     const snapshot = state.snapshot;
+    const requestTransitionId = chatTransitionId;
     if (!snapshot || ctx.getActiveChat().chatId !== snapshot.chatId) {
       state.voicePhase = "error";
       state.voiceMessage = "The active chat changed. The edit instruction was discarded.";
@@ -1118,6 +1126,12 @@ function setup(ctx) {
       instructionTranscript
     });
     if (!alive) return;
+    if (requestTransitionId !== chatTransitionId || state.activeChatId !== snapshot.chatId || state.snapshot?.chatId !== snapshot.chatId) {
+      state.voicePhase = "error";
+      state.voiceMessage = "The active chat changed. The edit proposal was discarded.";
+      render();
+      return;
+    }
     if (outcome.status === "resolved" && outcome.value.type === "edit.proposal.response") {
       state.pendingEditProposal = outcome.value.proposal;
       state.voicePhase = "review";

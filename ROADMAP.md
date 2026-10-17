@@ -644,7 +644,7 @@ Deliver flexible natural-language editing while allowing only resolved, validate
 
 ## Phase 6: Advanced conversational editing and language controls
 
-Implementation candidate `1.4.0` prepared on 2026-10-16. Hosted verification remains required before this phase is marked complete.
+Implementation candidate `1.4.1` prepared on 2026-10-16. Hosted verification remains required before this phase is marked complete. Candidate `1.4.1` clarifies that repeated exact targets must reach the explicit candidate-selection UI instead of being discarded during model interpretation.
 
 ### Objective
 

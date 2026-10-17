@@ -567,6 +567,11 @@ test('offers explicit choices for paragraph-resolvable ambiguity without mutatin
     },
     userId,
   )
+  const interpretationPrompt = generationRequests.at(-1)?.messages?.[0]?.content ?? ''
+  assert.match(
+    interpretationPrompt,
+    /application will present those occurrences as explicit choices/,
+  )
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'edit.candidates.response')
   if (response?.type !== 'edit.candidates.response') return

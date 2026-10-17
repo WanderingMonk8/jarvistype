@@ -1677,6 +1677,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         state.statusMessage = outcome.value.generationIdPresent
           ? 'Draft sent once and normal response generation started.'
           : 'Draft sent once. Lumiverse did not return a generation identifier.'
+        closeFloatingComposer()
       } else if (outcome.status === 'resolved' && outcome.value.type === 'app.error') {
         if (outcome.value.snapshot) applySnapshot(outcome.value.snapshot, true)
         state.sendOutcomeUnknown = false
@@ -1729,7 +1730,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     void refreshHostState()
     window.setTimeout(() => editor.focus(), 0)
   }
-  const closeFloatingComposer = () => {
+  function closeFloatingComposer(): void {
     if (activeRecording) {
       cancelActiveRecording('Recording cancelled because the floating composer was closed.')
     }

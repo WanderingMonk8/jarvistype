@@ -98,7 +98,7 @@ Important use cases include:
 2. JarvisType opens a compact extension-owned floating composition surface associated with the active chat and positioned near the chat composer.
 3. The floating surface shows the numbered editable draft and only the actions relevant to the current state. Recording, processing, review, ambiguity resolution, undo, history, glossary, settings, and send functions use focused views rather than one continuously expanded page.
 4. The draft remains unsent until the user explicitly selects **Confirm & Send**.
-5. After Lumiverse confirms a successful send, JarvisType clears the submitted draft and its transient history.
+5. After Lumiverse confirms a successful send, JarvisType clears the submitted draft and its transient history, then closes the floating composition surface so the generated response is unobstructed.
 6. If sending fails, JarvisType retains the full draft and permits retry.
 7. Each draft is owned by one Lumiverse chat and persists in per-user extension storage across page reloads and extension restarts until a confirmed successful send or a future explicit discard action.
 8. Switching chats never silently reassigns a non-empty draft. JarvisType warns about the mismatch, blocks sending to the different chat, and allows the user to open that chat's independently stored draft.
@@ -137,6 +137,7 @@ The user is not required to dictate a complete message in one session.
 3. On confirmation, JarvisType removes presentation-only data such as paragraph numbers and diff markers.
 4. JarvisType adds the final text as a user message in the active Lumiverse chat.
 5. The default send behavior starts the normal Lumiverse response-generation flow.
+6. The floating composition surface closes only after Lumiverse confirms the send; cancellation, rejection, or an uncertain outcome leaves it open with the draft available for recovery or retry.
 
 ## 7. Functional requirements
 

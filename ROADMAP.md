@@ -328,7 +328,7 @@ Implement the complete extension-owned draft lifecycle before voice input, provi
 - Guard against duplicate activation with an idempotency mechanism.
 - Add exactly one user message only after **Confirm & Send**.
 - Trigger normal Lumiverse generation by default.
-- Clear only after confirmed success; retain on failure.
+- Clear and close the floating composer only after confirmed success; retain both the draft and visible composer on failure or an uncertain outcome.
 - Warn and block on active-chat mismatch.
 
 ### Deliverables

@@ -1658,6 +1658,7 @@ function setup(ctx) {
         applySnapshot(outcome.value.snapshot, true);
         state.sendOutcomeUnknown = false;
         state.statusMessage = outcome.value.generationIdPresent ? "Draft sent once and normal response generation started." : "Draft sent once. Lumiverse did not return a generation identifier.";
+        closeFloatingComposer();
       } else if (outcome.status === "resolved" && outcome.value.type === "app.error") {
         if (outcome.value.snapshot) applySnapshot(outcome.value.snapshot, true);
         state.sendOutcomeUnknown = false;
@@ -1704,7 +1705,7 @@ function setup(ctx) {
     void refreshHostState();
     window.setTimeout(() => editor.focus(), 0);
   };
-  const closeFloatingComposer = () => {
+  function closeFloatingComposer() {
     if (activeRecording) {
       cancelActiveRecording("Recording cancelled because the floating composer was closed.");
     }
@@ -1715,7 +1716,7 @@ function setup(ctx) {
       if (returnTarget?.isConnected) returnTarget.focus();
       else composerLauncher.focus();
     }, 0);
-  };
+  }
   disposers.push(ctx.events.on("PERMISSION_CHANGED", handlePermissionChange));
   disposers.push(ctx.events.on("CHAT_SWITCHED", handleChatSwitch));
   disposers.push(

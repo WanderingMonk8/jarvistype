@@ -502,6 +502,79 @@ test('offers review and commits safely after the user manually clears the entire
   }
 })
 
+test('traces a manual rewrite and preserves it as the baseline for the next recording', async () => {
+  const userId = 'manual-rewrite-recording-user'
+  const chatId = 'manual-rewrite-recording-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Original baseline.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.mutate.request',
+      requestId: 'manual-rewrite-request',
+      operationId: 'manual-rewrite-operation',
+      chatId,
+      expectedVersion: 1,
+      editGroupId: 'manual-rewrite-group',
+      cleanText: 'Manually revised baseline.',
+    },
+    userId,
+  )
+  const rewritten = responses.at(-1)?.payload
+  assert.equal(rewritten?.type, 'draft.snapshot.response')
+  if (rewritten?.type !== 'draft.snapshot.response') return
+  assert.equal(rewritten.snapshot.cleanText, 'Manually revised baseline.')
+  assert.equal(rewritten.snapshot.draftVersion, 2)
+  assert.equal(rewritten.snapshot.history.at(-1)?.kind, 'manual-edit')
+  assert.equal(rewritten.snapshot.history.at(-1)?.editGroupId, 'manual-rewrite-group')
+  assert.equal(rewritten.snapshot.history.at(-1)?.beforeVersion, 1)
+  assert.equal(rewritten.snapshot.history.at(-1)?.afterVersion, 2)
+  assert.deepEqual(rewritten.snapshot.history.at(-1)?.diff.affectedParagraphOrdinals, [1])
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'record-after-manual-rewrite-segment',
+      rewritten.snapshot.draftVersion,
+      'Follow-up period',
+    ),
+    userId,
+  )
+  const proposalResponse = responses.at(-1)?.payload
+  assert.equal(proposalResponse?.type, 'transcript.normalization.response')
+  if (proposalResponse?.type !== 'transcript.normalization.response') return
+  assert.equal(proposalResponse.outcome, 'review')
+  assert.equal(proposalResponse.proposal.candidateText, 'Follow-up.')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.confirm.request',
+      requestId: 'confirm-after-manual-rewrite-request',
+      operationId: proposalResponse.proposal.operationId,
+      chatId,
+      expectedVersion: proposalResponse.proposal.expectedVersion,
+    },
+    userId,
+  )
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'transcript.normalization.response')
+  if (committed?.type === 'transcript.normalization.response') {
+    assert.equal(committed.outcome, 'committed')
+    assert.equal(committed.snapshot?.cleanText, 'Manually revised baseline. Follow-up.')
+    assert.deepEqual(
+      committed.snapshot?.history.slice(-2).map((entry) => entry.kind),
+      ['manual-edit', 'recording-append'],
+    )
+    assert.equal(
+      committed.snapshot?.recordingSegments.at(-1)?.beforeVersion,
+      rewritten.snapshot.draftVersion,
+    )
+  }
+})
+
 test('requires review before committing explicit spelling and learns only after confirmation', async () => {
   const userId = 'spelling-user'
   const chatId = 'spelling-chat'

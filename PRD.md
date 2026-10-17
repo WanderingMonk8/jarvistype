@@ -167,6 +167,8 @@ The user is not required to dictate a complete message in one session.
 
 **FR-DRAFT-010:** Preparing a non-mutating transcript or edit proposal shall not fail solely because the backend active-chat lookup is temporarily unavailable or stale. The frontend shall discard a proposal after an observed chat transition, and every approval that would mutate a draft shall revalidate the active chat, draft owner, and expected version on the backend.
 
+**FR-DRAFT-011:** Any manual draft change—including insertion, replacement, deletion, or clearing the complete draft—shall be allowed after private persistence, create a versioned and inspectable diff/history entry, remain undoable, and become the exact baseline for the next recording or edit operation.
+
 ### 7.2 Context-aware transcription
 
 **FR-CTX-001:** JarvisType shall use the five most recent eligible Lumiverse messages as transcription context by default.

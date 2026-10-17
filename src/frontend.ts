@@ -30,6 +30,20 @@ type VoicePhase =
   'idle' | 'starting' | 'recording' | 'processing' | 'committing' | 'review' | 'error'
 
 const MAX_RECORDING_DURATION_MS = 5 * 60 * 1_000
+const NARROW_COMPOSER_BREAKPOINT_PX = 760
+
+function getFloatingWidgetSize(): { width: number; height: number } {
+  if (window.innerWidth < NARROW_COMPOSER_BREAKPOINT_PX) {
+    return {
+      width: Math.min(430, Math.max(280, window.innerWidth - 24)),
+      height: Math.min(720, Math.max(320, window.innerHeight - 24)),
+    }
+  }
+  return {
+    width: Math.min(960, Math.max(680, window.innerWidth - 48)),
+    height: Math.min(680, Math.max(440, window.innerHeight - 48)),
+  }
+}
 
 const DRAWER_ICON_SVG = `
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -145,12 +159,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     subtitle: 'Open private composition draft',
   })
 
+  const initialFloatingSize = getFloatingWidgetSize()
   const floatingWidget = ctx.ui.createFloatWidget({
-    width: Math.min(430, Math.max(300, window.innerWidth - 24)),
-    height: Math.min(720, Math.max(420, window.innerHeight - 24)),
+    width: initialFloatingSize.width,
+    height: initialFloatingSize.height,
     initialPosition: {
-      x: Math.max(12, window.innerWidth - 454),
-      y: Math.max(12, window.innerHeight - 744),
+      x: Math.max(12, window.innerWidth - initialFloatingSize.width - 24),
+      y: Math.max(12, window.innerHeight - initialFloatingSize.height - 24),
     },
     snapToEdge: true,
     tooltip: 'JarvisType voice composer',
@@ -1653,10 +1668,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
   }
   const handleViewportResize = () => {
-    floatingWidget.setSize(
-      Math.min(430, Math.max(300, window.innerWidth - 24)),
-      Math.min(720, Math.max(420, window.innerHeight - 24)),
-    )
+    const size = getFloatingWidgetSize()
+    floatingWidget.setSize(size.width, size.height)
   }
   document.addEventListener('visibilitychange', handleVisibility)
   window.addEventListener('pagehide', handlePageHide)
@@ -2057,6 +2070,7 @@ function shellMarkup(): string {
       .jt-floating__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
       .jt-floating__body > .jt-shell__card { margin: .75rem; }
       .jt-floating__tools { display: grid; gap: .65rem; padding: 0 .75rem .75rem; }
+      .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
       .jt-floating summary { cursor: pointer; font-weight: 700; }
       .jt-command-list { display: grid; gap: .75rem; margin-top: .65rem; }
@@ -2065,6 +2079,15 @@ function shellMarkup(): string {
       .jt-shell [hidden] { display: none !important; }
       [data-state="ready"] { color: #38a169; }
       [data-state="unavailable"] { color: #e53e3e; }
+      @media (min-width: ${NARROW_COMPOSER_BREAKPOINT_PX}px) {
+        .jt-floating__body { display: grid; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
+        .jt-floating [data-floating-composer-mount] { min-height: 0; overflow: hidden; }
+        .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: stretch; height: calc(100% - 1.5rem); overflow: hidden; }
+        .jt-floating .jt-composer__pane { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: .25rem; }
+        .jt-floating .jt-draft-editor { min-height: 10rem; }
+        .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
+        .jt-floating__tools > section, .jt-floating__tools > details { grid-column: 1 / -1; max-height: 24rem; overflow-y: auto; }
+      }
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
@@ -2102,6 +2125,7 @@ function shellMarkup(): string {
 
       <div data-drawer-composer-mount>
       <section class="jt-shell__card" data-composer-surface aria-labelledby="jt-draft-title">
+        <div class="jt-composer__pane jt-composer__draft-pane">
         <h3 id="jt-draft-title">Working draft</h3>
         <textarea class="jt-draft-editor" data-draft-editor maxlength="${MAX_DRAFT_CHARACTERS}" aria-describedby="jt-draft-help" aria-label="JarvisType private working draft" disabled></textarea>
         <p id="jt-draft-help">Paragraph numbers are shown separately and are never copied or sent.</p>
@@ -2109,7 +2133,9 @@ function shellMarkup(): string {
 
         <h4>Numbered paragraphs</h4>
         <div class="jt-paragraphs" data-paragraph-list aria-live="polite"></div>
+        </div>
 
+        <div class="jt-composer__pane jt-composer__action-pane">
         <section class="jt-voice" aria-labelledby="jt-voice-title">
           <h4 id="jt-voice-title">Voice message segment</h4>
           <p role="status" aria-live="polite" data-voice-status>Ready to record a message segment.</p>
@@ -2186,6 +2212,7 @@ function shellMarkup(): string {
 
         <div class="jt-actions">
           <button type="button" data-send disabled>Confirm &amp; Send</button>
+        </div>
         </div>
       </section>
       </div>

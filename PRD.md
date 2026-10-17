@@ -305,6 +305,10 @@ The user is not required to dictate a complete message in one session.
 
 **FR-PUNC-004:** JarvisType shall preserve literal punctuation words when context indicates that the word itself, rather than the punctuation symbol, was intended.
 
+**FR-PUNC-005:** JarvisType shall resolve ambiguous punctuation words using deterministic lexical context, preserve explicit literal forms such as "the word period," and accept explicit fallbacks such as "insert period" or "punctuation colon."
+
+**FR-PUNC-006:** Provider-supplied punctuation shall take precedence. Pause or timing metadata may strengthen punctuation intent when the selected transcription provider exposes it, but correct handling shall not depend on timing metadata being available.
+
 ### 7.8 Explicit spelling
 
 **FR-SPELL-001:** During **Record Message**, JarvisType shall recognize an explicitly separated sequence of spoken letters as the spelling of one intended word.

@@ -222,7 +222,16 @@ async function handleTranscriptNormalization(
       if (
         contextual &&
         contextual !== candidateText &&
-        preservesAuthoritativeSpellings(candidateText, contextual, deterministic.learningCandidates)
+        preservesAuthoritativeSpellings(
+          candidateText,
+          contextual,
+          deterministic.learningCandidates,
+        ) &&
+        preservesAuthoritativePunctuationLiterals(
+          candidateText,
+          contextual,
+          deterministic.authoritativePunctuationLiterals,
+        )
       ) {
         const enforced = normalizeDeterministically(contextual, glossary.entries)
         candidateText = enforced.text
@@ -315,6 +324,23 @@ function preservesAuthoritativeSpellings(
     if (
       countExactOccurrences(contextualCandidate, canonical) !==
       countExactOccurrences(deterministicCandidate, canonical)
+    )
+      return false
+  }
+  return true
+}
+
+function preservesAuthoritativePunctuationLiterals(
+  deterministicCandidate: string,
+  contextualCandidate: string,
+  literals: readonly string[],
+): boolean {
+  const deterministicLower = deterministicCandidate.toLocaleLowerCase()
+  const contextualLower = contextualCandidate.toLocaleLowerCase()
+  for (const literal of new Set(literals.map((value) => value.toLocaleLowerCase()))) {
+    if (
+      countExactOccurrences(contextualLower, literal) !==
+      countExactOccurrences(deterministicLower, literal)
     )
       return false
   }

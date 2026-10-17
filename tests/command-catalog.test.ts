@@ -12,6 +12,8 @@ test('command catalog covers every supported editing operation and composition m
     'Record Message',
     'Record Edit',
     'Spoken punctuation',
+    'Literal punctuation word',
+    'Explicit punctuation',
     'Replace',
     'Delete',
     'Insert before',
@@ -40,4 +42,35 @@ test('command catalog has unique, non-empty activating phrases and examples', ()
 
   assert.equal(new Set(activations).size, activations.length)
   assert.ok(examples.every(([activation, example]) => activation.trim() && example.trim()))
+})
+
+test('command catalog advertises the complete expanded punctuation vocabulary', () => {
+  const examples: Array<readonly [string, string]> = []
+  for (const group of COMMAND_GROUPS) examples.push(...group.examples)
+  const catalog = examples
+    .map(([activation, example]) => `${activation} ${example}`.toLowerCase())
+    .join(' ')
+
+  for (const command of [
+    'period',
+    'comma',
+    'colon',
+    'semicolon',
+    'question mark',
+    'exclamation mark',
+    'ellipsis',
+    'apostrophe',
+    'hyphen',
+    'dash',
+    'en dash',
+    'em dash',
+    'open quote',
+    'close quote',
+    'open single quote',
+    'close single quote',
+    'new line',
+    'new paragraph',
+  ]) {
+    assert.ok(catalog.includes(command), `missing punctuation command: ${command}`)
+  }
 })

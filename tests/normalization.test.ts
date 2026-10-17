@@ -34,6 +34,44 @@ test('preserves explicitly literal punctuation words', () => {
     normalizeDeterministically('Use the word period here, period.', []).text,
     'Use period here.',
   )
+  assert.equal(
+    normalizeDeterministically('The period of time is challenging for many period', []).text,
+    'The period of time is challenging for many.',
+  )
+  assert.equal(
+    normalizeDeterministically('Add a dash of salt comma then stir period', []).text,
+    'Add a dash of salt, then stir.',
+  )
+  assert.equal(
+    normalizeDeterministically('The colon cancer screening period ended period', []).text,
+    'The colon cancer screening period ended.',
+  )
+})
+
+test('supports expanded punctuation commands and explicit fallbacks', () => {
+  assert.equal(
+    normalizeDeterministically(
+      'Label semi colon value colon open single quote ready close single quote ellipsis',
+      [],
+    ).text,
+    'Label; value: ‘ready’…',
+  )
+  assert.equal(
+    normalizeDeterministically('First dash second em dash third en dash fourth period', []).text,
+    'First — second — third – fourth.',
+  )
+  assert.equal(
+    normalizeDeterministically('Wait dot dot dot what question mark', []).text,
+    'Wait… what?',
+  )
+  assert.equal(
+    normalizeDeterministically('Use punctuation colon then insert period', []).text,
+    'Use: then.',
+  )
+  assert.equal(
+    normalizeDeterministically('Write the word dash and the word ellipsis period', []).text,
+    'Write dash and ellipsis.',
+  )
 })
 
 test('collapses explicit spelling, obeys casing, and creates a learning candidate', () => {

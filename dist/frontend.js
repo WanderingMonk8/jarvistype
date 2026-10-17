@@ -47,7 +47,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.5";
+var APP_VERSION = "1.6.6";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -328,8 +328,10 @@ var COMMAND_GROUPS = [
       ["Record Edit", "Record Edit, then describe a change to the existing draft."],
       [
         "Spoken punctuation",
-        "Say \u201Ccomma,\u201D \u201Cperiod,\u201D \u201Cquestion mark,\u201D or \u201Cnew paragraph\u201D while dictating."
-      ]
+        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen quote,\u201D \u201Cclose quote,\u201D \u201Copen single quote,\u201D \u201Cclose single quote,\u201D \u201Cnew line,\u201D or \u201Cnew paragraph.\u201D"
+      ],
+      ["Literal punctuation word", "Say \u201Cthe word period\u201D or \u201Cliteral dash.\u201D"],
+      ["Explicit punctuation", "Say \u201Cinsert period\u201D or \u201Cpunctuation colon.\u201D"]
     ]
   },
   {

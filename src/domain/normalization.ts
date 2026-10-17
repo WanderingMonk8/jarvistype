@@ -11,6 +11,7 @@ export interface DeterministicNormalization {
   reasons: string[]
   learningCandidates: SpellingLearningCandidate[]
   ambiguities: string[]
+  authoritativePunctuationLiterals: string[]
 }
 
 const PUNCTUATION: Array<[RegExp, string, string]> = [
@@ -20,20 +21,31 @@ const PUNCTUATION: Array<[RegExp, string, string]> = [
   [/\bclose (?:parenthesis|paren)\b/gi, ')', 'close parenthesis'],
   [/\bopen bracket\b/gi, '[', 'open bracket'],
   [/\bclose bracket\b/gi, ']', 'close bracket'],
+  [/\bopen single quote\b/gi, '‘', 'open single quote'],
+  [/\bclose single quote\b/gi, '’', 'close single quote'],
   [/\bopen quote\b/gi, '“', 'open quote'],
   [/\bclose quote\b/gi, '”', 'close quote'],
   [/\bquestion mark\b/gi, '?', 'question mark'],
   [/\bexclamation (?:mark|point)\b/gi, '!', 'exclamation mark'],
-  [/\bsemicolon\b/gi, ';', 'semicolon'],
+  [/\bsemi[ -]?colon\b/gi, ';', 'semicolon'],
   [/\bcolon\b/gi, ':', 'colon'],
   [/\bcomma\b/gi, ',', 'comma'],
   [/\bfull stop\b/gi, '.', 'period'],
   [/\bperiod\b/gi, '.', 'period'],
-  [/\bellipsis\b/gi, '…', 'ellipsis'],
+  [/\b(?:ellipsis|dot dot dot|three dots)\b/gi, '…', 'ellipsis'],
   [/\bem dash\b/gi, '—', 'em dash'],
   [/\ben dash\b/gi, '–', 'en dash'],
   [/\bhyphen\b/gi, '-', 'hyphen'],
+  [/\bdash\b/gi, '—', 'em dash'],
   [/\bapostrophe\b/gi, '’', 'apostrophe'],
+]
+
+const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
+  /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
+  /\btime\s+period\b/gi,
+  /\bdash(?=\s+(?:of|to|for|toward|through|across)\b)/gi,
+  /\b(?:mad|quick|hundred-meter)\s+dash\b/gi,
+  /\bcolon(?=\s+(?:cancer|health|screening|surgery|disease|pain|care)\b)/gi,
 ]
 
 export function normalizeDeterministically(
@@ -42,11 +54,21 @@ export function normalizeDeterministically(
 ): DeterministicNormalization {
   const protectedLiterals: string[] = []
   let text = raw.replace(
-    /\b(?:literal|the word)\s+(period|comma|colon|semicolon|hyphen|apostrophe)\b/gi,
+    /\b(?:literal|the word)\s+(period|comma|colon|semi[ -]?colon|hyphen|dash|ellipsis|apostrophe)\b/gi,
     (_, word: string) => {
-      const index = protectedLiterals.push(word.toLowerCase()) - 1
+      const index = protectedLiterals.push(word.toLowerCase().replace(/[ -]/g, '')) - 1
       return `\uE000${index}\uE001`
     },
+  )
+  for (const pattern of LITERAL_PUNCTUATION_CONTEXTS) {
+    text = text.replace(pattern, (literal: string) => {
+      const index = protectedLiterals.push(literal) - 1
+      return `\uE000${index}\uE001`
+    })
+  }
+  text = text.replace(
+    /\b(?:insert|punctuation)\s+(?=(?:period|full stop|comma|colon|semi[ -]?colon|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots|hyphen|en dash|em dash|dash|apostrophe|open quote|close quote|open single quote|close single quote)\b)/gi,
+    '',
   )
   const reasons: string[] = []
   const learningCandidates: SpellingLearningCandidate[] = []
@@ -86,6 +108,7 @@ export function normalizeDeterministically(
     reasons: [...new Set(reasons)],
     learningCandidates,
     ambiguities: spelling.ambiguities,
+    authoritativePunctuationLiterals: [...new Set(protectedLiterals)],
   }
 }
 
@@ -187,6 +210,11 @@ function cleanupPunctuationSpacing(value: string): string {
   return value
     .replace(/[ \t]+([,.;:!?)\]])/g, '$1')
     .replace(/([([])\s+/g, '$1')
+    .replace(/([“‘])[ \t]+/g, '$1')
+    .replace(/[ \t]+([”’])/g, '$1')
+    .replace(/[ \t]+…/g, '…')
+    .replace(/(?<=\p{L})[ \t]*’[ \t]*(?=\p{L})/gu, '’')
+    .replace(/[ \t]*-[ \t]*/g, '-')
     .replace(/[,;:]\s*([.!?])/g, '$1')
     .replace(/([,.;:!?])(?:\s*\1)+/g, '$1')
     .replace(/…(?:\s*\.){1,3}/g, '…')

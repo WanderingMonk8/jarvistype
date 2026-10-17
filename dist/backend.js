@@ -1168,29 +1168,49 @@ var PUNCTUATION = [
   [/\bclose (?:parenthesis|paren)\b/gi, ")", "close parenthesis"],
   [/\bopen bracket\b/gi, "[", "open bracket"],
   [/\bclose bracket\b/gi, "]", "close bracket"],
+  [/\bopen single quote\b/gi, "\u2018", "open single quote"],
+  [/\bclose single quote\b/gi, "\u2019", "close single quote"],
   [/\bopen quote\b/gi, "\u201C", "open quote"],
   [/\bclose quote\b/gi, "\u201D", "close quote"],
   [/\bquestion mark\b/gi, "?", "question mark"],
   [/\bexclamation (?:mark|point)\b/gi, "!", "exclamation mark"],
-  [/\bsemicolon\b/gi, ";", "semicolon"],
+  [/\bsemi[ -]?colon\b/gi, ";", "semicolon"],
   [/\bcolon\b/gi, ":", "colon"],
   [/\bcomma\b/gi, ",", "comma"],
   [/\bfull stop\b/gi, ".", "period"],
   [/\bperiod\b/gi, ".", "period"],
-  [/\bellipsis\b/gi, "\u2026", "ellipsis"],
+  [/\b(?:ellipsis|dot dot dot|three dots)\b/gi, "\u2026", "ellipsis"],
   [/\bem dash\b/gi, "\u2014", "em dash"],
   [/\ben dash\b/gi, "\u2013", "en dash"],
   [/\bhyphen\b/gi, "-", "hyphen"],
+  [/\bdash\b/gi, "\u2014", "em dash"],
   [/\bapostrophe\b/gi, "\u2019", "apostrophe"]
+];
+var LITERAL_PUNCTUATION_CONTEXTS = [
+  /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
+  /\btime\s+period\b/gi,
+  /\bdash(?=\s+(?:of|to|for|toward|through|across)\b)/gi,
+  /\b(?:mad|quick|hundred-meter)\s+dash\b/gi,
+  /\bcolon(?=\s+(?:cancer|health|screening|surgery|disease|pain|care)\b)/gi
 ];
 function normalizeDeterministically(raw, glossary) {
   const protectedLiterals = [];
   let text = raw.replace(
-    /\b(?:literal|the word)\s+(period|comma|colon|semicolon|hyphen|apostrophe)\b/gi,
+    /\b(?:literal|the word)\s+(period|comma|colon|semi[ -]?colon|hyphen|dash|ellipsis|apostrophe)\b/gi,
     (_, word) => {
-      const index = protectedLiterals.push(word.toLowerCase()) - 1;
+      const index = protectedLiterals.push(word.toLowerCase().replace(/[ -]/g, "")) - 1;
       return `\uE000${index}\uE001`;
     }
+  );
+  for (const pattern of LITERAL_PUNCTUATION_CONTEXTS) {
+    text = text.replace(pattern, (literal) => {
+      const index = protectedLiterals.push(literal) - 1;
+      return `\uE000${index}\uE001`;
+    });
+  }
+  text = text.replace(
+    /\b(?:insert|punctuation)\s+(?=(?:period|full stop|comma|colon|semi[ -]?colon|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots|hyphen|en dash|em dash|dash|apostrophe|open quote|close quote|open single quote|close single quote)\b)/gi,
+    ""
   );
   const reasons = [];
   const learningCandidates = [];
@@ -1223,7 +1243,8 @@ function normalizeDeterministically(raw, glossary) {
     changed: text !== raw,
     reasons: [...new Set(reasons)],
     learningCandidates,
-    ambiguities: spelling.ambiguities
+    ambiguities: spelling.ambiguities,
+    authoritativePunctuationLiterals: [...new Set(protectedLiterals)]
   };
 }
 function replaceExplicitSpelling(input) {
@@ -1284,7 +1305,7 @@ function applySpellingCasing(value, casing) {
   ).join("");
 }
 function cleanupPunctuationSpacing(value) {
-  return value.replace(/[ \t]+([,.;:!?)\]])/g, "$1").replace(/([([])\s+/g, "$1").replace(/[,;:]\s*([.!?])/g, "$1").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").replace(/^[ \t]+/, "").replace(/\s+$/, "");
+  return value.replace(/[ \t]+([,.;:!?)\]])/g, "$1").replace(/([([])\s+/g, "$1").replace(/([“‘])[ \t]+/g, "$1").replace(/[ \t]+([”’])/g, "$1").replace(/[ \t]+…/g, "\u2026").replace(/(?<=\p{L})[ \t]*’[ \t]*(?=\p{L})/gu, "\u2019").replace(/[ \t]*-[ \t]*/g, "-").replace(/[,;:]\s*([.!?])/g, "$1").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").replace(/^[ \t]+/, "").replace(/\s+$/, "");
 }
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1292,7 +1313,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.5";
+var APP_VERSION = "1.6.6";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts
@@ -1501,7 +1522,15 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
         settings,
         context.userId
       );
-      if (contextual && contextual !== candidateText && preservesAuthoritativeSpellings(candidateText, contextual, deterministic.learningCandidates)) {
+      if (contextual && contextual !== candidateText && preservesAuthoritativeSpellings(
+        candidateText,
+        contextual,
+        deterministic.learningCandidates
+      ) && preservesAuthoritativePunctuationLiterals(
+        candidateText,
+        contextual,
+        deterministic.authoritativePunctuationLiterals
+      )) {
         const enforced = normalizeDeterministically(contextual, glossary.entries);
         candidateText = enforced.text;
         reasons.push(...enforced.reasons);
@@ -1582,6 +1611,15 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
 function preservesAuthoritativeSpellings(deterministicCandidate, contextualCandidate, spellings) {
   for (const canonical of new Set(spellings.map((spelling) => spelling.canonical))) {
     if (countExactOccurrences(contextualCandidate, canonical) !== countExactOccurrences(deterministicCandidate, canonical))
+      return false;
+  }
+  return true;
+}
+function preservesAuthoritativePunctuationLiterals(deterministicCandidate, contextualCandidate, literals) {
+  const deterministicLower = deterministicCandidate.toLocaleLowerCase();
+  const contextualLower = contextualCandidate.toLocaleLowerCase();
+  for (const literal of new Set(literals.map((value) => value.toLocaleLowerCase()))) {
+    if (countExactOccurrences(contextualLower, literal) !== countExactOccurrences(deterministicLower, literal))
       return false;
   }
   return true;

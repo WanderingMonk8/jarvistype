@@ -816,7 +816,7 @@ Move the complete composition workflow into a minimal floating surface near the 
 
 ## Phase 7: Release-candidate hardening
 
-In progress as of October 17, 2026. Candidate `1.6.5` includes privacy-safe diagnostic references and redacted provider failures. It corrects the `1.6.0` startup regression caused by transferring the composer before control discovery completed, hardens whole-widget scrolling and viewport clamping across desktop and mobile, automatically loads the active chat's saved draft after chat changes without allowing stale loads to win, and bounds the numbered-paragraph region with its own accessible scroll. The complete local quality gate passes with 66 automated tests. Hosted accessibility, compatibility, performance, and safe-send verification remains open in `PHASE7-VALIDATION.md`.
+In progress as of October 17, 2026. Candidate `1.6.6` includes privacy-safe diagnostic references and redacted provider failures. It corrects the `1.6.0` startup regression caused by transferring the composer before control discovery completed, hardens whole-widget scrolling and viewport clamping across desktop and mobile, automatically loads the active chat's saved draft after chat changes without allowing stale loads to win, bounds the numbered-paragraph region with its own accessible scroll, and expands context-aware spoken punctuation. The complete local quality gate passes with 69 automated tests. Hosted accessibility, compatibility, performance, and safe-send verification remains open in `PHASE7-VALIDATION.md`.
 
 ### Objective
 

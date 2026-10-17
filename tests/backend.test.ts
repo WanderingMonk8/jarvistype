@@ -508,6 +508,33 @@ test('re-applies deterministic commands when contextual output returns the raw p
   }
 })
 
+test('does not let contextual normalization replace an authoritative literal punctuation word', async () => {
+  const userId = 'literal-punctuation-user'
+  const chatId = 'literal-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationNormalizedText = 'The. of time is challenging for many.'
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'literal-punctuation-segment',
+      1,
+      'The period of time is challenging for many period',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(response.proposal.candidateText, 'The period of time is challenging for many.')
+    assert.equal(response.proposal.contextualModelUsed, false)
+  }
+})
+
 test('commits a leading new-paragraph command as a paragraph boundary', async () => {
   const userId = 'leading-paragraph-user'
   const chatId = 'leading-paragraph-chat'

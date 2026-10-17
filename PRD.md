@@ -332,6 +332,8 @@ A bare spoken `period` or `full stop` immediately following provider-supplied `.
 
 **FR-PUNC-010:** When a spoken quotation command creates an opening quotation mark, JarvisType shall discard punctuation that the transcription provider attached directly to that opening command, tighten the opening spacing, and capitalize an ordinary lowercase first word. This formatting shall not alter quotation marks supplied directly by the provider, intentional leading punctuation requested through a punctuation command, or established mixed-case terms such as `eBay`.
 
+**FR-PUNC-011:** When quoted content already ends in `.`, `?`, `!`, or `…`, JarvisType shall discard a redundant period attached by the transcription provider to the spoken closing-quote command. Punctuation following a closing command shall otherwise remain available.
+
 ### 7.8 Explicit spelling
 
 **FR-SPELL-001:** During **Record Message**, JarvisType shall recognize an explicitly separated sequence of spoken letters as the spelling of one intended word.

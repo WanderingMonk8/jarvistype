@@ -168,6 +168,12 @@ test('formats voice-generated quotation openings without changing intentional le
   )
 })
 
+test('drops a provider period attached to a closing quote command after terminal punctuation', () => {
+  assert.equal(normalizeDeterministically('quote Good morning. quote.', []).text, '“Good morning.”')
+  assert.equal(normalizeDeterministically('open quote Really? close quote.', []).text, '“Really?”')
+  assert.equal(normalizeDeterministically('quote Good morning quote.', []).text, '“Good morning”.')
+})
+
 test('recovers a standalone phonetic new-paragraph command without changing natural prose', () => {
   assert.equal(
     recoverHighConfidenceContextualCommands(

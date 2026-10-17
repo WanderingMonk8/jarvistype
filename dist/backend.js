@@ -1680,34 +1680,40 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
   const generatedOpeningMarker = "\uE002";
   let text = input;
   const replaceFixed = (pattern, mark, reason, opening = false) => {
-    text = text.replace(pattern, () => {
+    text = text.replace(pattern, (_whole, attachedPunctuation, offset) => {
       marks.push(mark);
       reasons.push(reason);
-      return opening ? `${generatedOpeningMarker}${mark}` : mark;
+      if (opening) return `${generatedOpeningMarker}${mark}`;
+      return `${mark}${punctuationAfterGeneratedClosingQuote(text, offset, attachedPunctuation)}`;
     });
   };
-  replaceFixed(/\bopen single quote\b[.,;:!?…—–-]*/gi, "\u2018", "single quote", true);
-  replaceFixed(/\bclose single quote\b/gi, "\u2019", "single quote");
-  replaceFixed(/\bopen quote\b[.,;:!?…—–-]*/gi, "\u201C", "quote", true);
-  replaceFixed(/\bclose quote\b/gi, "\u201D", "quote");
+  replaceFixed(/\bopen single quote\b([.,;:!?…—–-]*)/gi, "\u2018", "single quote", true);
+  replaceFixed(/\bclose single quote\b([.,;:!?…—–-]*)/gi, "\u2019", "single quote");
+  replaceFixed(/\bopen quote\b([.,;:!?…—–-]*)/gi, "\u201C", "quote", true);
+  replaceFixed(/\bclose quote\b([.,;:!?…—–-]*)/gi, "\u201D", "quote");
   const replacePaired = (pattern, opening, closing, reason) => {
     if (hasLiteralQuoteContext) return;
     const count = text.match(pattern)?.length ?? 0;
     if (count < 2 || count % 2 !== 0) return;
     let occurrence = 0;
-    text = text.replace(pattern, (_whole, attachedPunctuation = "") => {
+    text = text.replace(pattern, (_whole, attachedPunctuation, offset) => {
       const isOpening = occurrence % 2 === 0;
       const mark = isOpening ? opening : closing;
       occurrence += 1;
       marks.push(mark);
       reasons.push(reason);
-      return isOpening ? `${generatedOpeningMarker}${mark}` : `${mark}${attachedPunctuation}`;
+      return isOpening ? `${generatedOpeningMarker}${mark}` : `${mark}${punctuationAfterGeneratedClosingQuote(text, offset, attachedPunctuation)}`;
     });
   };
   replacePaired(/\bsingle quote\b([.,;:!?…—–-]*)/gi, "\u2018", "\u2019", "single quote");
   replacePaired(/\bquote\b([.,;:!?…—–-]*)/gi, "\u201C", "\u201D", "quote");
   text = formatGeneratedQuotationOpenings(text, generatedOpeningMarker);
   return { text, marks, reasons };
+}
+function punctuationAfterGeneratedClosingQuote(source, commandOffset, attachedPunctuation) {
+  const quotedContentAlreadyEndsSentence = /[.?!…]$/u.test(source.slice(0, commandOffset).trimEnd());
+  if (quotedContentAlreadyEndsSentence && /^\.+$/u.test(attachedPunctuation)) return "";
+  return attachedPunctuation;
 }
 function formatGeneratedQuotationOpenings(input, marker) {
   const markedOpening = new RegExp(`${marker}([\u201C\u2018])[ \\t]*([\\p{Ll}][\\p{L}\\p{M}'\u2019-]*)`, "gu");

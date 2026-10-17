@@ -284,29 +284,32 @@ function replaceSpokenQuotationCommands(
   let text = input
 
   const replaceFixed = (pattern: RegExp, mark: string, reason: string, opening = false) => {
-    text = text.replace(pattern, () => {
+    text = text.replace(pattern, (_whole: string, attachedPunctuation: string, offset: number) => {
       marks.push(mark)
       reasons.push(reason)
-      return opening ? `${generatedOpeningMarker}${mark}` : mark
+      if (opening) return `${generatedOpeningMarker}${mark}`
+      return `${mark}${punctuationAfterGeneratedClosingQuote(text, offset, attachedPunctuation)}`
     })
   }
-  replaceFixed(/\bopen single quote\b[.,;:!?…—–-]*/gi, '‘', 'single quote', true)
-  replaceFixed(/\bclose single quote\b/gi, '’', 'single quote')
-  replaceFixed(/\bopen quote\b[.,;:!?…—–-]*/gi, '“', 'quote', true)
-  replaceFixed(/\bclose quote\b/gi, '”', 'quote')
+  replaceFixed(/\bopen single quote\b([.,;:!?…—–-]*)/gi, '‘', 'single quote', true)
+  replaceFixed(/\bclose single quote\b([.,;:!?…—–-]*)/gi, '’', 'single quote')
+  replaceFixed(/\bopen quote\b([.,;:!?…—–-]*)/gi, '“', 'quote', true)
+  replaceFixed(/\bclose quote\b([.,;:!?…—–-]*)/gi, '”', 'quote')
 
   const replacePaired = (pattern: RegExp, opening: string, closing: string, reason: string) => {
     if (hasLiteralQuoteContext) return
     const count = text.match(pattern)?.length ?? 0
     if (count < 2 || count % 2 !== 0) return
     let occurrence = 0
-    text = text.replace(pattern, (_whole: string, attachedPunctuation: string = '') => {
+    text = text.replace(pattern, (_whole: string, attachedPunctuation: string, offset: number) => {
       const isOpening = occurrence % 2 === 0
       const mark = isOpening ? opening : closing
       occurrence += 1
       marks.push(mark)
       reasons.push(reason)
-      return isOpening ? `${generatedOpeningMarker}${mark}` : `${mark}${attachedPunctuation}`
+      return isOpening
+        ? `${generatedOpeningMarker}${mark}`
+        : `${mark}${punctuationAfterGeneratedClosingQuote(text, offset, attachedPunctuation)}`
     })
   }
   replacePaired(/\bsingle quote\b([.,;:!?…—–-]*)/gi, '‘', '’', 'single quote')
@@ -315,6 +318,16 @@ function replaceSpokenQuotationCommands(
   text = formatGeneratedQuotationOpenings(text, generatedOpeningMarker)
 
   return { text, marks, reasons }
+}
+
+function punctuationAfterGeneratedClosingQuote(
+  source: string,
+  commandOffset: number,
+  attachedPunctuation: string,
+): string {
+  const quotedContentAlreadyEndsSentence = /[.?!…]$/u.test(source.slice(0, commandOffset).trimEnd())
+  if (quotedContentAlreadyEndsSentence && /^\.+$/u.test(attachedPunctuation)) return ''
+  return attachedPunctuation
 }
 
 function formatGeneratedQuotationOpenings(input: string, marker: string): string {

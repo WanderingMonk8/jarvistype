@@ -891,6 +891,28 @@ test('formats an opening produced by a spoken quote command', async () => {
   }
 })
 
+test('does not append a second period after a punctuated spoken quotation', async () => {
+  const userId = 'closing-quote-period-user'
+  const chatId = 'closing-quote-period-chat'
+  activeChatId = chatId
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'closing-quote-period-segment',
+      0,
+      'quote I am not going anywhere. quote.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.candidateText, '“I am not going anywhere.”')
+  }
+})
+
 test('does not let contextual normalization discard ordinary spoken punctuation commands', async () => {
   const userId = 'commanded-punctuation-user'
   const chatId = 'commanded-punctuation-chat'

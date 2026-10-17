@@ -2024,6 +2024,9 @@ function shellMarkup() {
       .jt-form-grid input, .jt-form-grid select { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
       .jt-proposal { display: grid; gap: .55rem; padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
       .jt-proposal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .55rem; background: color-mix(in srgb, currentColor 6%, transparent); }
+      .jt-proposal__details { display: grid; gap: .55rem; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: .45rem; padding: .55rem; }
+      .jt-proposal__details summary { cursor: pointer; font-weight: 700; }
+      .jt-proposal__details[open] summary { margin-bottom: .55rem; }
       .jt-candidate-list { display: grid; gap: .5rem; }
       .jt-candidate-list button { text-align: start; white-space: normal; }
       .jt-glossary { display: grid; gap: .55rem; }
@@ -2040,6 +2043,9 @@ function shellMarkup() {
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
       .jt-floating summary { cursor: pointer; font-weight: 700; }
+      .jt-floating .jt-proposal { max-height: min(70vh, 34rem); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+      .jt-floating .jt-proposal pre { max-height: 12rem; overflow-y: auto; }
+      .jt-floating .jt-proposal > .jt-actions { position: sticky; z-index: 2; bottom: -.7rem; margin: .15rem -.7rem -.7rem; padding: .65rem .7rem; border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent); background: var(--background, #171717); }
       .jt-command-list { display: grid; gap: .75rem; margin-top: .65rem; }
       .jt-command-list ul { display: grid; gap: .4rem; margin: .35rem 0 0; padding-left: 1.2rem; }
       .jt-empty { opacity: .65; font-style: italic; }
@@ -2051,6 +2057,8 @@ function shellMarkup() {
         .jt-floating [data-floating-composer-mount] { min-height: 0; overflow: hidden; }
         .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: stretch; height: calc(100% - 1.5rem); overflow: hidden; }
         .jt-floating .jt-composer__pane { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: .25rem; }
+        .jt-floating .jt-composer__action-pane { scrollbar-gutter: stable; touch-action: pan-y; }
+        .jt-floating .jt-proposal { max-height: clamp(18rem, 52vh, 30rem); }
         .jt-floating .jt-draft-editor { min-height: 10rem; }
         .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
         .jt-floating__tools > section, .jt-floating__tools > details { grid-column: 1 / -1; max-height: 24rem; overflow-y: auto; }
@@ -2115,11 +2123,14 @@ function shellMarkup() {
           <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
           <section class="jt-proposal" data-normalization-proposal hidden aria-labelledby="jt-proposal-title">
             <h4 id="jt-proposal-title">Review normalized transcript</h4>
-            <p><strong>Raw provider transcript</strong></p>
-            <pre data-proposal-raw></pre>
             <p><strong>Proposed text</strong></p>
             <pre data-proposal-candidate></pre>
-            <p class="jt-draft-meta" data-proposal-meta></p>
+            <details class="jt-proposal__details">
+              <summary>Raw transcript and normalization details</summary>
+              <p><strong>Raw provider transcript</strong></p>
+              <pre data-proposal-raw></pre>
+              <p class="jt-draft-meta" data-proposal-meta></p>
+            </details>
             <div class="jt-actions">
               <button type="button" data-proposal-accept>Accept &amp; append</button>
               <button type="button" data-proposal-reject>Reject</button>
@@ -2143,14 +2154,17 @@ function shellMarkup() {
         </section>
         <section class="jt-proposal" data-edit-proposal hidden aria-labelledby="jt-edit-proposal-title">
           <h4 id="jt-edit-proposal-title">Review interpreted edit</h4>
-          <p><strong>Spoken instruction</strong></p>
-          <pre data-edit-instruction></pre>
-          <p><strong>Structured operations</strong></p>
-          <pre data-edit-operations></pre>
-          <p><strong>Before</strong></p>
-          <pre data-edit-before></pre>
           <p><strong>Proposed draft</strong></p>
           <pre data-edit-after></pre>
+          <details class="jt-proposal__details">
+            <summary>Instruction and technical details</summary>
+            <p><strong>Spoken instruction</strong></p>
+            <pre data-edit-instruction></pre>
+            <p><strong>Structured operations</strong></p>
+            <pre data-edit-operations></pre>
+            <p><strong>Before</strong></p>
+            <pre data-edit-before></pre>
+          </details>
           <div class="jt-actions">
             <button type="button" data-edit-accept>Accept edit</button>
             <button type="button" data-edit-reject>Reject</button>

@@ -1213,7 +1213,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.4.1";
+var APP_VERSION = "1.4.2";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts
@@ -1909,6 +1909,11 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
   );
 }
 async function interpretEditInstruction(instructionTranscript, session, settings, glossary, userId) {
+  const deterministicPlan = parseDeterministicParagraphInsertion(
+    instructionTranscript,
+    session.draftVersion
+  );
+  if (deterministicPlan) return deterministicPlan;
   try {
     const response = await spindle.generate.quiet({
       type: "quiet",
@@ -1943,6 +1948,28 @@ async function interpretEditInstruction(instructionTranscript, session, settings
     spindle.log.warn(`JarvisType edit interpretation failed safely: ${describeError(error)}`);
     return null;
   }
+}
+function parseDeterministicParagraphInsertion(instructionTranscript, draftVersion) {
+  const match = instructionTranscript.trim().match(
+    /^insert\s+(?:a\s+)?new\s+paragraph\s+(before|after)\s+paragraph\s+(\d+)\s+(?:that\s+says[:,]?\s*)?([\s\S]+)$/iu
+  );
+  if (!match) return null;
+  const paragraphOrdinal = Number(match[2]);
+  const text = (match[3] ?? "").trim().replace(/^["'“”‘’]+/u, "").replace(/["'“”‘’]+$/u, "").trim();
+  if (!Number.isSafeInteger(paragraphOrdinal) || paragraphOrdinal < 1 || !text) return null;
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation: `Insert a new paragraph ${match[1]} paragraph ${paragraphOrdinal}.`,
+    operations: [
+      {
+        id: "deterministic-paragraph-insertion",
+        type: match[1] === "before" ? "insert_before" : "insert_after",
+        target: { paragraphOrdinal },
+        text
+      }
+    ]
+  });
 }
 async function normalizeWithContext(rawTranscript, deterministicCandidate, messages, draft, glossary, settings, userId) {
   try {

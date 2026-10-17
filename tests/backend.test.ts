@@ -600,6 +600,37 @@ test('offers explicit choices for paragraph-resolvable ambiguity without mutatin
   }
 })
 
+test('interprets an explicit new-paragraph command deterministically', async () => {
+  const userId = 'paragraph-insert-user'
+  const chatId = 'paragraph-insert-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'paragraph-insert-interpret',
+      operationId: 'paragraph-insert-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Insert a new paragraph after paragraph 2 that says, The route has been approved.',
+    },
+    userId,
+  )
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(
+      response.proposal.afterText,
+      'First paragraph.\n\nSecond paragraph.\n\nThe route has been approved.\n\nThird paragraph.',
+    )
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
 test('learns explicit spelling from an approved edit but not from its proposal', async () => {
   const userId = 'edit-spelling-user'
   const chatId = 'edit-spelling-chat'

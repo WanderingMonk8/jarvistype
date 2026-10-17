@@ -1213,7 +1213,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.4.2";
+var APP_VERSION = "1.4.3";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts
@@ -1914,6 +1914,8 @@ async function interpretEditInstruction(instructionTranscript, session, settings
     session.draftVersion
   );
   if (deterministicPlan) return deterministicPlan;
+  const referentialPlan = parseDeterministicReferentialReplacement(instructionTranscript, session);
+  if (referentialPlan) return referentialPlan;
   try {
     const response = await spindle.generate.quiet({
       type: "quiet",
@@ -1970,6 +1972,43 @@ function parseDeterministicParagraphInsertion(instructionTranscript, draftVersio
       }
     ]
   });
+}
+function parseDeterministicReferentialReplacement(instructionTranscript, session) {
+  const match = instructionTranscript.trim().match(
+    /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?replace\s+(.+?)\s+with\s+(.+?)(?:[.!?](?:\s|$)|$)/iu
+  );
+  if (!match) return null;
+  const paragraphOrdinal = match[1] === void 0 ? void 0 : Number(match[1]);
+  const spokenTarget = (match[2] ?? "").trim();
+  const replacement = (match[3] ?? "").trim();
+  if (!spokenTarget || !replacement || spokenTarget.toLocaleLowerCase() !== replacement.toLocaleLowerCase() || paragraphOrdinal !== void 0 && (!Number.isSafeInteger(paragraphOrdinal) || paragraphOrdinal < 1))
+    return null;
+  const scopedText = paragraphOrdinal === void 0 ? session.cleanText : session.paragraphs.find((paragraph) => paragraph.ordinal === paragraphOrdinal)?.text ?? "";
+  if (!scopedText || scopedText.includes(spokenTarget)) return null;
+  const plan = parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: "Resolve a speech-recognition homophone against the captured draft; exclude the explanatory reference.",
+    operations: [
+      {
+        id: "deterministic-referential-replacement",
+        type: "replace",
+        target: {
+          ...paragraphOrdinal === void 0 ? {} : { paragraphOrdinal },
+          approximateText: spokenTarget
+        },
+        text: replacement
+      }
+    ]
+  });
+  if (!plan) return null;
+  const resolved = executeEditPlan(
+    session.cleanText,
+    session.paragraphs,
+    session.draftVersion,
+    plan
+  );
+  return resolved.ok && resolved.afterText !== session.cleanText ? plan : null;
 }
 async function normalizeWithContext(rawTranscript, deterministicCandidate, messages, draft, glossary, settings, userId) {
   try {

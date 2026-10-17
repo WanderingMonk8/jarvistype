@@ -814,6 +814,8 @@ async function interpretEditInstruction(
     session.draftVersion,
   )
   if (deterministicPlan) return deterministicPlan
+  const referentialPlan = parseDeterministicReferentialReplacement(instructionTranscript, session)
+  if (referentialPlan) return referentialPlan
   try {
     const response = await spindle.generate.quiet({
       type: 'quiet',
@@ -885,6 +887,59 @@ function parseDeterministicParagraphInsertion(
       },
     ],
   })
+}
+
+function parseDeterministicReferentialReplacement(
+  instructionTranscript: string,
+  session: PersistedDraftSession,
+): EditPlan | null {
+  const match = instructionTranscript
+    .trim()
+    .match(
+      /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?replace\s+(.+?)\s+with\s+(.+?)(?:[.!?](?:\s|$)|$)/iu,
+    )
+  if (!match) return null
+  const paragraphOrdinal = match[1] === undefined ? undefined : Number(match[1])
+  const spokenTarget = (match[2] ?? '').trim()
+  const replacement = (match[3] ?? '').trim()
+  if (
+    !spokenTarget ||
+    !replacement ||
+    spokenTarget.toLocaleLowerCase() !== replacement.toLocaleLowerCase() ||
+    (paragraphOrdinal !== undefined &&
+      (!Number.isSafeInteger(paragraphOrdinal) || paragraphOrdinal < 1))
+  )
+    return null
+  const scopedText =
+    paragraphOrdinal === undefined
+      ? session.cleanText
+      : (session.paragraphs.find((paragraph) => paragraph.ordinal === paragraphOrdinal)?.text ?? '')
+  if (!scopedText || scopedText.includes(spokenTarget)) return null
+  const plan = parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation:
+      'Resolve a speech-recognition homophone against the captured draft; exclude the explanatory reference.',
+    operations: [
+      {
+        id: 'deterministic-referential-replacement',
+        type: 'replace',
+        target: {
+          ...(paragraphOrdinal === undefined ? {} : { paragraphOrdinal }),
+          approximateText: spokenTarget,
+        },
+        text: replacement,
+      },
+    ],
+  })
+  if (!plan) return null
+  const resolved = executeEditPlan(
+    session.cleanText,
+    session.paragraphs,
+    session.draftVersion,
+    plan,
+  )
+  return resolved.ok && resolved.afterText !== session.cleanText ? plan : null
 }
 
 async function normalizeWithContext(

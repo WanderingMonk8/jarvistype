@@ -744,6 +744,35 @@ test('keeps a one-time explanatory reference out of replacement text and glossar
   }
 })
 
+test('recovers a referential homophone when speech-to-text collapses target and replacement', async () => {
+  const userId = 'collapsed-reference-user'
+  const chatId = 'collapsed-reference-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Please ask can the worker for help.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'collapsed-reference-interpret',
+      operationId: 'collapsed-reference-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'In paragraph 1, replace Ken the worker with Ken the worker. Ken, as in the character from Barbie, is only a reference for the name.',
+    },
+    userId,
+  )
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, 'Please ask Ken the worker for help.')
+    assert.equal(response.proposal.afterText.includes('Barbie'), false)
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
 test('rejects malformed messages without replying', async () => {
   await dispatch({ type: 'untrusted' }, 'malformed-user')
   assert.equal(responses.length, 0)

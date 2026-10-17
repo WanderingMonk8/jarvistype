@@ -282,6 +282,8 @@ The user is not required to dictate a complete message in one session.
 
 **FR-EDIT-022:** Every supported punctuation mark shall be addressable as a structured edit target by punctuation type, one-based occurrence within a paragraph or draft, or nearest position before or after an exact anchor phrase. Punctuation targets shall work with applicable operations including move, replace, insert-before, insert-after, and delete, and shall reject missing or ambiguous references without mutating the draft.
 
+**FR-EDIT-023:** After an edit instruction has been separated into command, target, and newly supplied `text` payload, JarvisType shall normalize only that input payload using the same spoken-punctuation, layout, explicit-literal, spelling, casing, and glossary safeguards used by message dictation. Instruction verbs and target selectors shall remain outside this normalization boundary. Natural uses of command vocabulary within the new content shall remain literal.
+
 ### 7.6 Diff and history
 
 **FR-DIFF-001:** JarvisType shall display the complete current draft after every committed addition or edit.

@@ -1202,6 +1202,79 @@ test('interprets an explicit new-paragraph command deterministically', async () 
   assert.equal(generationRequests.length, 0)
 })
 
+test('normalizes spoken punctuation only inside newly inserted edit content', async () => {
+  const userId = 'edit-input-punctuation-user'
+  const chatId = 'edit-input-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Placeholder.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace the placeholder with the newly dictated content.',
+    operations: [
+      {
+        id: 'replace-with-dictated-content',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'Placeholder.' },
+        text: 'First thought period new paragraph Second thought period',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-input-punctuation-interpret',
+      operationId: 'edit-input-punctuation-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Replace Placeholder with First thought period new paragraph Second thought period.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, 'First thought.\n\nSecond thought.')
+    assert.equal(response.proposal.plan.operations[0]?.target.exactText, 'Placeholder.')
+  }
+})
+
+test('preserves natural punctuation words inside newly inserted edit content', async () => {
+  const userId = 'edit-input-literal-user'
+  const chatId = 'edit-input-literal-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-input-literal-interpret',
+      operationId: 'edit-input-literal-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Insert a new paragraph after paragraph 1 that says, The period of growth challenged everyone period',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(
+      response.proposal.afterText,
+      'First paragraph.\n\nThe period of growth challenged everyone.',
+    )
+  }
+})
+
 test('learns explicit spelling from an approved edit but not from its proposal', async () => {
   const userId = 'edit-spelling-user'
   const chatId = 'edit-spelling-chat'

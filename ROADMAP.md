@@ -576,6 +576,7 @@ Deliver flexible natural-language editing while allowing only resolved, validate
 - Provide minimal draft and paragraph context.
 - Produce operations, not rewritten full-draft prose.
 - Separate command, target, literal payload, and explanation.
+- Normalize newly supplied operation payloads only after command and target separation, using the message-dictation literal-language safeguards.
 - Return typed inability rather than inventing an edit.
 
 #### Optional fast path

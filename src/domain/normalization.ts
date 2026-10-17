@@ -280,18 +280,19 @@ function replaceSpokenQuotationCommands(
 } {
   const marks: string[] = []
   const reasons: string[] = []
+  const generatedOpeningMarker = '\uE002'
   let text = input
 
-  const replaceFixed = (pattern: RegExp, mark: string, reason: string) => {
+  const replaceFixed = (pattern: RegExp, mark: string, reason: string, opening = false) => {
     text = text.replace(pattern, () => {
       marks.push(mark)
       reasons.push(reason)
-      return mark
+      return opening ? `${generatedOpeningMarker}${mark}` : mark
     })
   }
-  replaceFixed(/\bopen single quote\b/gi, '‘', 'single quote')
+  replaceFixed(/\bopen single quote\b[.,;:!?…—–-]*/gi, '‘', 'single quote', true)
   replaceFixed(/\bclose single quote\b/gi, '’', 'single quote')
-  replaceFixed(/\bopen quote\b/gi, '“', 'quote')
+  replaceFixed(/\bopen quote\b[.,;:!?…—–-]*/gi, '“', 'quote', true)
   replaceFixed(/\bclose quote\b/gi, '”', 'quote')
 
   const replacePaired = (pattern: RegExp, opening: string, closing: string, reason: string) => {
@@ -299,18 +300,35 @@ function replaceSpokenQuotationCommands(
     const count = text.match(pattern)?.length ?? 0
     if (count < 2 || count % 2 !== 0) return
     let occurrence = 0
-    text = text.replace(pattern, () => {
-      const mark = occurrence % 2 === 0 ? opening : closing
+    text = text.replace(pattern, (_whole: string, attachedPunctuation: string = '') => {
+      const isOpening = occurrence % 2 === 0
+      const mark = isOpening ? opening : closing
       occurrence += 1
       marks.push(mark)
       reasons.push(reason)
-      return mark
+      return isOpening ? `${generatedOpeningMarker}${mark}` : `${mark}${attachedPunctuation}`
     })
   }
-  replacePaired(/\bsingle quote\b/gi, '‘', '’', 'single quote')
-  replacePaired(/\bquote\b/gi, '“', '”', 'quote')
+  replacePaired(/\bsingle quote\b([.,;:!?…—–-]*)/gi, '‘', '’', 'single quote')
+  replacePaired(/\bquote\b([.,;:!?…—–-]*)/gi, '“', '”', 'quote')
+
+  text = formatGeneratedQuotationOpenings(text, generatedOpeningMarker)
 
   return { text, marks, reasons }
+}
+
+function formatGeneratedQuotationOpenings(input: string, marker: string): string {
+  const markedOpening = new RegExp(`${marker}([“‘])[ \\t]*([\\p{Ll}][\\p{L}\\p{M}'’-]*)`, 'gu')
+
+  return input
+    .replace(markedOpening, (_whole: string, quote: string, word: string) => {
+      const hasInternalUppercase = /\p{Lu}/u.test(word.slice(1))
+      const formattedWord = hasInternalUppercase
+        ? word
+        : `${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`
+      return `${quote}${formattedWord}`
+    })
+    .replaceAll(marker, '')
 }
 
 function replaceExplicitSpelling(

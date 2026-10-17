@@ -824,7 +824,33 @@ test('does not let contextual normalization discard commanded quotation marks', 
   assert.equal(response?.type, 'transcript.normalization.response')
   if (response?.type === 'transcript.normalization.response') {
     assert.equal(response.outcome, 'review')
-    assert.equal(response.proposal.candidateText, 'She said “proceed carefully”.')
+    assert.equal(response.proposal.candidateText, 'She said “Proceed carefully”.')
+    assert.equal(response.proposal.contextualModelUsed, false)
+  }
+})
+
+test('formats an opening produced by a spoken quote command', async () => {
+  const userId = 'formatted-commanded-quotes-user'
+  const chatId = 'formatted-commanded-quotes-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'formatted-commanded-quotes-segment',
+      1,
+      'quote, and I am not going anywhere quote.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(response.proposal.candidateText, '“And I am not going anywhere”.')
     assert.equal(response.proposal.contextualModelUsed, false)
   }
 })

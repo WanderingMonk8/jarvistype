@@ -328,6 +328,8 @@ A bare spoken `period` or `full stop` immediately following provider-supplied `.
 
 **FR-PUNC-009:** When contextual normalization is enabled, every completed **Record Message** transcript shall receive a conservative contextual command-detection pass, even when no prior chat, draft, or glossary context exists. The model may recover a likely supported command from a minor transcription error only by identifying an exact source span from the raw transcript and returning an allow-listed canonical command. Natural or uncertain usage shall remain literal, all model decisions shall be validated before execution, and the resulting segment shall still require user approval.
 
+**FR-PUNC-010:** When a spoken quotation command creates an opening quotation mark, JarvisType shall discard punctuation that the transcription provider attached directly to that opening command, tighten the opening spacing, and capitalize an ordinary lowercase first word. This formatting shall not alter quotation marks supplied directly by the provider, intentional leading punctuation requested through a punctuation command, or established mixed-case terms such as `eBay`.
+
 ### 7.8 Explicit spelling
 
 **FR-SPELL-001:** During **Record Message**, JarvisType shall recognize an explicitly separated sequence of spoken letters as the spelling of one intended word.

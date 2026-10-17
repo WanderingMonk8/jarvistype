@@ -99,7 +99,7 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
       'Label semi colon value colon open single quote ready close single quote ellipsis',
       [],
     ).text,
-    'Label; value: ‘ready’…',
+    'Label; value: ‘Ready’…',
   )
   assert.equal(
     normalizeDeterministically('First dash second em dash third en dash fourth period', []).text,
@@ -130,11 +130,11 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
   )
   assert.equal(
     normalizeDeterministically('She said quote proceed carefully quote period', []).text,
-    'She said “proceed carefully”.',
+    'She said “Proceed carefully”.',
   )
   assert.equal(
     normalizeDeterministically('Mark it single quote provisional single quote period', []).text,
-    'Mark it ‘provisional’.',
+    'Mark it ‘Provisional’.',
   )
   assert.equal(
     normalizeDeterministically('The quote from the book was memorable period', []).text,
@@ -146,6 +146,26 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
   )
   const authoritative = normalizeDeterministically('Alpha comma beta question mark', [])
   assert.deepEqual([...authoritative.authoritativePunctuationMarks].sort(), [',', '?'])
+})
+
+test('formats voice-generated quotation openings without changing intentional leading punctuation', () => {
+  assert.equal(
+    normalizeDeterministically('quote, and I am not going anywhere quote.', []).text,
+    '“And I am not going anywhere”.',
+  )
+  assert.equal(normalizeDeterministically('open quote, hello close quote.', []).text, '“Hello”.')
+  assert.equal(
+    normalizeDeterministically('quote eBay is ready quote.', []).text,
+    '“eBay is ready”.',
+  )
+  assert.equal(
+    normalizeDeterministically('quote punctuation ellipsis and then quote.', []).text,
+    '“… and then”.',
+  )
+  assert.equal(
+    normalizeDeterministically('“and I am not going anywhere.”', []).text,
+    '“and I am not going anywhere.”',
+  )
 })
 
 test('recovers a standalone phonetic new-paragraph command without changing natural prose', () => {

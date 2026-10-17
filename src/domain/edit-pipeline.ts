@@ -93,6 +93,12 @@ export function executeEditPlan(
   plan: EditPlan,
 ): EditPipelineResult {
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
+  const inlineMoves = plan.operations.filter(isInlineMoveOperation)
+  if (inlineMoves.length) {
+    if (inlineMoves.length !== plan.operations.length || inlineMoves.length > 1)
+      return { ok: false, reason: 'an inline move must be the only operation in its edit plan' }
+    return executeInlineMove(cleanText, paragraphs, inlineMoves[0]!)
+  }
   const structural = plan.operations.filter(isStructuralOperation)
   if (structural.length) {
     if (structural.length !== plan.operations.length)
@@ -187,15 +193,10 @@ function parseOperation(value: unknown): EditOperation | null {
       return null
   } else if (type === 'move_before' || type === 'move_after') {
     if (text !== undefined || caseMode !== undefined || !destination) return null
-    if (
-      target.exactText !== undefined ||
-      target.approximateText !== undefined ||
-      target.scope !== undefined ||
-      destination.exactText !== undefined ||
-      destination.approximateText !== undefined ||
-      destination.scope !== undefined
-    )
-      return null
+    if (target.scope !== undefined || destination.scope !== undefined) return null
+    const sourceIsText = hasTextSelector(target)
+    const destinationIsText = hasTextSelector(destination)
+    if (sourceIsText !== destinationIsText) return null
   } else if (
     typeof text !== 'string' ||
     text.length > MAX_EDIT_TEXT_LENGTH ||
@@ -373,6 +374,11 @@ type StructuralEditOperation = EditOperation & {
   type: 'split' | 'join_next' | 'move_before' | 'move_after'
 }
 
+type InlineMoveOperation = EditOperation & {
+  type: 'move_before' | 'move_after'
+  destination: EditTarget
+}
+
 interface StructuralParagraph {
   id: string
   originalOrdinal: number
@@ -383,9 +389,152 @@ function isStructuralOperation(operation: EditOperation): operation is Structura
   return (
     operation.type === 'split' ||
     operation.type === 'join_next' ||
-    operation.type === 'move_before' ||
-    operation.type === 'move_after'
+    ((operation.type === 'move_before' || operation.type === 'move_after') &&
+      !isInlineMoveOperation(operation))
   )
+}
+
+function isInlineMoveOperation(operation: EditOperation): operation is InlineMoveOperation {
+  return (
+    (operation.type === 'move_before' || operation.type === 'move_after') &&
+    operation.destination !== undefined &&
+    hasTextSelector(operation.target) &&
+    hasTextSelector(operation.destination)
+  )
+}
+
+function hasTextSelector(target: EditTarget): boolean {
+  return target.exactText !== undefined || target.approximateText !== undefined
+}
+
+interface ResolvedTextTarget {
+  start: number
+  end: number
+  paragraphOrdinal: number
+  scopeStart: number
+  scopeEnd: number
+}
+
+function executeInlineMove(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  operation: InlineMoveOperation,
+): EditPipelineResult {
+  const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'move source')
+  if (typeof source === 'string') return { ok: false, reason: source }
+  const destination = resolveTextTarget(
+    cleanText,
+    paragraphs,
+    operation.destination,
+    'move destination',
+  )
+  if (typeof destination === 'string') return { ok: false, reason: destination }
+  if (source.start < destination.end && destination.start < source.end)
+    return { ok: false, reason: 'move source and destination overlap' }
+
+  const movedText = cleanText.slice(source.start, source.end)
+  let removalStart = source.start
+  let removalEnd = source.end
+  const hasSeparatorBefore =
+    removalStart > source.scopeStart && /[ \t]/.test(cleanText[removalStart - 1] ?? '')
+  const hasSeparatorAfter =
+    removalEnd < source.scopeEnd && /[ \t]/.test(cleanText[removalEnd] ?? '')
+  const endsBeforeClosingPunctuation = /[,.;:!?)}\]”’]/.test(cleanText[removalEnd] ?? '')
+  if (
+    hasSeparatorBefore &&
+    (hasSeparatorAfter || removalEnd === source.scopeEnd || endsBeforeClosingPunctuation)
+  )
+    removalStart -= 1
+  else if (hasSeparatorAfter && removalStart === source.scopeStart) removalEnd += 1
+
+  const withoutSource = `${cleanText.slice(0, removalStart)}${cleanText.slice(removalEnd)}`
+  const originalInsertionPoint =
+    operation.type === 'move_before' ? destination.start : destination.end
+  const insertionPoint =
+    originalInsertionPoint > removalStart
+      ? originalInsertionPoint - (removalEnd - removalStart)
+      : originalInsertionPoint
+  const insertion = addBoundarySpacing(withoutSource, insertionPoint, movedText)
+  const afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`
+  if (afterText.length > MAX_DRAFT_CHARACTERS)
+    return { ok: false, reason: 'edited draft is too large' }
+  if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
+
+  return {
+    ok: true,
+    afterText,
+    operations: [
+      {
+        ...operation,
+        startOffset: source.start,
+        endOffset: source.end,
+        beforeText: movedText,
+        afterText: movedText,
+        paragraphOrdinal: source.paragraphOrdinal,
+      },
+    ],
+    affectedParagraphOrdinals: [
+      ...new Set([source.paragraphOrdinal, destination.paragraphOrdinal]),
+    ].sort((left, right) => left - right),
+  }
+}
+
+function resolveTextTarget(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  target: EditTarget,
+  label: string,
+): ResolvedTextTarget | string {
+  const paragraphMatches = paragraphs.filter(
+    (paragraph) =>
+      (target.paragraphId === undefined || paragraph.id === target.paragraphId) &&
+      (target.paragraphOrdinal === undefined || paragraph.ordinal === target.paragraphOrdinal),
+  )
+  const scoped = target.paragraphId !== undefined || target.paragraphOrdinal !== undefined
+  if (scoped && paragraphMatches.length !== 1)
+    return paragraphMatches.length
+      ? `${label} paragraph is ambiguous`
+      : `${label} paragraph was not found`
+  const paragraph = scoped ? paragraphMatches[0]! : undefined
+  const range = paragraph
+    ? paragraphRange(cleanText, paragraph)
+    : { start: 0, end: cleanText.length }
+
+  let start: number
+  let end: number
+  if (target.exactText !== undefined) {
+    const matches = findAll(cleanText, target.exactText, range.start, range.end)
+    if (matches.length !== 1)
+      return matches.length ? `${label} is ambiguous` : `${label} was not found`
+    start = matches[0]!
+    end = start + target.exactText.length
+  } else if (target.approximateText !== undefined) {
+    const match = findApproximateMatch(cleanText, target.approximateText, range.start, range.end)
+    if (typeof match === 'string') return `${label}: ${match}`
+    start = match.start
+    end = match.end
+  } else {
+    return `${label} requires exact or approximate text`
+  }
+
+  return {
+    start,
+    end,
+    paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset(cleanText, start),
+    scopeStart: range.start,
+    scopeEnd: range.end,
+  }
+}
+
+function addBoundarySpacing(text: string, point: number, insertion: string): string {
+  let result = insertion
+  const left = text[point - 1] ?? ''
+  const right = text[point] ?? ''
+  if (left && !/\s/.test(left) && !/[([{“‘]/.test(left) && !/^[,.;:!?)}\]”’]/.test(result))
+    result = ` ${result}`
+  if (right && !/\s/.test(right) && !/^[,.;:!?)}\]”’]/.test(right) && !/[([{“‘]$/.test(result))
+    result = `${result} `
+  return result
 }
 
 function executeStructuralPlan(

@@ -5,6 +5,7 @@ import type {
 } from 'lumiverse-spindle-types'
 
 import { MAX_DRAFT_CHARACTERS, type DraftSnapshot } from './domain/draft-session'
+import type { EditTarget } from './domain/edit-pipeline'
 import type { GlossaryEntry } from './domain/glossary'
 import { RequestRegistry, type RequestOutcome } from './domain/request-registry'
 import {
@@ -85,6 +86,7 @@ export const COMMAND_GROUPS = [
       ],
       ['Append', 'Append “Please confirm attendance.” to paragraph 1.'],
       ['Prepend', 'Prepend “Urgent:” to paragraph 1.'],
+      ['Move', 'Move “approved” before “pending” in paragraph 1.'],
     ],
   },
   {
@@ -111,6 +113,18 @@ export const COMMAND_GROUPS = [
     ],
   },
 ] as const
+
+function describeEditDestination(destination: EditTarget | undefined): string {
+  if (!destination) return ''
+  const anchor = destination.exactText ?? destination.approximateText
+  if (anchor) {
+    const paragraph = destination.paragraphOrdinal
+      ? ` in paragraph ${destination.paragraphOrdinal}`
+      : ''
+    return ` → “${anchor}”${paragraph}`
+  }
+  return destination.paragraphOrdinal ? ` → paragraph ${destination.paragraphOrdinal}` : ''
+}
 
 interface ActiveRecording {
   runId: string
@@ -600,7 +614,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       ? editProposal.operations
           .map(
             (operation) =>
-              `${operation.type} · paragraph ${operation.paragraphOrdinal}${operation.destination?.paragraphOrdinal ? ` → paragraph ${operation.destination.paragraphOrdinal}` : ''} · ${operation.beforeText || '∅'} → ${operation.afterText || '∅'}`,
+              `${operation.type} · paragraph ${operation.paragraphOrdinal}${describeEditDestination(operation.destination)} · ${operation.beforeText || '∅'} → ${operation.afterText || '∅'}`,
           )
           .join('\n')
       : ''

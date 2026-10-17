@@ -102,8 +102,10 @@ function parseOperation(value) {
       return null;
   } else if (type === "move_before" || type === "move_after") {
     if (text !== void 0 || caseMode !== void 0 || !destination) return null;
-    if (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0 || destination.exactText !== void 0 || destination.approximateText !== void 0 || destination.scope !== void 0)
-      return null;
+    if (target.scope !== void 0 || destination.scope !== void 0) return null;
+    const sourceIsText = hasTextSelector(target);
+    const destinationIsText = hasTextSelector(destination);
+    if (sourceIsText !== destinationIsText) return null;
   } else if (typeof text !== "string" || text.length > MAX_EDIT_TEXT_LENGTH || caseMode !== void 0 || destination !== void 0) {
     return null;
   }
@@ -152,6 +154,9 @@ function parseTarget(value) {
   if (target.scope === "draft" && (target.paragraphId !== void 0 || target.paragraphOrdinal !== void 0 || target.exactText !== void 0 || target.approximateText !== void 0))
     return null;
   return Object.keys(target).length ? target : null;
+}
+function hasTextSelector(target) {
+  return target.exactText !== void 0 || target.approximateText !== void 0;
 }
 function isRecord(value) {
   return typeof value === "object" && value !== null;
@@ -345,7 +350,8 @@ var COMMAND_GROUPS = [
         "Insert a new paragraph after paragraph 2 that says \u201CThe route is approved.\u201D"
       ],
       ["Append", "Append \u201CPlease confirm attendance.\u201D to paragraph 1."],
-      ["Prepend", "Prepend \u201CUrgent:\u201D to paragraph 1."]
+      ["Prepend", "Prepend \u201CUrgent:\u201D to paragraph 1."],
+      ["Move", "Move \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."]
     ]
   },
   {
@@ -372,6 +378,15 @@ var COMMAND_GROUPS = [
     ]
   }
 ];
+function describeEditDestination(destination) {
+  if (!destination) return "";
+  const anchor = destination.exactText ?? destination.approximateText;
+  if (anchor) {
+    const paragraph = destination.paragraphOrdinal ? ` in paragraph ${destination.paragraphOrdinal}` : "";
+    return ` \u2192 \u201C${anchor}\u201D${paragraph}`;
+  }
+  return destination.paragraphOrdinal ? ` \u2192 paragraph ${destination.paragraphOrdinal}` : "";
+}
 function setup(ctx) {
   ctx.deferReady();
   const tab = ctx.ui.registerDrawerTab({
@@ -718,7 +733,7 @@ function setup(ctx) {
     editProposalPanel.hidden = !editProposal;
     editProposalInstruction.textContent = editProposal?.instructionTranscript ?? "";
     editProposalOperations.textContent = editProposal ? editProposal.operations.map(
-      (operation) => `${operation.type} \xB7 paragraph ${operation.paragraphOrdinal}${operation.destination?.paragraphOrdinal ? ` \u2192 paragraph ${operation.destination.paragraphOrdinal}` : ""} \xB7 ${operation.beforeText || "\u2205"} \u2192 ${operation.afterText || "\u2205"}`
+      (operation) => `${operation.type} \xB7 paragraph ${operation.paragraphOrdinal}${describeEditDestination(operation.destination)} \xB7 ${operation.beforeText || "\u2205"} \u2192 ${operation.afterText || "\u2205"}`
     ).join("\n") : "";
     editProposalBefore.textContent = editProposal?.beforeText ?? "";
     editProposalAfter.textContent = editProposal?.afterText ?? "";

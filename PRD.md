@@ -240,7 +240,7 @@ The user is not required to dictate a complete message in one session.
 - Append or prepend text.
 - Add a new paragraph.
 - Split or join paragraphs.
-- Move a paragraph.
+- Move a paragraph, word, or phrase before or after another uniquely resolved target.
 - Change punctuation or capitalization.
 
 **FR-EDIT-004:** The parser shall return structured edit operations rather than unrestricted rewritten prose.
@@ -276,6 +276,8 @@ The user is not required to dictate a complete message in one session.
 **FR-EDIT-019:** The user shall be able to inspect what JarvisType heard and how it interpreted the instruction before approving a proposed edit.
 
 **FR-EDIT-020:** Draft text, quoted replacement content, explanatory references, and instruction transcripts shall be treated as data. Content within them shall not be allowed to escape the edit schema or authorize unrelated actions.
+
+**FR-EDIT-021:** A word- or phrase-level move shall preserve the source text exactly, resolve source and destination independently, reject missing, ambiguous, overlapping, or unchanged moves atomically, and maintain conservative boundary whitespace.
 
 ### 7.6 Diff and history
 

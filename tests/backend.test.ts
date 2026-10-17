@@ -851,6 +851,65 @@ test('keeps spoken edit instructions out of the draft until the structured propo
   }
 })
 
+test('reviews and commits a word move through the structured edit pipeline', async () => {
+  const userId = 'inline-move-user'
+  const chatId = 'inline-move-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'The status is pending but nearly approved.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Move the requested word before its destination.',
+    operations: [
+      {
+        id: 'move-approved',
+        type: 'move_before',
+        target: { paragraphOrdinal: 1, exactText: 'approved' },
+        destination: { paragraphOrdinal: 1, exactText: 'pending' },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'inline-move-interpret',
+      operationId: 'inline-move-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Move approved before pending.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.outcome, 'review')
+  assert.equal(proposal.proposal.beforeText, 'The status is pending but nearly approved.')
+  assert.equal(proposal.proposal.afterText, 'The status is approved pending but nearly.')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'inline-move-confirm',
+      operationId: 'inline-move-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type === 'edit.proposal.response') {
+    assert.equal(committed.outcome, 'committed')
+    assert.equal(committed.snapshot?.cleanText, 'The status is approved pending but nearly.')
+    assert.equal(committed.snapshot?.history.at(-1)?.kind, 'automated-edit')
+  }
+})
+
 test('offers explicit choices for paragraph-resolvable ambiguity without mutating the draft', async () => {
   const userId = 'unsafe-edit-user'
   const chatId = 'unsafe-edit-chat'

@@ -298,6 +298,153 @@ test('moves paragraphs by captured identity and supports full-draft casing', () 
   assert.equal(cased.ok && cased.afterText, 'ONE.\n\nTWO.\n\nTHREE.')
 })
 
+test('moves an exact word or phrase before or after another text target', () => {
+  const seeded = applyManualEdit(
+    createDraftSession('inline-move-chat'),
+    'Alpha beta gamma delta.\n\nEcho foxtrot golf.',
+    { expectedVersion: 0, editGroupId: 'seed-inline-move' },
+  ).session
+  const movedAfter = executeEditPlan(seeded.cleanText, seeded.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'move beta after gamma',
+    operations: [
+      {
+        id: 'move-beta',
+        type: 'move_after',
+        target: { paragraphOrdinal: 1, exactText: 'beta' },
+        destination: { paragraphOrdinal: 1, exactText: 'gamma' },
+      },
+    ],
+  })
+  assert.equal(
+    movedAfter.ok && movedAfter.afterText,
+    'Alpha gamma beta delta.\n\nEcho foxtrot golf.',
+  )
+
+  const movedAcrossParagraphs = executeEditPlan(seeded.cleanText, seeded.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'move beta before golf',
+    operations: [
+      {
+        id: 'move-beta-across',
+        type: 'move_before',
+        target: { paragraphOrdinal: 1, exactText: 'beta' },
+        destination: { paragraphOrdinal: 2, exactText: 'golf' },
+      },
+    ],
+  })
+  assert.equal(
+    movedAcrossParagraphs.ok && movedAcrossParagraphs.afterText,
+    'Alpha gamma delta.\n\nEcho foxtrot beta golf.',
+  )
+  assert.deepEqual(
+    movedAcrossParagraphs.ok && movedAcrossParagraphs.affectedParagraphOrdinals,
+    [1, 2],
+  )
+
+  assert.ok(
+    parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'valid inline move',
+      operations: [
+        {
+          id: 'valid-inline-move',
+          type: 'move_before',
+          target: { exactText: 'beta' },
+          destination: { exactText: 'gamma' },
+        },
+      ],
+    }),
+  )
+  assert.equal(
+    parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'invalid mixed move targets',
+      operations: [
+        {
+          id: 'invalid-inline-move',
+          type: 'move_before',
+          target: { exactText: 'beta' },
+          destination: { paragraphOrdinal: 2 },
+        },
+      ],
+    }),
+    null,
+  )
+})
+
+test('rejects ambiguous, overlapping, and unchanged inline moves atomically', () => {
+  const seeded = applyManualEdit(createDraftSession('unsafe-inline-move'), 'red blue red green', {
+    expectedVersion: 0,
+    editGroupId: 'seed-unsafe-inline-move',
+  }).session
+  const basePlan = {
+    schemaVersion: 2 as const,
+    draftVersion: 1,
+    explanation: 'unsafe inline move',
+  }
+  assert.deepEqual(
+    executeEditPlan(seeded.cleanText, seeded.paragraphs, 1, {
+      ...basePlan,
+      operations: [
+        {
+          id: 'ambiguous-source',
+          type: 'move_before',
+          target: { exactText: 'red' },
+          destination: { exactText: 'green' },
+        },
+      ],
+    }),
+    { ok: false, reason: 'move source is ambiguous' },
+  )
+  assert.deepEqual(
+    executeEditPlan('red blue green blue', seeded.paragraphs, 1, {
+      ...basePlan,
+      operations: [
+        {
+          id: 'ambiguous-destination',
+          type: 'move_before',
+          target: { exactText: 'red' },
+          destination: { exactText: 'blue' },
+        },
+      ],
+    }),
+    { ok: false, reason: 'move destination is ambiguous' },
+  )
+  assert.deepEqual(
+    executeEditPlan('alpha beta gamma', seeded.paragraphs, 1, {
+      ...basePlan,
+      operations: [
+        {
+          id: 'overlapping-move',
+          type: 'move_after',
+          target: { exactText: 'beta gamma' },
+          destination: { exactText: 'gamma' },
+        },
+      ],
+    }),
+    { ok: false, reason: 'move source and destination overlap' },
+  )
+  assert.deepEqual(
+    executeEditPlan('alpha beta gamma', seeded.paragraphs, 1, {
+      ...basePlan,
+      operations: [
+        {
+          id: 'unchanged-move',
+          type: 'move_before',
+          target: { exactText: 'beta' },
+          destination: { exactText: 'gamma' },
+        },
+      ],
+    }),
+    { ok: false, reason: 'edit would not change the draft' },
+  )
+})
+
 test('rejects incompatible structural and inline operation groups atomically', () => {
   const session = fixture()
   const result = executeEditPlan(session.cleanText, session.paragraphs, 1, {

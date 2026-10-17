@@ -1,6 +1,9 @@
 export const DEFAULT_CONTEXT_MESSAGE_COUNT = 5
 export const MAX_CONTEXT_MESSAGE_COUNT = 20
 export const MAX_CONTEXT_CHARACTERS = 12_000
+export const NORMALIZATION_RECENT_MESSAGE_COUNT = 2
+export const NORMALIZATION_RECENT_CONTEXT_CHARACTERS = 4_000
+export const MAX_CONVERSATION_REFERENCE_CHARACTERS = 2_000
 
 export interface ContextSourceMessage {
   role: 'system' | 'user' | 'assistant'
@@ -72,6 +75,46 @@ export function selectRecentContext(
   }
 }
 
+export function extractConversationReferences(
+  messages: readonly ContextMessage[],
+  characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS,
+): string[] {
+  if (characterLimit <= 0) return []
+  const references: string[] = []
+  const seen = new Set<string>()
+  let size = 0
+
+  const add = (value: string) => {
+    const normalized = value.trim()
+    const key = normalized.toLocaleLowerCase()
+    if (!normalized || seen.has(key) || size + normalized.length > characterLimit) return
+    seen.add(key)
+    references.push(normalized)
+    size += normalized.length
+  }
+
+  for (const message of messages) {
+    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
+    let sequence: string[] = []
+    const flushSequence = () => {
+      if (sequence.length > 1) add(sequence.slice(0, 4).join(' '))
+      for (const term of sequence) add(term)
+      sequence = []
+    }
+
+    for (const term of terms) {
+      if (isReferenceTerm(term)) {
+        sequence.push(term)
+      } else {
+        flushSequence()
+      }
+    }
+    flushSequence()
+  }
+
+  return references
+}
+
 function eligibleCount(source: readonly ContextSourceMessage[]): number {
   return source.filter(isEligible).length
 }
@@ -97,4 +140,46 @@ function isHidden(record: Record<string, unknown> | undefined): boolean {
     record?.visibility === 'hidden' ||
     record?.excluded_from_context === true,
   )
+}
+
+const COMMON_CAPITALIZED_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'as',
+  'at',
+  'but',
+  'for',
+  'from',
+  'he',
+  'her',
+  'his',
+  'i',
+  'if',
+  'in',
+  'it',
+  'its',
+  'my',
+  'of',
+  'on',
+  'our',
+  'she',
+  'so',
+  'that',
+  'the',
+  'their',
+  'then',
+  'they',
+  'this',
+  'to',
+  'we',
+  'when',
+  'with',
+  'you',
+  'your',
+])
+
+function isReferenceTerm(term: string): boolean {
+  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(term.toLocaleLowerCase())) return false
+  return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1))
 }

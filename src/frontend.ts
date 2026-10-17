@@ -2475,7 +2475,7 @@ function shellMarkup(): string {
 
       <section class="jt-shell__card" aria-labelledby="jt-context-title">
         <h3 id="jt-context-title">Context and glossary</h3>
-        <p class="jt-shell__notice">JarvisType sends the selected recent chat text, current draft tail, and glossary to the normalization connection selected below only after speech-to-text finishes. The normalization model receives text, never audio. Lumiverse STT remains independently managed by the host and receives no added context. Set recent messages to 0 to exclude chat history.</p>
+        <p class="jt-shell__notice">After speech-to-text finishes, JarvisType sends the current recording, at most the two newest selected chat messages, a compact name and terminology list extracted from the selected history, and the glossary to the normalization connection below. Ordinary message normalization does not send the working draft. The model receives text, never audio, and historical context may assist spelling and references but cannot activate dictation commands. Lumiverse STT remains independently managed by the host and receives no added context. Set recent messages to 0 to exclude chat history.</p>
         <div class="jt-form-grid">
           <label>Recent messages (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>

@@ -172,7 +172,7 @@ The user is not required to dictate a complete message in one session.
 
 ### 7.2 Context-aware transcription
 
-**FR-CTX-001:** JarvisType shall use the five most recent eligible Lumiverse messages as transcription context by default.
+**FR-CTX-001:** JarvisType shall inspect up to the five most recent eligible Lumiverse messages by default to build compact spelling and proper-noun references. Ordinary message normalization shall include no more than the two newest complete messages as conversational reference context.
 
 **FR-CTX-002:** The user shall be able to configure the number of recent messages, including selecting zero.
 
@@ -180,7 +180,7 @@ The user is not required to dictate a complete message in one session.
 
 **FR-CTX-004:** Eligible context shall prioritize recent visible user and assistant text messages. Hidden messages and non-text payloads shall not be sent as transcription context.
 
-**FR-CTX-005:** The current unsent draft shall be supplied as separate continuity context and shall not count against the configured recent-message number.
+**FR-CTX-005:** Ordinary **Record Message** normalization shall not transmit the current unsent draft. **Record Edit** may receive the versioned draft because deterministic target resolution requires it.
 
 **FR-CTX-006:** The user's personal spelling glossary shall be supplied as vocabulary context independently of the recent-message number.
 
@@ -191,6 +191,8 @@ The user is not required to dictate a complete message in one session.
 **FR-CTX-009:** The user shall be able to select Main or another accessible Lumiverse connection for post-transcription context normalization without exposing connection credentials to JarvisType.
 
 **FR-CTX-010:** The user shall be able to search the models available through the selected Lumiverse text connection and optionally choose one as the normalization override. Model discovery and refresh shall use Lumiverse's host-managed connection-aware picker so provider credentials remain unavailable to JarvisType. A blank override shall use the selected connection's configured model.
+
+**FR-CTX-011:** Contextual message normalization shall separate local command intent from conversational reference data. Spoken-command classification may use only the current recording sentence and its immediate neighboring sentences. Bounded recent messages and a compact cached conversation vocabulary may inform spelling, proper nouns, and subject references, but shall not influence whether wording activates a command.
 
 ### 7.3 Transcription display
 

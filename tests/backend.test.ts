@@ -22,6 +22,11 @@ let generationReturnsRawTranscript = false
 let generationNormalizedText: string | null = null
 let generationCommandDecisions: unknown[] = []
 let editPlanResponse: unknown = null
+let chatMessages: Array<{
+  role: 'system' | 'user' | 'assistant'
+  content: unknown
+  metadata?: Record<string, unknown>
+}> = []
 
 const spindleMock = {
   onFrontendMessage(handler: FrontendHandler) {
@@ -68,7 +73,7 @@ const spindleMock = {
       ),
   },
   chat: {
-    getMessages: () => Promise.resolve([]),
+    getMessages: () => Promise.resolve(chatMessages),
     appendMessage: (
       chatId: string,
       message: { content: string },
@@ -134,6 +139,7 @@ test.beforeEach(() => {
   generationNormalizedText = null
   generationCommandDecisions = []
   editPlanResponse = null
+  chatMessages = []
 })
 
 const normalizationConnection = {
@@ -277,6 +283,36 @@ test('lists safe normalization connections and dispatches with selected connecti
   assert.equal(generationRequests.length, 1)
   assert.equal(generationRequests[0]?.connection_id, normalizationConnection.id)
   assert.equal(generationRequests[0]?.parameters?.model, 'custom-text-model')
+})
+
+test('uses local command context with compact conversational spelling references', async () => {
+  const userId = 'split-context-user'
+  const chatId = 'split-context-chat'
+  activeChatId = chatId
+  chatMessages = [
+    { role: 'assistant', content: 'Captain Caelora Venn leads the Northern Survey.' },
+    { role: 'user', content: 'Tell me more about her work.' },
+    { role: 'assistant', content: 'She is mapping the coast near Port Meridian.' },
+    { role: 'user', content: 'Continue that account.' },
+  ]
+  await seedDraft(userId, chatId, 'This draft content must not enter the normalization prompt.')
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'split-context-segment', 1, 'She reached the harbor period'),
+    userId,
+  )
+
+  const request = generationRequests.at(-1)
+  const prompt = JSON.parse(request?.messages?.at(-1)?.content ?? '{}') as Record<string, unknown>
+  assert.deepEqual(prompt.recentReferenceContext, [
+    { role: 'assistant', content: 'She is mapping the coast near Port Meridian.' },
+    { role: 'user', content: 'Continue that account.' },
+  ])
+  assert.ok(Array.isArray(prompt.conversationReferences))
+  assert.ok(prompt.conversationReferences.includes('Caelora'))
+  assert.ok(prompt.conversationReferences.includes('Northern Survey'))
+  assert.equal('currentDraftTail' in prompt, false)
+  assert.equal(JSON.stringify(prompt).includes('This draft content must not enter'), false)
 })
 
 test('blocks sending when the active chat does not own the draft', async () => {

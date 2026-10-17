@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { clampContextMessageCount, selectRecentContext } from '../src/domain/context'
+import {
+  clampContextMessageCount,
+  extractConversationReferences,
+  selectRecentContext,
+} from '../src/domain/context'
 
 test('defaults and bounds the user-configurable context count', () => {
   assert.equal(clampContextMessageCount(undefined), 5)
@@ -34,4 +38,27 @@ test('zero excludes chat history entirely', () => {
   const result = selectRecentContext([{ role: 'user', content: 'hello' }], 0)
   assert.deepEqual(result.messages, [])
   assert.equal(result.omittedCount, 1)
+})
+
+test('extracts compact proper-name and specialized-term references from conversation context', () => {
+  assert.deepEqual(
+    extractConversationReferences([
+      { role: 'assistant', content: 'The expedition is led by Captain Caelora Venn.' },
+      { role: 'user', content: 'Her Pip-Boy connects to Vault-Tec Relay 7.' },
+    ]),
+    [
+      'Captain Caelora Venn',
+      'Captain',
+      'Caelora',
+      'Venn',
+      'Pip-Boy',
+      'Vault-Tec Relay',
+      'Vault-Tec',
+      'Relay',
+    ],
+  )
+  assert.deepEqual(
+    extractConversationReferences([{ role: 'user', content: 'Ordinary sentence.' }], 0),
+    [],
+  )
 })

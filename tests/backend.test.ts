@@ -684,6 +684,33 @@ test('does not let contextual normalization replace an authoritative literal pun
   }
 })
 
+test('does not let contextual normalization discard commanded quotation marks', async () => {
+  const userId = 'commanded-quotes-user'
+  const chatId = 'commanded-quotes-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationNormalizedText = 'She said proceed carefully.'
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'commanded-quotes-segment',
+      1,
+      'She said quote proceed carefully quote period',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(response.proposal.candidateText, 'She said “proceed carefully”.')
+    assert.equal(response.proposal.contextualModelUsed, false)
+  }
+})
+
 test('commits a leading new-paragraph command as a paragraph boundary', async () => {
   const userId = 'leading-paragraph-user'
   const chatId = 'leading-paragraph-chat'

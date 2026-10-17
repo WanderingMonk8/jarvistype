@@ -328,9 +328,9 @@ var COMMAND_GROUPS = [
       ["Record Edit", "Record Edit, then describe a change to the existing draft."],
       [
         "Spoken punctuation",
-        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen quote,\u201D \u201Cclose quote,\u201D \u201Copen single quote,\u201D \u201Cclose single quote,\u201D \u201Cnew line,\u201D or \u201Cnew paragraph.\u201D"
+        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Cquote\u201D at both ends of a quotation, \u201Csingle quote\u201D at both ends of a single quotation, \u201Cnew line,\u201D or \u201Cnew paragraph.\u201D"
       ],
-      ["Literal punctuation word", "Say \u201Cthe word period\u201D or \u201Cliteral dash.\u201D"],
+      ["Literal punctuation word", "Say \u201Cthe word period,\u201D \u201Cliteral dash,\u201D or \u201Cthe word quote.\u201D"],
       ["Explicit punctuation", "Say \u201Cinsert period\u201D or \u201Cpunctuation colon.\u201D"]
     ]
   },

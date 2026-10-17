@@ -298,7 +298,7 @@ The user is not required to dictate a complete message in one session.
 - Period and comma.
 - Colon and semicolon.
 - Question mark and exclamation mark.
-- Open and close quotation marks.
+- Paired quotation marks activated by saying "quote" at both boundaries, and paired single quotation marks activated by saying "single quote" at both boundaries.
 - Apostrophe.
 - Open and close parentheses or brackets.
 - Hyphen, en dash, and em dash.
@@ -309,7 +309,7 @@ The user is not required to dictate a complete message in one session.
 
 **FR-PUNC-004:** JarvisType shall preserve literal punctuation words when context indicates that the word itself, rather than the punctuation symbol, was intended.
 
-**FR-PUNC-005:** JarvisType shall resolve ambiguous punctuation words using deterministic lexical context, preserve explicit literal forms such as "the word period," and accept explicit fallbacks such as "insert period" or "punctuation colon."
+**FR-PUNC-005:** JarvisType shall resolve ambiguous punctuation words using deterministic lexical context, preserve explicit literal forms such as "the word period" and "the word quote," and accept explicit fallbacks such as "insert period" or "punctuation colon." Ordinary contextual uses such as "the quote from the book" shall remain words rather than punctuation commands.
 
 **FR-PUNC-006:** Provider-supplied punctuation shall take precedence. Pause or timing metadata may strengthen punctuation intent when the selected transcription provider exposes it, but correct handling shall not depend on timing metadata being available.
 

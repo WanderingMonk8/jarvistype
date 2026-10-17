@@ -227,6 +227,10 @@ async function handleTranscriptNormalization(
           candidateText,
           contextual,
           deterministic.authoritativePunctuationLiterals,
+        ) &&
+        preservesAuthoritativePunctuationMarks(
+          contextual,
+          deterministic.authoritativePunctuationMarks,
         )
       ) {
         const enforced = normalizeDeterministically(contextual, glossary.entries)
@@ -337,6 +341,18 @@ function preservesAuthoritativePunctuationLiterals(
       countExactOccurrences(deterministicLower, literal)
     )
       return false
+  }
+  return true
+}
+
+function preservesAuthoritativePunctuationMarks(
+  contextualCandidate: string,
+  marks: readonly string[],
+): boolean {
+  const requiredCounts = new Map<string, number>()
+  for (const mark of marks) requiredCounts.set(mark, (requiredCounts.get(mark) ?? 0) + 1)
+  for (const [mark, requiredCount] of requiredCounts) {
+    if (countExactOccurrences(contextualCandidate, mark) < requiredCount) return false
   }
   return true
 }

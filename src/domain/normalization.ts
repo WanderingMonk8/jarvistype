@@ -12,6 +12,7 @@ export interface DeterministicNormalization {
   learningCandidates: SpellingLearningCandidate[]
   ambiguities: string[]
   authoritativePunctuationLiterals: string[]
+  authoritativePunctuationMarks: string[]
 }
 
 const PUNCTUATION: Array<[RegExp, string, string]> = [
@@ -21,10 +22,6 @@ const PUNCTUATION: Array<[RegExp, string, string]> = [
   [/\bclose (?:parenthesis|paren)\b/gi, ')', 'close parenthesis'],
   [/\bopen bracket\b/gi, '[', 'open bracket'],
   [/\bclose bracket\b/gi, ']', 'close bracket'],
-  [/\bopen single quote\b/gi, '‘', 'open single quote'],
-  [/\bclose single quote\b/gi, '’', 'close single quote'],
-  [/\bopen quote\b/gi, '“', 'open quote'],
-  [/\bclose quote\b/gi, '”', 'close quote'],
   [/\bquestion mark\b/gi, '?', 'question mark'],
   [/\bexclamation (?:mark|point)\b/gi, '!', 'exclamation mark'],
   [/\bsemi[ -]?colon\b/gi, ';', 'semicolon'],
@@ -46,6 +43,8 @@ const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
   /\bdash(?=\s+(?:of|to|for|toward|through|across)\b)/gi,
   /\b(?:mad|quick|hundred-meter)\s+dash\b/gi,
   /\bcolon(?=\s+(?:cancer|health|screening|surgery|disease|pain|care)\b)/gi,
+  /\bquote(?=\s+(?:from|by|about|of)\b)/gi,
+  /\b(?:please|to|I|we|you|they|he|she)\s+quote\b/gi,
 ]
 
 export function normalizeDeterministically(
@@ -54,9 +53,10 @@ export function normalizeDeterministically(
 ): DeterministicNormalization {
   const protectedLiterals: string[] = []
   let text = raw.replace(
-    /\b(?:literal|the word)\s+(period|comma|colon|semi[ -]?colon|hyphen|dash|ellipsis|apostrophe)\b/gi,
+    /\b(?:literal|the word)\s+(single quote|quote|period|comma|colon|semi[ -]?colon|hyphen|dash|ellipsis|apostrophe)\b/gi,
     (_, word: string) => {
-      const index = protectedLiterals.push(word.toLowerCase().replace(/[ -]/g, '')) - 1
+      const normalizedWord = word.toLowerCase().replace(/^semi[ -]?colon$/, 'semicolon')
+      const index = protectedLiterals.push(normalizedWord) - 1
       return `\uE000${index}\uE001`
     },
   )
@@ -67,15 +67,21 @@ export function normalizeDeterministically(
     })
   }
   text = text.replace(
-    /\b(?:insert|punctuation)\s+(?=(?:period|full stop|comma|colon|semi[ -]?colon|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots|hyphen|en dash|em dash|dash|apostrophe|open quote|close quote|open single quote|close single quote)\b)/gi,
+    /\b(?:insert|punctuation)\s+(?=(?:period|full stop|comma|colon|semi[ -]?colon|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots|hyphen|en dash|em dash|dash|apostrophe|quote|single quote|open quote|close quote|open single quote|close single quote)\b)/gi,
     '',
   )
   const reasons: string[] = []
+  const authoritativePunctuationMarks: string[] = []
   const learningCandidates: SpellingLearningCandidate[] = []
   const spelling = replaceExplicitSpelling(text)
   text = spelling.text
   if (spelling.learningCandidates.length) reasons.push('explicit spelling')
   learningCandidates.push(...spelling.learningCandidates)
+
+  const quotation = replaceSpokenQuotationCommands(text)
+  text = quotation.text
+  if (quotation.marks.length) reasons.push(...quotation.reasons)
+  authoritativePunctuationMarks.push(...quotation.marks)
 
   for (const [pattern, replacement, reason] of PUNCTUATION) {
     const next = text.replace(pattern, replacement)
@@ -109,7 +115,53 @@ export function normalizeDeterministically(
     learningCandidates,
     ambiguities: spelling.ambiguities,
     authoritativePunctuationLiterals: [...new Set(protectedLiterals)],
+    authoritativePunctuationMarks,
   }
+}
+
+function replaceSpokenQuotationCommands(input: string): {
+  text: string
+  marks: string[]
+  reasons: string[]
+} {
+  const marks: string[] = []
+  const reasons: string[] = []
+  let text = input
+
+  const replaceFixed = (pattern: RegExp, mark: string, reason: string) => {
+    text = text.replace(pattern, () => {
+      marks.push(mark)
+      reasons.push(reason)
+      return mark
+    })
+  }
+  replaceFixed(/\bopen single quote\b/gi, '‘', 'single quote')
+  replaceFixed(/\bclose single quote\b/gi, '’', 'single quote')
+  replaceFixed(/\bopen quote\b/gi, '“', 'quote')
+  replaceFixed(/\bclose quote\b/gi, '”', 'quote')
+
+  const replacePaired = (pattern: RegExp, opening: string, closing: string, reason: string) => {
+    const count = text.match(pattern)?.length ?? 0
+    let occurrence = 0
+    text = text.replace(pattern, (whole, offset: number) => {
+      const mark =
+        count === 1
+          ? text.slice(0, offset).trim().length === 0
+            ? opening
+            : closing
+          : occurrence % 2 === 0
+            ? opening
+            : closing
+      occurrence += 1
+      marks.push(mark)
+      reasons.push(reason)
+      return mark
+    })
+  }
+  replacePaired(/\bsingle quote\b/gi, '‘', '’', 'single quote')
+  replacePaired(/\bquote\b/gi, '“', '”', 'quote')
+
+  return { text, marks, reasons }
 }
 
 function replaceExplicitSpelling(

@@ -1168,10 +1168,6 @@ var PUNCTUATION = [
   [/\bclose (?:parenthesis|paren)\b/gi, ")", "close parenthesis"],
   [/\bopen bracket\b/gi, "[", "open bracket"],
   [/\bclose bracket\b/gi, "]", "close bracket"],
-  [/\bopen single quote\b/gi, "\u2018", "open single quote"],
-  [/\bclose single quote\b/gi, "\u2019", "close single quote"],
-  [/\bopen quote\b/gi, "\u201C", "open quote"],
-  [/\bclose quote\b/gi, "\u201D", "close quote"],
   [/\bquestion mark\b/gi, "?", "question mark"],
   [/\bexclamation (?:mark|point)\b/gi, "!", "exclamation mark"],
   [/\bsemi[ -]?colon\b/gi, ";", "semicolon"],
@@ -1191,14 +1187,17 @@ var LITERAL_PUNCTUATION_CONTEXTS = [
   /\btime\s+period\b/gi,
   /\bdash(?=\s+(?:of|to|for|toward|through|across)\b)/gi,
   /\b(?:mad|quick|hundred-meter)\s+dash\b/gi,
-  /\bcolon(?=\s+(?:cancer|health|screening|surgery|disease|pain|care)\b)/gi
+  /\bcolon(?=\s+(?:cancer|health|screening|surgery|disease|pain|care)\b)/gi,
+  /\bquote(?=\s+(?:from|by|about|of)\b)/gi,
+  /\b(?:please|to|I|we|you|they|he|she)\s+quote\b/gi
 ];
 function normalizeDeterministically(raw, glossary) {
   const protectedLiterals = [];
   let text = raw.replace(
-    /\b(?:literal|the word)\s+(period|comma|colon|semi[ -]?colon|hyphen|dash|ellipsis|apostrophe)\b/gi,
+    /\b(?:literal|the word)\s+(single quote|quote|period|comma|colon|semi[ -]?colon|hyphen|dash|ellipsis|apostrophe)\b/gi,
     (_, word) => {
-      const index = protectedLiterals.push(word.toLowerCase().replace(/[ -]/g, "")) - 1;
+      const normalizedWord = word.toLowerCase().replace(/^semi[ -]?colon$/, "semicolon");
+      const index = protectedLiterals.push(normalizedWord) - 1;
       return `\uE000${index}\uE001`;
     }
   );
@@ -1209,15 +1208,20 @@ function normalizeDeterministically(raw, glossary) {
     });
   }
   text = text.replace(
-    /\b(?:insert|punctuation)\s+(?=(?:period|full stop|comma|colon|semi[ -]?colon|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots|hyphen|en dash|em dash|dash|apostrophe|open quote|close quote|open single quote|close single quote)\b)/gi,
+    /\b(?:insert|punctuation)\s+(?=(?:period|full stop|comma|colon|semi[ -]?colon|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots|hyphen|en dash|em dash|dash|apostrophe|quote|single quote|open quote|close quote|open single quote|close single quote)\b)/gi,
     ""
   );
   const reasons = [];
+  const authoritativePunctuationMarks = [];
   const learningCandidates = [];
   const spelling = replaceExplicitSpelling(text);
   text = spelling.text;
   if (spelling.learningCandidates.length) reasons.push("explicit spelling");
   learningCandidates.push(...spelling.learningCandidates);
+  const quotation = replaceSpokenQuotationCommands(text);
+  text = quotation.text;
+  if (quotation.marks.length) reasons.push(...quotation.reasons);
+  authoritativePunctuationMarks.push(...quotation.marks);
   for (const [pattern, replacement, reason] of PUNCTUATION) {
     const next = text.replace(pattern, replacement);
     if (next !== text) reasons.push(reason);
@@ -1244,8 +1248,39 @@ function normalizeDeterministically(raw, glossary) {
     reasons: [...new Set(reasons)],
     learningCandidates,
     ambiguities: spelling.ambiguities,
-    authoritativePunctuationLiterals: [...new Set(protectedLiterals)]
+    authoritativePunctuationLiterals: [...new Set(protectedLiterals)],
+    authoritativePunctuationMarks
   };
+}
+function replaceSpokenQuotationCommands(input) {
+  const marks = [];
+  const reasons = [];
+  let text = input;
+  const replaceFixed = (pattern, mark, reason) => {
+    text = text.replace(pattern, () => {
+      marks.push(mark);
+      reasons.push(reason);
+      return mark;
+    });
+  };
+  replaceFixed(/\bopen single quote\b/gi, "\u2018", "single quote");
+  replaceFixed(/\bclose single quote\b/gi, "\u2019", "single quote");
+  replaceFixed(/\bopen quote\b/gi, "\u201C", "quote");
+  replaceFixed(/\bclose quote\b/gi, "\u201D", "quote");
+  const replacePaired = (pattern, opening, closing, reason) => {
+    const count = text.match(pattern)?.length ?? 0;
+    let occurrence = 0;
+    text = text.replace(pattern, (whole, offset) => {
+      const mark = count === 1 ? text.slice(0, offset).trim().length === 0 ? opening : closing : occurrence % 2 === 0 ? opening : closing;
+      occurrence += 1;
+      marks.push(mark);
+      reasons.push(reason);
+      return mark;
+    });
+  };
+  replacePaired(/\bsingle quote\b/gi, "\u2018", "\u2019", "single quote");
+  replacePaired(/\bquote\b/gi, "\u201C", "\u201D", "quote");
+  return { text, marks, reasons };
 }
 function replaceExplicitSpelling(input) {
   const learningCandidates = [];
@@ -1526,6 +1561,9 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
         candidateText,
         contextual,
         deterministic.authoritativePunctuationLiterals
+      ) && preservesAuthoritativePunctuationMarks(
+        contextual,
+        deterministic.authoritativePunctuationMarks
       )) {
         const enforced = normalizeDeterministically(contextual, glossary.entries);
         candidateText = enforced.text;
@@ -1617,6 +1655,14 @@ function preservesAuthoritativePunctuationLiterals(deterministicCandidate, conte
   for (const literal of new Set(literals.map((value) => value.toLocaleLowerCase()))) {
     if (countExactOccurrences(contextualLower, literal) !== countExactOccurrences(deterministicLower, literal))
       return false;
+  }
+  return true;
+}
+function preservesAuthoritativePunctuationMarks(contextualCandidate, marks) {
+  const requiredCounts = /* @__PURE__ */ new Map();
+  for (const mark of marks) requiredCounts.set(mark, (requiredCounts.get(mark) ?? 0) + 1);
+  for (const [mark, requiredCount] of requiredCounts) {
+    if (countExactOccurrences(contextualCandidate, mark) < requiredCount) return false;
   }
   return true;
 }

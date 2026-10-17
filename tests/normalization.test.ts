@@ -72,6 +72,22 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
     normalizeDeterministically('Write the word dash and the word ellipsis period', []).text,
     'Write dash and ellipsis.',
   )
+  assert.equal(
+    normalizeDeterministically('She said quote proceed carefully quote period', []).text,
+    'She said “proceed carefully”.',
+  )
+  assert.equal(
+    normalizeDeterministically('Mark it single quote provisional single quote period', []).text,
+    'Mark it ‘provisional’.',
+  )
+  assert.equal(
+    normalizeDeterministically('The quote from the book was memorable period', []).text,
+    'The quote from the book was memorable.',
+  )
+  assert.equal(
+    normalizeDeterministically('Write the word quote and literal single quote period', []).text,
+    'Write quote and single quote.',
+  )
 })
 
 test('collapses explicit spelling, obeys casing, and creates a learning candidate', () => {

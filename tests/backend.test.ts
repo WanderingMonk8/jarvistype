@@ -443,6 +443,65 @@ test('allows non-mutating transcript review but blocks confirmation after the ac
   }
 })
 
+test('offers review and commits safely after the user manually clears the entire draft', async () => {
+  const userId = 'cleared-draft-recording-user'
+  const chatId = 'cleared-draft-recording-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Delete all of this before recording.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.mutate.request',
+      requestId: 'clear-draft-request',
+      operationId: 'clear-draft-operation',
+      chatId,
+      expectedVersion: 1,
+      editGroupId: 'clear-draft-group',
+      cleanText: '',
+    },
+    userId,
+  )
+  const cleared = responses.at(-1)?.payload
+  assert.equal(cleared?.type, 'draft.snapshot.response')
+  if (cleared?.type !== 'draft.snapshot.response') return
+  assert.equal(cleared.snapshot.cleanText, '')
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'record-after-clear-segment',
+      cleared.snapshot.draftVersion,
+      'Testing comma testing period',
+    ),
+    userId,
+  )
+  const proposalResponse = responses.at(-1)?.payload
+  assert.equal(proposalResponse?.type, 'transcript.normalization.response')
+  if (proposalResponse?.type !== 'transcript.normalization.response') return
+  assert.equal(proposalResponse.outcome, 'review')
+  assert.equal(proposalResponse.proposal.candidateText, 'Testing, testing.')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.confirm.request',
+      requestId: 'confirm-after-clear-request',
+      operationId: proposalResponse.proposal.operationId,
+      chatId,
+      expectedVersion: proposalResponse.proposal.expectedVersion,
+    },
+    userId,
+  )
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'transcript.normalization.response')
+  if (committed?.type === 'transcript.normalization.response') {
+    assert.equal(committed.outcome, 'committed')
+    assert.equal(committed.snapshot?.cleanText, 'Testing, testing.')
+  }
+})
+
 test('requires review before committing explicit spelling and learns only after confirmation', async () => {
   const userId = 'spelling-user'
   const chatId = 'spelling-chat'

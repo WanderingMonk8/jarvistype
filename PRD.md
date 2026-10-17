@@ -457,7 +457,7 @@ The user is not required to dictate a complete message in one session.
 
 **FR-UI-013:** Closing or hiding the floating surface during an active recording shall cancel capture safely. Hiding it during a pending review shall not approve, reject, or otherwise mutate the draft.
 
-**FR-UI-014:** The floating surface shall preserve keyboard focus intentionally across state transitions, remain fully operable by keyboard, use restrained live announcements, and support zoom, font scaling, reduced motion, high contrast, and screen readers.
+**FR-UI-014:** The floating surface shall preserve keyboard focus intentionally across state transitions, remain fully operable by keyboard, contain arrow-key and page-key scrolling so expanded controls cannot scroll the background chat, use restrained live announcements, and support zoom, font scaling, reduced motion, high contrast, and screen readers.
 
 **FR-UI-015:** JarvisType shall use only documented Lumiverse placement and activation APIs. It shall not bind to, replace, or suppress the native microphone button through undocumented DOM selectors or event interception.
 

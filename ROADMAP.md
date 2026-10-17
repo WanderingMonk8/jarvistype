@@ -855,7 +855,7 @@ Make the feature-complete beta safe and dependable across supported environments
 
 #### Accessibility
 
-- Complete all workflows by keyboard.
+- Complete all workflows by keyboard, with keyboard scrolling contained inside the active JarvisType region rather than escaping to the background chat.
 - Add correct names, roles, focus, disabled states, and restrained live announcements.
 - Avoid color-only recording status.
 - Keep ordinals semantically associated but outside editable text.

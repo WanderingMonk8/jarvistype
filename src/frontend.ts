@@ -1833,6 +1833,47 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       group.hidden = !group.querySelector('[data-command-item]:not([hidden])')
     }
   }
+  const handleFloatingScrollKey = (event: KeyboardEvent) => {
+    if (
+      event.defaultPrevented ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      !['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(event.key)
+    ) {
+      return
+    }
+    const eventTarget = event.target
+    if (
+      eventTarget instanceof HTMLTextAreaElement ||
+      eventTarget instanceof HTMLSelectElement ||
+      (eventTarget instanceof HTMLElement && eventTarget.isContentEditable)
+    ) {
+      return
+    }
+
+    const nestedPanel =
+      eventTarget instanceof Element
+        ? eventTarget.closest<HTMLElement>('[data-command-panel], .jt-floating__tools details')
+        : null
+    const scrollTarget =
+      nestedPanel && nestedPanel.scrollHeight > nestedPanel.clientHeight
+        ? nestedPanel
+        : floatingWidget.root
+    const pageDistance = Math.max(48, Math.floor(scrollTarget.clientHeight * 0.8))
+    const distance =
+      event.key === 'ArrowUp'
+        ? -48
+        : event.key === 'ArrowDown'
+          ? 48
+          : event.key === 'PageUp'
+            ? -pageDistance
+            : pageDistance
+    event.preventDefault()
+    event.stopPropagation()
+    scrollTarget.scrollBy({ top: distance, behavior: 'auto' })
+  }
   function resizeAndClampFloatingWidget(): void {
     const size = getFloatingWidgetSize()
     const viewport = getViewportSize()
@@ -1888,6 +1929,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   floatingCloseButton.addEventListener('click', handleCloseFloating)
   floatingCommandButton.addEventListener('click', handleCommandToggle)
   floatingCommandSearch.addEventListener('input', handleCommandSearch)
+  floatingWidget.root.addEventListener('keydown', handleFloatingScrollKey)
 
   render()
   void checkBackend()
@@ -1945,6 +1987,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     floatingCloseButton.removeEventListener('click', handleCloseFloating)
     floatingCommandButton.removeEventListener('click', handleCommandToggle)
     floatingCommandSearch.removeEventListener('input', handleCommandSearch)
+    floatingWidget.root.removeEventListener('keydown', handleFloatingScrollKey)
     normalizationModelPicker.destroy()
     composerLauncher.remove()
     composerLauncherStyle.remove()
@@ -2272,7 +2315,7 @@ function shellMarkup(): string {
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
       .jt-floating summary { cursor: pointer; font-weight: 700; }
-      .jt-floating .jt-proposal { max-height: min(70vh, 34rem); overflow-y: auto; overscroll-behavior: auto; scrollbar-gutter: stable; }
+      .jt-floating .jt-proposal { max-height: min(70vh, 34rem); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
       .jt-floating .jt-proposal pre { max-height: 12rem; overflow-y: auto; }
       .jt-floating .jt-proposal > .jt-actions { position: sticky; z-index: 2; bottom: -.7rem; margin: .15rem -.7rem -.7rem; padding: .65rem .7rem; border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent); background: var(--background, #171717); }
       .jt-command-list { display: grid; gap: .75rem; margin-top: .65rem; }
@@ -2289,7 +2332,7 @@ function shellMarkup(): string {
         .jt-floating .jt-proposal { max-height: clamp(18rem, 52vh, 30rem); }
         .jt-floating .jt-draft-editor { min-height: 10rem; }
         .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
-        .jt-floating__tools > section, .jt-floating__tools > details { grid-column: 1 / -1; max-height: 24rem; overflow-y: auto; }
+        .jt-floating__tools > section, .jt-floating__tools > details { grid-column: 1 / -1; max-height: 24rem; overflow-y: auto; overscroll-behavior: contain; }
       }
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">

@@ -26,16 +26,17 @@ Phases are ordered by dependency rather than date. Estimates will be added after
 
 ## 3. Release checkpoints
 
-| Checkpoint            | Completion | User-visible result                                                                  |
-| --------------------- | ---------- | ------------------------------------------------------------------------------------ |
-| Technical foundation  | Phase 1    | Installable extension shell with frontend/backend communication                      |
-| Drafting foundation   | Phase 2    | Numbered editor and manual confirmed send                                            |
-| Voice MVP             | Phase 3    | Record, transcribe, append sequentially, review, and send                            |
-| Context-aware alpha   | Phase 4    | Chat context, punctuation, explicit spelling, and personal glossary                  |
-| Editing alpha         | Phase 5    | Natural-language editing through validated structured patches                        |
-| Feature-complete beta | Phase 6    | Advanced targeting, references, casing, paragraph operations, and multi-edit support |
-| Release candidate     | Phase 7    | Accessible, private, resilient, compatible, and performance-tested build             |
-| General availability  | Phase 8    | Validated beta, packaged release, migrations, and support documentation              |
+| Checkpoint            | Completion | User-visible result                                                                   |
+| --------------------- | ---------- | ------------------------------------------------------------------------------------- |
+| Technical foundation  | Phase 1    | Installable extension shell with frontend/backend communication                       |
+| Drafting foundation   | Phase 2    | Numbered editor and manual confirmed send                                             |
+| Voice MVP             | Phase 3    | Record, transcribe, append sequentially, review, and send                             |
+| Context-aware alpha   | Phase 4    | Chat context, punctuation, explicit spelling, and personal glossary                   |
+| Editing alpha         | Phase 5    | Natural-language editing through validated structured patches                         |
+| Feature-complete beta | Phase 6    | Advanced targeting, references, casing, paragraph operations, and multi-edit support  |
+| Floating composer     | Phase 6.5  | Minimal floating workflow, command discovery, glossary scaling, and drawer retirement |
+| Release candidate     | Phase 7    | Accessible, private, resilient, compatible, and performance-tested build              |
+| General availability  | Phase 8    | Validated beta, packaged release, migrations, and support documentation               |
 
 ## 4. Stable technical boundaries
 
@@ -732,6 +733,84 @@ Complete semantic references, paragraph restructuring, referential wording, scop
 
 ---
 
+## Phase 6.5: Floating composition surface and drawer transition
+
+### Objective
+
+Move the complete composition workflow into a minimal floating surface near the Lumiverse composer, add command discovery and scalable glossary management, and retire routine composition controls from the drawer only after hosted functional parity is proven.
+
+### PRD coverage
+
+- `FR-UI-001` through `FR-UI-015`
+- `FR-GLOSS-007` through `FR-GLOSS-009`
+- Interface requirements in PRD Section 10
+
+### Detailed specifications
+
+#### Supported activation and placement
+
+- Create the primary UI with Lumiverse's documented floating-widget placement and `ui_panels` permission.
+- Open it from the documented JarvisType input-bar action until Lumiverse exposes a public direct composer-action or native-microphone integration contract.
+- Do not intercept, replace, or suppress the native STT button through undocumented DOM selectors or events.
+- Position the widget near the composer on desktop, remember a valid user position, and adapt it to a bottom-sheet or equivalently usable layout on narrow screens.
+
+#### Shared controller and staged migration
+
+- Extract recording, proposal, draft, history, send, settings, and glossary behavior into one shared controller used by both renderers during migration.
+- Forbid simultaneous recordings, duplicate proposals, divergent draft state, or duplicate sends across surfaces.
+- Keep the existing drawer composition workflow available until the parity checklist and hosted verification pass.
+- After parity, retire routine composition controls from the drawer while permanently retaining glossary management and optionally retaining non-routine settings, privacy disclosures, and diagnostics.
+
+#### Minimal state-driven composer
+
+- Show the numbered editable draft and only currently valid labeled actions in the ready view.
+- Use focused recording, processing, message-review, edit-review, ambiguity-selection, history, glossary, settings, and send views.
+- Prefer labeled buttons with reinforcing icons over unstyled text actions.
+- Present concise proposed text or affected-text diffs first; place raw transcripts, spoken instructions, structured operations, provider details, and full before/after content behind an explicit details disclosure.
+- Cancel active recording safely when the floating surface closes; never treat hiding or closing as approval.
+
+#### Command catalog
+
+- Add a labeled **Commands** button that opens a searchable, categorized list.
+- Cover dictation punctuation, replacement, insertion, deletion, paragraph structure, movement, casing, explicit spelling, referential wording, and multi-operation commands.
+- Bold the activating phrase in every example and label whether the command is used during message dictation or edit recording.
+- Generate the view and coverage tests from one maintained command catalog.
+
+#### Glossary
+
+- Keep glossary management permanently available in the drawer.
+- Add an expandable glossary view to the floating surface using the same per-user state and operations.
+- Search canonical spellings, variants, and hints.
+- Use a bounded scrolling results region after six displayed entries, with search and add-entry controls remaining available.
+- Synchronize add, edit, delete, automatic learning, conflicts, and undo across both views without reload.
+
+### Deliverables
+
+- Shared composer controller and state model.
+- Responsive floating composer.
+- Searchable generated command catalog.
+- Expandable floating glossary and permanent searchable drawer glossary.
+- Drawer-composition retirement migration.
+- Parity checklist and hosted verification record.
+
+### Tests
+
+- Every existing composition, recording, review, ambiguity, undo, history, settings, glossary, ownership, and send scenario passes through the floating UI.
+- Simultaneous drawer and floating actions cannot duplicate recording, mutation, proposal confirmation, or sending during migration.
+- Closing during capture cancels safely; closing during review causes no mutation.
+- Commands list contains every supported operation, bolds activating phrases, and advertises no unsupported operation.
+- Glossary search covers canonical, variant, and hint fields; scrolling activates after six entries; mutations synchronize between surfaces.
+- Keyboard, focus, screen-reader, zoom, high-contrast, reduced-motion, narrow-screen, and mobile checks pass.
+
+### Exit gate
+
+- The floating UI has 100% functional parity with the Phase 6 drawer workflow.
+- Hosted desktop and narrow-layout verification passes without a critical or high-severity accessibility, data-loss, privacy, or duplicate-action defect.
+- Routine user composition controls are retired from the drawer only after the parity record is complete.
+- Permanent drawer glossary management and expandable floating glossary management operate on identical state.
+
+---
+
 ## Phase 7: Release-candidate hardening
 
 ### Objective
@@ -741,6 +820,7 @@ Make the feature-complete beta safe and dependable across supported environments
 ### PRD coverage
 
 - `PRIV-001` through `PRIV-008`
+- `FR-UI-001` through `FR-UI-015`
 - PRD Sections 14 and 15
 - Final `FR-SEND-*` hardening
 
@@ -880,6 +960,7 @@ Validate real usage, finalize operational documentation and migrations, and publ
 | Personal glossary (`FR-GLOSS-*`)     | 4             | 7            |
 | Referential wording (`FR-REF-*`)     | 6             | 7            |
 | Sending (`FR-SEND-*`)                | 2             | 7            |
+| Floating interface (`FR-UI-*`)       | 6.5           | 7            |
 | Privacy (`PRIV-*`)                   | Begins 1–4    | 7 audit      |
 | Success measures                     | 8             | Post-release |
 

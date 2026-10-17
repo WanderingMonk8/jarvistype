@@ -1,7 +1,7 @@
 # JarvisType Product Requirements Document
 
-- **Status:** Draft 0.2
-- **Last updated:** 2026-10-14
+- **Status:** Draft 0.3
+- **Last updated:** 2026-10-16
 - **Product:** JarvisType
 - **Platform:** Lumiverse Spindle extension
   **Document role:** Product source of truth
@@ -37,6 +37,7 @@ JarvisType should make voice composition practical for complex Lumiverse message
 5. **Make every automated change inspectable.** The current message, latest diff, and undo controls remain visible before sending.
 6. **Fail without losing work.** Processing or send failures must preserve the draft and its recoverable history.
 7. **Use context conservatively.** Recent messages improve recognition, but hard size limits control cost, latency, and privacy exposure.
+8. **Keep the primary workflow focused.** Show the draft and currently valid actions first; disclose audit details, history, settings, and management tools only when requested.
 
 ## 4. Target user
 
@@ -56,8 +57,10 @@ Important use cases include:
 
 ### 5.1 In scope
 
-- A Lumiverse input-bar action that opens JarvisType.
-- An extension-owned draft editor.
+- A supported Lumiverse input-bar or composer action that opens JarvisType without intercepting undocumented host controls.
+- An extension-owned floating composition surface containing the complete user workflow.
+- A permanent drawer surface for personal-glossary management and non-routine settings or diagnostics.
+- A searchable command list generated from the supported command catalog.
 - Bounded microphone recording sessions initiated by the user.
 - Sequential voice segments appended to one draft.
 - Configurable recent-message context, defaulting to five messages.
@@ -91,14 +94,15 @@ Important use cases include:
 
 ### 6.1 Entry and draft lifecycle
 
-1. The user opens JarvisType from an action in the Lumiverse chat input bar.
-2. JarvisType opens an extension-owned composition surface associated with the active chat.
-3. The surface shows the current draft, paragraph numbers, recording controls, processing status, latest diff, undo controls, and **Confirm & Send**.
+1. The user opens JarvisType from a supported action associated with the Lumiverse chat input bar. JarvisType shall not intercept Lumiverse's native microphone control unless Lumiverse exposes an explicit public integration contract for that action.
+2. JarvisType opens a compact extension-owned floating composition surface associated with the active chat and positioned near the chat composer.
+3. The floating surface shows the numbered editable draft and only the actions relevant to the current state. Recording, processing, review, ambiguity resolution, undo, history, glossary, settings, and send functions use focused views rather than one continuously expanded page.
 4. The draft remains unsent until the user explicitly selects **Confirm & Send**.
 5. After Lumiverse confirms a successful send, JarvisType clears the submitted draft and its transient history.
 6. If sending fails, JarvisType retains the full draft and permits retry.
 7. Each draft is owned by one Lumiverse chat and persists in per-user extension storage across page reloads and extension restarts until a confirmed successful send or a future explicit discard action.
 8. Switching chats never silently reassigns a non-empty draft. JarvisType warns about the mismatch, blocks sending to the different chat, and allows the user to open that chat's independently stored draft.
+9. The personal glossary is available as an expandable view in the floating surface and remains permanently available in the JarvisType drawer. Both views operate on the same per-user glossary state.
 
 ### 6.2 Initial and sequential dictation
 
@@ -374,6 +378,12 @@ The user is not required to dictate a complete message in one session.
 
 **FR-GLOSS-006:** The user shall be able to inspect, add, edit, delete, and undo automatic changes to glossary entries.
 
+**FR-GLOSS-007:** Both glossary surfaces shall provide a search field that filters canonical spellings, recognized or spoken variants, and optional reference hints without mutating stored entries.
+
+**FR-GLOSS-008:** The glossary shall be available as an expandable view within the floating composition surface and as a permanent management view in the JarvisType drawer. Changes made in either view shall be reflected in the other without requiring a page reload.
+
+**FR-GLOSS-009:** The glossary list shall use its own bounded scrolling region after the displayed entry count exceeds an approved threshold. The search and add-entry controls shall remain available while the results scroll.
+
 **FR-REF-001:** JarvisType shall support one-time explanatory references for any intended word or phrase, not only proper nouns.
 
 **FR-REF-002:** Referential disambiguation shall support homophones, homonyms, near-homophones, names, and other phonetically confusable terms.
@@ -401,6 +411,38 @@ The user is not required to dictate a complete message in one session.
 **FR-SEND-006:** If submission fails, JarvisType shall retain the draft, history, and ability to retry.
 
 **FR-SEND-007:** JarvisType shall warn the user if the active chat changes while a non-empty draft is open and shall not silently send the draft to a different chat.
+
+### 7.12 Floating interface and command discovery
+
+**FR-UI-001:** The primary composition workflow shall live in an extension-owned floating surface positioned near the Lumiverse chat composer on desktop and adapted to a bottom-sheet or equivalently usable layout on narrow screens.
+
+**FR-UI-002:** The floating surface shall provide functional parity with the existing drawer composition workflow before any composition control is retired from the drawer.
+
+**FR-UI-003:** Parity shall include manual draft editing, paragraph numbering, message and edit recording, stop and cancel, processing status, proposal review, target selection, accept and reject, undo, latest diff, history, chat ownership, confirmed send, context settings, provider and model selection, glossary management, permission errors, and retry behavior.
+
+**FR-UI-004:** The floating and drawer surfaces shall use one shared composer state and operation controller. They shall not create independent drafts, simultaneous recordings, duplicate proposals, or competing send operations.
+
+**FR-UI-005:** After hosted parity verification, routine composition controls shall be retired from the drawer. The drawer shall permanently retain personal-glossary management and may retain non-routine settings, privacy disclosures, and diagnostics.
+
+**FR-UI-006:** The ready view shall prioritize the numbered draft and labeled actions for **Record Message**, **Record Edit**, **Undo**, **History**, **Commands**, and **Confirm & Send**.
+
+**FR-UI-007:** Controls shall be rendered as accessible buttons with visible action labels. Icons may reinforce a label but shall not be the only accessible name for primary actions.
+
+**FR-UI-008:** Recording and processing views shall show only the current status, elapsed time or useful progress when available, and the actions valid for that state, including clearly labeled stop or cancel controls.
+
+**FR-UI-009:** Review views shall show the proposed content or concise affected-text diff first. Raw transcripts, spoken instructions, structured operations, provider metadata, and complete before-and-after drafts shall remain available through an explicit details disclosure when relevant.
+
+**FR-UI-010:** A labeled **Commands** button shall open a searchable, categorized list of every supported dictation and editing command.
+
+**FR-UI-011:** Command examples shall visually emphasize the activating phrase in bold and distinguish message-dictation commands from edit-mode commands.
+
+**FR-UI-012:** The displayed command list and its tests shall derive from one maintained command catalog so unsupported examples are not advertised and supported commands are not silently omitted.
+
+**FR-UI-013:** Closing or hiding the floating surface during an active recording shall cancel capture safely. Hiding it during a pending review shall not approve, reject, or otherwise mutate the draft.
+
+**FR-UI-014:** The floating surface shall preserve keyboard focus intentionally across state transitions, remain fully operable by keyboard, use restrained live announcements, and support zoom, font scaling, reduced motion, high contrast, and screen readers.
+
+**FR-UI-015:** JarvisType shall use only documented Lumiverse placement and activation APIs. It shall not bind to, replace, or suppress the native microphone button through undocumented DOM selectors or event interception.
 
 ## 8. Editing command model
 
@@ -488,22 +530,13 @@ This is a behavioral model, not a mandated storage schema.
 
 ## 10. Interface requirements
 
-The primary surface must contain:
+The primary surface is the floating composer. Its default view must remain minimal and contain the numbered editable draft, current state, chat-ownership warning when applicable, and labeled buttons for the currently valid primary actions. Recording, processing, proposal review, ambiguity resolution, diff, history, command discovery, glossary, settings, and send confirmation shall use state-specific or expandable views rather than remain simultaneously expanded.
 
-- A numbered, editable draft.
-- **Record Message** and recording-stop/cancel controls.
-- **Record Edit** and recording-stop/cancel controls.
-- A visible recording and processing indicator.
-- A provisional transcript area or provisional styling.
-- The latest editing-instruction transcript and its interpreted operation.
-- A latest-change diff.
-- Approve/reject controls for proposed edits.
-- Undo for committed voice additions and automated edits.
-- Access to edit history.
-- **Confirm & Send**.
-- A clear indication of which Lumiverse chat owns the draft.
+Technical audit data shall remain inspectable but shall be collapsed by default. The interface shall favor concise affected-text diffs over repeating the complete draft when that presentation is sufficient to understand the proposed change.
 
-The UI must remain usable with keyboard and pointer input and expose appropriate accessible labels for all recording and editing controls.
+The personal glossary shall remain permanently accessible in the drawer and shall also be available through an expandable floating view. The floating composer and drawer glossary shall share the same per-user data, filtering behavior, mutation rules, and undo state.
+
+The UI must remain usable with keyboard and pointer input and expose appropriate accessible labels, roles, focus behavior, disabled states, and restrained live announcements for all recording and editing controls.
 
 ## 11. State model
 
@@ -536,8 +569,8 @@ Only valid actions for the current state should be enabled. The draft remains re
 
 JarvisType is expected to use the following Spindle capabilities:
 
-- Input-bar action for opening JarvisType.
-- An extension-owned drawer, panel, widget, or modal for composition.
+- A documented input-bar or future public composer action for opening JarvisType.
+- An extension-owned floating widget for primary composition and a drawer tab for permanent glossary management, settings, privacy disclosures, and diagnostics.
 - Frontend microphone capture through Lumiverse `ctx.stt.start(...)` where available, with browser microphone permission still controlled by the host environment.
 - Frontend-to-backend messaging for recordings, partial results, status, and draft operations.
 - `spindle.chats.getActive()` for active-chat identification.
@@ -724,15 +757,14 @@ The following decisions remain open and must be resolved through deliberate PRD 
 1. Which Lumiverse `speech-to-text-v1` providers satisfy the required accuracy, context, vocabulary, interim-result, format, language, latency, and retention capabilities. Lumiverse 1.2.5 is the first verified host version exposing the API; the credential model is host-managed and shall not duplicate the user's STT key.
 2. Supported audio formats and whether host-side conversion is required.
 3. Whether edit parsing uses the user's configured Lumiverse LLM or a dedicated service.
-4. Primary composition placement: drawer, docked panel, floating widget, or modal.
-5. Minimum and maximum values for the recent-message context setting.
-6. The hard context token or character ceiling.
-7. Exact confidence thresholds for automatic application and proposed edits.
-8. Expiry, retention duration, and explicit discard UX for per-chat persistent drafts. Persistence across refreshes, extension restarts, and chat switches is resolved in Section 6.1.
-9. Whether an optional send-without-generation action is included.
-10. Languages supported in the initial release.
-11. Whether **Record Insert** is added in a future release.
-12. Whether optional, privacy-preserving product telemetry will be implemented.
+4. Minimum and maximum values for the recent-message context setting.
+5. The hard context token or character ceiling.
+6. Exact confidence thresholds for automatic application and proposed edits.
+7. Expiry, retention duration, and explicit discard UX for per-chat persistent drafts. Persistence across refreshes, extension restarts, and chat switches is resolved in Section 6.1.
+8. Whether an optional send-without-generation action is included.
+9. Languages supported in the initial release.
+10. Whether **Record Insert** is added in a future release.
+11. Whether optional, privacy-preserving product telemetry will be implemented.
 
 ## 19. Known platform constraints and risks
 
@@ -742,6 +774,7 @@ The following decisions remain open and must be resolved through deliberate PRD 
 - Browser microphone access depends on secure-context behavior, user permission, and the runtime environment. Compatibility must be validated before release commitments are made.
 - Progressive display depends on the selected provider returning partial results. Batch-only providers cannot supply genuine interim recognition.
 - Semantic editing can be probabilistic. Structured operations, target validation, confidence gating, diffs, and undo are mandatory safeguards.
+- Lumiverse currently documents extension input-bar actions in the Extras popover and separately documents floating widgets, but it does not document interception or replacement of the native microphone control. JarvisType shall use the supported input-bar action until Lumiverse provides an explicit public composer-action contract.
 
 ## 20. Lumiverse documentation references
 

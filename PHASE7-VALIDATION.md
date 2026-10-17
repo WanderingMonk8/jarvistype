@@ -62,7 +62,9 @@ The hosted test confirmed textual recording state, cancellation without mutation
 
 ### Test 3: Provider, permission, and reconnect failures
 
-**Status:** PENDING
+**Status:** PASS — hosted recovery confirmed October 17, 2026; malformed-output and send-rejection paths verified by deterministic local injection
+
+The hosted run confirmed denial and restoration of chat, chat-mutation, and generation permissions; unavailable normalization handling; preservation of the complete draft and open floating workspace; and an exactly-once successful retry after the connection was restored. The release UI intentionally exposes no control that can force Lumiverse to return malformed model output or reject an append. Automated backend injection therefore supplies those two cases and verifies structured-output rejection, draft retention, bounded `JT-...` diagnostic references, redacted logs, and retry-safe operation IDs.
 
 1. Preserve a recognizable committed draft, then deny each requested permission in turn.
 2. Exercise unavailable normalization connection, malformed interpreter response, and failed send.

@@ -445,6 +445,103 @@ test('rejects ambiguous, overlapping, and unchanged inline moves atomically', ()
   )
 })
 
+test('addresses punctuation by occurrence or its position relative to an anchor phrase', () => {
+  const quoted = applyManualEdit(
+    createDraftSession('punctuation-target-chat'),
+    'He called it “good”, then said “this is very good”.',
+    { expectedVersion: 0, editGroupId: 'seed-punctuation-target' },
+  ).session
+  const replaced = executeEditPlan(quoted.cleanText, quoted.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'replace the second quote',
+    operations: [
+      {
+        id: 'replace-second-quote',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, punctuation: 'quote', occurrence: 2 },
+        text: '"',
+      },
+    ],
+  })
+  assert.equal(
+    replaced.ok && replaced.afterText,
+    'He called it “good", then said “this is very good”.',
+  )
+
+  const deleted = executeEditPlan(quoted.cleanText, quoted.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the quote after the phrase',
+    operations: [
+      {
+        id: 'delete-relative-quote',
+        type: 'delete',
+        target: {
+          punctuation: 'quote',
+          relativePosition: 'after',
+          relativeToText: 'this is very good',
+        },
+      },
+    ],
+  })
+  assert.equal(
+    deleted.ok && deleted.afterText,
+    'He called it “good”, then said “this is very good.',
+  )
+
+  const inserted = executeEditPlan(quoted.cleanText, quoted.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'insert before the comma',
+    operations: [
+      {
+        id: 'insert-before-comma',
+        type: 'insert_before',
+        target: { punctuation: 'comma', occurrence: 1 },
+        text: ' exactly',
+      },
+    ],
+  })
+  assert.equal(
+    inserted.ok && inserted.afterText,
+    'He called it “good” exactly, then said “this is very good”.',
+  )
+
+  const movable = applyManualEdit(
+    createDraftSession('punctuation-move-chat'),
+    'Alpha, beta gamma.',
+    {
+      expectedVersion: 0,
+      editGroupId: 'seed-punctuation-move',
+    },
+  ).session
+  const moved = executeEditPlan(movable.cleanText, movable.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'move the comma after beta',
+    operations: [
+      {
+        id: 'move-comma',
+        type: 'move_after',
+        target: { punctuation: 'comma' },
+        destination: { exactText: 'beta' },
+      },
+    ],
+  })
+  assert.equal(moved.ok && moved.afterText, 'Alpha beta, gamma.')
+
+  assert.deepEqual(
+    executeEditPlan(quoted.cleanText, quoted.paragraphs, 1, {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'ambiguous quote',
+      operations: [{ id: 'delete-quote', type: 'delete', target: { punctuation: 'quote' } }],
+    }),
+    { ok: false, reason: 'punctuation target is ambiguous' },
+  )
+})
+
 test('rejects incompatible structural and inline operation groups atomically', () => {
   const session = fixture()
   const result = executeEditPlan(session.cleanText, session.paragraphs, 1, {

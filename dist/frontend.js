@@ -103,8 +103,8 @@ function parseOperation(value) {
   } else if (type === "move_before" || type === "move_after") {
     if (text !== void 0 || caseMode !== void 0 || !destination) return null;
     if (target.scope !== void 0 || destination.scope !== void 0) return null;
-    const sourceIsText = hasTextSelector(target);
-    const destinationIsText = hasTextSelector(destination);
+    const sourceIsText = hasInlineSelector(target);
+    const destinationIsText = hasInlineSelector(destination);
     if (sourceIsText !== destinationIsText) return null;
   } else if (typeof text !== "string" || text.length > MAX_EDIT_TEXT_LENGTH || caseMode !== void 0 || destination !== void 0) {
     return null;
@@ -124,7 +124,11 @@ function parseTarget(value) {
     "paragraphOrdinal",
     "exactText",
     "approximateText",
-    "scope"
+    "scope",
+    "punctuation",
+    "occurrence",
+    "relativePosition",
+    "relativeToText"
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return null;
   const target = {};
@@ -153,10 +157,37 @@ function parseTarget(value) {
   }
   if (target.scope === "draft" && (target.paragraphId !== void 0 || target.paragraphOrdinal !== void 0 || target.exactText !== void 0 || target.approximateText !== void 0))
     return null;
+  if (value.punctuation !== void 0) {
+    if (!isPunctuationTarget(value.punctuation)) return null;
+    target.punctuation = value.punctuation;
+  }
+  if (value.occurrence !== void 0) {
+    if (!isPositiveInteger(value.occurrence) || value.occurrence > 1e4) return null;
+    target.occurrence = value.occurrence;
+  }
+  if (value.relativePosition !== void 0) {
+    if (value.relativePosition !== "before" && value.relativePosition !== "after") return null;
+    target.relativePosition = value.relativePosition;
+  }
+  if (value.relativeToText !== void 0) {
+    if (typeof value.relativeToText !== "string" || value.relativeToText.length < 1 || value.relativeToText.length > MAX_EDIT_TEXT_LENGTH)
+      return null;
+    target.relativeToText = value.relativeToText;
+  }
+  const hasRelativePosition = target.relativePosition !== void 0;
+  const hasRelativeText = target.relativeToText !== void 0;
+  if (hasRelativePosition !== hasRelativeText) return null;
+  if (target.punctuation !== void 0 && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
+    return null;
+  if (target.punctuation === void 0 && (target.occurrence !== void 0 || hasRelativePosition || hasRelativeText))
+    return null;
   return Object.keys(target).length ? target : null;
 }
-function hasTextSelector(target) {
-  return target.exactText !== void 0 || target.approximateText !== void 0;
+function hasInlineSelector(target) {
+  return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0;
+}
+function isPunctuationTarget(value) {
+  return value === "period" || value === "comma" || value === "colon" || value === "semicolon" || value === "question_mark" || value === "exclamation_mark" || value === "ellipsis" || value === "quote" || value === "single_quote" || value === "apostrophe" || value === "hyphen" || value === "en_dash" || value === "em_dash" || value === "open_parenthesis" || value === "close_parenthesis" || value === "open_bracket" || value === "close_bracket";
 }
 function isRecord(value) {
   return typeof value === "object" && value !== null;
@@ -351,7 +382,11 @@ var COMMAND_GROUPS = [
       ],
       ["Append", "Append \u201CPlease confirm attendance.\u201D to paragraph 1."],
       ["Prepend", "Prepend \u201CUrgent:\u201D to paragraph 1."],
-      ["Move", "Move \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."]
+      ["Move", "Move \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
+      [
+        "Punctuation targets",
+        "Say \u201Cthe second quote in paragraph 1\u201D or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
+      ]
     ]
   },
   {
@@ -380,6 +415,12 @@ var COMMAND_GROUPS = [
 ];
 function describeEditDestination(destination) {
   if (!destination) return "";
+  if (destination.punctuation) {
+    const occurrence = destination.occurrence ? `${destination.occurrence} ` : "";
+    const relative = destination.relativeToText ? ` ${destination.relativePosition} \u201C${destination.relativeToText}\u201D` : "";
+    const paragraph = destination.paragraphOrdinal ? ` in paragraph ${destination.paragraphOrdinal}` : "";
+    return ` \u2192 ${occurrence}${destination.punctuation.replaceAll("_", " ")}${relative}${paragraph}`;
+  }
   const anchor = destination.exactText ?? destination.approximateText;
   if (anchor) {
     const paragraph = destination.paragraphOrdinal ? ` in paragraph ${destination.paragraphOrdinal}` : "";

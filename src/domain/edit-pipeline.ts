@@ -17,12 +17,35 @@ export type EditOperationType =
   | 'move_before'
   | 'move_after'
 
+export type PunctuationTarget =
+  | 'period'
+  | 'comma'
+  | 'colon'
+  | 'semicolon'
+  | 'question_mark'
+  | 'exclamation_mark'
+  | 'ellipsis'
+  | 'quote'
+  | 'single_quote'
+  | 'apostrophe'
+  | 'hyphen'
+  | 'en_dash'
+  | 'em_dash'
+  | 'open_parenthesis'
+  | 'close_parenthesis'
+  | 'open_bracket'
+  | 'close_bracket'
+
 export interface EditTarget {
   paragraphId?: string
   paragraphOrdinal?: number
   exactText?: string
   approximateText?: string
   scope?: 'draft'
+  punctuation?: PunctuationTarget
+  occurrence?: number
+  relativePosition?: 'before' | 'after'
+  relativeToText?: string
 }
 
 export interface EditOperation {
@@ -194,8 +217,8 @@ function parseOperation(value: unknown): EditOperation | null {
   } else if (type === 'move_before' || type === 'move_after') {
     if (text !== undefined || caseMode !== undefined || !destination) return null
     if (target.scope !== undefined || destination.scope !== undefined) return null
-    const sourceIsText = hasTextSelector(target)
-    const destinationIsText = hasTextSelector(destination)
+    const sourceIsText = hasInlineSelector(target)
+    const destinationIsText = hasInlineSelector(destination)
     if (sourceIsText !== destinationIsText) return null
   } else if (
     typeof text !== 'string' ||
@@ -222,6 +245,10 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     'exactText',
     'approximateText',
     'scope',
+    'punctuation',
+    'occurrence',
+    'relativePosition',
+    'relativeToText',
   ])
   if (Object.keys(value).some((key) => !allowed.has(key))) return null
   const target: EditTarget = {}
@@ -264,6 +291,42 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
       target.approximateText !== undefined)
   )
     return null
+  if (value.punctuation !== undefined) {
+    if (!isPunctuationTarget(value.punctuation)) return null
+    target.punctuation = value.punctuation
+  }
+  if (value.occurrence !== undefined) {
+    if (!isPositiveInteger(value.occurrence) || value.occurrence > 10_000) return null
+    target.occurrence = value.occurrence
+  }
+  if (value.relativePosition !== undefined) {
+    if (value.relativePosition !== 'before' && value.relativePosition !== 'after') return null
+    target.relativePosition = value.relativePosition
+  }
+  if (value.relativeToText !== undefined) {
+    if (
+      typeof value.relativeToText !== 'string' ||
+      value.relativeToText.length < 1 ||
+      value.relativeToText.length > MAX_EDIT_TEXT_LENGTH
+    )
+      return null
+    target.relativeToText = value.relativeToText
+  }
+  const hasRelativePosition = target.relativePosition !== undefined
+  const hasRelativeText = target.relativeToText !== undefined
+  if (hasRelativePosition !== hasRelativeText) return null
+  if (
+    target.punctuation !== undefined &&
+    (target.exactText !== undefined ||
+      target.approximateText !== undefined ||
+      target.scope !== undefined)
+  )
+    return null
+  if (
+    target.punctuation === undefined &&
+    (target.occurrence !== undefined || hasRelativePosition || hasRelativeText)
+  )
+    return null
   return Object.keys(target).length ? target : null
 }
 
@@ -304,7 +367,12 @@ function resolveOperation(
 
   let start = range.start
   let end = range.end
-  if (operation.target.exactText !== undefined) {
+  if (operation.target.punctuation !== undefined) {
+    const match = resolvePunctuationTarget(cleanText, range.start, range.end, operation.target)
+    if (typeof match === 'string') return match
+    start = match.start
+    end = match.end
+  } else if (operation.target.exactText !== undefined) {
     const matches = findAll(cleanText, operation.target.exactText, range.start, range.end)
     if (matches.length !== 1)
       return matches.length ? 'text target is ambiguous' : 'text target was not found'
@@ -327,6 +395,7 @@ function resolveOperation(
     paragraph !== undefined &&
     operation.target.exactText === undefined &&
     operation.target.approximateText === undefined &&
+    operation.target.punctuation === undefined &&
     (operation.type === 'insert_before' || operation.type === 'insert_after')
   if (isParagraphInsertion) {
     const insertedParagraph = (operation.text ?? '').trim()
@@ -398,13 +467,17 @@ function isInlineMoveOperation(operation: EditOperation): operation is InlineMov
   return (
     (operation.type === 'move_before' || operation.type === 'move_after') &&
     operation.destination !== undefined &&
-    hasTextSelector(operation.target) &&
-    hasTextSelector(operation.destination)
+    hasInlineSelector(operation.target) &&
+    hasInlineSelector(operation.destination)
   )
 }
 
-function hasTextSelector(target: EditTarget): boolean {
-  return target.exactText !== undefined || target.approximateText !== undefined
+function hasInlineSelector(target: EditTarget): boolean {
+  return (
+    target.exactText !== undefined ||
+    target.approximateText !== undefined ||
+    target.punctuation !== undefined
+  )
 }
 
 interface ResolvedTextTarget {
@@ -502,7 +575,12 @@ function resolveTextTarget(
 
   let start: number
   let end: number
-  if (target.exactText !== undefined) {
+  if (target.punctuation !== undefined) {
+    const match = resolvePunctuationTarget(cleanText, range.start, range.end, target)
+    if (typeof match === 'string') return `${label}: ${match}`
+    start = match.start
+    end = match.end
+  } else if (target.exactText !== undefined) {
     const matches = findAll(cleanText, target.exactText, range.start, range.end)
     if (matches.length !== 1)
       return matches.length ? `${label} is ambiguous` : `${label} was not found`
@@ -514,7 +592,7 @@ function resolveTextTarget(
     start = match.start
     end = match.end
   } else {
-    return `${label} requires exact or approximate text`
+    return `${label} requires exact, approximate, or punctuation text`
   }
 
   return {
@@ -523,6 +601,124 @@ function resolveTextTarget(
     paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset(cleanText, start),
     scopeStart: range.start,
     scopeEnd: range.end,
+  }
+}
+
+function isPunctuationTarget(value: unknown): value is PunctuationTarget {
+  return (
+    value === 'period' ||
+    value === 'comma' ||
+    value === 'colon' ||
+    value === 'semicolon' ||
+    value === 'question_mark' ||
+    value === 'exclamation_mark' ||
+    value === 'ellipsis' ||
+    value === 'quote' ||
+    value === 'single_quote' ||
+    value === 'apostrophe' ||
+    value === 'hyphen' ||
+    value === 'en_dash' ||
+    value === 'em_dash' ||
+    value === 'open_parenthesis' ||
+    value === 'close_parenthesis' ||
+    value === 'open_bracket' ||
+    value === 'close_bracket'
+  )
+}
+
+function resolvePunctuationTarget(
+  cleanText: string,
+  rangeStart: number,
+  rangeEnd: number,
+  target: EditTarget,
+): { start: number; end: number } | string {
+  let matches = findPunctuationMatches(cleanText, target.punctuation!, rangeStart, rangeEnd)
+  if (target.relativeToText !== undefined) {
+    const anchors = findAll(cleanText, target.relativeToText, rangeStart, rangeEnd)
+    if (anchors.length !== 1)
+      return anchors.length ? 'punctuation anchor is ambiguous' : 'punctuation anchor was not found'
+    const anchorStart = anchors[0]!
+    const anchorEnd = anchorStart + target.relativeToText.length
+    matches =
+      target.relativePosition === 'after'
+        ? matches.filter((match) => match.start >= anchorEnd)
+        : matches.filter((match) => match.end <= anchorStart).reverse()
+  }
+  if (target.occurrence !== undefined) {
+    const match = matches[target.occurrence - 1]
+    return match ?? 'punctuation occurrence was not found'
+  }
+  if (target.relativeToText !== undefined) {
+    return matches[0] ?? 'punctuation target was not found'
+  }
+  if (matches.length !== 1)
+    return matches.length ? 'punctuation target is ambiguous' : 'punctuation target was not found'
+  return matches[0]!
+}
+
+function findPunctuationMatches(
+  text: string,
+  punctuation: PunctuationTarget,
+  start: number,
+  end: number,
+): Array<{ start: number; end: number }> {
+  const pattern = punctuationPattern(punctuation)
+  const matches: Array<{ start: number; end: number }> = []
+  for (const match of text.slice(start, end).matchAll(pattern)) {
+    const matchStart = start + (match.index ?? 0)
+    const value = match[0]
+    if (
+      punctuation === 'period' &&
+      (text[matchStart - 1] === '.' || text[matchStart + value.length] === '.')
+    )
+      continue
+    if (
+      punctuation === 'single_quote' &&
+      /[\p{L}\p{N}]/u.test(text[matchStart - 1] ?? '') &&
+      /[\p{L}\p{N}]/u.test(text[matchStart + value.length] ?? '')
+    )
+      continue
+    matches.push({ start: matchStart, end: matchStart + value.length })
+  }
+  return matches
+}
+
+function punctuationPattern(punctuation: PunctuationTarget): RegExp {
+  switch (punctuation) {
+    case 'period':
+      return /\./g
+    case 'comma':
+      return /,/g
+    case 'colon':
+      return /:/g
+    case 'semicolon':
+      return /;/g
+    case 'question_mark':
+      return /\?/g
+    case 'exclamation_mark':
+      return /!/g
+    case 'ellipsis':
+      return /…|\.{3}/g
+    case 'quote':
+      return /["“”]/g
+    case 'single_quote':
+      return /['‘’]/g
+    case 'apostrophe':
+      return /['’]/g
+    case 'hyphen':
+      return /-/g
+    case 'en_dash':
+      return /–/g
+    case 'em_dash':
+      return /—/g
+    case 'open_parenthesis':
+      return /\(/g
+    case 'close_parenthesis':
+      return /\)/g
+    case 'open_bracket':
+      return /\[/g
+    case 'close_bracket':
+      return /\]/g
   }
 }
 

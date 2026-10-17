@@ -910,6 +910,68 @@ test('reviews and commits a word move through the structured edit pipeline', asy
   }
 })
 
+test('reviews and commits a punctuation target resolved relative to a phrase', async () => {
+  const userId = 'punctuation-target-user'
+  const chatId = 'punctuation-target-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She said “this is very good”, and smiled.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace the quote after the requested phrase.',
+    operations: [
+      {
+        id: 'replace-relative-quote',
+        type: 'replace',
+        target: {
+          punctuation: 'quote',
+          relativePosition: 'after',
+          relativeToText: 'this is very good',
+        },
+        text: '!',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'punctuation-target-interpret',
+      operationId: 'punctuation-target-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Replace the quote after the phrase this is very good with an exclamation mark.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.outcome, 'review')
+  assert.equal(proposal.proposal.afterText, 'She said “this is very good!, and smiled.')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'punctuation-target-confirm',
+      operationId: 'punctuation-target-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type === 'edit.proposal.response') {
+    assert.equal(committed.outcome, 'committed')
+    assert.equal(committed.snapshot?.cleanText, 'She said “this is very good!, and smiled.')
+  }
+})
+
 test('offers explicit choices for paragraph-resolvable ambiguity without mutating the draft', async () => {
   const userId = 'unsafe-edit-user'
   const chatId = 'unsafe-edit-chat'

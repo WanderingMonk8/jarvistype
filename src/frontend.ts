@@ -87,6 +87,10 @@ export const COMMAND_GROUPS = [
       ['Append', 'Append “Please confirm attendance.” to paragraph 1.'],
       ['Prepend', 'Prepend “Urgent:” to paragraph 1.'],
       ['Move', 'Move “approved” before “pending” in paragraph 1.'],
+      [
+        'Punctuation targets',
+        'Say “the second quote in paragraph 1” or “the quote after the phrase ‘this is very good’” with move, replace, insert, or delete.',
+      ],
     ],
   },
   {
@@ -116,6 +120,16 @@ export const COMMAND_GROUPS = [
 
 function describeEditDestination(destination: EditTarget | undefined): string {
   if (!destination) return ''
+  if (destination.punctuation) {
+    const occurrence = destination.occurrence ? `${destination.occurrence} ` : ''
+    const relative = destination.relativeToText
+      ? ` ${destination.relativePosition} “${destination.relativeToText}”`
+      : ''
+    const paragraph = destination.paragraphOrdinal
+      ? ` in paragraph ${destination.paragraphOrdinal}`
+      : ''
+    return ` → ${occurrence}${destination.punctuation.replaceAll('_', ' ')}${relative}${paragraph}`
+  }
   const anchor = destination.exactText ?? destination.approximateText
   if (anchor) {
     const paragraph = destination.paragraphOrdinal

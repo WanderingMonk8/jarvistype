@@ -161,20 +161,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const composerToolsMount = ctx.ui.mount('chat_input_tools_left')
   const composerLauncherStyle = document.createElement('style')
   composerLauncherStyle.textContent = `
-    .jt-composer-launcher { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-height: 2.25rem; padding: .4rem .65rem; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: .55rem; background: color-mix(in srgb, #d69e2e 16%, transparent); color: inherit; font: inherit; font-weight: 650; line-height: 1; cursor: pointer; }
-    .jt-composer-launcher .jt-brand-icon { width: 1.35em; height: 1.35em; flex: 0 0 auto; }
-    .jt-composer-launcher:hover { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 26%, transparent); }
-    .jt-composer-launcher:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
-    @media (max-width: ${NARROW_COMPOSER_BREAKPOINT_PX - 1}px) {
-      .jt-composer-launcher { width: 2.35rem; padding-inline: .45rem; }
-      .jt-composer-launcher > span { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-    }`
+    .jt-composer-launcher { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; padding: .45rem; border: 0; border-radius: .5rem; background: transparent; color: inherit; line-height: 1; cursor: pointer; opacity: .78; }
+    .jt-composer-launcher .jt-brand-icon { width: 1.35rem; height: 1.35rem; flex: 0 0 auto; }
+    .jt-composer-launcher:hover { background: color-mix(in srgb, currentColor 9%, transparent); opacity: 1; }
+    .jt-composer-launcher:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; opacity: 1; }`
   const composerLauncher = document.createElement('button')
   composerLauncher.type = 'button'
   composerLauncher.className = 'jt-composer-launcher'
   composerLauncher.setAttribute('aria-label', 'Open JarvisType voice composer')
   composerLauncher.title = 'Open JarvisType voice composer'
-  composerLauncher.innerHTML = `${JARVISTYPE_ICON_SVG}<span>JarvisType</span>`
+  composerLauncher.innerHTML = JARVISTYPE_ICON_SVG
   composerToolsMount.append(composerLauncherStyle, composerLauncher)
 
   const initialFloatingSize = getFloatingWidgetSize()

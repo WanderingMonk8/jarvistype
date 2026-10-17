@@ -318,7 +318,7 @@ Implement the complete extension-owned draft lifecycle before voice input, provi
 
 - Support keyboard editing, selection, and clipboard operations.
 - Capture versioned history sufficient for recovery.
-- Implement latest-mutation undo and an inspectable chronological history.
+- Implement latest-mutation undo, conditional redo that is invalidated by a new mutation, and an inspectable chronological history.
 - Ensure clean-text extraction excludes numbers and history metadata.
 
 #### Confirmed send

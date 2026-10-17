@@ -235,6 +235,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const diffRemoved = requireElement<HTMLElement>(tab.root, '[data-diff-removed]')
   const diffAdded = requireElement<HTMLElement>(tab.root, '[data-diff-added]')
   const undoButton = requireElement<HTMLButtonElement>(tab.root, '[data-undo]')
+  const redoButton = requireElement<HTMLButtonElement>(tab.root, '[data-redo]')
   const historyButton = requireElement<HTMLButtonElement>(tab.root, '[data-history-toggle]')
   const historyPanel = requireElement<HTMLElement>(tab.root, '[data-history-panel]')
   const historyList = requireElement<HTMLOListElement>(tab.root, '[data-history-list]')
@@ -467,6 +468,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       !editorEnabled ||
       state.saving ||
       !state.snapshot?.canUndo ||
+      desiredText !== state.snapshot.cleanText
+    redoButton.hidden = !state.snapshot?.canRedo
+    redoButton.disabled =
+      !editorEnabled ||
+      state.saving ||
+      !state.snapshot?.canRedo ||
       desiredText !== state.snapshot.cleanText
     const recordingOwnerReady =
       state.backendState === 'ready' &&
@@ -866,6 +873,38 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.statusMessage = outcome.value.message
     } else {
       state.statusMessage = 'Undo timed out. The existing draft was preserved.'
+    }
+    render()
+  }
+
+  const handleRedo = async () => {
+    if (!state.snapshot || state.automatedBusy || state.sending) return
+    await drainMutations()
+    if (!state.snapshot.canRedo || desiredText !== state.snapshot.cleanText) return
+    state.automatedBusy = true
+    state.statusMessage = 'Redoing the latest undone draft mutation…'
+    render()
+    const snapshot = state.snapshot
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.redo.request',
+      requestId: createRequestId('redo'),
+      operationId: createRequestId('redo-operation'),
+      chatId: snapshot.chatId,
+      expectedVersion: snapshot.draftVersion,
+    })
+    state.automatedBusy = false
+    if (!alive) return
+    if (outcome.status === 'resolved' && outcome.value.type === 'draft.snapshot.response') {
+      applySnapshot(outcome.value.snapshot, true)
+      state.statusMessage =
+        outcome.value.outcome === 'applied'
+          ? 'Latest undone draft mutation redone.'
+          : 'Nothing to redo.'
+    } else if (outcome.status === 'resolved' && outcome.value.type === 'app.error') {
+      state.statusMessage = outcome.value.message
+    } else {
+      state.statusMessage = 'Redo timed out. The existing draft was preserved.'
     }
     render()
   }
@@ -1608,6 +1647,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     render()
   }
   const handleUndoClick = () => void handleUndo()
+  const handleRedoClick = () => void handleRedo()
   const handleRecordClick = () => void handleRecording('message')
   const handleRecordEditClick = () => void handleRecording('edit')
   const handleCancelRecordingClick = () =>
@@ -1684,6 +1724,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cancelRecordingButton.addEventListener('click', handleCancelRecordingClick)
   undoRecordingButton.addEventListener('click', handleUndoRecordingClick)
   undoButton.addEventListener('click', handleUndoClick)
+  redoButton.addEventListener('click', handleRedoClick)
   historyButton.addEventListener('click', handleHistoryToggle)
   sendButton.addEventListener('click', handleSendClick)
   acceptProposalButton.addEventListener('click', handleAcceptProposalClick)
@@ -1738,6 +1779,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     cancelRecordingButton.removeEventListener('click', handleCancelRecordingClick)
     undoRecordingButton.removeEventListener('click', handleUndoRecordingClick)
     undoButton.removeEventListener('click', handleUndoClick)
+    redoButton.removeEventListener('click', handleRedoClick)
     historyButton.removeEventListener('click', handleHistoryToggle)
     sendButton.removeEventListener('click', handleSendClick)
     acceptProposalButton.removeEventListener('click', handleAcceptProposalClick)
@@ -1898,13 +1940,15 @@ function renderHistory(list: HTMLOListElement, snapshot: DraftSnapshot | null): 
     const kind =
       entry.kind === 'undo'
         ? 'Undo'
-        : entry.kind === 'recording-append'
-          ? 'Recording appended'
-          : entry.kind === 'automated-edit'
-            ? 'Approved voice edit'
-            : entry.kind === 'recording-undo'
-              ? 'Recording removed'
-              : 'Manual edit'
+        : entry.kind === 'redo'
+          ? 'Redo'
+          : entry.kind === 'recording-append'
+            ? 'Recording appended'
+            : entry.kind === 'automated-edit'
+              ? 'Approved voice edit'
+              : entry.kind === 'recording-undo'
+                ? 'Recording removed'
+                : 'Manual edit'
     const affected = entry.diff.affectedParagraphOrdinals.length
       ? ` · paragraph ${entry.diff.affectedParagraphOrdinals.join(', ')}`
       : ''
@@ -2199,6 +2243,7 @@ function shellMarkup(): string {
         </div>
         <div class="jt-actions">
           <button type="button" data-undo disabled>Undo</button>
+          <button type="button" data-redo hidden>Redo</button>
           <button type="button" data-history-toggle disabled>Show History</button>
         </div>
 

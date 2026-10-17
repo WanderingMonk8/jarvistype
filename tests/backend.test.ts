@@ -186,6 +186,49 @@ test('loads and persists a chat-owned draft', async () => {
   )
 })
 
+test('undoes and redoes a draft mutation through the backend protocol', async () => {
+  const userId = 'redo-user'
+  const chatId = 'redo-chat'
+  await seedDraft(userId, chatId, 'Restorable text')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.undo.request',
+      requestId: 'undo-for-redo',
+      operationId: 'undo-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+  const undone = responses.at(-1)?.payload
+  assert.equal(undone?.type, 'draft.snapshot.response')
+  if (undone?.type === 'draft.snapshot.response') {
+    assert.equal(undone.snapshot.cleanText, '')
+    assert.equal(undone.snapshot.canRedo, true)
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.redo.request',
+      requestId: 'redo-1',
+      operationId: 'redo-operation',
+      chatId,
+      expectedVersion: 2,
+    },
+    userId,
+  )
+  const redone = responses.at(-1)?.payload
+  assert.equal(redone?.type, 'draft.snapshot.response')
+  if (redone?.type === 'draft.snapshot.response') {
+    assert.equal(redone.snapshot.cleanText, 'Restorable text')
+    assert.equal(redone.snapshot.canRedo, false)
+    assert.equal(redone.snapshot.canUndo, true)
+  }
+})
+
 test('lists safe normalization connections and dispatches with selected connection and model', async () => {
   const userId = 'connection-user'
   const chatId = 'connection-chat'

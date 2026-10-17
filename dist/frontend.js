@@ -228,10 +228,10 @@ function isDraftSnapshot(value) {
   if (!isRecord2(value)) return false;
   return isIdentifier2(value.chatId) && isNonNegativeInteger2(value.draftVersion) && typeof value.cleanText === "string" && value.cleanText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.paragraphs) && value.paragraphs.every(
     (paragraph) => isRecord2(paragraph) && isIdentifier2(paragraph.id) && isPositiveInteger2(paragraph.ordinal) && isNonNegativeInteger2(paragraph.lineIndex) && typeof paragraph.text === "string" && paragraph.text.trim().length > 0
-  ) && Array.isArray(value.history) && value.history.length <= MAX_HISTORY_ENTRIES && value.history.every(isHistoryEntry) && (value.latestDiff === null || isDiff(value.latestDiff)) && typeof value.canUndo === "boolean" && Array.isArray(value.recordingSegments) && value.recordingSegments.length <= MAX_RECORDING_SEGMENTS && value.recordingSegments.every(isRecordingSegment) && typeof value.canUndoRecording === "boolean" && typeof value.dirty === "boolean" && isBoundedString(value.updatedAt, 1, 128);
+  ) && Array.isArray(value.history) && value.history.length <= MAX_HISTORY_ENTRIES && value.history.every(isHistoryEntry) && (value.latestDiff === null || isDiff(value.latestDiff)) && typeof value.canUndo === "boolean" && typeof value.canRedo === "boolean" && Array.isArray(value.recordingSegments) && value.recordingSegments.length <= MAX_RECORDING_SEGMENTS && value.recordingSegments.every(isRecordingSegment) && typeof value.canUndoRecording === "boolean" && typeof value.dirty === "boolean" && isBoundedString(value.updatedAt, 1, 128);
 }
 function isHistoryEntry(value) {
-  return isRecord2(value) && isIdentifier2(value.id) && (value.kind === "manual-edit" || value.kind === "automated-edit" || value.kind === "undo" || value.kind === "recording-append" || value.kind === "recording-undo") && (value.editGroupId === void 0 || isIdentifier2(value.editGroupId)) && isNonNegativeInteger2(value.beforeVersion) && isPositiveInteger2(value.afterVersion) && isBoundedString(value.timestamp, 1, 128) && isDiff(value.diff);
+  return isRecord2(value) && isIdentifier2(value.id) && (value.kind === "manual-edit" || value.kind === "automated-edit" || value.kind === "undo" || value.kind === "redo" || value.kind === "recording-append" || value.kind === "recording-undo") && (value.editGroupId === void 0 || isIdentifier2(value.editGroupId)) && isNonNegativeInteger2(value.beforeVersion) && isPositiveInteger2(value.afterVersion) && isBoundedString(value.timestamp, 1, 128) && isDiff(value.diff);
 }
 function isRecordingSegment(value) {
   return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) && isBoundedString(value.normalizedTranscript, 1, MAX_DRAFT_CHARACTERS) && isRecordingNormalization(value.normalization) && isBoundedString(value.committedText, 1, MAX_DRAFT_CHARACTERS) && isNonNegativeInteger2(value.startOffset) && isNonNegativeInteger2(value.beforeVersion) && isPositiveInteger2(value.resultingVersion) && value.resultingVersion === value.beforeVersion + 1 && isBoundedString(value.committedAt, 1, 128);
@@ -454,6 +454,7 @@ function setup(ctx) {
   const diffRemoved = requireElement(tab.root, "[data-diff-removed]");
   const diffAdded = requireElement(tab.root, "[data-diff-added]");
   const undoButton = requireElement(tab.root, "[data-undo]");
+  const redoButton = requireElement(tab.root, "[data-redo]");
   const historyButton = requireElement(tab.root, "[data-history-toggle]");
   const historyPanel = requireElement(tab.root, "[data-history-panel]");
   const historyList = requireElement(tab.root, "[data-history-list]");
@@ -644,6 +645,8 @@ function setup(ctx) {
     historyButton.textContent = state.historyExpanded ? "Hide History" : "Show History";
     historyButton.disabled = !state.snapshot || state.snapshot.history.length === 0;
     undoButton.disabled = !editorEnabled || state.saving || !state.snapshot?.canUndo || desiredText !== state.snapshot.cleanText;
+    redoButton.hidden = !state.snapshot?.canRedo;
+    redoButton.disabled = !editorEnabled || state.saving || !state.snapshot?.canRedo || desiredText !== state.snapshot.cleanText;
     const recordingOwnerReady = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.saving && !state.automatedBusy && !state.sending && !mismatch && state.activeChatId === state.snapshot.chatId && desiredText === state.snapshot.cleanText;
     recordButton.textContent = state.voicePhase === "starting" || state.voicePhase === "recording" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record Message";
     recordButton.disabled = !hasNativeStt() || !recordingOwnerReady || voiceBusy() && activeRecording?.mode !== "message" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
@@ -944,6 +947,34 @@ function setup(ctx) {
       state.statusMessage = outcome.value.message;
     } else {
       state.statusMessage = "Undo timed out. The existing draft was preserved.";
+    }
+    render();
+  };
+  const handleRedo = async () => {
+    if (!state.snapshot || state.automatedBusy || state.sending) return;
+    await drainMutations();
+    if (!state.snapshot.canRedo || desiredText !== state.snapshot.cleanText) return;
+    state.automatedBusy = true;
+    state.statusMessage = "Redoing the latest undone draft mutation\u2026";
+    render();
+    const snapshot = state.snapshot;
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "draft.redo.request",
+      requestId: createRequestId("redo"),
+      operationId: createRequestId("redo-operation"),
+      chatId: snapshot.chatId,
+      expectedVersion: snapshot.draftVersion
+    });
+    state.automatedBusy = false;
+    if (!alive) return;
+    if (outcome.status === "resolved" && outcome.value.type === "draft.snapshot.response") {
+      applySnapshot(outcome.value.snapshot, true);
+      state.statusMessage = outcome.value.outcome === "applied" ? "Latest undone draft mutation redone." : "Nothing to redo.";
+    } else if (outcome.status === "resolved" && outcome.value.type === "app.error") {
+      state.statusMessage = outcome.value.message;
+    } else {
+      state.statusMessage = "Redo timed out. The existing draft was preserved.";
     }
     render();
   };
@@ -1569,6 +1600,7 @@ function setup(ctx) {
     render();
   };
   const handleUndoClick = () => void handleUndo();
+  const handleRedoClick = () => void handleRedo();
   const handleRecordClick = () => void handleRecording("message");
   const handleRecordEditClick = () => void handleRecording("edit");
   const handleCancelRecordingClick = () => cancelActiveRecording("Recording cancelled. No transcript was appended.");
@@ -1643,6 +1675,7 @@ function setup(ctx) {
   cancelRecordingButton.addEventListener("click", handleCancelRecordingClick);
   undoRecordingButton.addEventListener("click", handleUndoRecordingClick);
   undoButton.addEventListener("click", handleUndoClick);
+  redoButton.addEventListener("click", handleRedoClick);
   historyButton.addEventListener("click", handleHistoryToggle);
   sendButton.addEventListener("click", handleSendClick);
   acceptProposalButton.addEventListener("click", handleAcceptProposalClick);
@@ -1695,6 +1728,7 @@ function setup(ctx) {
     cancelRecordingButton.removeEventListener("click", handleCancelRecordingClick);
     undoRecordingButton.removeEventListener("click", handleUndoRecordingClick);
     undoButton.removeEventListener("click", handleUndoClick);
+    redoButton.removeEventListener("click", handleRedoClick);
     historyButton.removeEventListener("click", handleHistoryToggle);
     sendButton.removeEventListener("click", handleSendClick);
     acceptProposalButton.removeEventListener("click", handleAcceptProposalClick);
@@ -1826,7 +1860,7 @@ function renderHistory(list, snapshot) {
   list.replaceChildren();
   for (const entry of snapshot?.history ?? []) {
     const item = document.createElement("li");
-    const kind = entry.kind === "undo" ? "Undo" : entry.kind === "recording-append" ? "Recording appended" : entry.kind === "automated-edit" ? "Approved voice edit" : entry.kind === "recording-undo" ? "Recording removed" : "Manual edit";
+    const kind = entry.kind === "undo" ? "Undo" : entry.kind === "redo" ? "Redo" : entry.kind === "recording-append" ? "Recording appended" : entry.kind === "automated-edit" ? "Approved voice edit" : entry.kind === "recording-undo" ? "Recording removed" : "Manual edit";
     const affected = entry.diff.affectedParagraphOrdinals.length ? ` \xB7 paragraph ${entry.diff.affectedParagraphOrdinals.join(", ")}` : "";
     item.textContent = `${kind} \xB7 v${entry.beforeVersion} \u2192 v${entry.afterVersion}${affected}`;
     list.append(item);
@@ -2104,6 +2138,7 @@ function shellMarkup() {
         </div>
         <div class="jt-actions">
           <button type="button" data-undo disabled>Undo</button>
+          <button type="button" data-redo hidden>Redo</button>
           <button type="button" data-history-toggle disabled>Show History</button>
         </div>
 

@@ -163,6 +163,8 @@ The user is not required to dictate a complete message in one session.
 
 **FR-DRAFT-008:** Every completed **Record Message** segment shall require explicit **Accept & append** confirmation, even when normalization proposes no textual change. **Reject** shall leave the draft and glossary unchanged.
 
+**FR-DRAFT-009:** After a draft mutation is undone, JarvisType shall expose **Redo** only while that mutation can still be restored. Redo shall create an inspectable history entry and remain undoable. Any newly committed draft mutation shall clear the redo path.
+
 ### 7.2 Context-aware transcription
 
 **FR-CTX-001:** JarvisType shall use the five most recent eligible Lumiverse messages as transcription context by default.
@@ -418,13 +420,13 @@ The user is not required to dictate a complete message in one session.
 
 **FR-UI-002:** The floating surface shall provide functional parity with the existing drawer composition workflow before any composition control is retired from the drawer.
 
-**FR-UI-003:** Parity shall include manual draft editing, paragraph numbering, message and edit recording, stop and cancel, processing status, proposal review, target selection, accept and reject, undo, latest diff, history, chat ownership, confirmed send, context settings, provider and model selection, glossary management, permission errors, and retry behavior.
+**FR-UI-003:** Parity shall include manual draft editing, paragraph numbering, message and edit recording, stop and cancel, processing status, proposal review, target selection, accept and reject, undo and conditional redo, latest diff, history, chat ownership, confirmed send, context settings, provider and model selection, glossary management, permission errors, and retry behavior.
 
 **FR-UI-004:** The floating and drawer surfaces shall use one shared composer state and operation controller. They shall not create independent drafts, simultaneous recordings, duplicate proposals, or competing send operations.
 
 **FR-UI-005:** After hosted parity verification, routine composition controls shall be retired from the drawer. The drawer shall permanently retain personal-glossary management and may retain non-routine settings, privacy disclosures, and diagnostics.
 
-**FR-UI-006:** The ready view shall prioritize the numbered draft and labeled actions for **Record Message**, **Record Edit**, **Undo**, **History**, **Commands**, and **Confirm & Send**.
+**FR-UI-006:** The ready view shall prioritize the numbered draft and labeled actions for **Record Message**, **Record Edit**, **Undo**, conditional **Redo**, **History**, **Commands**, and **Confirm & Send**.
 
 **FR-UI-007:** Controls shall be rendered as accessible buttons with visible action labels. Icons may reinforce a label but shall not be the only accessible name for primary actions.
 

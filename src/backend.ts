@@ -7,6 +7,7 @@ import {
   clearDraftAfterSend,
   createDraftSession,
   restoreDraftSession,
+  redoLatestDraftMutation,
   toDraftSnapshot,
   undoLatestDraftMutation,
   undoLastRecording,
@@ -128,6 +129,8 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
       await handleDraftMutation(request, context, activeRequest)
     } else if (request.type === 'draft.undo.request') {
       await handleDraftUndo(request, context, activeRequest)
+    } else if (request.type === 'draft.redo.request') {
+      await handleDraftRedo(request, context, activeRequest)
     } else if (request.type === 'transcript.normalize.request') {
       await handleTranscriptNormalization(request, context, activeRequest)
     } else if (request.type === 'transcript.confirm.request') {
@@ -1408,6 +1411,36 @@ async function handleDraftUndo(
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const session = await loadDraft(context.userId, request.chatId)
     const mutation = undoLatestDraftMutation(session, request.expectedVersion)
+    if (mutation.applied) await persistDraft(context.userId, mutation.session)
+    return mutation
+  })
+  if (activeRequest.cancelled) return
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.snapshot.response',
+      requestId: request.requestId,
+      ok: true,
+      outcome: result.applied
+        ? 'applied'
+        : result.reason === 'stale-version'
+          ? 'stale-version'
+          : 'unchanged',
+      operationId: request.operationId,
+      snapshot: toDraftSnapshot(result.session),
+    },
+    context,
+  )
+}
+
+async function handleDraftRedo(
+  request: Extract<FrontendRequest, { type: 'draft.redo.request' }>,
+  context: RequestContext,
+  activeRequest: ActiveRequest,
+): Promise<void> {
+  const result = await withDraftLock(context.userId, request.chatId, async () => {
+    const session = await loadDraft(context.userId, request.chatId)
+    const mutation = redoLatestDraftMutation(session, request.expectedVersion)
     if (mutation.applied) await persistDraft(context.userId, mutation.session)
     return mutation
   })

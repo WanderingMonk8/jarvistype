@@ -101,6 +101,17 @@ test('validates bounded draft mutations', () => {
     }),
     true,
   )
+  assert.equal(
+    isFrontendRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.redo.request',
+      requestId: 'redo-request-1',
+      operationId: 'redo-operation-1',
+      chatId: 'chat-1',
+      expectedVersion: 2,
+    }),
+    true,
+  )
 })
 
 test('validates normalization connection and custom-model settings', () => {

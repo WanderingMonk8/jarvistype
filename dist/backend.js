@@ -1,5 +1,5 @@
 // src/domain/draft-session.ts
-var DRAFT_SCHEMA_VERSION = 3;
+var DRAFT_SCHEMA_VERSION = 4;
 var MAX_DRAFT_CHARACTERS = 1e5;
 var MAX_HISTORY_ENTRIES = 200;
 var MAX_RECORDING_SEGMENTS = 200;
@@ -14,6 +14,8 @@ function createDraftSession(chatId, now = (/* @__PURE__ */ new Date()).toISOStri
     latestDiff: null,
     undoStack: [],
     canUndo: false,
+    redoStack: [],
+    canRedo: false,
     recordingSegments: [],
     canUndoRecording: false,
     dirty: false,
@@ -69,6 +71,8 @@ function applyManualEdit(session, nextText, options) {
       latestDiff: diff,
       undoStack,
       canUndo: undoStack.length > 0,
+      redoStack: [],
+      canRedo: false,
       canUndoRecording: canUndoLatestRecording(session, nextText, undoStack),
       dirty: nextText.length > 0,
       updatedAt: now
@@ -129,6 +133,8 @@ function applyAutomatedEdit(session, nextText, options) {
       latestDiff: diff,
       undoStack,
       canUndo: true,
+      redoStack: [],
+      canRedo: false,
       canUndoRecording: false,
       dirty: nextText.length > 0,
       updatedAt: now
@@ -146,6 +152,7 @@ function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
   const lastHistory = session.history.at(-1);
   const recordingSegments = lastHistory?.kind === "recording-append" ? session.recordingSegments.slice(0, -1) : session.recordingSegments;
   const undoStack = session.undoStack.slice(0, -1);
+  const redoStack = [...session.redoStack, session.cleanText].slice(-MAX_HISTORY_ENTRIES);
   return {
     applied: true,
     session: {
@@ -167,6 +174,8 @@ function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
       latestDiff: diff,
       undoStack,
       canUndo: undoStack.length > 0,
+      redoStack,
+      canRedo: true,
       recordingSegments,
       canUndoRecording: canUndoLatestRecording(
         { ...session, recordingSegments },
@@ -174,6 +183,45 @@ function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
         undoStack
       ),
       dirty: previousText.length > 0,
+      updatedAt: now
+    }
+  };
+}
+function redoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId = defaultId) {
+  if (expectedVersion !== session.draftVersion) {
+    return { applied: false, reason: "stale-version", session };
+  }
+  const nextText = session.redoStack.at(-1);
+  if (nextText === void 0) return { applied: false, reason: "unchanged", session };
+  const nextVersion = session.draftVersion + 1;
+  const diff = createDiff(session.cleanText, nextText);
+  const undoStack = [...session.undoStack, session.cleanText].slice(-MAX_HISTORY_ENTRIES);
+  const redoStack = session.redoStack.slice(0, -1);
+  return {
+    applied: true,
+    session: {
+      ...session,
+      draftVersion: nextVersion,
+      cleanText: nextText,
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      history: [
+        ...session.history,
+        {
+          id: createId(),
+          kind: "redo",
+          beforeVersion: session.draftVersion,
+          afterVersion: nextVersion,
+          timestamp: now,
+          diff
+        }
+      ].slice(-MAX_HISTORY_ENTRIES),
+      latestDiff: diff,
+      undoStack,
+      canUndo: true,
+      redoStack,
+      canRedo: redoStack.length > 0,
+      canUndoRecording: false,
+      dirty: nextText.length > 0,
       updatedAt: now
     }
   };
@@ -190,6 +238,7 @@ function toDraftSnapshot(session) {
     history: session.history,
     latestDiff: session.latestDiff,
     canUndo: session.canUndo,
+    canRedo: session.canRedo,
     recordingSegments: session.recordingSegments,
     canUndoRecording: session.canUndoRecording,
     dirty: session.dirty,
@@ -260,6 +309,8 @@ function appendRecordingTranscript(session, rawTranscript, options) {
       latestDiff: diff,
       undoStack,
       canUndo: true,
+      redoStack: [],
+      canRedo: false,
       recordingSegments,
       canUndoRecording: true,
       dirty: true,
@@ -279,6 +330,7 @@ function undoLastRecording(session, expectedVersion, now = (/* @__PURE__ */ new 
   const diff = createDiff(session.cleanText, nextText);
   const recordingSegments = session.recordingSegments.slice(0, -1);
   const undoStack = session.undoStack.slice(0, -1);
+  const redoStack = [...session.redoStack, session.cleanText].slice(-MAX_HISTORY_ENTRIES);
   return {
     applied: true,
     session: {
@@ -300,6 +352,8 @@ function undoLastRecording(session, expectedVersion, now = (/* @__PURE__ */ new 
       latestDiff: diff,
       undoStack,
       canUndo: undoStack.length > 0,
+      redoStack,
+      canRedo: true,
       recordingSegments,
       canUndoRecording: canUndoLatestRecording(
         { ...session, recordingSegments },
@@ -329,7 +383,9 @@ function isPersistedDraftSession(value, expectedChatId) {
   if (!isRecord(value)) return false;
   return value.schemaVersion === DRAFT_SCHEMA_VERSION && value.chatId === expectedChatId && isNonNegativeInteger(value.draftVersion) && typeof value.cleanText === "string" && value.cleanText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.paragraphs) && value.paragraphs.every(isDraftParagraph) && Array.isArray(value.history) && value.history.length <= MAX_HISTORY_ENTRIES && value.history.every(isHistoryEntry) && (value.latestDiff === null || isDraftDiff(value.latestDiff)) && Array.isArray(value.undoStack) && value.undoStack.length <= MAX_HISTORY_ENTRIES && value.undoStack.every(
     (text) => typeof text === "string" && text.length <= MAX_DRAFT_CHARACTERS
-  ) && typeof value.canUndo === "boolean" && value.canUndo === value.undoStack.length > 0 && Array.isArray(value.recordingSegments) && value.recordingSegments.length <= MAX_RECORDING_SEGMENTS && value.recordingSegments.every(isRecordingSegment) && typeof value.canUndoRecording === "boolean" && value.canUndoRecording === canUndoLatestRecording(
+  ) && typeof value.canUndo === "boolean" && value.canUndo === value.undoStack.length > 0 && Array.isArray(value.redoStack) && value.redoStack.length <= MAX_HISTORY_ENTRIES && value.redoStack.every(
+    (text) => typeof text === "string" && text.length <= MAX_DRAFT_CHARACTERS
+  ) && typeof value.canRedo === "boolean" && value.canRedo === value.redoStack.length > 0 && Array.isArray(value.recordingSegments) && value.recordingSegments.length <= MAX_RECORDING_SEGMENTS && value.recordingSegments.every(isRecordingSegment) && typeof value.canUndoRecording === "boolean" && value.canUndoRecording === canUndoLatestRecording(
     value,
     value.cleanText,
     value.undoStack
@@ -337,10 +393,20 @@ function isPersistedDraftSession(value, expectedChatId) {
 }
 function restoreDraftSession(value, expectedChatId) {
   if (isPersistedDraftSession(value, expectedChatId)) return value;
+  if (isSchemaThreeDraftSession(value, expectedChatId)) {
+    return {
+      ...value,
+      schemaVersion: DRAFT_SCHEMA_VERSION,
+      redoStack: [],
+      canRedo: false
+    };
+  }
   if (isSchemaTwoDraftSession(value, expectedChatId)) {
     return {
       ...value,
       schemaVersion: DRAFT_SCHEMA_VERSION,
+      redoStack: [],
+      canRedo: false,
       recordingSegments: value.recordingSegments.map((segment) => ({
         ...segment,
         normalizedTranscript: segment.rawTranscript,
@@ -358,6 +424,8 @@ function restoreDraftSession(value, expectedChatId) {
   return {
     ...value,
     schemaVersion: DRAFT_SCHEMA_VERSION,
+    redoStack: [],
+    canRedo: false,
     recordingSegments: [],
     canUndoRecording: false
   };
@@ -452,7 +520,7 @@ function isDraftParagraph(value) {
 }
 function isHistoryEntry(value) {
   if (!isRecord(value)) return false;
-  return typeof value.id === "string" && (value.kind === "manual-edit" || value.kind === "automated-edit" || value.kind === "undo" || value.kind === "recording-append" || value.kind === "recording-undo") && (value.editGroupId === void 0 || typeof value.editGroupId === "string") && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.afterVersion) && typeof value.timestamp === "string" && isDraftDiff(value.diff);
+  return typeof value.id === "string" && (value.kind === "manual-edit" || value.kind === "automated-edit" || value.kind === "undo" || value.kind === "redo" || value.kind === "recording-append" || value.kind === "recording-undo") && (value.editGroupId === void 0 || typeof value.editGroupId === "string") && isNonNegativeInteger(value.beforeVersion) && isPositiveInteger(value.afterVersion) && typeof value.timestamp === "string" && isDraftDiff(value.diff);
 }
 function isRecordingSegment(value) {
   if (!isRecord(value)) return false;
@@ -461,12 +529,23 @@ function isRecordingSegment(value) {
 function isRecordingNormalization(value) {
   return isRecord(value) && Array.isArray(value.reasons) && value.reasons.every((reason) => typeof reason === "string") && isNonNegativeInteger(value.contextMessageCount) && isNonNegativeInteger(value.contextCharacterCount) && typeof value.contextTruncated === "boolean" && typeof value.contextualModelUsed === "boolean";
 }
+function isSchemaThreeDraftSession(value, expectedChatId) {
+  if (!isRecord(value) || value.schemaVersion !== 3 || value.chatId !== expectedChatId) {
+    return false;
+  }
+  return isPersistedDraftSession(
+    { ...value, schemaVersion: DRAFT_SCHEMA_VERSION, redoStack: [], canRedo: false },
+    expectedChatId
+  );
+}
 function isSchemaTwoDraftSession(value, expectedChatId) {
   if (!isRecord(value) || value.schemaVersion !== 2 || value.chatId !== expectedChatId || !Array.isArray(value.recordingSegments))
     return false;
   const candidate = {
     ...value,
     schemaVersion: DRAFT_SCHEMA_VERSION,
+    redoStack: [],
+    canRedo: false,
     recordingSegments: value.recordingSegments.map(
       (segment) => isRecord(segment) ? {
         ...segment,
@@ -1227,7 +1306,7 @@ function isFrontendRequest(value) {
   if (value.type === "draft.mutate.request") {
     return isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger3(value.expectedVersion) && isIdentifier2(value.editGroupId) && typeof value.cleanText === "string" && value.cleanText.length <= MAX_DRAFT_CHARACTERS;
   }
-  if (value.type === "draft.undo.request" || value.type === "draft.send.request") {
+  if (value.type === "draft.undo.request" || value.type === "draft.redo.request" || value.type === "draft.send.request") {
     return isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger3(value.expectedVersion);
   }
   if (value.type === "transcript.normalize.request") {
@@ -1341,6 +1420,8 @@ async function handleRequest(request, context) {
       await handleDraftMutation(request, context, activeRequest);
     } else if (request.type === "draft.undo.request") {
       await handleDraftUndo(request, context, activeRequest);
+    } else if (request.type === "draft.redo.request") {
+      await handleDraftRedo(request, context, activeRequest);
     } else if (request.type === "transcript.normalize.request") {
       await handleTranscriptNormalization(request, context, activeRequest);
     } else if (request.type === "transcript.confirm.request") {
@@ -2366,6 +2447,27 @@ async function handleDraftUndo(request, context, activeRequest) {
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const session = await loadDraft(context.userId, request.chatId);
     const mutation = undoLatestDraftMutation(session, request.expectedVersion);
+    if (mutation.applied) await persistDraft(context.userId, mutation.session);
+    return mutation;
+  });
+  if (activeRequest.cancelled) return;
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "draft.snapshot.response",
+      requestId: request.requestId,
+      ok: true,
+      outcome: result.applied ? "applied" : result.reason === "stale-version" ? "stale-version" : "unchanged",
+      operationId: request.operationId,
+      snapshot: toDraftSnapshot(result.session)
+    },
+    context
+  );
+}
+async function handleDraftRedo(request, context, activeRequest) {
+  const result = await withDraftLock(context.userId, request.chatId, async () => {
+    const session = await loadDraft(context.userId, request.chatId);
+    const mutation = redoLatestDraftMutation(session, request.expectedVersion);
     if (mutation.applied) await persistDraft(context.userId, mutation.session);
     return mutation;
   });

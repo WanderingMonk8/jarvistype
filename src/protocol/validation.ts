@@ -56,7 +56,11 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       value.cleanText.length <= MAX_DRAFT_CHARACTERS
     )
   }
-  if (value.type === 'draft.undo.request' || value.type === 'draft.send.request') {
+  if (
+    value.type === 'draft.undo.request' ||
+    value.type === 'draft.redo.request' ||
+    value.type === 'draft.send.request'
+  ) {
     return (
       isIdentifier(value.operationId) &&
       isIdentifier(value.chatId) &&
@@ -239,6 +243,7 @@ function isDraftSnapshot(value: unknown): value is DraftSnapshot {
     value.history.every(isHistoryEntry) &&
     (value.latestDiff === null || isDiff(value.latestDiff)) &&
     typeof value.canUndo === 'boolean' &&
+    typeof value.canRedo === 'boolean' &&
     Array.isArray(value.recordingSegments) &&
     value.recordingSegments.length <= MAX_RECORDING_SEGMENTS &&
     value.recordingSegments.every(isRecordingSegment) &&
@@ -255,6 +260,7 @@ function isHistoryEntry(value: unknown): boolean {
     (value.kind === 'manual-edit' ||
       value.kind === 'automated-edit' ||
       value.kind === 'undo' ||
+      value.kind === 'redo' ||
       value.kind === 'recording-append' ||
       value.kind === 'recording-undo') &&
     (value.editGroupId === undefined || isIdentifier(value.editGroupId)) &&

@@ -6,6 +6,7 @@ import {
   applyManualEdit,
   createDraftSession,
   joinRecordingTranscript,
+  redoLatestDraftMutation,
   restoreDraftSession,
   undoLatestDraftMutation,
   undoLastRecording,
@@ -79,6 +80,7 @@ test('increments versions, rejects stale edits, groups typing, and undoes the gr
     createId: ids,
   })
   const undone = undoLatestDraftMutation(second, 2, '2026-10-13T10:01:00.000Z', ids)
+  const redone = redoLatestDraftMutation(undone.session, 3, '2026-10-13T10:02:00.000Z', ids)
 
   assert.equal(second.draftVersion, 2)
   assert.equal(second.history.length, 1)
@@ -89,7 +91,30 @@ test('increments versions, rejects stale edits, groups typing, and undoes the gr
   assert.equal(undone.session.draftVersion, 3)
   assert.equal(undone.session.cleanText, '')
   assert.equal(undone.session.canUndo, false)
+  assert.equal(undone.session.canRedo, true)
   assert.equal(undone.session.history.at(-1)?.kind, 'undo')
+  assert.equal(redone.applied, true)
+  assert.equal(redone.session.draftVersion, 4)
+  assert.equal(redone.session.cleanText, 'Hi')
+  assert.equal(redone.session.canRedo, false)
+  assert.equal(redone.session.canUndo, true)
+  assert.equal(redone.session.history.at(-1)?.kind, 'redo')
+})
+
+test('a new edit after undo clears the redo path', () => {
+  const edited = applyManualEdit(createDraftSession('chat-redo'), 'First', {
+    expectedVersion: 0,
+    editGroupId: 'first',
+  }).session
+  const undone = undoLatestDraftMutation(edited, 1).session
+  const replacement = applyManualEdit(undone, 'Different', {
+    expectedVersion: 2,
+    editGroupId: 'replacement',
+  }).session
+
+  assert.equal(undone.canRedo, true)
+  assert.equal(replacement.canRedo, false)
+  assert.equal(redoLatestDraftMutation(replacement, 3).applied, false)
 })
 
 test('appends recordings in order with conservative boundary whitespace', () => {
@@ -148,7 +173,7 @@ test('undo last recording removes only that segment and supports the preceding s
   assert.equal(undoFirst.session.canUndoRecording, false)
 })
 
-test('deduplicates recording operation ids and migrates Phase 2 drafts', () => {
+test('deduplicates recording operation ids and migrates older drafts', () => {
   const first = appendRecordingTranscript(createDraftSession('chat-voice'), 'Once', {
     expectedVersion: 0,
     segmentId: 'segment-once',
@@ -162,10 +187,20 @@ test('deduplicates recording operation ids and migrates Phase 2 drafts', () => {
   delete legacy.recordingSegments
   delete legacy.canUndoRecording
   const migrated = restoreDraftSession(legacy, 'legacy-chat')
+  const schemaThree = { ...createDraftSession('schema-three'), schemaVersion: 3 } as Record<
+    string,
+    unknown
+  >
+  delete schemaThree.redoStack
+  delete schemaThree.canRedo
+  const migratedSchemaThree = restoreDraftSession(schemaThree, 'schema-three')
 
   assert.equal(duplicate.applied, false)
   assert.equal(duplicate.session.cleanText, 'Once')
-  assert.equal(migrated?.schemaVersion, 3)
+  assert.equal(migrated?.schemaVersion, 4)
   assert.deepEqual(migrated?.recordingSegments, [])
   assert.equal(migrated?.canUndoRecording, false)
+  assert.equal(migratedSchemaThree?.schemaVersion, 4)
+  assert.deepEqual(migratedSchemaThree?.redoStack, [])
+  assert.equal(migratedSchemaThree?.canRedo, false)
 })

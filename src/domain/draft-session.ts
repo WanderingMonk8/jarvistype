@@ -1,4 +1,4 @@
-export const DRAFT_SCHEMA_VERSION = 3 as const
+export const DRAFT_SCHEMA_VERSION = 4 as const
 export const MAX_DRAFT_CHARACTERS = 100_000
 export const MAX_HISTORY_ENTRIES = 200
 export const MAX_RECORDING_SEGMENTS = 200
@@ -19,7 +19,7 @@ export interface DraftDiff {
 
 export interface DraftHistoryEntry {
   id: string
-  kind: 'manual-edit' | 'automated-edit' | 'undo' | 'recording-append' | 'recording-undo'
+  kind: 'manual-edit' | 'automated-edit' | 'undo' | 'redo' | 'recording-append' | 'recording-undo'
   editGroupId?: string
   beforeVersion: number
   afterVersion: number
@@ -61,6 +61,7 @@ export interface DraftSnapshot {
   history: DraftHistoryEntry[]
   latestDiff: DraftDiff | null
   canUndo: boolean
+  canRedo: boolean
   recordingSegments: RecordingSegment[]
   canUndoRecording: boolean
   dirty: boolean
@@ -70,6 +71,7 @@ export interface DraftSnapshot {
 export interface PersistedDraftSession extends DraftSnapshot {
   schemaVersion: typeof DRAFT_SCHEMA_VERSION
   undoStack: string[]
+  redoStack: string[]
 }
 
 export interface DraftMutationResult {
@@ -99,6 +101,8 @@ export function createDraftSession(
     latestDiff: null,
     undoStack: [],
     canUndo: false,
+    redoStack: [],
+    canRedo: false,
     recordingSegments: [],
     canUndoRecording: false,
     dirty: false,
@@ -166,6 +170,8 @@ export function applyManualEdit(
       latestDiff: diff,
       undoStack,
       canUndo: undoStack.length > 0,
+      redoStack: [],
+      canRedo: false,
       canUndoRecording: canUndoLatestRecording(session, nextText, undoStack),
       dirty: nextText.length > 0,
       updatedAt: now,
@@ -237,6 +243,8 @@ export function applyAutomatedEdit(
       latestDiff: diff,
       undoStack,
       canUndo: true,
+      redoStack: [],
+      canRedo: false,
       canUndoRecording: false,
       dirty: nextText.length > 0,
       updatedAt: now,
@@ -264,6 +272,7 @@ export function undoLatestDraftMutation(
       ? session.recordingSegments.slice(0, -1)
       : session.recordingSegments
   const undoStack = session.undoStack.slice(0, -1)
+  const redoStack = [...session.redoStack, session.cleanText].slice(-MAX_HISTORY_ENTRIES)
   return {
     applied: true,
     session: {
@@ -285,6 +294,8 @@ export function undoLatestDraftMutation(
       latestDiff: diff,
       undoStack,
       canUndo: undoStack.length > 0,
+      redoStack,
+      canRedo: true,
       recordingSegments,
       canUndoRecording: canUndoLatestRecording(
         { ...session, recordingSegments },
@@ -292,6 +303,52 @@ export function undoLatestDraftMutation(
         undoStack,
       ),
       dirty: previousText.length > 0,
+      updatedAt: now,
+    },
+  }
+}
+
+export function redoLatestDraftMutation(
+  session: PersistedDraftSession,
+  expectedVersion: number,
+  now = new Date().toISOString(),
+  createId: () => string = defaultId,
+): DraftMutationResult {
+  if (expectedVersion !== session.draftVersion) {
+    return { applied: false, reason: 'stale-version', session }
+  }
+  const nextText = session.redoStack.at(-1)
+  if (nextText === undefined) return { applied: false, reason: 'unchanged', session }
+
+  const nextVersion = session.draftVersion + 1
+  const diff = createDiff(session.cleanText, nextText)
+  const undoStack = [...session.undoStack, session.cleanText].slice(-MAX_HISTORY_ENTRIES)
+  const redoStack = session.redoStack.slice(0, -1)
+  return {
+    applied: true,
+    session: {
+      ...session,
+      draftVersion: nextVersion,
+      cleanText: nextText,
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      history: [
+        ...session.history,
+        {
+          id: createId(),
+          kind: 'redo' as const,
+          beforeVersion: session.draftVersion,
+          afterVersion: nextVersion,
+          timestamp: now,
+          diff,
+        },
+      ].slice(-MAX_HISTORY_ENTRIES),
+      latestDiff: diff,
+      undoStack,
+      canUndo: true,
+      redoStack,
+      canRedo: redoStack.length > 0,
+      canUndoRecording: false,
+      dirty: nextText.length > 0,
       updatedAt: now,
     },
   }
@@ -313,6 +370,7 @@ export function toDraftSnapshot(session: PersistedDraftSession): DraftSnapshot {
     history: session.history,
     latestDiff: session.latestDiff,
     canUndo: session.canUndo,
+    canRedo: session.canRedo,
     recordingSegments: session.recordingSegments,
     canUndoRecording: session.canUndoRecording,
     dirty: session.dirty,
@@ -400,6 +458,8 @@ export function appendRecordingTranscript(
       latestDiff: diff,
       undoStack,
       canUndo: true,
+      redoStack: [],
+      canRedo: false,
       recordingSegments,
       canUndoRecording: true,
       dirty: true,
@@ -426,6 +486,7 @@ export function undoLastRecording(
   const diff = createDiff(session.cleanText, nextText)
   const recordingSegments = session.recordingSegments.slice(0, -1)
   const undoStack = session.undoStack.slice(0, -1)
+  const redoStack = [...session.redoStack, session.cleanText].slice(-MAX_HISTORY_ENTRIES)
   return {
     applied: true,
     session: {
@@ -447,6 +508,8 @@ export function undoLastRecording(
       latestDiff: diff,
       undoStack,
       canUndo: undoStack.length > 0,
+      redoStack,
+      canRedo: true,
       recordingSegments,
       canUndoRecording: canUndoLatestRecording(
         { ...session, recordingSegments },
@@ -500,6 +563,13 @@ export function isPersistedDraftSession(
     ) &&
     typeof value.canUndo === 'boolean' &&
     value.canUndo === value.undoStack.length > 0 &&
+    Array.isArray(value.redoStack) &&
+    value.redoStack.length <= MAX_HISTORY_ENTRIES &&
+    value.redoStack.every(
+      (text) => typeof text === 'string' && text.length <= MAX_DRAFT_CHARACTERS,
+    ) &&
+    typeof value.canRedo === 'boolean' &&
+    value.canRedo === value.redoStack.length > 0 &&
     Array.isArray(value.recordingSegments) &&
     value.recordingSegments.length <= MAX_RECORDING_SEGMENTS &&
     value.recordingSegments.every(isRecordingSegment) &&
@@ -520,10 +590,20 @@ export function restoreDraftSession(
   expectedChatId: string,
 ): PersistedDraftSession | null {
   if (isPersistedDraftSession(value, expectedChatId)) return value
+  if (isSchemaThreeDraftSession(value, expectedChatId)) {
+    return {
+      ...value,
+      schemaVersion: DRAFT_SCHEMA_VERSION,
+      redoStack: [],
+      canRedo: false,
+    }
+  }
   if (isSchemaTwoDraftSession(value, expectedChatId)) {
     return {
       ...value,
       schemaVersion: DRAFT_SCHEMA_VERSION,
+      redoStack: [],
+      canRedo: false,
       recordingSegments: value.recordingSegments.map((segment) => ({
         ...segment,
         normalizedTranscript: segment.rawTranscript,
@@ -541,6 +621,8 @@ export function restoreDraftSession(
   return {
     ...value,
     schemaVersion: DRAFT_SCHEMA_VERSION,
+    redoStack: [],
+    canRedo: false,
     recordingSegments: [],
     canUndoRecording: false,
   }
@@ -669,6 +751,7 @@ function isHistoryEntry(value: unknown): value is DraftHistoryEntry {
     (value.kind === 'manual-edit' ||
       value.kind === 'automated-edit' ||
       value.kind === 'undo' ||
+      value.kind === 'redo' ||
       value.kind === 'recording-append' ||
       value.kind === 'recording-undo') &&
     (value.editGroupId === undefined || typeof value.editGroupId === 'string') &&
@@ -711,10 +794,28 @@ function isRecordingNormalization(value: unknown): value is RecordingSegment['no
   )
 }
 
+function isSchemaThreeDraftSession(
+  value: unknown,
+  expectedChatId: string,
+): value is Omit<PersistedDraftSession, 'schemaVersion' | 'redoStack' | 'canRedo'> & {
+  schemaVersion: 3
+} {
+  if (!isRecord(value) || value.schemaVersion !== 3 || value.chatId !== expectedChatId) {
+    return false
+  }
+  return isPersistedDraftSession(
+    { ...value, schemaVersion: DRAFT_SCHEMA_VERSION, redoStack: [], canRedo: false },
+    expectedChatId,
+  )
+}
+
 function isSchemaTwoDraftSession(
   value: unknown,
   expectedChatId: string,
-): value is Omit<PersistedDraftSession, 'schemaVersion' | 'recordingSegments'> & {
+): value is Omit<
+  PersistedDraftSession,
+  'schemaVersion' | 'recordingSegments' | 'redoStack' | 'canRedo'
+> & {
   schemaVersion: 2
   recordingSegments: Array<Omit<RecordingSegment, 'normalizedTranscript' | 'normalization'>>
 } {
@@ -728,6 +829,8 @@ function isSchemaTwoDraftSession(
   const candidate = {
     ...value,
     schemaVersion: DRAFT_SCHEMA_VERSION,
+    redoStack: [],
+    canRedo: false,
     recordingSegments: value.recordingSegments.map((segment) =>
       isRecord(segment)
         ? {
@@ -752,7 +855,7 @@ function isLegacyDraftSession(
   expectedChatId: string,
 ): value is Omit<
   PersistedDraftSession,
-  'schemaVersion' | 'recordingSegments' | 'canUndoRecording'
+  'schemaVersion' | 'recordingSegments' | 'canUndoRecording' | 'redoStack' | 'canRedo'
 > & {
   schemaVersion: 1
 } {

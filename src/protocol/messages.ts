@@ -114,6 +114,12 @@ export type FrontendRequest =
       expectedVersion: number
     })
   | (RequestEnvelope & {
+      type: 'draft.redo.request'
+      operationId: string
+      chatId: string
+      expectedVersion: number
+    })
+  | (RequestEnvelope & {
       type: 'transcript.normalize.request'
       operationId: string
       chatId: string

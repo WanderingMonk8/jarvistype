@@ -10,17 +10,17 @@ Minimum supported Lumiverse version: `1.2.5`
 
 ## Current status
 
-| ID    | Requirement                              | Status     | Evidence                                                                                                                                                 |
-| ----- | ---------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F7-01 | Recoverable failures preserve drafts     | LOCAL-PASS | Backend tests cover rejected send, stale ownership, normalization review isolation, cancellation, and retry-safe operation IDs.                          |
-| F7-02 | Privacy-safe operational diagnostics     | LOCAL-PASS | Provider exception text is redacted; user-visible failures carry a bounded diagnostic reference; regression tests reject private draft/provider leakage. |
-| F7-03 | Protocol and structured-edit security    | LOCAL-PASS | Closed-schema validation rejects malformed, oversized, unknown, overlapping, stale, and incompatible operations.                                         |
-| F7-04 | Prompt-injection resistance              | LOCAL-PASS | Context and draft text remain quoted data; model output must pass allowlisted structured parsing and deterministic execution before review.              |
-| F7-05 | Keyboard and assistive-technology access | PENDING    | Hosted keyboard, focus, screen-reader, zoom, contrast, reduced-motion, and repaired whole-workspace scrolling checks remain.                             |
-| F7-06 | Long-state performance budgets           | PENDING    | Maximum draft, context, glossary, and history profiling remains.                                                                                         |
-| F7-07 | Supported-platform compatibility         | PENDING    | Hosted desktop and narrow/mobile matrix remains.                                                                                                         |
-| F7-08 | Exactly-once safe send under stress      | LOCAL-PASS | Automated duplicate-operation test proves one append and repeatable acknowledgements; hosted reconnect/delayed-ack checks remain.                        |
-| F7-09 | Complete package quality gate            | LOCAL-PASS | Formatting, lint, strict typing, 66 tests, backend/frontend builds, and package validation pass.                                                         |
+| ID    | Requirement                              | Status      | Evidence                                                                                                                                                                                  |
+| ----- | ---------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F7-01 | Recoverable failures preserve drafts     | REMOTE-PASS | Hosted Test 1 passed on October 17, 2026: saved drafts, history, glossary data, floating ownership, focus return, reload recovery, and race-safe per-chat draft switching were confirmed. |
+| F7-02 | Privacy-safe operational diagnostics     | LOCAL-PASS  | Provider exception text is redacted; user-visible failures carry a bounded diagnostic reference; regression tests reject private draft/provider leakage.                                  |
+| F7-03 | Protocol and structured-edit security    | LOCAL-PASS  | Closed-schema validation rejects malformed, oversized, unknown, overlapping, stale, and incompatible operations.                                                                          |
+| F7-04 | Prompt-injection resistance              | LOCAL-PASS  | Context and draft text remain quoted data; model output must pass allowlisted structured parsing and deterministic execution before review.                                               |
+| F7-05 | Keyboard and assistive-technology access | PENDING     | Hosted keyboard, focus, screen-reader, zoom, contrast, reduced-motion, and repaired whole-workspace scrolling checks remain.                                                              |
+| F7-06 | Long-state performance budgets           | PENDING     | Maximum draft, context, glossary, and history profiling remains.                                                                                                                          |
+| F7-07 | Supported-platform compatibility         | PENDING     | Hosted desktop and narrow/mobile matrix remains.                                                                                                                                          |
+| F7-08 | Exactly-once safe send under stress      | LOCAL-PASS  | Automated duplicate-operation test proves one append and repeatable acknowledgements; hosted reconnect/delayed-ack checks remain.                                                         |
+| F7-09 | Complete package quality gate            | LOCAL-PASS  | Formatting, lint, strict typing, 77 tests, backend/frontend builds, and package validation pass.                                                                                          |
 
 ## Privacy and security decisions
 
@@ -34,7 +34,9 @@ Minimum supported Lumiverse version: `1.2.5`
 
 ### Test 1: Upgrade, recovery, and permanent floating ownership
 
-**Status:** PENDING RETEST — `1.6.7` proposal-review ownership fix
+**Status:** REMOTE-PASS — October 17, 2026, version `1.6.7` through commit `adc75be`
+
+The hosted retest confirmed upgrade preservation, toolbar and drawer launch paths, permanent floating ownership, state preservation across close/reopen and reload, focus return to the drawer launcher, automatic loading of distinct chat-owned drafts, preservation of an edit made immediately before switching, and protection against stale loads during rapid switching.
 
 1. Update the extension from `development` and confirm version `1.6.7` reports backend **Ready**. Candidates `1.6.0` through `1.6.6` are superseded by startup, viewport, active-chat draft-loading, long-draft accessibility, spoken-punctuation, and proposal-review ownership fixes.
 2. Open a chat that already has a non-empty saved draft, recording history, and glossary entries. Confirm all survive the upgrade exactly.

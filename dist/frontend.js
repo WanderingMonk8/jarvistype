@@ -47,7 +47,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.0";
+var APP_VERSION = "1.6.1";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -418,8 +418,6 @@ function setup(ctx) {
     floatingWidget.root,
     "[data-floating-composer-mount]"
   );
-  floatingComposerMount.append(composerSurface);
-  composerBootstrap.remove();
   const floatingCloseButton = requireElement(
     floatingWidget.root,
     "[data-close-floating]"
@@ -553,6 +551,8 @@ function setup(ctx) {
     "[data-floating-glossary-undo]"
   );
   const phaseFourStatus = requireElement(tab.root, "[data-phase4-status]");
+  floatingComposerMount.append(composerSurface);
+  composerBootstrap.remove();
   const state = {
     activeChatId: ctx.getActiveChat().chatId,
     snapshot: null,

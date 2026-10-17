@@ -199,8 +199,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     floatingWidget.root,
     '[data-floating-composer-mount]',
   )
-  floatingComposerMount.append(composerSurface)
-  composerBootstrap.remove()
   const floatingCloseButton = requireElement<HTMLButtonElement>(
     floatingWidget.root,
     '[data-close-floating]',
@@ -334,6 +332,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     '[data-floating-glossary-undo]',
   )
   const phaseFourStatus = requireElement<HTMLElement>(tab.root, '[data-phase4-status]')
+
+  // Resolve every composer control while the bootstrap surface is still under the drawer root.
+  // The floating widget owns it permanently after setup; moving it earlier makes later queries fail.
+  floatingComposerMount.append(composerSurface)
+  composerBootstrap.remove()
 
   const state: ComposerState = {
     activeChatId: ctx.getActiveChat().chatId,

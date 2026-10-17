@@ -727,6 +727,32 @@ test('rejects contextual command decisions that do not quote the raw transcript'
   }
 })
 
+test('falls back safely when the model misses a standalone phonetic paragraph command', async () => {
+  const userId = 'missed-contextual-command-user'
+  const chatId = 'missed-contextual-command-chat'
+  activeChatId = chatId
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'missed-contextual-command-segment',
+      0,
+      'That completes the introduction. New pair of graph. Our second concern is cost.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(
+      response.proposal.candidateText,
+      'That completes the introduction.\n\nOur second concern is cost.',
+    )
+    assert.ok(response.proposal.reasons.includes('contextual recovery: new paragraph'))
+  }
+})
+
 test('does not let contextual normalization replace an authoritative literal punctuation word', async () => {
   const userId = 'literal-punctuation-user'
   const chatId = 'literal-punctuation-chat'

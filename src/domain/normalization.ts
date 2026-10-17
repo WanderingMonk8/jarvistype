@@ -15,6 +15,11 @@ export interface DeterministicNormalization {
   authoritativePunctuationMarks: string[]
 }
 
+export interface ContextualCommandRecovery {
+  text: string
+  reasons: string[]
+}
+
 export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   'new paragraph',
   'new line',
@@ -174,6 +179,25 @@ export function normalizeDeterministically(
     authoritativePunctuationLiterals: [...new Set(protectedLiterals)],
     authoritativePunctuationMarks,
   }
+}
+
+export function recoverHighConfidenceContextualCommands(input: string): ContextualCommandRecovery {
+  const reasons: string[] = []
+  const text = input.replace(
+    /\bnew pair of graphs?\b[.,;:!?]?/giu,
+    (match: string, offset: number, source: string) => {
+      const before = source.slice(0, offset)
+      const after = source.slice(offset + match.length)
+      const followsSentenceBoundary = !before.trim() || /[.!?][\s”’"']*$/u.test(before)
+      const precedesSentenceText = /^\s*[“‘"'(]*\p{Lu}/u.test(after)
+      const hasLiteralDeterminer =
+        /\b(?:a|an|the|this|that|these|those|my|your|our|its|another|each|every)\s+$/iu.test(before)
+      if (!followsSentenceBoundary || !precedesSentenceText || hasLiteralDeterminer) return match
+      reasons.push('contextual recovery: new paragraph')
+      return '\n\n'
+    },
+  )
+  return { text: cleanupPunctuationSpacing(text), reasons }
 }
 
 function replaceExplicitPunctuationCommands(input: string): {

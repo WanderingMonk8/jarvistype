@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { normalizeDeterministically } from '../src/domain/normalization'
+import {
+  normalizeDeterministically,
+  recoverHighConfidenceContextualCommands,
+} from '../src/domain/normalization'
 
 test('supports spoken punctuation and paragraph commands', () => {
   const result = normalizeDeterministically(
@@ -122,6 +125,19 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
   )
   const authoritative = normalizeDeterministically('Alpha comma beta question mark', [])
   assert.deepEqual([...authoritative.authoritativePunctuationMarks].sort(), [',', '?'])
+})
+
+test('recovers a standalone phonetic new-paragraph command without changing natural prose', () => {
+  assert.equal(
+    recoverHighConfidenceContextualCommands(
+      'That completes the introduction. New pair of graph. Our second concern is cost.',
+    ).text,
+    'That completes the introduction.\n\nOur second concern is cost.',
+  )
+  assert.equal(
+    recoverHighConfidenceContextualCommands('I compared a new pair of graphs.').text,
+    'I compared a new pair of graphs.',
+  )
 })
 
 test('collapses explicit spelling, obeys casing, and creates a learning candidate', () => {

@@ -1946,8 +1946,12 @@ function shellMarkup() {
       .jt-paragraph-number { text-align: right; opacity: .6; user-select: none; }
       .jt-paragraph-text { white-space: pre-wrap; overflow-wrap: anywhere; }
       .jt-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-      .jt-shell button { min-height: 2.35rem; }
+      .jt-shell button { min-height: 2.35rem; padding: .48rem .75rem; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: .5rem; background: color-mix(in srgb, currentColor 9%, transparent); color: inherit; font: inherit; font-weight: 600; line-height: 1.2; cursor: pointer; }
+      .jt-shell button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 15%, transparent); border-color: color-mix(in srgb, currentColor 45%, transparent); }
+      .jt-shell button:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-shell button:disabled { cursor: not-allowed; opacity: .55; }
+      .jt-shell [data-record-message], .jt-shell [data-record-edit], .jt-shell [data-send], .jt-shell [data-proposal-accept], .jt-shell [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
+      .jt-shell [data-record-message]:hover:not(:disabled), .jt-shell [data-record-edit]:hover:not(:disabled), .jt-shell [data-send]:hover:not(:disabled), .jt-shell [data-proposal-accept]:hover:not(:disabled), .jt-shell [data-edit-accept]:hover:not(:disabled) { background: color-mix(in srgb, #d69e2e 28%, transparent); }
       .jt-voice { display: grid; gap: .55rem; padding: .7rem; border-radius: .5rem; background: color-mix(in srgb, currentColor 6%, transparent); }
       .jt-voice__meta { display: flex; flex-wrap: wrap; gap: .35rem 1rem; font-size: .8rem; opacity: .78; }
       .jt-voice__transcript { min-height: 2.5rem; padding: .55rem; border-left: .2rem solid color-mix(in srgb, currentColor 35%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; }

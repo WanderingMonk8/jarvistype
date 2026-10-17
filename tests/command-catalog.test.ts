@@ -28,7 +28,7 @@ test('command catalog covers every supported editing operation and composition m
     'Lowercase',
     'Capitalize',
     'Spelled form',
-    'As in',
+    'As in reference',
     'Multiple changes',
   ]) {
     assert.ok(activations.has(activation), `missing command example: ${activation}`)

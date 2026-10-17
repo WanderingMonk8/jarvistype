@@ -109,7 +109,10 @@ export const COMMAND_GROUPS = [
       ['Lowercase', 'Change paragraph 2 to lowercase.'],
       ['Capitalize', 'Capitalize “Project Atlas” in paragraph 1.'],
       ['Spelled form', 'Replace Kalora with capitalized C-A-E-L-O-R-A.'],
-      ['As in', 'Replace “can the worker” with “Ken the worker,” as in Barbie and Ken.'],
+      [
+        'As in reference',
+        'Say “Replace ‘can the worker’ with ‘Ken the worker.’ Ken, as in Barbie and Ken.” The intended word must occur immediately before and again after “as in.”',
+      ],
       [
         'Multiple changes',
         'In paragraph 1 replace pending with approved, and in paragraph 2 replace incomplete with complete.',

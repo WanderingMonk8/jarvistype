@@ -63,9 +63,9 @@ Once an explicitly spelled token is committed through either message recording o
 
 Referential corrections also work for ordinary words, homophones, and near-homophones—not only proper nouns. For example:
 
-> In the sentence where I say "can the worker," I meant "Ken the worker," as in Barbie and Ken.
+> In the sentence where I say "can the worker," I meant "Ken the worker." Ken, as in Barbie and Ken.
 
-JarvisType uses the explanation to identify the intended spelling, applies only the requested replacement, and omits the explanatory wording from the draft. One-time references remain local to the current session unless the user explicitly asks to remember them.
+JarvisType treats `as in` as a reference cue only when the intended token occurs immediately before the cue and repeats afterward, as `Ken` does in the example. Otherwise, `as in` remains literal wording. A qualified explanation identifies the intended spelling, applies only the requested replacement, and is omitted from the draft. One-time references remain local to the current session unless the user explicitly asks to remember them.
 
 ## Conversational editing
 

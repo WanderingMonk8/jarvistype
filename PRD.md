@@ -403,13 +403,15 @@ The user is not required to dictate a complete message in one session.
 
 **FR-REF-002:** Referential disambiguation shall support homophones, homonyms, near-homophones, names, and other phonetically confusable terms.
 
-**FR-REF-003:** During **Record Edit**, the user may identify the existing phrase, state the intended replacement, and provide a reference. For example: "In the sentence where I say 'can the worker,' I meant 'Ken the worker,' as in Barbie and Ken."
+**FR-REF-003:** During **Record Edit**, the user may identify the existing phrase, state the intended replacement, and provide a reference. For example: "In the sentence where I say 'can the worker,' I meant 'Ken the worker.' Ken, as in Barbie and Ken."
 
 **FR-REF-004:** When the command is unambiguous, JarvisType shall apply only the intended lexical replacement. The explanatory reference shall not be inserted into the draft unless the user explicitly asks to include it.
 
 **FR-REF-005:** A one-time reference shall remain session-scoped by default. JarvisType shall persist it in the user's glossary only after an explicit request to remember it.
 
 **FR-REF-006:** If the reference does not resolve the intended spelling or target uniquely, JarvisType shall present the proposed interpretation for confirmation and leave the draft unchanged until confirmed.
+
+**FR-REF-007:** JarvisType shall treat `as in` as an explanatory reference cue only when the intended token occurs immediately before `as in` and the same token occurs again after it. Unqualified occurrences shall remain literal message or edit text and shall not authorize omission as explanatory wording.
 
 ### 7.11 Sending
 
@@ -745,7 +747,7 @@ No analytics collection is implied by this section; any telemetry implementation
 ### Scenario G: Referential homophone correction
 
 1. The draft contains the phrase `can the worker`.
-2. The user records an edit: "In the sentence where I say 'can the worker,' I meant 'Ken the worker,' as in Barbie and Ken."
+2. The user records an edit: "In the sentence where I say 'can the worker,' I meant 'Ken the worker.' Ken, as in Barbie and Ken."
 3. JarvisType uses the reference to resolve `Ken` as the intended spelling.
 4. Only `can the worker` is replaced with `Ken the worker`.
 5. The words `as in Barbie and Ken` are not inserted into the draft.

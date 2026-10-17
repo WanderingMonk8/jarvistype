@@ -684,6 +684,28 @@ test('does not let contextual normalization replace an authoritative literal pun
   }
 })
 
+test('does not let contextual normalization discard literal as in wording', async () => {
+  const userId = 'literal-as-in-user'
+  const chatId = 'literal-as-in-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationNormalizedText = 'Use the prior example.'
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'literal-as-in-segment', 1, 'Use this as in the prior example.'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(response.proposal.candidateText, 'Use this as in the prior example.')
+    assert.equal(response.proposal.contextualModelUsed, false)
+  }
+})
+
 test('does not let contextual normalization discard commanded quotation marks', async () => {
   const userId = 'commanded-quotes-user'
   const chatId = 'commanded-quotes-chat'
@@ -1204,7 +1226,7 @@ test('keeps a one-time explanatory reference out of replacement text and glossar
       chatId,
       expectedVersion: 1,
       instructionTranscript:
-        'Where I said can the worker, I meant Ken the worker, as in Barbie and Ken.',
+        'Where I said can the worker, I meant Ken the worker. Ken, as in Barbie and Ken.',
     },
     userId,
   )
@@ -1233,7 +1255,7 @@ test('recovers a referential homophone when speech-to-text collapses target and 
       chatId,
       expectedVersion: 1,
       instructionTranscript:
-        'In paragraph 1, replace Ken the worker with Ken the worker. Ken, as in the character from Barbie, is only a reference for the name.',
+        'In paragraph 1, replace Ken the worker with Ken the worker. Ken, as in Barbie and Ken, is only a reference for the name.',
     },
     userId,
   )
@@ -1244,6 +1266,74 @@ test('recovers a referential homophone when speech-to-text collapses target and 
     assert.equal(response.proposal.afterText.includes('Barbie'), false)
   }
   assert.equal(generationRequests.length, 0)
+})
+
+test('requires a repeated intended token before treating as in as a reference cue', async () => {
+  const userId = 'guarded-reference-user'
+  const chatId = 'guarded-reference-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Please ask can the worker for help.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'guarded-reference-interpret',
+      operationId: 'guarded-reference-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'In paragraph 1, replace Ken the worker with Ken the worker. Ken, as in the character from Barbie, is only a reference for the name.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'app.error')
+  if (response?.type === 'app.error') assert.equal(response.code, 'EDIT_INTERPRETATION_FAILED')
+  assert.equal(generationRequests.length, 1)
+})
+
+test('allows as in when it is explicit replacement text rather than a reference cue', async () => {
+  const userId = 'literal-as-in-edit-user'
+  const chatId = 'literal-as-in-edit-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Use placeholder here.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Insert the requested literal wording.',
+    operations: [
+      {
+        id: 'literal-as-in-replacement',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'placeholder' },
+        text: 'as in the previous example',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'literal-as-in-edit-interpret',
+      operationId: 'literal-as-in-edit-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace placeholder with as in the previous example.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, 'Use as in the previous example here.')
+  }
 })
 
 test('rejects malformed messages without replying', async () => {

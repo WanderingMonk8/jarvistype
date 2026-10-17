@@ -405,7 +405,10 @@ var COMMAND_GROUPS = [
       ["Lowercase", "Change paragraph 2 to lowercase."],
       ["Capitalize", "Capitalize \u201CProject Atlas\u201D in paragraph 1."],
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
-      ["As in", "Replace \u201Ccan the worker\u201D with \u201CKen the worker,\u201D as in Barbie and Ken."],
+      [
+        "As in reference",
+        "Say \u201CReplace \u2018can the worker\u2019 with \u2018Ken the worker.\u2019 Ken, as in Barbie and Ken.\u201D The intended word must occur immediately before and again after \u201Cas in.\u201D"
+      ],
       [
         "Multiple changes",
         "In paragraph 1 replace pending with approved, and in paragraph 2 replace incomplete with complete."

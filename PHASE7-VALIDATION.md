@@ -20,7 +20,7 @@ Minimum supported Lumiverse version: `1.2.5`
 | F7-06 | Long-state performance budgets           | PENDING     | Maximum draft, context, glossary, and history profiling remains.                                                                                                                          |
 | F7-07 | Supported-platform compatibility         | PENDING     | Hosted desktop and narrow/mobile matrix remains.                                                                                                                                          |
 | F7-08 | Exactly-once safe send under stress      | LOCAL-PASS  | Automated duplicate-operation test proves one append and repeatable acknowledgements; hosted reconnect/delayed-ack checks remain.                                                         |
-| F7-09 | Complete package quality gate            | LOCAL-PASS  | Formatting, lint, strict typing, 77 tests, backend/frontend builds, and package validation pass.                                                                                          |
+| F7-09 | Complete package quality gate            | LOCAL-PASS  | Formatting, lint, strict typing, 80 tests, backend/frontend builds, and package validation pass.                                                                                          |
 
 ## Privacy and security decisions
 

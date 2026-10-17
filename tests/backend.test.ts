@@ -703,6 +703,48 @@ test('learns explicit spelling from an approved edit but not from its proposal',
   }
 })
 
+test('uses authoritative explicit spelling instead of inserting the spelling cue', async () => {
+  const userId = 'authoritative-edit-spelling-user'
+  const chatId = 'authoritative-edit-spelling-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'The project codename is Kalora.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Apply the explicit spelling.',
+    operations: [
+      {
+        id: 'spell-caelora',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'Kalora' },
+        text: 'C-A-E-L-O-R-A, Calora.',
+      },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'authoritative-edit-spelling-interpret',
+      operationId: 'authoritative-edit-spelling-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'In paragraph 1, replace Calora with capitalized C-A-E-L-O-R-A, Calora.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'The project codename is Caelora.')
+    assert.deepEqual(proposal.proposal.learningCandidates, [
+      { canonical: 'Caelora', spokenVariant: 'C-A-E-L-O-R-A' },
+    ])
+  }
+})
+
 test('keeps a one-time explanatory reference out of replacement text and glossary learning', async () => {
   const userId = 'reference-edit-user'
   const chatId = 'reference-edit-chat'

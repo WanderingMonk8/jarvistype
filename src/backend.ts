@@ -456,7 +456,8 @@ async function handleEditInterpretation(
       loadSettings(context.userId),
       loadGlossary(context.userId),
     ])
-    const plan = await interpretEditInstruction(
+    const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries)
+    const interpretedPlan = await interpretEditInstruction(
       request.instructionTranscript,
       session,
       settings,
@@ -464,7 +465,8 @@ async function handleEditInterpretation(
       context.userId,
     )
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
-    if (!plan) return { error: 'interpretation' as const, session }
+    if (!interpretedPlan) return { error: 'interpretation' as const, session }
+    const plan = enforceAuthoritativeEditSpellings(interpretedPlan, spelling.learningCandidates)
     const executed = executeEditPlan(
       session.cleanText,
       session.paragraphs,
@@ -479,7 +481,6 @@ async function handleEditInterpretation(
       }
       return { error: 'target' as const, detail: executed.reason, session }
     }
-    const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries)
     const learningCandidates = spelling.learningCandidates.filter((candidate) =>
       executed.afterText.includes(candidate.canonical),
     )
@@ -940,6 +941,35 @@ function parseDeterministicReferentialReplacement(
     plan,
   )
   return resolved.ok && resolved.afterText !== session.cleanText ? plan : null
+}
+
+function enforceAuthoritativeEditSpellings(
+  plan: EditPlan,
+  candidates: ReadonlyArray<{ canonical: string; spokenVariant: string }>,
+): EditPlan {
+  if (!candidates.length) return plan
+  return {
+    ...plan,
+    operations: plan.operations.map((operation) => {
+      if (typeof operation.text !== 'string') return operation
+      let text = operation.text
+      for (const candidate of candidates) {
+        const spellingPayload = `${escapeRegularExpression(candidate.spokenVariant)}(?:\\s*[,;:]\\s*[A-Za-z][A-Za-z'-]*)?`
+        const wholePayloadPattern = new RegExp(`^\\s*${spellingPayload}[.!?]?\\s*$`, 'i')
+        if (wholePayloadPattern.test(text)) {
+          text = candidate.canonical
+          continue
+        }
+        const inlinePattern = new RegExp(spellingPayload, 'gi')
+        text = text.replace(inlinePattern, candidate.canonical)
+      }
+      return text === operation.text ? operation : { ...operation, text }
+    }),
+  }
+}
+
+function escapeRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 async function normalizeWithContext(

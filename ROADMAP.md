@@ -735,7 +735,7 @@ Complete semantic references, paragraph restructuring, referential wording, scop
 
 ## Phase 6.5: Floating composition surface and drawer transition
 
-Implementation candidate `1.5.0` is ready for hosted parity verification. It adds a distinct JarvisType drawer icon and labeled floating-composer launcher, relocates the one live composer surface between drawer and floating mounts to prevent divergent state during migration, provides searchable command discovery, and synchronizes searchable glossary management in both locations. The drawer composition fallback remains in place until the hosted parity exit gate passes.
+Implementation candidate `1.5.0` is ready for hosted parity verification. It adds one unique JarvisType waveform-J icon across the drawer, Extras fallback, composer toolbar, launch controls, and floating header; provides an always-visible composer-toolbar launcher through Lumiverse's documented mount API; relocates the one live composer surface between drawer and floating mounts to prevent divergent state during migration; provides searchable command discovery; and synchronizes searchable glossary management in both locations. The drawer composition fallback remains in place until the hosted parity exit gate passes.
 
 ### Objective
 
@@ -752,8 +752,8 @@ Move the complete composition workflow into a minimal floating surface near the 
 #### Supported activation and placement
 
 - Create the primary UI with Lumiverse's documented floating-widget placement and `ui_panels` permission.
-- Give JarvisType a distinct drawer-tab icon and a labeled **Open JarvisType** action in the drawer; both remain separate from Lumiverse's native STT control.
-- Open it from the documented JarvisType input-bar action until Lumiverse exposes a public direct composer-action or native-microphone integration contract.
+- Use one distinct waveform-J icon for the composer-toolbar action, drawer tab, Extras fallback, floating header, and labeled **Open JarvisType** action; all remain separate from Lumiverse's native STT control.
+- Open it primarily from a JarvisType button mounted through the documented `chat_input_tools_left` composer-toolbar point; retain the registered input-bar Extras action as a fallback.
 - Do not intercept, replace, or suppress the native STT button through undocumented DOM selectors or events.
 - Position the widget near the composer on desktop, remember a valid user position, and adapt it to a bottom-sheet or equivalently usable layout on narrow screens.
 

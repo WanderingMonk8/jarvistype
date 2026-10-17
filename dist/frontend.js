@@ -308,11 +308,10 @@ function getFloatingWidgetSize() {
     height: Math.min(680, Math.max(440, window.innerHeight - 48))
   };
 }
-var DRAWER_ICON_SVG = `
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/>
-    <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6"/>
-    <path d="m18.5 3 .45 1.05L20 4.5l-1.05.45L18.5 6l-.45-1.05L17 4.5l1.05-.45L18.5 3Z"/>
+var JARVISTYPE_ICON_SVG = `
+  <svg class="jt-brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <path d="M18 4v10.25A5.75 5.75 0 0 1 12.25 20H10a4 4 0 0 1-4-4"/>
+    <path d="M4 9h2.1l1.3-3.25 2.15 6.5 1.7-4.25 1.35 2H18"/>
   </svg>`;
 var COMMAND_GROUPS = [
   {
@@ -372,13 +371,32 @@ function setup(ctx) {
     shortName: "Jarvis",
     description: "Compose and revise a private message before sending it.",
     keywords: ["voice", "dictation", "draft", "speech"],
-    iconSvg: DRAWER_ICON_SVG
+    iconSvg: JARVISTYPE_ICON_SVG
   });
   const inputAction = ctx.ui.registerInputBarAction({
     id: "jarvistype-open",
     label: "JarvisType",
-    subtitle: "Open private composition draft"
+    subtitle: "Open private composition draft",
+    iconSvg: JARVISTYPE_ICON_SVG
   });
+  const composerToolsMount = ctx.ui.mount("chat_input_tools_left");
+  const composerLauncherStyle = document.createElement("style");
+  composerLauncherStyle.textContent = `
+    .jt-composer-launcher { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-height: 2.25rem; padding: .4rem .65rem; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: .55rem; background: color-mix(in srgb, #d69e2e 16%, transparent); color: inherit; font: inherit; font-weight: 650; line-height: 1; cursor: pointer; }
+    .jt-composer-launcher .jt-brand-icon { width: 1.35em; height: 1.35em; flex: 0 0 auto; }
+    .jt-composer-launcher:hover { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 26%, transparent); }
+    .jt-composer-launcher:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
+    @media (max-width: ${NARROW_COMPOSER_BREAKPOINT_PX - 1}px) {
+      .jt-composer-launcher { width: 2.35rem; padding-inline: .45rem; }
+      .jt-composer-launcher > span { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    }`;
+  const composerLauncher = document.createElement("button");
+  composerLauncher.type = "button";
+  composerLauncher.className = "jt-composer-launcher";
+  composerLauncher.setAttribute("aria-label", "Open JarvisType voice composer");
+  composerLauncher.title = "Open JarvisType voice composer";
+  composerLauncher.innerHTML = `${JARVISTYPE_ICON_SVG}<span>JarvisType</span>`;
+  composerToolsMount.append(composerLauncherStyle, composerLauncher);
   const initialFloatingSize = getFloatingWidgetSize();
   const floatingWidget = ctx.ui.createFloatWidget({
     width: initialFloatingSize.width,
@@ -1697,6 +1715,7 @@ function setup(ctx) {
   floatingGlossaryList.addEventListener("click", handleGlossaryListClick);
   floatingGlossarySearchInput.addEventListener("input", handleFloatingGlossarySearchInput);
   drawerOpenButton.addEventListener("click", handleOpenFloating);
+  composerLauncher.addEventListener("click", handleOpenFloating);
   floatingCloseButton.addEventListener("click", handleCloseFloating);
   floatingCommandButton.addEventListener("click", handleCommandToggle);
   floatingCommandSearch.addEventListener("input", handleCommandSearch);
@@ -1750,10 +1769,13 @@ function setup(ctx) {
     floatingGlossaryList.removeEventListener("click", handleGlossaryListClick);
     floatingGlossarySearchInput.removeEventListener("input", handleFloatingGlossarySearchInput);
     drawerOpenButton.removeEventListener("click", handleOpenFloating);
+    composerLauncher.removeEventListener("click", handleOpenFloating);
     floatingCloseButton.removeEventListener("click", handleCloseFloating);
     floatingCommandButton.removeEventListener("click", handleCommandToggle);
     floatingCommandSearch.removeEventListener("input", handleCommandSearch);
     normalizationModelPicker.destroy();
+    composerLauncher.remove();
+    composerLauncherStyle.remove();
     floatingWidget.destroy();
     inputAction.destroy();
     tab.destroy();
@@ -1930,7 +1952,7 @@ function floatingMarkup() {
   return `
     <aside class="jt-shell jt-floating" aria-label="JarvisType floating composer">
       <header class="jt-floating__bar">
-        <h2>JarvisType</h2>
+        <h2 class="jt-brand">${JARVISTYPE_ICON_SVG}<span>JarvisType</span></h2>
         <button type="button" data-close-floating aria-label="Close JarvisType">Close</button>
       </header>
       <div class="jt-floating__body">
@@ -1966,6 +1988,8 @@ function shellMarkup() {
       .jt-shell { box-sizing: border-box; display: grid; gap: 1rem; padding: 1rem; min-width: 0; }
       .jt-shell *, .jt-shell *::before, .jt-shell *::after { box-sizing: border-box; }
       .jt-shell h2, .jt-shell h3, .jt-shell h4, .jt-shell p { margin: 0; }
+      .jt-brand { display: inline-flex; align-items: center; gap: .5rem; }
+      .jt-brand-icon { width: 1.35em; height: 1.35em; flex: 0 0 auto; }
       .jt-shell__header, .jt-shell__card { display: grid; gap: .7rem; min-width: 0; }
       .jt-shell__eyebrow { font-size: .78rem; opacity: .72; text-transform: uppercase; letter-spacing: .08em; }
       .jt-shell__card { padding: .85rem; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: .75rem; }
@@ -2035,7 +2059,7 @@ function shellMarkup() {
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
         <p class="jt-shell__eyebrow">Phase 6.5 floating composer \xB7 v${APP_VERSION}</p>
-        <h2 id="jt-title">JarvisType</h2>
+        <h2 id="jt-title" class="jt-brand">${JARVISTYPE_ICON_SVG}<span>JarvisType</span></h2>
         <p>Compose privately, review every change, and send only when you confirm.</p>
       </header>
 
@@ -2044,7 +2068,7 @@ function shellMarkup() {
           <h3>Voice composer</h3>
           <p class="jt-draft-meta">Opens near the message input and keeps this drawer available for glossary and settings.</p>
         </div>
-        <button type="button" data-open-floating aria-label="Open JarvisType floating composer">Open JarvisType</button>
+        <button type="button" class="jt-brand" data-open-floating aria-label="Open JarvisType floating composer">${JARVISTYPE_ICON_SVG}<span>Open JarvisType</span></button>
       </section>
 
       <section class="jt-shell__card" aria-labelledby="jt-connection-title">
@@ -2194,5 +2218,6 @@ function requireElement(root, selector) {
 }
 export {
   COMMAND_GROUPS,
+  JARVISTYPE_ICON_SVG,
   setup
 };

@@ -419,15 +419,16 @@ function resolveOperation(
     else if (hasSeparatorAfter && start === range.start) end += 1
   }
   const adjustedBefore = cleanText.slice(start, end)
+  const insertionText = operation.text ?? ''
   const replacement =
     operation.type === 'replace'
-      ? (operation.text ?? '')
+      ? insertionText
       : operation.type === 'delete'
         ? ''
         : operation.type === 'insert_before'
-          ? (operation.text ?? '')
+          ? addBoundarySpacing(cleanText, start, insertionText)
           : operation.type === 'insert_after'
-            ? `${adjustedBefore}${operation.text ?? ''}`
+            ? `${adjustedBefore}${addBoundarySpacing(cleanText, end, insertionText)}`
             : applyCase(adjustedBefore, operation.caseMode!)
   if (operation.type === 'insert_before') end = start
   return {
@@ -726,9 +727,23 @@ function addBoundarySpacing(text: string, point: number, insertion: string): str
   let result = insertion
   const left = text[point - 1] ?? ''
   const right = text[point] ?? ''
-  if (left && !/\s/.test(left) && !/[([{“‘]/.test(left) && !/^[,.;:!?)}\]”’]/.test(result))
+  if (/[ \t]/.test(left)) result = result.replace(/^[ \t]+/u, '')
+  if (/[ \t]/.test(right)) result = result.replace(/[ \t]+$/u, '')
+  if (
+    left &&
+    !/\s/.test(left) &&
+    !/[([{“‘]/.test(left) &&
+    !/^\s/.test(result) &&
+    !/^[,.;:!?)}\]”’]/.test(result)
+  )
     result = ` ${result}`
-  if (right && !/\s/.test(right) && !/^[,.;:!?)}\]”’]/.test(right) && !/[([{“‘]$/.test(result))
+  if (
+    right &&
+    !/\s/.test(right) &&
+    !/^[,.;:!?)}\]”’]/.test(right) &&
+    !/\s$/.test(result) &&
+    !/[([{“‘]$/.test(result)
+  )
     result = `${result} `
   return result
 }

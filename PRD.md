@@ -286,6 +286,8 @@ The user is not required to dictate a complete message in one session.
 
 **FR-EDIT-023:** After an edit instruction has been separated into command, target, and newly supplied `text` payload, JarvisType shall normalize only that input payload using the same spoken-punctuation, layout, explicit-literal, spelling, casing, and glossary safeguards used by message dictation. Instruction verbs and target selectors shall remain outside this normalization boundary. Natural uses of command vocabulary within the new content shall remain literal.
 
+**FR-EDIT-024:** Inline `insert before` and `insert after` operations shall add a missing boundary space when both adjacent values are word-like, preserve spacing already supplied by the user, and avoid inserting spaces between punctuation or paired delimiters and their content.
+
 ### 7.6 Diff and history
 
 **FR-DIFF-001:** JarvisType shall display the complete current draft after every committed addition or edit.

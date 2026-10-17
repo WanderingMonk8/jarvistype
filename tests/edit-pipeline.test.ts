@@ -161,9 +161,9 @@ test('adds deterministic paragraph boundaries for paragraph-targeted insertions'
   )
 })
 
-test('keeps exact-text insertions inline', () => {
+test('keeps exact-text insertions inline and adds only missing boundary spacing', () => {
   const session = fixture()
-  const result = executeEditPlan(session.cleanText, session.paragraphs, 1, {
+  const after = executeEditPlan(session.cleanText, session.paragraphs, 1, {
     schemaVersion: 2,
     draftVersion: 1,
     explanation: 'insert inline',
@@ -172,12 +172,50 @@ test('keeps exact-text insertions inline', () => {
         id: 'inline',
         type: 'insert_after',
         target: { paragraphOrdinal: 1, exactText: 'First' },
-        text: ' difficult',
+        text: 'difficult',
       },
     ],
   })
   assert.equal(
-    result.ok && result.afterText,
+    after.ok && after.afterText,
+    'First difficult mountain sentence.\n\nSecond paragraph here.',
+  )
+
+  const before = executeEditPlan(
+    'I fill the bucket.',
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text: 'I fill the bucket.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert before a word',
+      operations: [
+        {
+          id: 'inline-before',
+          type: 'insert_before',
+          target: { paragraphOrdinal: 1, exactText: 'fill' },
+          text: 'will',
+        },
+      ],
+    },
+  )
+  assert.equal(before.ok && before.afterText, 'I will fill the bucket.')
+
+  const alreadySpaced = executeEditPlan(session.cleanText, session.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'preserve supplied spacing',
+    operations: [
+      {
+        id: 'inline-spaced',
+        type: 'insert_after',
+        target: { paragraphOrdinal: 1, exactText: 'First' },
+        text: ' difficult ',
+      },
+    ],
+  })
+  assert.equal(
+    alreadySpaced.ok && alreadySpaced.afterText,
     'First difficult mountain sentence.\n\nSecond paragraph here.',
   )
 })

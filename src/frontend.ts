@@ -414,8 +414,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   let alive = true
   let currentHealthRequestId: string | null = null
+  let latestDraftLoadId = 0
+  let chatTransitionId = 0
   let desiredText = ''
-  let mutationInFlight = false
+  let mutationDrainPromise: Promise<void> | null = null
   let editGroupId: string | null = null
   let editGroupTimer: ReturnType<typeof setTimeout> | null = null
   let sendFlowActive = false
@@ -687,7 +689,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
 
   const loadDraft = async (chatId: string) => {
-    if (!alive || state.loading) return
+    if (!alive) return
+    const loadId = ++latestDraftLoadId
     state.pendingProposal = null
     state.pendingEditProposal = null
     state.pendingEditCandidates = null
@@ -702,8 +705,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       requestId,
       chatId,
     })
+    if (!alive || loadId !== latestDraftLoadId || state.activeChatId !== chatId) return
     state.loading = false
-    if (!alive) return
     if (outcome.status === 'resolved' && outcome.value.type === 'draft.snapshot.response') {
       applySnapshot(outcome.value.snapshot, true)
       state.sendOutcomeUnknown = false
@@ -759,16 +762,27 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const nextChatId = ctx.getActiveChat().chatId
     const changed = nextChatId !== state.activeChatId
     state.activeChatId = nextChatId
+    const transitionId = changed ? ++chatTransitionId : chatTransitionId
     await refreshPermissions()
-    if (!alive || !changed || !nextChatId || state.loading) return
+    if (!alive || !changed) return
 
-    if (!state.snapshot || (!state.snapshot.dirty && desiredText.length === 0)) {
-      await loadDraft(nextChatId)
-    } else if (state.snapshot.chatId !== nextChatId) {
-      state.statusMessage =
-        'Active chat changed. This draft remains attached to its original chat and cannot be sent here.'
+    await drainMutations()
+    if (!alive || transitionId !== chatTransitionId || ctx.getActiveChat().chatId !== nextChatId)
+      return
+    if (!nextChatId) {
+      latestDraftLoadId += 1
+      state.snapshot = null
+      state.loading = false
+      state.pendingProposal = null
+      state.pendingEditProposal = null
+      state.pendingEditCandidates = null
+      desiredText = ''
+      editor.value = ''
+      state.statusMessage = 'Select a chat to begin a private draft.'
       render()
+      return
     }
+    await loadDraft(nextChatId)
   }
 
   const checkBackend = async () => {
@@ -824,58 +838,65 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     return editGroupId
   }
 
-  const drainMutations = async () => {
-    if (mutationInFlight || !state.snapshot || !alive) return
-    mutationInFlight = true
-    state.saving = true
-    render()
-    try {
-      while (
-        alive &&
-        state.snapshot &&
-        desiredText !== state.snapshot.cleanText &&
-        !state.automatedBusy &&
-        !state.sending
-      ) {
-        const snapshot = state.snapshot
-        const requestId = createRequestId('mutate')
-        const operationId = createRequestId('manual-edit')
-        const textForRequest = desiredText
-        const outcome = await performRequest({
-          protocolVersion: PROTOCOL_VERSION,
-          type: 'draft.mutate.request',
-          requestId,
-          operationId,
-          chatId: snapshot.chatId,
-          expectedVersion: snapshot.draftVersion,
-          editGroupId: beginEditGroup(),
-          cleanText: textForRequest,
-        })
-        if (!alive) return
-        if (outcome.status === 'resolved' && outcome.value.type === 'draft.snapshot.response') {
-          applySnapshot(outcome.value.snapshot, false)
-          state.statusMessage =
-            outcome.value.outcome === 'stale-version'
-              ? 'Draft changed elsewhere; reconciling your latest text safely…'
-              : 'Draft saved privately.'
-          if (desiredText === outcome.value.snapshot.cleanText) {
-            clearDraftBackup(outcome.value.snapshot.chatId)
-          }
-        } else if (outcome.status === 'resolved' && outcome.value.type === 'app.error') {
-          if (outcome.value.snapshot) applySnapshot(outcome.value.snapshot, false)
-          state.statusMessage = outcome.value.message
-          break
-        } else {
-          state.statusMessage =
-            'Draft save timed out. Your text remains visible; retry before leaving.'
-          break
-        }
-      }
-    } finally {
-      mutationInFlight = false
-      state.saving = desiredText !== state.snapshot?.cleanText
+  const drainMutations = (): Promise<void> => {
+    if (mutationDrainPromise) return mutationDrainPromise
+    if (!state.snapshot || !alive) return Promise.resolve()
+    const run = (async () => {
+      state.saving = true
       render()
+      try {
+        while (
+          alive &&
+          state.snapshot &&
+          desiredText !== state.snapshot.cleanText &&
+          !state.automatedBusy &&
+          !state.sending
+        ) {
+          const snapshot = state.snapshot
+          const requestId = createRequestId('mutate')
+          const operationId = createRequestId('manual-edit')
+          const textForRequest = desiredText
+          const outcome = await performRequest({
+            protocolVersion: PROTOCOL_VERSION,
+            type: 'draft.mutate.request',
+            requestId,
+            operationId,
+            chatId: snapshot.chatId,
+            expectedVersion: snapshot.draftVersion,
+            editGroupId: beginEditGroup(),
+            cleanText: textForRequest,
+          })
+          if (!alive) return
+          if (outcome.status === 'resolved' && outcome.value.type === 'draft.snapshot.response') {
+            applySnapshot(outcome.value.snapshot, false)
+            state.statusMessage =
+              outcome.value.outcome === 'stale-version'
+                ? 'Draft changed elsewhere; reconciling your latest text safely…'
+                : 'Draft saved privately.'
+            if (desiredText === outcome.value.snapshot.cleanText) {
+              clearDraftBackup(outcome.value.snapshot.chatId)
+            }
+          } else if (outcome.status === 'resolved' && outcome.value.type === 'app.error') {
+            if (outcome.value.snapshot) applySnapshot(outcome.value.snapshot, false)
+            state.statusMessage = outcome.value.message
+            break
+          } else {
+            state.statusMessage =
+              'Draft save timed out. Your text remains visible; retry before leaving.'
+            break
+          }
+        }
+      } finally {
+        state.saving = desiredText !== state.snapshot?.cleanText
+        render()
+      }
+    })()
+    mutationDrainPromise = run
+    const clearRun = () => {
+      if (mutationDrainPromise === run) mutationDrainPromise = null
     }
+    void run.then(clearRun, clearRun)
+    return run
   }
 
   const handleEditorInput = () => {

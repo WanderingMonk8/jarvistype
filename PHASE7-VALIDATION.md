@@ -4,7 +4,7 @@
 
 Phase 7 hardens the accepted floating-composer beta for release across recovery, privacy, security, accessibility, performance, compatibility, and exactly-once sending.
 
-Candidate version: `1.6.3`
+Candidate version: `1.6.4`
 
 Minimum supported Lumiverse version: `1.2.5`
 
@@ -34,15 +34,17 @@ Minimum supported Lumiverse version: `1.2.5`
 
 ### Test 1: Upgrade, recovery, and permanent floating ownership
 
-**Status:** REMOTE-PASS — 2026-10-17
+**Status:** PENDING RETEST — `1.6.4` chat-switch loading fix
 
-1. Update the extension from `development` and confirm version `1.6.3` reports backend **Ready**. Candidates `1.6.0` through `1.6.2` are superseded by startup and scrolling fixes.
+1. Update the extension from `development` and confirm version `1.6.4` reports backend **Ready**. Candidates `1.6.0` through `1.6.3` are superseded by startup, viewport, and active-chat draft-loading fixes.
 2. Open a chat that already has a non-empty saved draft, recording history, and glossary entries. Confirm all survive the upgrade exactly.
 3. Open JarvisType from the icon-only composer-toolbar button. Confirm the floating workspace contains the draft and all routine composition controls.
 4. Close the floating workspace. Confirm routine composition controls do not reappear in the drawer; the drawer still contains launch, connection/ownership diagnostics, context/model settings, and searchable glossary management.
 5. Reopen from the composer-toolbar button and confirm draft text, paragraph IDs/order, history, proposal state if applicable, and glossary state are unchanged.
 6. Open from the drawer action and then close. Confirm keyboard focus returns to that invoking action.
 7. Reload Lumiverse and confirm the saved draft and glossary restore without a duplicate operation or message.
+8. Create distinct saved drafts in two chats, switch between them in both directions, and confirm JarvisType automatically displays the active chat's own draft without using a manual switch action.
+9. Repeat the switch immediately after typing and then switch rapidly across both chats. Confirm the final edit is preserved in its original chat and a stale load never replaces the currently active chat's draft.
 
 ### Test 2: Microphone privacy and terminal cleanup
 

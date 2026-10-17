@@ -851,6 +851,52 @@ test('does not let contextual normalization discard ordinary spoken punctuation 
   }
 })
 
+test('keeps provider question punctuation instead of appending a spoken period', async () => {
+  const userId = 'provider-question-punctuation-user'
+  const chatId = 'provider-question-punctuation-chat'
+  activeChatId = chatId
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'provider-question-punctuation-segment',
+      0,
+      "All right. How's that? period",
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.candidateText, "All right. How's that?")
+    assert.ok(response.proposal.reasons.includes('provider terminal punctuation'))
+  }
+})
+
+test('removes a provider-rendered period after existing question punctuation', async () => {
+  const userId = 'provider-rendered-period-user'
+  const chatId = 'provider-rendered-period-chat'
+  activeChatId = chatId
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'provider-rendered-period-segment',
+      0,
+      'All right. How is that? ."',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.candidateText, 'All right. How is that?"')
+    assert.ok(response.proposal.reasons.includes('provider terminal punctuation'))
+  }
+})
+
 test('commits a leading new-paragraph command as a paragraph boundary', async () => {
   const userId = 'leading-paragraph-user'
   const chatId = 'leading-paragraph-chat'

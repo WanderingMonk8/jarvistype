@@ -320,6 +320,8 @@ The user is not required to dictate a complete message in one session.
 
 **FR-PUNC-006:** Provider-supplied punctuation shall take precedence. Pause or timing metadata may strengthen punctuation intent when the selected transcription provider exposes it, but correct handling shall not depend on timing metadata being available.
 
+A bare spoken terminal-punctuation command immediately following provider-supplied `.`, `?`, `!`, or `…` shall be treated as redundant rather than appended as a second mark. An explicit cue such as `insert`, `punctuation`, or `command` may still request an intentional additional mark.
+
 **FR-PUNC-007:** Every spoken punctuation and layout command shall have an explicit literal form using `literal`, `the word`, `the words`, or `the phrase`. Common noun and verb contexts, including articles, descriptive uses, and punctuation terminology, shall remain literal without requiring an escape phrase.
 
 **FR-PUNC-008:** Explicit `insert`, `punctuation`, or `command` cues shall activate any supported punctuation or layout mark. Bare `quote` and `single quote` shall activate only as a complete even pair; unmatched or odd bare occurrences remain literal. Marks produced by deterministic commands shall be authoritative and cannot be removed by contextual normalization.

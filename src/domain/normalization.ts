@@ -119,6 +119,12 @@ export function normalizeDeterministically(
   )
   const reasons: string[] = []
   const authoritativePunctuationMarks: string[] = []
+  const deduplicatedTerminalMarks = removeRedundantProviderTerminalMarks(text)
+  if (deduplicatedTerminalMarks !== text) reasons.push('provider terminal punctuation')
+  text = deduplicatedTerminalMarks
+  const deduplicatedTerminalPunctuation = removeRedundantTerminalPunctuationCommands(text)
+  if (deduplicatedTerminalPunctuation !== text) reasons.push('provider terminal punctuation')
+  text = deduplicatedTerminalPunctuation
   const explicitPunctuation = replaceExplicitPunctuationCommands(text)
   text = explicitPunctuation.text
   reasons.push(...explicitPunctuation.reasons)
@@ -198,6 +204,17 @@ export function recoverHighConfidenceContextualCommands(input: string): Contextu
     },
   )
   return { text: cleanupPunctuationSpacing(text), reasons }
+}
+
+function removeRedundantProviderTerminalMarks(input: string): string {
+  return input.replace(/([.?!…][”’"']?)\s+\.(?=\s|[”’"']|$)/gu, '$1')
+}
+
+function removeRedundantTerminalPunctuationCommands(input: string): string {
+  return input.replace(
+    /([.?!…][”’"']?)\s+(?:period|full stop|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots)\b[.,]?/giu,
+    '$1',
+  )
 }
 
 function replaceExplicitPunctuationCommands(input: string): {

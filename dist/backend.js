@@ -1470,6 +1470,12 @@ function normalizeDeterministically(raw, glossary) {
   );
   const reasons = [];
   const authoritativePunctuationMarks = [];
+  const deduplicatedTerminalMarks = removeRedundantProviderTerminalMarks(text);
+  if (deduplicatedTerminalMarks !== text) reasons.push("provider terminal punctuation");
+  text = deduplicatedTerminalMarks;
+  const deduplicatedTerminalPunctuation = removeRedundantTerminalPunctuationCommands(text);
+  if (deduplicatedTerminalPunctuation !== text) reasons.push("provider terminal punctuation");
+  text = deduplicatedTerminalPunctuation;
   const explicitPunctuation = replaceExplicitPunctuationCommands(text);
   text = explicitPunctuation.text;
   reasons.push(...explicitPunctuation.reasons);
@@ -1540,6 +1546,15 @@ function recoverHighConfidenceContextualCommands(input) {
     }
   );
   return { text: cleanupPunctuationSpacing(text), reasons };
+}
+function removeRedundantProviderTerminalMarks(input) {
+  return input.replace(/([.?!…][”’"']?)\s+\.(?=\s|[”’"']|$)/gu, "$1");
+}
+function removeRedundantTerminalPunctuationCommands(input) {
+  return input.replace(
+    /([.?!…][”’"']?)\s+(?:period|full stop|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots)\b[.,]?/giu,
+    "$1"
+  );
 }
 function replaceExplicitPunctuationCommands(input) {
   const marks = [];

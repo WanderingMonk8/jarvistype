@@ -15,6 +15,18 @@ test('supports spoken punctuation and paragraph commands', () => {
   assert.equal(result.changed, true)
 })
 
+test('does not append a bare terminal command after provider terminal punctuation', () => {
+  assert.equal(normalizeDeterministically('Is this working? period', []).text, 'Is this working?')
+  assert.equal(normalizeDeterministically('Really! full stop.', []).text, 'Really!')
+  assert.equal(normalizeDeterministically('Done. period.', []).text, 'Done.')
+  assert.equal(normalizeDeterministically('Wait… period', []).text, 'Wait…')
+  assert.equal(normalizeDeterministically('How is that? ."', []).text, 'How is that?"')
+  assert.equal(
+    normalizeDeterministically('Is this working? insert period', []).text,
+    'Is this working?.',
+  )
+})
+
 test('preserves a paragraph command at the start of a recording segment', () => {
   const result = normalizeDeterministically(
     'New paragraph. It is often assumed that those who work harder tend to be more successful. Period.',

@@ -427,7 +427,7 @@ A bare spoken `period` or `full stop` immediately following provider-supplied `.
 
 **FR-REF-006:** If the reference does not resolve the intended spelling or target uniquely, JarvisType shall present the proposed interpretation for confirmation and leave the draft unchanged until confirmed.
 
-**FR-REF-007:** JarvisType shall treat `as in` as an explanatory reference cue only when the intended token occurs immediately before `as in` and the same token occurs again after it. Unqualified occurrences shall remain literal message or edit text and shall not authorize omission as explanatory wording.
+**FR-REF-007:** JarvisType shall treat `as in` as an explanatory reference cue only when the intended token occurs immediately before `as in` and either the same token or an unmistakable inflectional form occurs shortly after it, such as `filled, as in filling something up`. Unqualified occurrences shall remain literal message or edit text and shall not authorize omission as explanatory wording.
 
 ### 7.11 Sending
 

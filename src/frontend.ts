@@ -114,7 +114,7 @@ export const COMMAND_GROUPS = [
       ['Spelled form', 'Replace Kalora with capitalized C-A-E-L-O-R-A.'],
       [
         'As in reference',
-        'Say “Replace ‘can the worker’ with ‘Ken the worker.’ Ken, as in Barbie and Ken.” The intended word must occur immediately before and again after “as in.”',
+        'Say “Replace ‘can the worker’ with ‘Ken the worker.’ Ken, as in Barbie and Ken,” or “Replace ‘I feel’ with ‘I filled,’ as in filling something up.” The intended word must occur immediately before “as in” and repeat afterward exactly or as a clear inflection.',
       ],
       [
         'Multiple changes',

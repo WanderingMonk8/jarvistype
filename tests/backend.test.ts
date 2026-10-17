@@ -1622,7 +1622,7 @@ test('recovers a referential homophone when speech-to-text collapses target and 
   assert.equal(generationRequests.length, 0)
 })
 
-test('requires a repeated intended token before treating as in as a reference cue', async () => {
+test('rejects an as in reference without an exact repetition or clear inflection', async () => {
   const userId = 'guarded-reference-user'
   const chatId = 'guarded-reference-chat'
   activeChatId = chatId
@@ -1648,6 +1648,47 @@ test('requires a repeated intended token before treating as in as a reference cu
   assert.equal(response?.type, 'app.error')
   if (response?.type === 'app.error') assert.equal(response.code, 'EDIT_INTERPRETATION_FAILED')
   assert.equal(generationRequests.length, 1)
+})
+
+test('accepts a clear inflection after as in as an explanatory reference', async () => {
+  const userId = 'inflected-reference-user'
+  const chatId = 'inflected-reference-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'I feel the bucket quickly.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace the requested phrase and omit its explanatory reference.',
+    operations: [
+      {
+        id: 'inflected-as-in-replacement',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'I feel' },
+        text: 'I filled',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'inflected-reference-interpret',
+      operationId: 'inflected-reference-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace I feel with I filled, as in filling something up.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, 'I filled the bucket quickly.')
+    assert.equal(response.proposal.afterText.includes('as in'), false)
+  }
 })
 
 test('allows as in when it is explicit replacement text rather than a reference cue', async () => {

@@ -47,7 +47,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.4.4";
+var APP_VERSION = "1.5.0";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -295,6 +295,62 @@ function isPositiveInteger2(value) {
 
 // src/frontend.ts
 var MAX_RECORDING_DURATION_MS = 5 * 60 * 1e3;
+var DRAWER_ICON_SVG = `
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/>
+    <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6"/>
+    <path d="m18.5 3 .45 1.05L20 4.5l-1.05.45L18.5 6l-.45-1.05L17 4.5l1.05-.45L18.5 3Z"/>
+  </svg>`;
+var COMMAND_GROUPS = [
+  {
+    title: "Compose",
+    examples: [
+      ["Record Message", "Record Message, then dictate a new segment."],
+      ["Record Edit", "Record Edit, then describe a change to the existing draft."],
+      [
+        "Spoken punctuation",
+        "Say \u201Ccomma,\u201D \u201Cperiod,\u201D \u201Cquestion mark,\u201D or \u201Cnew paragraph\u201D while dictating."
+      ]
+    ]
+  },
+  {
+    title: "Change text",
+    examples: [
+      ["Replace", "Replace \u201Cpending\u201D with \u201Capproved\u201D in paragraph 2."],
+      ["Delete", "Delete the second sentence in paragraph 1."],
+      ["Insert before", "Insert \u201CUrgent:\u201D before the first sentence."],
+      [
+        "Insert after",
+        "Insert a new paragraph after paragraph 2 that says \u201CThe route is approved.\u201D"
+      ],
+      ["Append", "Append \u201CPlease confirm attendance.\u201D to paragraph 1."],
+      ["Prepend", "Prepend \u201CUrgent:\u201D to paragraph 1."]
+    ]
+  },
+  {
+    title: "Structure and order",
+    examples: [
+      ["Split", "Split paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
+      ["Join", "Join paragraph 1 with the following paragraph."],
+      ["Move before", "Move paragraph 3 before paragraph 1."],
+      ["Move after", "Move paragraph 1 after paragraph 2."]
+    ]
+  },
+  {
+    title: "Capitalization and spelling",
+    examples: [
+      ["Uppercase", "Change the entire draft to uppercase."],
+      ["Lowercase", "Change paragraph 2 to lowercase."],
+      ["Capitalize", "Capitalize \u201CProject Atlas\u201D in paragraph 1."],
+      ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
+      ["As in", "Replace \u201Ccan the worker\u201D with \u201CKen the worker,\u201D as in Barbie and Ken."],
+      [
+        "Multiple changes",
+        "In paragraph 1 replace pending with approved, and in paragraph 2 replace incomplete with complete."
+      ]
+    ]
+  }
+];
 function setup(ctx) {
   ctx.deferReady();
   const tab = ctx.ui.registerDrawerTab({
@@ -302,14 +358,54 @@ function setup(ctx) {
     title: "JarvisType",
     shortName: "Jarvis",
     description: "Compose and revise a private message before sending it.",
-    keywords: ["voice", "dictation", "draft", "speech"]
+    keywords: ["voice", "dictation", "draft", "speech"],
+    iconSvg: DRAWER_ICON_SVG
   });
   const inputAction = ctx.ui.registerInputBarAction({
     id: "jarvistype-open",
     label: "JarvisType",
     subtitle: "Open private composition draft"
   });
+  const floatingWidget = ctx.ui.createFloatWidget({
+    width: Math.min(430, Math.max(300, window.innerWidth - 24)),
+    height: Math.min(720, Math.max(420, window.innerHeight - 24)),
+    initialPosition: {
+      x: Math.max(12, window.innerWidth - 454),
+      y: Math.max(12, window.innerHeight - 744)
+    },
+    snapToEdge: true,
+    tooltip: "JarvisType voice composer",
+    chromeless: true,
+    touchScrollMode: "native"
+  });
+  floatingWidget.root.innerHTML = floatingMarkup();
+  floatingWidget.setVisible(false);
   tab.root.innerHTML = shellMarkup();
+  const shellStyle = tab.root.querySelector("style");
+  if (shellStyle) floatingWidget.root.prepend(shellStyle.cloneNode(true));
+  const composerSurface = requireElement(tab.root, "[data-composer-surface]");
+  const drawerComposerMount = requireElement(tab.root, "[data-drawer-composer-mount]");
+  const drawerOpenButton = requireElement(tab.root, "[data-open-floating]");
+  const floatingComposerMount = requireElement(
+    floatingWidget.root,
+    "[data-floating-composer-mount]"
+  );
+  const floatingCloseButton = requireElement(
+    floatingWidget.root,
+    "[data-close-floating]"
+  );
+  const floatingCommandButton = requireElement(
+    floatingWidget.root,
+    "[data-command-toggle]"
+  );
+  const floatingCommandPanel = requireElement(
+    floatingWidget.root,
+    "[data-command-panel]"
+  );
+  const floatingCommandSearch = requireElement(
+    floatingWidget.root,
+    "[data-command-search]"
+  );
   const backendStatus = requireElement(tab.root, "[data-backend-status]");
   const hostVersions = requireElement(tab.root, "[data-host-versions]");
   const activeChatStatus = requireElement(tab.root, "[data-active-chat]");
@@ -392,6 +488,39 @@ function setup(ctx) {
   const glossaryCancelButton = requireElement(tab.root, "[data-glossary-cancel]");
   const glossaryUndoButton = requireElement(tab.root, "[data-glossary-undo]");
   const glossaryList = requireElement(tab.root, "[data-glossary-list]");
+  const glossarySearchInput = requireElement(tab.root, "[data-glossary-search]");
+  const floatingGlossarySearchInput = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-search]"
+  );
+  const floatingGlossaryList = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-list]"
+  );
+  const floatingGlossaryCanonicalInput = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-canonical]"
+  );
+  const floatingGlossaryVariantsInput = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-variants]"
+  );
+  const floatingGlossaryHintInput = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-hint]"
+  );
+  const floatingGlossarySaveButton = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-save]"
+  );
+  const floatingGlossaryCancelButton = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-cancel]"
+  );
+  const floatingGlossaryUndoButton = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-undo]"
+  );
   const phaseFourStatus = requireElement(tab.root, "[data-phase4-status]");
   const state = {
     activeChatId: ctx.getActiveChat().chatId,
@@ -455,6 +584,8 @@ function setup(ctx) {
   let recordingDeadline = null;
   let recordingStartedAt = 0;
   let editingGlossaryEntryId;
+  let drawerGlossaryQuery = "";
+  let floatingGlossaryQuery = "";
   const disposers = [];
   const sendCancellation = (requestId) => {
     if (!alive) return;
@@ -566,9 +697,13 @@ function setup(ctx) {
     }
     phaseFourStatus.textContent = state.phaseFourMessage;
     glossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy;
+    floatingGlossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy;
     glossarySaveButton.textContent = editingGlossaryEntryId ? "Update entry" : "Add entry";
+    floatingGlossarySaveButton.textContent = editingGlossaryEntryId ? "Update entry" : "Add entry";
     glossaryCancelButton.hidden = !editingGlossaryEntryId;
-    renderGlossary(glossaryList, state.glossary);
+    floatingGlossaryCancelButton.hidden = !editingGlossaryEntryId;
+    renderGlossary(glossaryList, state.glossary, drawerGlossaryQuery);
+    renderGlossary(floatingGlossaryList, state.glossary, floatingGlossaryQuery);
     sendButton.disabled = !editorEnabled || state.saving || mismatch || desiredText.trim().length === 0 || desiredText !== state.snapshot?.cleanText || state.sendOutcomeUnknown || sendFlowActive || voiceBusy();
   };
   const send = (request) => {
@@ -1029,14 +1164,17 @@ function setup(ctx) {
     else state.phaseFourMessage = "Settings were not saved. Try again.";
     render();
   };
-  const saveGlossaryEntry = async () => {
-    const canonical = glossaryCanonicalInput.value.trim();
+  const saveGlossaryEntry = async (surface = "drawer") => {
+    const canonicalInput = surface === "floating" ? floatingGlossaryCanonicalInput : glossaryCanonicalInput;
+    const variantsInput = surface === "floating" ? floatingGlossaryVariantsInput : glossaryVariantsInput;
+    const hintInput = surface === "floating" ? floatingGlossaryHintInput : glossaryHintInput;
+    const canonical = canonicalInput.value.trim();
     if (!canonical) {
       state.phaseFourMessage = "Enter a canonical spelling before saving.";
       render();
       return;
     }
-    const variants = glossaryVariantsInput.value.split(",").map((value) => value.trim()).filter(Boolean).slice(0, 20);
+    const variants = variantsInput.value.split(",").map((value) => value.trim()).filter(Boolean).slice(0, 20);
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: "glossary.upsert.request",
@@ -1044,7 +1182,7 @@ function setup(ctx) {
       ...editingGlossaryEntryId ? { entryId: editingGlossaryEntryId } : {},
       canonical,
       variants,
-      hint: glossaryHintInput.value.trim()
+      hint: hintInput.value.trim()
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
       applyPhaseFourResponse(outcome.value);
@@ -1059,6 +1197,9 @@ function setup(ctx) {
     glossaryCanonicalInput.value = "";
     glossaryVariantsInput.value = "";
     glossaryHintInput.value = "";
+    floatingGlossaryCanonicalInput.value = "";
+    floatingGlossaryVariantsInput.value = "";
+    floatingGlossaryHintInput.value = "";
   };
   const handleGlossaryListClick = async (event) => {
     const button = event.target?.closest(
@@ -1072,6 +1213,9 @@ function setup(ctx) {
       glossaryCanonicalInput.value = entry.canonical;
       glossaryVariantsInput.value = entry.variants.join(", ");
       glossaryHintInput.value = entry.hint;
+      floatingGlossaryCanonicalInput.value = entry.canonical;
+      floatingGlossaryVariantsInput.value = entry.variants.join(", ");
+      floatingGlossaryHintInput.value = entry.hint;
       render();
       return;
     }
@@ -1373,17 +1517,30 @@ function setup(ctx) {
     if (state.pendingProposal) rejectNormalizationProposal();
     void refreshHostState();
   };
+  const openFloatingComposer = () => {
+    floatingComposerMount.append(composerSurface);
+    floatingWidget.setVisible(true);
+    void refreshHostState();
+    window.setTimeout(() => editor.focus(), 0);
+  };
+  const closeFloatingComposer = () => {
+    if (activeRecording) {
+      cancelActiveRecording("Recording cancelled because the floating composer was closed.");
+    }
+    drawerComposerMount.append(composerSurface);
+    floatingWidget.setVisible(false);
+  };
   disposers.push(ctx.events.on("PERMISSION_CHANGED", handlePermissionChange));
   disposers.push(ctx.events.on("CHAT_SWITCHED", handleChatSwitch));
   disposers.push(
     ctx.ui.events.onDrawerChange((drawer) => {
-      if (activeRecording && (!drawer.open || drawer.tabId !== tab.tabId)) {
+      if (activeRecording && !floatingWidget.isVisible() && (!drawer.open || drawer.tabId !== tab.tabId)) {
         cancelActiveRecording("Recording cancelled because JarvisType was closed.");
       }
     })
   );
   disposers.push(tab.onActivate(refreshFromHost));
-  disposers.push(inputAction.onClick(() => tab.activate()));
+  disposers.push(inputAction.onClick(openFloatingComposer));
   const handleVisibility = () => {
     if (document.visibilityState === "visible") void refreshHostState();
   };
@@ -1422,15 +1579,49 @@ function setup(ctx) {
     render();
     normalizationModelPicker.refresh();
   };
-  const handleSaveGlossaryClick = () => void saveGlossaryEntry();
+  const handleSaveGlossaryClick = () => void saveGlossaryEntry("drawer");
+  const handleFloatingSaveGlossaryClick = () => void saveGlossaryEntry("floating");
   const handleCancelGlossaryClick = () => {
     clearGlossaryForm();
     render();
   };
   const handleUndoGlossaryClick = () => void undoGlossary();
+  const handleGlossarySearchInput = () => {
+    drawerGlossaryQuery = glossarySearchInput.value;
+    render();
+  };
+  const handleFloatingGlossarySearchInput = () => {
+    floatingGlossaryQuery = floatingGlossarySearchInput.value;
+    render();
+  };
+  const handleOpenFloating = () => openFloatingComposer();
+  const handleCloseFloating = () => closeFloatingComposer();
+  const handleCommandToggle = () => {
+    const expanded = floatingCommandButton.getAttribute("aria-expanded") === "true";
+    floatingCommandButton.setAttribute("aria-expanded", String(!expanded));
+    floatingCommandPanel.hidden = expanded;
+  };
+  const handleCommandSearch = () => {
+    const query = floatingCommandSearch.value.trim().toLocaleLowerCase();
+    for (const item of floatingCommandPanel.querySelectorAll("[data-command-item]")) {
+      item.hidden = !!query && !item.textContent?.toLocaleLowerCase().includes(query);
+    }
+    for (const group of floatingCommandPanel.querySelectorAll(
+      "[data-command-group]"
+    )) {
+      group.hidden = !group.querySelector("[data-command-item]:not([hidden])");
+    }
+  };
+  const handleViewportResize = () => {
+    floatingWidget.setSize(
+      Math.min(430, Math.max(300, window.innerWidth - 24)),
+      Math.min(720, Math.max(420, window.innerHeight - 24))
+    );
+  };
   document.addEventListener("visibilitychange", handleVisibility);
   window.addEventListener("pagehide", handlePageHide);
   window.addEventListener("focus", handleFocus);
+  window.addEventListener("resize", handleViewportResize);
   retryButton.addEventListener("click", handleRetry);
   switchDraftButton.addEventListener("click", handleSwitchDraft);
   editor.addEventListener("input", handleEditorInput);
@@ -1454,6 +1645,16 @@ function setup(ctx) {
   glossaryCancelButton.addEventListener("click", handleCancelGlossaryClick);
   glossaryUndoButton.addEventListener("click", handleUndoGlossaryClick);
   glossaryList.addEventListener("click", handleGlossaryListClick);
+  glossarySearchInput.addEventListener("input", handleGlossarySearchInput);
+  floatingGlossarySaveButton.addEventListener("click", handleFloatingSaveGlossaryClick);
+  floatingGlossaryCancelButton.addEventListener("click", handleCancelGlossaryClick);
+  floatingGlossaryUndoButton.addEventListener("click", handleUndoGlossaryClick);
+  floatingGlossaryList.addEventListener("click", handleGlossaryListClick);
+  floatingGlossarySearchInput.addEventListener("input", handleFloatingGlossarySearchInput);
+  drawerOpenButton.addEventListener("click", handleOpenFloating);
+  floatingCloseButton.addEventListener("click", handleCloseFloating);
+  floatingCommandButton.addEventListener("click", handleCommandToggle);
+  floatingCommandSearch.addEventListener("input", handleCommandSearch);
   render();
   void checkBackend();
   ctx.ready();
@@ -1472,6 +1673,7 @@ function setup(ctx) {
     document.removeEventListener("visibilitychange", handleVisibility);
     window.removeEventListener("pagehide", handlePageHide);
     window.removeEventListener("focus", handleFocus);
+    window.removeEventListener("resize", handleViewportResize);
     retryButton.removeEventListener("click", handleRetry);
     switchDraftButton.removeEventListener("click", handleSwitchDraft);
     editor.removeEventListener("input", handleEditorInput);
@@ -1495,7 +1697,18 @@ function setup(ctx) {
     glossaryCancelButton.removeEventListener("click", handleCancelGlossaryClick);
     glossaryUndoButton.removeEventListener("click", handleUndoGlossaryClick);
     glossaryList.removeEventListener("click", handleGlossaryListClick);
+    glossarySearchInput.removeEventListener("input", handleGlossarySearchInput);
+    floatingGlossarySaveButton.removeEventListener("click", handleFloatingSaveGlossaryClick);
+    floatingGlossaryCancelButton.removeEventListener("click", handleCancelGlossaryClick);
+    floatingGlossaryUndoButton.removeEventListener("click", handleUndoGlossaryClick);
+    floatingGlossaryList.removeEventListener("click", handleGlossaryListClick);
+    floatingGlossarySearchInput.removeEventListener("input", handleFloatingGlossarySearchInput);
+    drawerOpenButton.removeEventListener("click", handleOpenFloating);
+    floatingCloseButton.removeEventListener("click", handleCloseFloating);
+    floatingCommandButton.removeEventListener("click", handleCommandToggle);
+    floatingCommandSearch.removeEventListener("input", handleCommandSearch);
     normalizationModelPicker.destroy();
+    floatingWidget.destroy();
     inputAction.destroy();
     tab.destroy();
   };
@@ -1523,16 +1736,23 @@ function renderConnectionOptions(select, connections, selectedId) {
   }
   select.value = selectedId ?? "";
 }
-function renderGlossary(container, entries) {
+function renderGlossary(container, entries, query = "") {
   container.replaceChildren();
-  if (!entries.length) {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visibleEntries = normalizedQuery ? entries.filter(
+    (entry) => [entry.canonical, ...entry.variants, entry.hint].some(
+      (value) => value.toLocaleLowerCase().includes(normalizedQuery)
+    )
+  ) : [...entries];
+  container.classList.toggle("jt-glossary--scrolling", visibleEntries.length > 6);
+  if (!visibleEntries.length) {
     const empty = document.createElement("p");
     empty.className = "jt-empty";
-    empty.textContent = "No glossary entries yet. Confirmed explicit spelling can add them automatically.";
+    empty.textContent = entries.length ? "No glossary entries match this search." : "No glossary entries yet. Confirmed explicit spelling can add them automatically.";
     container.append(empty);
     return;
   }
-  for (const entry of entries) {
+  for (const entry of visibleEntries) {
     const row = document.createElement("div");
     row.className = "jt-glossary-row";
     const text = document.createElement("p");
@@ -1649,6 +1869,51 @@ function clearDraftBackup(chatId) {
   } catch {
   }
 }
+function floatingMarkup() {
+  const commands = COMMAND_GROUPS.map(
+    (group) => `
+      <section data-command-group>
+        <h4>${group.title}</h4>
+        <ul>
+          ${group.examples.map(
+      ([activation, example]) => `<li data-command-item><strong>${activation}</strong>: ${example}</li>`
+    ).join("")}
+        </ul>
+      </section>`
+  ).join("");
+  return `
+    <aside class="jt-shell jt-floating" aria-label="JarvisType floating composer">
+      <header class="jt-floating__bar">
+        <h2>JarvisType</h2>
+        <button type="button" data-close-floating aria-label="Close JarvisType">Close</button>
+      </header>
+      <div class="jt-floating__body">
+        <div data-floating-composer-mount></div>
+        <div class="jt-floating__tools">
+          <button type="button" data-command-toggle aria-expanded="false" aria-controls="jt-command-panel">Command list</button>
+          <section id="jt-command-panel" data-command-panel hidden aria-label="Available voice edit commands">
+            <label class="jt-form-grid">Search commands<input type="search" placeholder="Search commands or examples" data-command-search></label>
+            <div class="jt-command-list">${commands}</div>
+          </section>
+          <details>
+            <summary>Glossary</summary>
+            <div class="jt-form-grid">
+              <label>Search glossary<input type="search" placeholder="Search spellings, variants, or hints" data-floating-glossary-search></label>
+              <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-floating-glossary-canonical></label>
+              <label>Heard-as variants<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-floating-glossary-variants></label>
+              <label>Optional hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-floating-glossary-hint></label>
+            </div>
+            <div class="jt-actions">
+              <button type="button" data-floating-glossary-save>Add entry</button>
+              <button type="button" data-floating-glossary-cancel hidden>Cancel edit</button>
+              <button type="button" data-floating-glossary-undo disabled>Undo change</button>
+            </div>
+            <div class="jt-glossary" data-floating-glossary-list></div>
+          </details>
+        </div>
+      </div>
+    </aside>`;
+}
 function shellMarkup() {
   return `
     <style>
@@ -1688,7 +1953,20 @@ function shellMarkup() {
       .jt-candidate-list { display: grid; gap: .5rem; }
       .jt-candidate-list button { text-align: start; white-space: normal; }
       .jt-glossary { display: grid; gap: .55rem; }
+      .jt-glossary--scrolling { max-height: 22rem; overflow-y: auto; overscroll-behavior: contain; padding-right: .25rem; }
       .jt-glossary-row { display: grid; gap: .35rem; padding: .55rem; border-radius: .45rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-wrap: anywhere; }
+      .jt-launch { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: center; padding: .8rem; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: .75rem; }
+      .jt-launch button { font-weight: 700; }
+      .jt-floating { box-sizing: border-box; display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100%; min-width: 0; overflow: hidden; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: .9rem; background: var(--background, #171717); color: var(--foreground, inherit); box-shadow: 0 18px 55px rgb(0 0 0 / .38); }
+      .jt-floating__bar { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .55rem .7rem; border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent); cursor: move; }
+      .jt-floating__bar h2 { font-size: 1rem; }
+      .jt-floating__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+      .jt-floating__body > .jt-shell__card { margin: .75rem; }
+      .jt-floating__tools { display: grid; gap: .65rem; padding: 0 .75rem .75rem; }
+      .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
+      .jt-floating summary { cursor: pointer; font-weight: 700; }
+      .jt-command-list { display: grid; gap: .75rem; margin-top: .65rem; }
+      .jt-command-list ul { display: grid; gap: .4rem; margin: .35rem 0 0; padding-left: 1.2rem; }
       .jt-empty { opacity: .65; font-style: italic; }
       .jt-shell [hidden] { display: none !important; }
       [data-state="ready"] { color: #38a169; }
@@ -1696,10 +1974,18 @@ function shellMarkup() {
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
-        <p class="jt-shell__eyebrow">Phase 6 advanced editing \xB7 v${APP_VERSION}</p>
+        <p class="jt-shell__eyebrow">Phase 6.5 floating composer \xB7 v${APP_VERSION}</p>
         <h2 id="jt-title">JarvisType</h2>
         <p>Compose privately, review every change, and send only when you confirm.</p>
       </header>
+
+      <section class="jt-launch" aria-label="Floating composer launcher">
+        <div>
+          <h3>Voice composer</h3>
+          <p class="jt-draft-meta">Opens near the message input and keeps this drawer available for glossary and settings.</p>
+        </div>
+        <button type="button" data-open-floating aria-label="Open JarvisType floating composer">Open JarvisType</button>
+      </section>
 
       <section class="jt-shell__card" aria-labelledby="jt-connection-title">
         <h3 id="jt-connection-title">Connection and ownership</h3>
@@ -1720,7 +2006,8 @@ function shellMarkup() {
         </div>
       </section>
 
-      <section class="jt-shell__card" aria-labelledby="jt-draft-title">
+      <div data-drawer-composer-mount>
+      <section class="jt-shell__card" data-composer-surface aria-labelledby="jt-draft-title">
         <h3 id="jt-draft-title">Working draft</h3>
         <textarea class="jt-draft-editor" data-draft-editor maxlength="${MAX_DRAFT_CHARACTERS}" aria-describedby="jt-draft-help" aria-label="JarvisType private working draft" disabled></textarea>
         <p id="jt-draft-help">Paragraph numbers are shown separately and are never copied or sent.</p>
@@ -1807,6 +2094,7 @@ function shellMarkup() {
           <button type="button" data-send disabled>Confirm &amp; Send</button>
         </div>
       </section>
+      </div>
 
       <section class="jt-shell__card" aria-labelledby="jt-context-title">
         <h3 id="jt-context-title">Context and glossary</h3>
@@ -1821,6 +2109,7 @@ function shellMarkup() {
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings\u2026</p>
 
         <h4>Personal glossary</h4>
+        <label class="jt-form-grid">Search glossary<input type="search" placeholder="Search spellings, variants, or hints" data-glossary-search></label>
         <div class="jt-form-grid">
           <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-glossary-canonical></label>
           <label>Heard-as variants, comma separated<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-glossary-variants></label>
@@ -1842,5 +2131,6 @@ function requireElement(root, selector) {
   return element;
 }
 export {
+  COMMAND_GROUPS,
   setup
 };

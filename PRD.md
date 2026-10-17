@@ -414,7 +414,7 @@ The user is not required to dictate a complete message in one session.
 
 ### 7.12 Floating interface and command discovery
 
-**FR-UI-001:** The primary composition workflow shall live in an extension-owned floating surface positioned near the Lumiverse chat composer on desktop and adapted to a bottom-sheet or equivalently usable layout on narrow screens.
+**FR-UI-001:** The primary composition workflow shall live in an extension-owned floating surface positioned near the Lumiverse chat composer on desktop and adapted to a bottom-sheet or equivalently usable layout on narrow screens. JarvisType shall have a distinct, accessible drawer-tab identity and a labeled drawer action that opens this surface.
 
 **FR-UI-002:** The floating surface shall provide functional parity with the existing drawer composition workflow before any composition control is retired from the drawer.
 

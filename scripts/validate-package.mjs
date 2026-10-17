@@ -9,9 +9,11 @@ if (manifest.identifier !== 'jarvistype') {
 if (
   !Array.isArray(manifest.permissions) ||
   JSON.stringify(manifest.permissions) !==
-    JSON.stringify(['media', 'chats', 'chat_mutation', 'generation'])
+    JSON.stringify(['media', 'chats', 'chat_mutation', 'generation', 'ui_panels'])
 ) {
-  throw new Error('Phase 5 must declare exactly media, chats, chat_mutation, and generation')
+  throw new Error(
+    'Phase 6.5 must declare exactly media, chats, chat_mutation, generation, and ui_panels',
+  )
 }
 
 for (const entry of [manifest.entry_backend, manifest.entry_frontend]) {
@@ -21,8 +23,8 @@ for (const entry of [manifest.entry_backend, manifest.entry_frontend]) {
   await access(entry)
 }
 
-if (manifest.name !== 'JarvisType' || manifest.version !== '1.4.4') {
-  throw new Error('Phase 6 manifest name and version are invalid')
+if (manifest.name !== 'JarvisType' || manifest.version !== '1.5.0') {
+  throw new Error('Phase 6.5 manifest name and version are invalid')
 }
 
-console.log('Validated JarvisType Phase 6 package')
+console.log('Validated JarvisType Phase 6.5 package')

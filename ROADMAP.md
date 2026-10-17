@@ -816,7 +816,7 @@ Move the complete composition workflow into a minimal floating surface near the 
 
 ## Phase 7: Release-candidate hardening
 
-In progress as of October 16, 2026. Candidate `1.6.1` includes privacy-safe diagnostic references and redacted provider failures. It also corrects the `1.6.0` startup regression caused by transferring the composer to its permanent floating mount before drawer-root control discovery completed. The complete local quality gate passes with 66 automated tests. Hosted recovery, accessibility, compatibility, performance, and safe-send verification remains open in `PHASE7-VALIDATION.md`.
+In progress as of October 17, 2026. Candidate `1.6.2` includes privacy-safe diagnostic references and redacted provider failures. It corrects the `1.6.0` startup regression caused by transferring the composer before control discovery completed and the `1.6.1` cross-platform scrolling defect by using one workspace scroll owner, visual-viewport sizing, and viewport position clamping. The complete local quality gate passes with 66 automated tests. Hosted accessibility, compatibility, performance, and safe-send verification remains open in `PHASE7-VALIDATION.md`.
 
 ### Objective
 

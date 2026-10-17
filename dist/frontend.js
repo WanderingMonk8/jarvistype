@@ -47,7 +47,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.1";
+var APP_VERSION = "1.6.2";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -296,16 +296,23 @@ function isPositiveInteger2(value) {
 // src/frontend.ts
 var MAX_RECORDING_DURATION_MS = 5 * 60 * 1e3;
 var NARROW_COMPOSER_BREAKPOINT_PX = 760;
+function getViewportSize() {
+  return {
+    width: window.visualViewport?.width ?? window.innerWidth,
+    height: window.visualViewport?.height ?? window.innerHeight
+  };
+}
 function getFloatingWidgetSize() {
-  if (window.innerWidth < NARROW_COMPOSER_BREAKPOINT_PX) {
+  const viewport = getViewportSize();
+  if (viewport.width < NARROW_COMPOSER_BREAKPOINT_PX) {
     return {
-      width: Math.min(430, Math.max(280, window.innerWidth - 24)),
-      height: Math.min(720, Math.max(320, window.innerHeight - 24))
+      width: Math.max(1, Math.min(430, viewport.width - 24)),
+      height: Math.max(1, Math.min(720, viewport.height - 24))
     };
   }
   return {
-    width: Math.min(960, Math.max(680, window.innerWidth - 48)),
-    height: Math.min(680, Math.max(440, window.innerHeight - 48))
+    width: Math.max(1, Math.min(960, viewport.width - 48)),
+    height: Math.max(1, Math.min(680, viewport.height - 48))
   };
 }
 var JARVISTYPE_ICON_SVG = `
@@ -394,12 +401,13 @@ function setup(ctx) {
   composerLauncher.innerHTML = JARVISTYPE_ICON_SVG;
   composerToolsMount.append(composerLauncherStyle, composerLauncher);
   const initialFloatingSize = getFloatingWidgetSize();
+  const initialViewport = getViewportSize();
   const floatingWidget = ctx.ui.createFloatWidget({
     width: initialFloatingSize.width,
     height: initialFloatingSize.height,
     initialPosition: {
-      x: Math.max(12, window.innerWidth - initialFloatingSize.width - 24),
-      y: Math.max(12, window.innerHeight - initialFloatingSize.height - 24)
+      x: Math.max(12, initialViewport.width - initialFloatingSize.width - 24),
+      y: Math.max(12, initialViewport.height - initialFloatingSize.height - 24)
     },
     snapToEdge: true,
     tooltip: "JarvisType voice composer",
@@ -1584,6 +1592,7 @@ function setup(ctx) {
     if (activeElement instanceof HTMLElement && !floatingWidget.root.contains(activeElement)) {
       floatingLaunchReturnTarget = activeElement;
     }
+    resizeAndClampFloatingWidget();
     floatingWidget.setVisible(true);
     void refreshHostState();
     window.setTimeout(() => editor.focus(), 0);
@@ -1683,14 +1692,26 @@ function setup(ctx) {
       group.hidden = !group.querySelector("[data-command-item]:not([hidden])");
     }
   };
-  const handleViewportResize = () => {
+  function resizeAndClampFloatingWidget() {
     const size = getFloatingWidgetSize();
+    const viewport = getViewportSize();
     floatingWidget.setSize(size.width, size.height);
-  };
+    const position = floatingWidget.getPosition();
+    const marginX = viewport.width >= size.width + 24 ? 12 : 0;
+    const marginY = viewport.height >= size.height + 24 ? 12 : 0;
+    const maxX = Math.max(marginX, viewport.width - size.width - marginX);
+    const maxY = Math.max(marginY, viewport.height - size.height - marginY);
+    floatingWidget.moveTo(
+      Math.min(maxX, Math.max(marginX, position.x)),
+      Math.min(maxY, Math.max(marginY, position.y))
+    );
+  }
+  const handleViewportResize = () => resizeAndClampFloatingWidget();
   document.addEventListener("visibilitychange", handleVisibility);
   window.addEventListener("pagehide", handlePageHide);
   window.addEventListener("focus", handleFocus);
   window.addEventListener("resize", handleViewportResize);
+  window.visualViewport?.addEventListener("resize", handleViewportResize);
   retryButton.addEventListener("click", handleRetry);
   switchDraftButton.addEventListener("click", handleSwitchDraft);
   editor.addEventListener("input", handleEditorInput);
@@ -1745,6 +1766,7 @@ function setup(ctx) {
     window.removeEventListener("pagehide", handlePageHide);
     window.removeEventListener("focus", handleFocus);
     window.removeEventListener("resize", handleViewportResize);
+    window.visualViewport?.removeEventListener("resize", handleViewportResize);
     retryButton.removeEventListener("click", handleRetry);
     switchDraftButton.removeEventListener("click", handleSwitchDraft);
     editor.removeEventListener("input", handleEditorInput);
@@ -2041,16 +2063,16 @@ function shellMarkup() {
       .jt-glossary-row { display: grid; gap: .35rem; padding: .55rem; border-radius: .45rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-wrap: anywhere; }
       .jt-launch { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: center; padding: .8rem; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: .75rem; }
       .jt-launch button { font-weight: 700; }
-      .jt-floating { box-sizing: border-box; display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100%; min-width: 0; overflow: hidden; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: .9rem; background: var(--background, #171717); color: var(--foreground, inherit); box-shadow: 0 18px 55px rgb(0 0 0 / .38); }
+      .jt-floating { box-sizing: border-box; display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100%; min-width: 0; min-height: 0; max-height: 100%; overflow: hidden; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: .9rem; background: var(--background, #171717); color: var(--foreground, inherit); box-shadow: 0 18px 55px rgb(0 0 0 / .38); }
       .jt-floating__bar { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .55rem .7rem; border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent); cursor: move; }
       .jt-floating__bar h2 { font-size: 1rem; }
-      .jt-floating__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+      .jt-floating__body { min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
       .jt-floating__body > .jt-shell__card { margin: .75rem; }
       .jt-floating__tools { display: grid; gap: .65rem; padding: 0 .75rem .75rem; }
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
       .jt-floating summary { cursor: pointer; font-weight: 700; }
-      .jt-floating .jt-proposal { max-height: min(70vh, 34rem); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+      .jt-floating .jt-proposal { max-height: min(70vh, 34rem); overflow-y: auto; overscroll-behavior: auto; scrollbar-gutter: stable; }
       .jt-floating .jt-proposal pre { max-height: 12rem; overflow-y: auto; }
       .jt-floating .jt-proposal > .jt-actions { position: sticky; z-index: 2; bottom: -.7rem; margin: .15rem -.7rem -.7rem; padding: .65rem .7rem; border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent); background: var(--background, #171717); }
       .jt-command-list { display: grid; gap: .75rem; margin-top: .65rem; }
@@ -2060,11 +2082,10 @@ function shellMarkup() {
       [data-state="ready"] { color: #38a169; }
       [data-state="unavailable"] { color: #e53e3e; }
       @media (min-width: ${NARROW_COMPOSER_BREAKPOINT_PX}px) {
-        .jt-floating__body { display: grid; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
-        .jt-floating [data-floating-composer-mount] { min-height: 0; overflow: hidden; }
-        .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: stretch; height: calc(100% - 1.5rem); overflow: hidden; }
-        .jt-floating .jt-composer__pane { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: .25rem; }
-        .jt-floating .jt-composer__action-pane { scrollbar-gutter: stable; touch-action: pan-y; }
+        .jt-floating__body { display: block; }
+        .jt-floating [data-floating-composer-mount] { min-height: 0; }
+        .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: start; height: auto; overflow: visible; }
+        .jt-floating .jt-composer__pane { min-height: 0; overflow: visible; padding-right: .25rem; }
         .jt-floating .jt-proposal { max-height: clamp(18rem, 52vh, 30rem); }
         .jt-floating .jt-draft-editor { min-height: 10rem; }
         .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }

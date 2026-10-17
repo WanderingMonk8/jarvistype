@@ -4,7 +4,7 @@
 
 Phase 7 hardens the accepted floating-composer beta for release across recovery, privacy, security, accessibility, performance, compatibility, and exactly-once sending.
 
-Candidate version: `1.6.1`
+Candidate version: `1.6.2`
 
 Minimum supported Lumiverse version: `1.2.5`
 
@@ -16,7 +16,7 @@ Minimum supported Lumiverse version: `1.2.5`
 | F7-02 | Privacy-safe operational diagnostics     | LOCAL-PASS | Provider exception text is redacted; user-visible failures carry a bounded diagnostic reference; regression tests reject private draft/provider leakage. |
 | F7-03 | Protocol and structured-edit security    | LOCAL-PASS | Closed-schema validation rejects malformed, oversized, unknown, overlapping, stale, and incompatible operations.                                         |
 | F7-04 | Prompt-injection resistance              | LOCAL-PASS | Context and draft text remain quoted data; model output must pass allowlisted structured parsing and deterministic execution before review.              |
-| F7-05 | Keyboard and assistive-technology access | PENDING    | Hosted keyboard, focus, screen-reader, zoom, contrast, and reduced-motion checks remain.                                                                 |
+| F7-05 | Keyboard and assistive-technology access | PENDING    | Hosted keyboard, focus, screen-reader, zoom, contrast, reduced-motion, and repaired whole-workspace scrolling checks remain.                             |
 | F7-06 | Long-state performance budgets           | PENDING    | Maximum draft, context, glossary, and history profiling remains.                                                                                         |
 | F7-07 | Supported-platform compatibility         | PENDING    | Hosted desktop and narrow/mobile matrix remains.                                                                                                         |
 | F7-08 | Exactly-once safe send under stress      | LOCAL-PASS | Automated duplicate-operation test proves one append and repeatable acknowledgements; hosted reconnect/delayed-ack checks remain.                        |
@@ -34,9 +34,9 @@ Minimum supported Lumiverse version: `1.2.5`
 
 ### Test 1: Upgrade, recovery, and permanent floating ownership
 
-**Status:** PENDING
+**Status:** REMOTE-PASS — 2026-10-17
 
-1. Update the extension from `development` and confirm version `1.6.1` reports backend **Ready**. Candidate `1.6.0` must not be used because an initialization-order regression prevented its drawer and composer-toolbar entry points from remaining registered.
+1. Update the extension from `development` and confirm version `1.6.2` reports backend **Ready**. Candidates `1.6.0` and `1.6.1` are superseded by startup and scrolling fixes.
 2. Open a chat that already has a non-empty saved draft, recording history, and glossary entries. Confirm all survive the upgrade exactly.
 3. Open JarvisType from the icon-only composer-toolbar button. Confirm the floating workspace contains the draft and all routine composition controls.
 4. Close the floating workspace. Confirm routine composition controls do not reappear in the drawer; the drawer still contains launch, connection/ownership diagnostics, context/model settings, and searchable glossary management.

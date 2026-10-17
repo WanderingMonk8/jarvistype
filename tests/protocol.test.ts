@@ -80,6 +80,35 @@ test('accepts valid health responses and rejects malformed permission snapshots'
   )
 })
 
+test('accepts bounded diagnostic references on errors', () => {
+  assert.equal(
+    isBackendResponse({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'app.error',
+      requestId: 'failed-request',
+      ok: false,
+      code: 'SEND_FAILED',
+      message: 'The send failed. Reference: JT-SEND-123.',
+      retryable: true,
+      diagnosticId: 'JT-SEND-123',
+    }),
+    true,
+  )
+  assert.equal(
+    isBackendResponse({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'app.error',
+      requestId: 'failed-request',
+      ok: false,
+      code: 'SEND_FAILED',
+      message: 'The send failed.',
+      retryable: true,
+      diagnosticId: 'x'.repeat(101),
+    }),
+    false,
+  )
+})
+
 test('permission snapshots expose only unique declared Phase 4 permissions', () => {
   assert.deepEqual(sanitizeGrantedPermissions(['generation', 'media', 'media', 'chat_mutation']), {
     declared: ['media', 'chats', 'chat_mutation', 'generation'],

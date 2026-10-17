@@ -816,6 +816,8 @@ Move the complete composition workflow into a minimal floating surface near the 
 
 ## Phase 7: Release-candidate hardening
 
+In progress as of October 16, 2026. Candidate `1.6.0` begins with privacy-safe diagnostic references and redacted provider failures; the complete local quality gate passes with 66 automated tests. Hosted recovery, accessibility, compatibility, performance, and safe-send verification remains open in `PHASE7-VALIDATION.md`.
+
 ### Objective
 
 Make the feature-complete beta safe and dependable across supported environments and failures.

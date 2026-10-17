@@ -207,6 +207,7 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
       ERROR_CODES.includes(value.code as AppErrorCode) &&
       isBoundedString(value.message, 1, 2_000) &&
       typeof value.retryable === 'boolean' &&
+      (value.diagnosticId === undefined || isBoundedString(value.diagnosticId, 1, 100)) &&
       (value.operationId === undefined || isIdentifier(value.operationId)) &&
       (value.snapshot === undefined || isDraftSnapshot(value.snapshot))
     )

@@ -1292,7 +1292,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.5.0";
+var APP_VERSION = "1.6.0";
 var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
 
 // src/protocol/validation.ts
@@ -1449,7 +1449,7 @@ async function handleRequest(request, context) {
     }
   } catch (error) {
     if (activeRequest.cancelled) return;
-    spindle.log.error(`JarvisType request failed: ${describeError(error)}`);
+    const diagnosticId = logSafeFailure("error", "REQUEST", error);
     send(
       {
         protocolVersion: PROTOCOL_VERSION,
@@ -1457,8 +1457,9 @@ async function handleRequest(request, context) {
         requestId: request.requestId,
         ok: false,
         code: "INTERNAL_ERROR",
-        message: "JarvisType could not complete the request. The draft was preserved.",
+        message: `JarvisType could not complete the request. The draft was preserved. Reference: ${diagnosticId}.`,
         retryable: true,
+        diagnosticId,
         ..."operationId" in request ? { operationId: request.operationId } : {}
       },
       context
@@ -1640,9 +1641,7 @@ async function handleTranscriptConfirmation(request, context, activeRequest) {
         await persistGlossary(context.userId, glossary);
       } catch (error) {
         learned.length = 0;
-        spindle.log.error(
-          `JarvisType committed a transcript but could not persist its spelling entry: ${describeError(error)}`
-        );
+        logSafeFailure("error", "TRANSCRIPT_GLOSSARY_PERSIST", error);
       }
     }
     normalizationProposals.delete(proposalKey(context.userId, request.operationId));
@@ -1877,9 +1876,7 @@ async function handleEditConfirmation(request, context, activeRequest) {
         await persistGlossary(context.userId, glossary);
       } catch (error) {
         learned.length = 0;
-        spindle.log.error(
-          `JarvisType committed an edit but could not persist its spelling entry: ${describeError(error)}`
-        );
+        logSafeFailure("error", "EDIT_GLOSSARY_PERSIST", error);
       }
     }
     editProposals.delete(proposalKey(context.userId, request.operationId));
@@ -2029,7 +2026,7 @@ async function interpretEditInstruction(instructionTranscript, session, settings
     if (!content) return null;
     return parseEditPlan(JSON.parse(stripCodeFence(content)));
   } catch (error) {
-    spindle.log.warn(`JarvisType edit interpretation failed safely: ${describeError(error)}`);
+    logSafeFailure("warn", "EDIT_INTERPRETATION", error);
     return null;
   }
 }
@@ -2155,9 +2152,7 @@ async function normalizeWithContext(rawTranscript, deterministicCandidate, messa
     if (!isSafeContextualCandidate(deterministicCandidate, normalized)) return null;
     return normalized;
   } catch (error) {
-    spindle.log.warn(
-      `JarvisType contextual normalization fell back safely: ${describeError(error)}`
-    );
+    logSafeFailure("warn", "CONTEXT_NORMALIZATION", error);
     return null;
   }
 }
@@ -2329,7 +2324,7 @@ async function listNormalizationConnections(userId) {
       isDefault: connection.is_default
     }));
   } catch (error) {
-    spindle.log.warn(`JarvisType could not list normalization connections: ${describeError(error)}`);
+    logSafeFailure("warn", "CONNECTION_LIST", error);
     return [];
   }
 }
@@ -2537,8 +2532,8 @@ async function handleDraftSend(request, context) {
       rememberCompletedSend(sendKey, completed2);
       return { completed: completed2 };
     } catch (error) {
-      spindle.log.error(`JarvisType send failed: ${describeError(error)}`);
-      return { error: "send", session };
+      const diagnosticId = logSafeFailure("error", "SEND", error);
+      return { error: "send", diagnosticId, session };
     }
   });
   if ("error" in result && result.session) {
@@ -2573,8 +2568,9 @@ async function handleDraftSend(request, context) {
         request,
         context,
         "SEND_FAILED",
-        "Lumiverse did not confirm the send. The draft was preserved for retry.",
-        result.session
+        `Lumiverse did not confirm the send. The draft was preserved for retry. Reference: ${result.diagnosticId}.`,
+        result.session,
+        result.diagnosticId
       );
     }
     return;
@@ -2598,7 +2594,7 @@ function sendSendResponse(request, context, completed) {
     context
   );
 }
-function sendDraftError(request, context, code, message, session) {
+function sendDraftError(request, context, code, message, session, diagnosticId) {
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -2608,6 +2604,7 @@ function sendDraftError(request, context, code, message, session) {
       code,
       message,
       retryable: code !== "DRAFT_EMPTY",
+      ...diagnosticId ? { diagnosticId } : {},
       operationId: request.operationId,
       snapshot: toDraftSnapshot(session)
     },
@@ -2672,9 +2669,7 @@ async function clearPersistedDraft(userId, chatId, cleared) {
     try {
       await spindle.userStorage.setJson(draftPath(chatId), cleared, { userId });
     } catch (error) {
-      spindle.log.error(
-        `JarvisType sent the draft but could not clear its persisted copy: ${describeError(error)}`
-      );
+      logSafeFailure("error", "POST_SEND_DRAFT_CLEAR", error);
     }
   }
 }
@@ -2736,10 +2731,15 @@ function draftKey(userId, chatId) {
 function draftPath(chatId) {
   return `draft-${encodeURIComponent(chatId)}.json`;
 }
-function describeError(error) {
-  return error instanceof Error ? error.message : String(error);
+function logSafeFailure(level, category, error) {
+  const diagnosticId = `JT-${category}-${crypto.randomUUID()}`;
+  const errorKind = error instanceof Error ? error.name : typeof error;
+  const message = `JarvisType failure [${diagnosticId}] (${errorKind}). Private provider details were redacted.`;
+  if (level === "warn") spindle.log.warn(message);
+  else spindle.log.error(message);
+  return diagnosticId;
 }
 function isRecord5(value) {
   return typeof value === "object" && value !== null;
 }
-spindle.log.info("JarvisType Phase 6 advanced editing service loaded");
+spindle.log.info("JarvisType Phase 7 release-candidate service loaded");

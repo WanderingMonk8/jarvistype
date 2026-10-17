@@ -47,7 +47,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.5.0";
+var APP_VERSION = "1.6.0";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -214,7 +214,7 @@ function isBackendResponse(value) {
     return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.connections) && value.connections.every(isNormalizationConnectionOption) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
   }
   if (value.type === "app.error") {
-    return value.ok === false && typeof value.code === "string" && ERROR_CODES.includes(value.code) && isBoundedString(value.message, 1, 2e3) && typeof value.retryable === "boolean" && (value.operationId === void 0 || isIdentifier2(value.operationId)) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot));
+    return value.ok === false && typeof value.code === "string" && ERROR_CODES.includes(value.code) && isBoundedString(value.message, 1, 2e3) && typeof value.retryable === "boolean" && (value.diagnosticId === void 0 || isBoundedString(value.diagnosticId, 1, 100)) && (value.operationId === void 0 || isIdentifier2(value.operationId)) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot));
   }
   return false;
 }
@@ -2073,7 +2073,7 @@ function shellMarkup() {
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
-        <p class="jt-shell__eyebrow">Phase 6.5 floating composer \xB7 v${APP_VERSION}</p>
+        <p class="jt-shell__eyebrow">Phase 7 release-candidate hardening \xB7 v${APP_VERSION}</p>
         <h2 id="jt-title" class="jt-brand">${JARVISTYPE_ICON_SVG}<span>JarvisType</span></h2>
         <p>Compose privately, review every change, and send only when you confirm.</p>
       </header>

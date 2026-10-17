@@ -2178,7 +2178,7 @@ function shellMarkup(): string {
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
       <header class="jt-shell__header">
-        <p class="jt-shell__eyebrow">Phase 6.5 floating composer · v${APP_VERSION}</p>
+        <p class="jt-shell__eyebrow">Phase 7 release-candidate hardening · v${APP_VERSION}</p>
         <h2 id="jt-title" class="jt-brand">${JARVISTYPE_ICON_SVG}<span>JarvisType</span></h2>
         <p>Compose privately, review every change, and send only when you confirm.</p>
       </header>

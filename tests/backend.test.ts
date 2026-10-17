@@ -7,6 +7,7 @@ type FrontendHandler = (payload: unknown, userId: string, frontendSessionId?: st
 
 const responses: Array<{ payload: BackendResponse; userId?: string }> = []
 const warnings: string[] = []
+const errors: string[] = []
 const stored = new Map<string, unknown>()
 const appended: Array<{ chatId: string; content: string; triggerGeneration: boolean }> = []
 const generationRequests: Array<{
@@ -112,7 +113,7 @@ const spindleMock = {
   log: {
     info: () => undefined,
     warn: (message: string) => warnings.push(message),
-    error: () => undefined,
+    error: (message: string) => errors.push(message),
   },
 }
 
@@ -122,6 +123,7 @@ await import('../src/backend')
 test.beforeEach(() => {
   responses.length = 0
   warnings.length = 0
+  errors.length = 0
   appended.length = 0
   generationRequests.length = 0
   activeChatId = 'chat-default'
@@ -327,7 +329,19 @@ test('retains the draft when Lumiverse rejects the send', async () => {
   if (response?.type === 'app.error') {
     assert.equal(response.code, 'SEND_FAILED')
     assert.equal(response.snapshot?.cleanText, 'Keep me')
+    assert.match(response.diagnosticId ?? '', /^JT-SEND-[0-9a-f-]+$/i)
+    assert.equal(response.message.includes(response.diagnosticId ?? 'missing'), true)
   }
+  assert.equal(errors.length, 1)
+  assert.match(errors[0] ?? '', /Private provider details were redacted/)
+  assert.equal(
+    errors.some((message) => message.includes('provider failure')),
+    false,
+  )
+  assert.equal(
+    errors.some((message) => message.includes('Keep me')),
+    false,
+  )
 })
 
 test('commits recording segments once, in order, and undoes only the latest segment', async () => {

@@ -146,6 +146,10 @@ test('appends recordings in order with conservative boundary whitespace', () => 
   assert.equal(joinRecordingTranscript('Hello ', ' world'), 'Hello world')
   assert.equal(joinRecordingTranscript('Hello', 'world'), 'Hello world')
   assert.equal(joinRecordingTranscript('Hello\n', '\nworld'), 'Hello\n\nworld')
+  assert.equal(
+    joinRecordingTranscript('First paragraph.\n\nSecond paragraph.', '\n\nThird paragraph.'),
+    'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.',
+  )
 })
 
 test('undo last recording removes only that segment and supports the preceding segment', () => {

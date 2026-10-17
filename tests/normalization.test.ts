@@ -12,6 +12,19 @@ test('supports spoken punctuation and paragraph commands', () => {
   assert.equal(result.changed, true)
 })
 
+test('preserves a paragraph command at the start of a recording segment', () => {
+  const result = normalizeDeterministically(
+    'New paragraph. It is often assumed that those who work harder tend to be more successful. Period.',
+    [],
+  )
+
+  assert.equal(
+    result.text,
+    '\n\nIt is often assumed that those who work harder tend to be more successful.',
+  )
+  assert.equal(result.reasons.includes('new paragraph'), true)
+})
+
 test('preserves explicitly literal punctuation words', () => {
   assert.equal(
     normalizeDeterministically('Use the word period here period', []).text,

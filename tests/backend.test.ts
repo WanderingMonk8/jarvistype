@@ -494,6 +494,56 @@ test('re-applies deterministic commands when contextual output returns the raw p
   }
 })
 
+test('commits a leading new-paragraph command as a paragraph boundary', async () => {
+  const userId = 'leading-paragraph-user'
+  const chatId = 'leading-paragraph-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'First paragraph.\n\nA healthier limit is half of the actual context window.',
+  )
+  responses.length = 0
+
+  const request = recordingAppendRequest(
+    chatId,
+    'leading-paragraph-segment',
+    1,
+    'New paragraph. It is often assumed that those who work harder tend to be more successful. Period.',
+  )
+  await dispatch(request, userId)
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'transcript.normalization.response')
+  if (proposal?.type !== 'transcript.normalization.response') return
+  assert.equal(
+    proposal.proposal.candidateText,
+    '\n\nIt is often assumed that those who work harder tend to be more successful.',
+  )
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.confirm.request',
+      requestId: 'confirm-leading-paragraph',
+      operationId: request.operationId,
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'transcript.normalization.response')
+  if (committed?.type === 'transcript.normalization.response') {
+    assert.equal(
+      committed.snapshot?.cleanText,
+      'First paragraph.\n\nA healthier limit is half of the actual context window.\n\nIt is often assumed that those who work harder tend to be more successful.',
+    )
+    assert.equal(committed.snapshot?.paragraphs.length, 3)
+  }
+})
+
 test('does not let contextual normalization override authoritative explicit spelling', async () => {
   const userId = 'authoritative-spelling-user'
   const chatId = 'authoritative-spelling-chat'

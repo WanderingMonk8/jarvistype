@@ -1162,8 +1162,8 @@ function isRecord3(value) {
 
 // src/domain/normalization.ts
 var PUNCTUATION = [
-  [/\bnew paragraph\b/gi, "\n\n", "new paragraph"],
-  [/\bnew line\b/gi, "\n", "new line"],
+  [/\bnew paragraph\b[.,;:!?]?/gi, "\n\n", "new paragraph"],
+  [/\bnew line\b[.,;:!?]?/gi, "\n", "new line"],
   [/\bopen (?:parenthesis|paren)\b/gi, "(", "open parenthesis"],
   [/\bclose (?:parenthesis|paren)\b/gi, ")", "close parenthesis"],
   [/\bopen bracket\b/gi, "[", "open bracket"],
@@ -1284,7 +1284,7 @@ function applySpellingCasing(value, casing) {
   ).join("");
 }
 function cleanupPunctuationSpacing(value) {
-  return value.replace(/[ \t]+([,.;:!?)\]])/g, "$1").replace(/([([])\s+/g, "$1").replace(/[,;:]\s*([.!?])/g, "$1").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").trim();
+  return value.replace(/[ \t]+([,.;:!?)\]])/g, "$1").replace(/([([])\s+/g, "$1").replace(/[,;:]\s*([.!?])/g, "$1").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").replace(/^[ \t]+/, "").replace(/\s+$/, "");
 }
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -2149,7 +2149,9 @@ async function normalizeWithContext(rawTranscript, deterministicCandidate, messa
     if (!content) return null;
     const parsed = JSON.parse(stripCodeFence(content));
     if (!isRecord5(parsed) || typeof parsed.normalizedText !== "string") return null;
-    const normalized = parsed.normalizedText.trim();
+    const normalizedBody = parsed.normalizedText.trim();
+    const leadingBreak = deterministicCandidate.match(/^(?:\r?\n)+/)?.[0] ?? "";
+    const normalized = `${leadingBreak}${normalizedBody}`;
     if (!isSafeContextualCandidate(deterministicCandidate, normalized)) return null;
     return normalized;
   } catch (error) {

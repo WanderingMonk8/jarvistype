@@ -1021,7 +1021,9 @@ async function normalizeWithContext(
     if (!content) return null
     const parsed = JSON.parse(stripCodeFence(content)) as unknown
     if (!isRecord(parsed) || typeof parsed.normalizedText !== 'string') return null
-    const normalized = parsed.normalizedText.trim()
+    const normalizedBody = parsed.normalizedText.trim()
+    const leadingBreak = deterministicCandidate.match(/^(?:\r?\n)+/)?.[0] ?? ''
+    const normalized = `${leadingBreak}${normalizedBody}`
     if (!isSafeContextualCandidate(deterministicCandidate, normalized)) return null
     return normalized
   } catch (error) {

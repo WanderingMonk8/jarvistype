@@ -14,8 +14,8 @@ export interface DeterministicNormalization {
 }
 
 const PUNCTUATION: Array<[RegExp, string, string]> = [
-  [/\bnew paragraph\b/gi, '\n\n', 'new paragraph'],
-  [/\bnew line\b/gi, '\n', 'new line'],
+  [/\bnew paragraph\b[.,;:!?]?/gi, '\n\n', 'new paragraph'],
+  [/\bnew line\b[.,;:!?]?/gi, '\n', 'new line'],
   [/\bopen (?:parenthesis|paren)\b/gi, '(', 'open parenthesis'],
   [/\bclose (?:parenthesis|paren)\b/gi, ')', 'close parenthesis'],
   [/\bopen bracket\b/gi, '[', 'open bracket'],
@@ -193,7 +193,8 @@ function cleanupPunctuationSpacing(value: string): string {
     .replace(/[ \t]*\n[ \t]*/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/([,.;:!?])(?=[A-Za-z])/g, '$1 ')
-    .trim()
+    .replace(/^[ \t]+/, '')
+    .replace(/\s+$/, '')
 }
 
 function escapeRegExp(value: string): string {

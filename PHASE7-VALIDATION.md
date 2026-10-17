@@ -4,7 +4,7 @@
 
 Phase 7 hardens the accepted floating-composer beta for release across recovery, privacy, security, accessibility, performance, compatibility, and exactly-once sending.
 
-Candidate version: `1.6.4`
+Candidate version: `1.6.5`
 
 Minimum supported Lumiverse version: `1.2.5`
 
@@ -34,9 +34,9 @@ Minimum supported Lumiverse version: `1.2.5`
 
 ### Test 1: Upgrade, recovery, and permanent floating ownership
 
-**Status:** PENDING RETEST — `1.6.4` chat-switch loading fix
+**Status:** PENDING RETEST — `1.6.5` chat-switch and long-draft accessibility fixes
 
-1. Update the extension from `development` and confirm version `1.6.4` reports backend **Ready**. Candidates `1.6.0` through `1.6.3` are superseded by startup, viewport, and active-chat draft-loading fixes.
+1. Update the extension from `development` and confirm version `1.6.5` reports backend **Ready**. Candidates `1.6.0` through `1.6.4` are superseded by startup, viewport, active-chat draft-loading, and long-draft accessibility fixes.
 2. Open a chat that already has a non-empty saved draft, recording history, and glossary entries. Confirm all survive the upgrade exactly.
 3. Open JarvisType from the icon-only composer-toolbar button. Confirm the floating workspace contains the draft and all routine composition controls.
 4. Close the floating workspace. Confirm routine composition controls do not reappear in the drawer; the drawer still contains launch, connection/ownership diagnostics, context/model settings, and searchable glossary management.
@@ -90,8 +90,9 @@ Minimum supported Lumiverse version: `1.2.5`
 
 1. Test desktop and narrow/mobile layouts at default size, 200% zoom, and increased font scaling.
 2. Confirm every proposal action remains reachable by scrolling and sticky review actions do not obscure content.
-3. Test high-contrast/forced-colors and reduced-motion preferences.
-4. Confirm the icon-only launcher remains visible, named on hover/focus, and distinguishable from disabled controls.
+3. With a long draft, confirm the numbered-paragraph box stops growing, scrolls independently with pointer, touch, and keyboard input, and retains a visible focus indicator.
+4. Test high-contrast/forced-colors and reduced-motion preferences.
+5. Confirm the icon-only launcher remains visible, named on hover/focus, and distinguishable from disabled controls.
 
 ### Test 7: Maximum-state performance
 

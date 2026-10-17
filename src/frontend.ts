@@ -2170,7 +2170,8 @@ function shellMarkup(): string {
       .jt-shell__warning { padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
       .jt-draft-editor { width: 100%; min-height: 11rem; resize: vertical; border-radius: .55rem; padding: .75rem; font: inherit; line-height: 1.5; }
       .jt-draft-meta { font-size: .78rem; opacity: .75; overflow-wrap: anywhere; }
-      .jt-paragraphs { display: grid; gap: .25rem; padding: .6rem; border-radius: .5rem; background: color-mix(in srgb, currentColor 6%, transparent); }
+      .jt-paragraphs { display: grid; gap: .25rem; max-height: min(18rem, 34vh); padding: .6rem; border-radius: .5rem; background: color-mix(in srgb, currentColor 6%, transparent); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+      .jt-paragraphs:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-paragraph-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: .5rem; min-height: 1.5rem; }
       .jt-paragraph-row--separator { min-height: .8rem; }
       .jt-paragraph-number { text-align: right; opacity: .6; user-select: none; }
@@ -2279,7 +2280,7 @@ function shellMarkup(): string {
         <p class="jt-draft-meta" data-draft-meta>Draft not loaded</p>
 
         <h4>Numbered paragraphs</h4>
-        <div class="jt-paragraphs" data-paragraph-list aria-live="polite"></div>
+        <div class="jt-paragraphs" data-paragraph-list role="region" aria-label="Numbered draft paragraphs" aria-live="polite" tabindex="0"></div>
         </div>
 
         <div class="jt-composer__pane jt-composer__action-pane">

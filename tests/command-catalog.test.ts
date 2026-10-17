@@ -20,6 +20,8 @@ test('command catalog covers every supported editing operation and composition m
     'Insert after',
     'Append',
     'Prepend',
+    'Move',
+    'Punctuation targets',
     'Split',
     'Join',
     'Move before',

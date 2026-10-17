@@ -70,8 +70,11 @@ export const COMMAND_GROUPS = [
         'Spoken punctuation',
         'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “hyphen,” “dash,” “en dash,” “em dash,” “quote” at both ends of a quotation, “single quote” at both ends of a single quotation, “new line,” or “new paragraph.”',
       ],
-      ['Literal punctuation word', 'Say “the word period,” “literal dash,” or “the word quote.”'],
-      ['Explicit punctuation', 'Say “insert period” or “punctuation colon.”'],
+      [
+        'Literal punctuation word',
+        'Say “the word period,” “literal dash,” “the phrase new paragraph,” or “the words open parenthesis.”',
+      ],
+      ['Explicit punctuation', 'Say “insert period,” “punctuation colon,” or “command new line.”'],
     ],
   },
   {

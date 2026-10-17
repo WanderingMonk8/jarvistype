@@ -733,6 +733,28 @@ test('does not let contextual normalization discard commanded quotation marks', 
   }
 })
 
+test('does not let contextual normalization discard ordinary spoken punctuation commands', async () => {
+  const userId = 'commanded-punctuation-user'
+  const chatId = 'commanded-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationNormalizedText = 'Alpha beta.'
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'commanded-punctuation-segment', 1, 'Alpha comma beta period'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(response.proposal.candidateText, 'Alpha, beta.')
+    assert.equal(response.proposal.contextualModelUsed, false)
+  }
+})
+
 test('commits a leading new-paragraph command as a paragraph boundary', async () => {
   const userId = 'leading-paragraph-user'
   const chatId = 'leading-paragraph-chat'

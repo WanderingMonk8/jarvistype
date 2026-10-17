@@ -46,6 +46,27 @@ test('preserves explicitly literal punctuation words', () => {
     normalizeDeterministically('The colon cancer screening period ended period', []).text,
     'The colon cancer screening period ended.',
   )
+  assert.equal(
+    normalizeDeterministically(
+      'Discuss the phrase new paragraph comma literal open parenthesis comma and the words question mark period',
+      [],
+    ).text,
+    'Discuss new paragraph, open parenthesis, and question mark.',
+  )
+})
+
+test('preserves punctuation vocabulary in ordinary noun and verb contexts', () => {
+  const natural =
+    'The semicolon is optional. An exclamation mark followed. A question mark appeared. The ellipsis means omission. The open parenthesis is unmatched. The close bracket is missing. A new line of products launched. The new paragraph discusses history. The Oxford comma was debated. The possessive apostrophe is required. Please quote the source and quote from the report. A difficult period ended.'
+  assert.equal(normalizeDeterministically(natural, []).text, natural)
+  assert.equal(
+    normalizeDeterministically('A lone quote remains literal.', []).text,
+    'A lone quote remains literal.',
+  )
+  assert.equal(
+    normalizeDeterministically('Quote one, quote two, and quote three.', []).text,
+    'Quote one, quote two, and quote three.',
+  )
 })
 
 test('supports expanded punctuation commands and explicit fallbacks', () => {
@@ -69,6 +90,17 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
     'Use: then.',
   )
   assert.equal(
+    normalizeDeterministically(
+      'Alpha command open parenthesis beta command close parenthesis command new line gamma command open bracket delta command close bracket',
+      [],
+    ).text,
+    'Alpha (beta)\ngamma [delta]',
+  )
+  assert.equal(
+    normalizeDeterministically('Alpha punctuation quote beta punctuation single quote', []).text,
+    'Alpha” beta’',
+  )
+  assert.equal(
     normalizeDeterministically('Write the word dash and the word ellipsis period', []).text,
     'Write dash and ellipsis.',
   )
@@ -88,6 +120,8 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
     normalizeDeterministically('Write the word quote and literal single quote period', []).text,
     'Write quote and single quote.',
   )
+  const authoritative = normalizeDeterministically('Alpha comma beta question mark', [])
+  assert.deepEqual([...authoritative.authoritativePunctuationMarks].sort(), [',', '?'])
 })
 
 test('collapses explicit spelling, obeys casing, and creates a learning candidate', () => {

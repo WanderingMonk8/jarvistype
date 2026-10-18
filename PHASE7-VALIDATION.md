@@ -110,7 +110,7 @@ The hosted test confirmed that embedded instructions to ignore rules, reveal sec
 
 ### Test 6: Responsive, zoom, contrast, and motion
 
-**Status:** PENDING â€” desktop 200% zoom and narrow/mobile layout checks passed on October 18, 2026. Long-draft testing found arrow and page keys scrolled the whole workspace instead of the focused numbered-paragraph region; keyboard routing now includes that bounded region and awaits hosted retest.
+**Status:** PARTIAL â€” October 18, 2026, version `1.6.7` through commit `3db91a7`. Desktop 200% zoom, increased font scaling, narrow/mobile layout, touch and pointer workspace scrolling, long-proposal action reachability, resize/reclamping, expandable tools, bounded long-draft rendering, non-overlapping paragraph text, visible paragraph focus, and independent pointer, touch, scrollbar, arrow, and page-key paragraph scrolling passed. The user deliberately deferred high-contrast/forced-colors and reduced-motion verification; those checks are not counted as passed.
 
 1. Test desktop and narrow/mobile layouts at default size, 200% zoom, and increased font scaling.
 2. Confirm every proposal action remains reachable by scrolling and sticky review actions do not obscure content.

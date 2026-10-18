@@ -252,6 +252,38 @@ test('keeps exact-text insertions inline and adds only missing boundary spacing'
   )
 })
 
+test('attaches inserted quotation marks directly to an exact sentence target', () => {
+  const text = 'She paused. This is very good. Then she continued.'
+  const paragraphs = [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }]
+
+  for (const mark of ['"', "'"]) {
+    const quoted = executeEditPlan(text, paragraphs, 1, {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'put quotations around the sentence',
+      operations: [
+        {
+          id: `opening-${mark}`,
+          type: 'insert_before',
+          target: { paragraphOrdinal: 1, exactText: 'This is very good.' },
+          text: mark,
+        },
+        {
+          id: `closing-${mark}`,
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, exactText: 'This is very good.' },
+          text: mark,
+        },
+      ],
+    })
+
+    assert.equal(
+      quoted.ok && quoted.afterText,
+      `She paused. ${mark}This is very good.${mark} Then she continued.`,
+    )
+  }
+})
+
 test('deletion consumes one adjacent horizontal separator without touching other text', () => {
   const text = 'Keep this sentence. Remove this sentence.\n\nAnother paragraph.'
   const seeded = applyManualEdit(createDraftSession('delete-chat'), text, {

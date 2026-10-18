@@ -844,10 +844,10 @@ ${insertedParagraph}`,
     if (hasSeparatorBefore && (hasSeparatorAfter || end === range.end)) start -= 1;
     else if (hasSeparatorAfter && start === range.start) end += 1;
   }
-  const adjustedBefore = cleanText.slice(start, end);
   const insertionText = operation.text ?? "";
-  const replacement = operation.type === "replace" ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText) : operation.type === "delete" ? "" : operation.type === "insert_before" ? addBoundarySpacing(cleanText, start, insertionText) : operation.type === "insert_after" ? `${adjustedBefore}${addBoundarySpacing(cleanText, end, insertionText)}` : applyCase(adjustedBefore, operation.caseMode);
+  const replacement = operation.type === "replace" ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText) : operation.type === "delete" ? "" : operation.type === "insert_before" ? addBoundarySpacing(cleanText, start, insertionText) : operation.type === "insert_after" ? addBoundarySpacing(cleanText, end, insertionText) : applyCase(cleanText.slice(start, end), operation.caseMode);
   if (operation.type === "insert_before") end = start;
+  else if (operation.type === "insert_after") start = end;
   return {
     operation,
     start,
@@ -1032,9 +1032,9 @@ function addBoundarySpacing(text, point, insertion) {
   const right = text[point] ?? "";
   if (/[ \t]/.test(left)) result = result.replace(/^[ \t]+/u, "");
   if (/[ \t]/.test(right)) result = result.replace(/[ \t]+$/u, "");
-  if (left && !/\s/.test(left) && !/[([{“‘]/.test(left) && !/^\s/.test(result) && !/^[,.;:!?)}\]”’]/.test(result))
+  if (left && !/\s/.test(left) && !/[([{“‘"']/.test(left) && !/^\s/.test(result) && !/^[,.;:!?)}\]”’"']/.test(result))
     result = ` ${result}`;
-  if (right && !/\s/.test(right) && !/^[,.;:!?)}\]”’]/.test(right) && !/\s$/.test(result) && !/[([{“‘]$/.test(result))
+  if (right && !/\s/.test(right) && !/^[,.;:!?)}\]”’"']/.test(right) && !/\s$/.test(result) && !/[([{“‘"']$/.test(result))
     result = `${result} `;
   return result;
 }

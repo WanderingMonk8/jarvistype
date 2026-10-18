@@ -6,7 +6,7 @@ import type {
 
 import { MAX_DRAFT_CHARACTERS, type DraftSnapshot } from './domain/draft-session'
 import type { EditTarget } from './domain/edit-pipeline'
-import type { GlossaryEntry } from './domain/glossary'
+import { GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX, type GlossaryEntry } from './domain/glossary'
 import { RequestRegistry, type RequestOutcome } from './domain/request-registry'
 import {
   APP_VERSION,
@@ -355,6 +355,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const glossarySaveButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-save]')
   const glossaryCancelButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-cancel]')
   const glossaryUndoButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-undo]')
+  const glossaryFixtureButton = requireElement<HTMLButtonElement>(
+    tab.root,
+    '[data-glossary-performance-fixture]',
+  )
   const glossaryList = requireElement<HTMLElement>(tab.root, '[data-glossary-list]')
   const glossarySearchInput = requireElement<HTMLInputElement>(tab.root, '[data-glossary-search]')
   const floatingGlossarySearchInput = requireElement<HTMLInputElement>(
@@ -695,6 +699,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
     phaseFourStatus.textContent = state.phaseFourMessage
     glossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy
+    const hasGlossaryFixture = state.glossary.some((entry) =>
+      entry.id.startsWith(GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX),
+    )
+    glossaryFixtureButton.textContent = hasGlossaryFixture
+      ? 'Remove Phase 7 test glossary'
+      : 'Load Phase 7 test glossary'
+    glossaryFixtureButton.disabled = state.automatedBusy
     floatingGlossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy
     glossarySaveButton.textContent = editingGlossaryEntryId ? 'Update entry' : 'Add entry'
     floatingGlossarySaveButton.textContent = editingGlossaryEntryId ? 'Update entry' : 'Add entry'
@@ -1421,6 +1432,26 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     render()
   }
 
+  const toggleGlossaryPerformanceFixture = async () => {
+    if (state.automatedBusy) return
+    state.automatedBusy = true
+    state.phaseFourMessage = 'Preparing the Phase 7 test glossaryâ€¦'
+    render()
+    try {
+      const outcome = await performRequest({
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'glossary.performance_fixture.toggle.request',
+        requestId: createRequestId('glossary-performance-fixture'),
+      })
+      if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
+        applyPhaseFourResponse(outcome.value)
+      else state.phaseFourMessage = 'The Phase 7 test glossary could not be changed.'
+    } finally {
+      state.automatedBusy = false
+      render()
+    }
+  }
+
   const finishRecording = async (runId: string, transcript: SpindleSTTTranscript) => {
     const recording = activeRecording
     if (!recording || recording.runId !== runId) return
@@ -1839,6 +1870,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     render()
   }
   const handleUndoGlossaryClick = () => void undoGlossary()
+  const handleGlossaryFixtureClick = () => void toggleGlossaryPerformanceFixture()
   const handleGlossarySearchInput = () => {
     drawerGlossaryQuery = glossarySearchInput.value
     render()
@@ -1958,6 +1990,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   glossarySaveButton.addEventListener('click', handleSaveGlossaryClick)
   glossaryCancelButton.addEventListener('click', handleCancelGlossaryClick)
   glossaryUndoButton.addEventListener('click', handleUndoGlossaryClick)
+  glossaryFixtureButton.addEventListener('click', handleGlossaryFixtureClick)
   glossaryList.addEventListener('click', handleGlossaryListClick)
   glossarySearchInput.addEventListener('input', handleGlossarySearchInput)
   floatingGlossarySaveButton.addEventListener('click', handleFloatingSaveGlossaryClick)
@@ -2019,6 +2052,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     glossarySaveButton.removeEventListener('click', handleSaveGlossaryClick)
     glossaryCancelButton.removeEventListener('click', handleCancelGlossaryClick)
     glossaryUndoButton.removeEventListener('click', handleUndoGlossaryClick)
+    glossaryFixtureButton.removeEventListener('click', handleGlossaryFixtureClick)
     glossaryList.removeEventListener('click', handleGlossaryListClick)
     glossarySearchInput.removeEventListener('input', handleGlossarySearchInput)
     floatingGlossarySaveButton.removeEventListener('click', handleFloatingSaveGlossaryClick)
@@ -2534,6 +2568,7 @@ function shellMarkup(): string {
           <button type="button" data-glossary-save>Add entry</button>
           <button type="button" data-glossary-cancel hidden>Cancel edit</button>
           <button type="button" data-glossary-undo disabled>Undo glossary change</button>
+          <button type="button" data-glossary-performance-fixture>Load Phase 7 test glossary</button>
         </div>
         <div class="jt-glossary" data-glossary-list></div>
       </section>

@@ -3,6 +3,9 @@ var MAX_DRAFT_CHARACTERS = 1e5;
 var MAX_HISTORY_ENTRIES = 200;
 var MAX_RECORDING_SEGMENTS = 200;
 
+// src/domain/glossary.ts
+var GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX = "jt-phase7-fixture-";
+
 // src/domain/request-registry.ts
 var RequestRegistry = class {
   constructor(timeoutMs, onTimeout) {
@@ -601,6 +604,10 @@ function setup(ctx) {
   const glossarySaveButton = requireElement(tab.root, "[data-glossary-save]");
   const glossaryCancelButton = requireElement(tab.root, "[data-glossary-cancel]");
   const glossaryUndoButton = requireElement(tab.root, "[data-glossary-undo]");
+  const glossaryFixtureButton = requireElement(
+    tab.root,
+    "[data-glossary-performance-fixture]"
+  );
   const glossaryList = requireElement(tab.root, "[data-glossary-list]");
   const glossarySearchInput = requireElement(tab.root, "[data-glossary-search]");
   const floatingGlossarySearchInput = requireElement(
@@ -835,6 +842,11 @@ function setup(ctx) {
     }
     phaseFourStatus.textContent = state.phaseFourMessage;
     glossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy;
+    const hasGlossaryFixture = state.glossary.some(
+      (entry) => entry.id.startsWith(GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX)
+    );
+    glossaryFixtureButton.textContent = hasGlossaryFixture ? "Remove Phase 7 test glossary" : "Load Phase 7 test glossary";
+    glossaryFixtureButton.disabled = state.automatedBusy;
     floatingGlossaryUndoButton.disabled = !state.canUndoGlossary || state.automatedBusy;
     glossarySaveButton.textContent = editingGlossaryEntryId ? "Update entry" : "Add entry";
     floatingGlossarySaveButton.textContent = editingGlossaryEntryId ? "Update entry" : "Add entry";
@@ -1441,6 +1453,25 @@ function setup(ctx) {
       applyPhaseFourResponse(outcome.value);
     render();
   };
+  const toggleGlossaryPerformanceFixture = async () => {
+    if (state.automatedBusy) return;
+    state.automatedBusy = true;
+    state.phaseFourMessage = "Preparing the Phase 7 test glossary\xE2\u20AC\xA6";
+    render();
+    try {
+      const outcome = await performRequest({
+        protocolVersion: PROTOCOL_VERSION,
+        type: "glossary.performance_fixture.toggle.request",
+        requestId: createRequestId("glossary-performance-fixture")
+      });
+      if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
+        applyPhaseFourResponse(outcome.value);
+      else state.phaseFourMessage = "The Phase 7 test glossary could not be changed.";
+    } finally {
+      state.automatedBusy = false;
+      render();
+    }
+  };
   const finishRecording = async (runId, transcript) => {
     const recording = activeRecording;
     if (!recording || recording.runId !== runId) return;
@@ -1804,6 +1835,7 @@ function setup(ctx) {
     render();
   };
   const handleUndoGlossaryClick = () => void undoGlossary();
+  const handleGlossaryFixtureClick = () => void toggleGlossaryPerformanceFixture();
   const handleGlossarySearchInput = () => {
     drawerGlossaryQuery = glossarySearchInput.value;
     render();
@@ -1898,6 +1930,7 @@ function setup(ctx) {
   glossarySaveButton.addEventListener("click", handleSaveGlossaryClick);
   glossaryCancelButton.addEventListener("click", handleCancelGlossaryClick);
   glossaryUndoButton.addEventListener("click", handleUndoGlossaryClick);
+  glossaryFixtureButton.addEventListener("click", handleGlossaryFixtureClick);
   glossaryList.addEventListener("click", handleGlossaryListClick);
   glossarySearchInput.addEventListener("input", handleGlossarySearchInput);
   floatingGlossarySaveButton.addEventListener("click", handleFloatingSaveGlossaryClick);
@@ -1957,6 +1990,7 @@ function setup(ctx) {
     glossarySaveButton.removeEventListener("click", handleSaveGlossaryClick);
     glossaryCancelButton.removeEventListener("click", handleCancelGlossaryClick);
     glossaryUndoButton.removeEventListener("click", handleUndoGlossaryClick);
+    glossaryFixtureButton.removeEventListener("click", handleGlossaryFixtureClick);
     glossaryList.removeEventListener("click", handleGlossaryListClick);
     glossarySearchInput.removeEventListener("input", handleGlossarySearchInput);
     floatingGlossarySaveButton.removeEventListener("click", handleFloatingSaveGlossaryClick);
@@ -2418,6 +2452,7 @@ function shellMarkup() {
           <button type="button" data-glossary-save>Add entry</button>
           <button type="button" data-glossary-cancel hidden>Cancel edit</button>
           <button type="button" data-glossary-undo disabled>Undo glossary change</button>
+          <button type="button" data-glossary-performance-fixture>Load Phase 7 test glossary</button>
         </div>
         <div class="jt-glossary" data-glossary-list></div>
       </section>

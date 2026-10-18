@@ -127,6 +127,7 @@ function parseTarget(value) {
     "scope",
     "punctuation",
     "occurrence",
+    "occurrenceFromEnd",
     "relativePosition",
     "relativeToText"
   ]);
@@ -165,6 +166,11 @@ function parseTarget(value) {
     if (!isPositiveInteger(value.occurrence) || value.occurrence > 1e4) return null;
     target.occurrence = value.occurrence;
   }
+  if (value.occurrenceFromEnd !== void 0) {
+    if (!isPositiveInteger(value.occurrenceFromEnd) || value.occurrenceFromEnd > 1e4) return null;
+    target.occurrenceFromEnd = value.occurrenceFromEnd;
+  }
+  if (target.occurrence !== void 0 && target.occurrenceFromEnd !== void 0) return null;
   if (value.relativePosition !== void 0) {
     if (value.relativePosition !== "before" && value.relativePosition !== "after") return null;
     target.relativePosition = value.relativePosition;
@@ -179,7 +185,7 @@ function parseTarget(value) {
   if (hasRelativePosition !== hasRelativeText) return null;
   if (target.punctuation !== void 0 && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
     return null;
-  if (target.punctuation === void 0 && (target.occurrence !== void 0 || hasRelativePosition || hasRelativeText))
+  if (target.punctuation === void 0 && (target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
     return null;
   return Object.keys(target).length ? target : null;
 }
@@ -388,7 +394,7 @@ var COMMAND_GROUPS = [
       ["Move", "Move \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
       [
         "Punctuation targets",
-        "Say \u201Cthe second quote in paragraph 1\u201D or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
+        "Say \u201Cthe second quote in paragraph 1\u201D, \u201Cthe last period in paragraph 1\u201D, or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
       ]
     ]
   },

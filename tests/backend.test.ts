@@ -1352,6 +1352,53 @@ test('reviews and commits a punctuation target resolved relative to a phrase', a
   }
 })
 
+test('resolves “last” punctuation from the end even when the model counts incorrectly', async () => {
+  const userId = 'last-punctuation-user'
+  const chatId = 'last-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'I nod at Toggard and consider the offer. “Yes, we will take the inn. We will stay away for now. We are not ready to confront them”.',
+  )
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the last period in the paragraph.',
+    operations: [
+      {
+        id: 'delete-last-period',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, punctuation: 'period', occurrence: 3 },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'last-punctuation-interpret',
+      operationId: 'last-punctuation-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the last period of this paragraph.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'I nod at Toggard and consider the offer. “Yes, we will take the inn. We will stay away for now. We are not ready to confront them”',
+  )
+  assert.equal(proposal.proposal.plan.operations[0]?.target.occurrence, undefined)
+  assert.equal(proposal.proposal.plan.operations[0]?.target.occurrenceFromEnd, 1)
+})
+
 test('keeps beginning and end insertions inside the targeted paragraph', async () => {
   const userId = 'paragraph-boundary-user'
   const chatId = 'paragraph-boundary-chat'

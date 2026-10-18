@@ -92,7 +92,7 @@ export const COMMAND_GROUPS = [
       ['Move', 'Move “approved” before “pending” in paragraph 1.'],
       [
         'Punctuation targets',
-        'Say “the second quote in paragraph 1” or “the quote after the phrase ‘this is very good’” with move, replace, insert, or delete.',
+        'Say “the second quote in paragraph 1”, “the last period in paragraph 1”, or “the quote after the phrase ‘this is very good’” with move, replace, insert, or delete.',
       ],
     ],
   },

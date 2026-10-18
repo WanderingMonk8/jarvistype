@@ -44,6 +44,7 @@ export interface EditTarget {
   scope?: 'draft'
   punctuation?: PunctuationTarget
   occurrence?: number
+  occurrenceFromEnd?: number
   relativePosition?: 'before' | 'after'
   relativeToText?: string
 }
@@ -247,6 +248,7 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     'scope',
     'punctuation',
     'occurrence',
+    'occurrenceFromEnd',
     'relativePosition',
     'relativeToText',
   ])
@@ -299,6 +301,11 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     if (!isPositiveInteger(value.occurrence) || value.occurrence > 10_000) return null
     target.occurrence = value.occurrence
   }
+  if (value.occurrenceFromEnd !== undefined) {
+    if (!isPositiveInteger(value.occurrenceFromEnd) || value.occurrenceFromEnd > 10_000) return null
+    target.occurrenceFromEnd = value.occurrenceFromEnd
+  }
+  if (target.occurrence !== undefined && target.occurrenceFromEnd !== undefined) return null
   if (value.relativePosition !== undefined) {
     if (value.relativePosition !== 'before' && value.relativePosition !== 'after') return null
     target.relativePosition = value.relativePosition
@@ -324,7 +331,10 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     return null
   if (
     target.punctuation === undefined &&
-    (target.occurrence !== undefined || hasRelativePosition || hasRelativeText)
+    (target.occurrence !== undefined ||
+      target.occurrenceFromEnd !== undefined ||
+      hasRelativePosition ||
+      hasRelativeText)
   )
     return null
   return Object.keys(target).length ? target : null
@@ -666,6 +676,10 @@ function resolvePunctuationTarget(
   if (target.occurrence !== undefined) {
     const match = matches[target.occurrence - 1]
     return match ?? 'punctuation occurrence was not found'
+  }
+  if (target.occurrenceFromEnd !== undefined) {
+    const match = matches[matches.length - target.occurrenceFromEnd]
+    return match ?? 'punctuation occurrence from end was not found'
   }
   if (target.relativeToText !== undefined) {
     return matches[0] ?? 'punctuation target was not found'

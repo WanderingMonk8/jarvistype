@@ -45,6 +45,21 @@ test('accepts a closed supported schema and rejects unknown or oversized operati
     }),
     null,
   )
+  assert.equal(
+    parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'conflicting punctuation selectors',
+      operations: [
+        {
+          id: 'one',
+          type: 'delete',
+          target: { punctuation: 'period', occurrence: 2, occurrenceFromEnd: 1 },
+        },
+      ],
+    }),
+    null,
+  )
 })
 
 test('resolves a unique paragraph-scoped replacement deterministically', () => {
@@ -671,6 +686,20 @@ test('addresses punctuation by occurrence or its position relative to an anchor 
     ],
   })
   assert.equal(moved.ok && moved.afterText, 'Alpha beta, gamma.')
+
+  const lastPeriod = executeEditPlan('One. “Two. Three. Four”.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the last period',
+    operations: [
+      {
+        id: 'delete-last-period',
+        type: 'delete',
+        target: { punctuation: 'period', occurrenceFromEnd: 1 },
+      },
+    ],
+  })
+  assert.equal(lastPeriod.ok && lastPeriod.afterText, 'One. “Two. Three. Four”')
 
   assert.deepEqual(
     executeEditPlan(quoted.cleanText, quoted.paragraphs, 1, {

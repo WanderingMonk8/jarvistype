@@ -2513,9 +2513,9 @@ function shellMarkup(): string {
 
       <section class="jt-shell__card" aria-labelledby="jt-context-title">
         <h3 id="jt-context-title">Context and glossary</h3>
-        <p class="jt-shell__notice">After speech-to-text finishes, JarvisType sends the current recording, at most the two newest selected chat messages, a compact name and terminology list extracted from the selected history, and the glossary to the normalization connection below. Ordinary message normalization does not send the working draft. The model receives text, never audio, and historical context may assist spelling and references but cannot activate dictation commands. Lumiverse STT remains independently managed by the host and receives no added context. Set recent messages to 0 to exclude chat history.</p>
+        <p class="jt-shell__notice">The message count controls how much recent chat history JarvisType scans for names, spellings, terminology, and subject references. After speech-to-text finishes, the normalization connection receives the current recording, only the two newest messages from that selected history, a compact reference list extracted from the full selected history, and the glossary. It receives text, never audio or the working draft. Chat history cannot activate dictation commands; command detection stays local to the current recording. Lumiverse STT remains independently managed by the host and receives no added context. Set the count to 0 to exclude chat history.</p>
         <div class="jt-form-grid">
-          <label>Recent messages (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
+          <label>Messages scanned for references (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>

@@ -846,7 +846,7 @@ ${insertedParagraph}`,
   }
   const adjustedBefore = cleanText.slice(start, end);
   const insertionText = operation.text ?? "";
-  const replacement = operation.type === "replace" ? insertionText : operation.type === "delete" ? "" : operation.type === "insert_before" ? addBoundarySpacing(cleanText, start, insertionText) : operation.type === "insert_after" ? `${adjustedBefore}${addBoundarySpacing(cleanText, end, insertionText)}` : applyCase(adjustedBefore, operation.caseMode);
+  const replacement = operation.type === "replace" ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText) : operation.type === "delete" ? "" : operation.type === "insert_before" ? addBoundarySpacing(cleanText, start, insertionText) : operation.type === "insert_after" ? `${adjustedBefore}${addBoundarySpacing(cleanText, end, insertionText)}` : applyCase(adjustedBefore, operation.caseMode);
   if (operation.type === "insert_before") end = start;
   return {
     operation,
@@ -1037,6 +1037,18 @@ function addBoundarySpacing(text, point, insertion) {
   if (right && !/\s/.test(right) && !/^[,.;:!?)}\]”’]/.test(right) && !/\s$/.test(result) && !/[([{“‘]$/.test(result))
     result = `${result} `;
   return result;
+}
+function capitalizeReplacementAtSentenceOpening(text, start, replacement) {
+  const before = text.slice(0, start);
+  const isSentenceOpening = /(?:^|\n{2,}|[.?!…][”’"']?[ \t]+)[ \t]*[“‘"'([{]*[ \t]*$/u.test(before);
+  if (!isSentenceOpening) return replacement;
+  return replacement.replace(
+    /^([ \t]*[“‘"'([{]*[ \t]*)([\p{Ll}][\p{L}\p{M}'’-]*)/u,
+    (whole, prefix, word) => {
+      if (/\p{Lu}/u.test(word.slice(1))) return whole;
+      return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`;
+    }
+  );
 }
 function executeStructuralPlan(cleanText, paragraphs, operations) {
   const working = paragraphs.map((paragraph) => ({

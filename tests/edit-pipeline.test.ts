@@ -68,6 +68,38 @@ test('resolves a unique paragraph-scoped replacement deterministically', () => {
   assert.equal(first.ok && first.afterText, 'First hiking sentence.\n\nSecond paragraph here.')
 })
 
+test('capitalizes replacement text only when it begins a sentence', () => {
+  const opening = executeEditPlan('Keyboard recording test.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'replace the opening word',
+    operations: [
+      { id: 'opening', type: 'replace', target: { exactText: 'Keyboard' }, text: 'accessible' },
+    ],
+  })
+  assert.equal(opening.ok && opening.afterText, 'Accessible recording test.')
+
+  const middle = executeEditPlan('A keyboard recording test.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'replace a word inside the sentence',
+    operations: [
+      { id: 'middle', type: 'replace', target: { exactText: 'keyboard' }, text: 'accessible' },
+    ],
+  })
+  assert.equal(middle.ok && middle.afterText, 'A accessible recording test.')
+
+  const establishedCase = executeEditPlan('Keyboard recording test.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'preserve established mixed case',
+    operations: [
+      { id: 'mixed-case', type: 'replace', target: { exactText: 'Keyboard' }, text: 'eBay' },
+    ],
+  })
+  assert.equal(establishedCase.ok && establishedCase.afterText, 'eBay recording test.')
+})
+
 test('rejects missing, duplicate, stale, and overlapping targets atomically', () => {
   const duplicate = applyManualEdit(createDraftSession('chat'), 'same same', {
     expectedVersion: 0,

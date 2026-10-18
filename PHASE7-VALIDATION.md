@@ -101,7 +101,7 @@ The hosted test confirmed that embedded instructions to ignore rules, reveal sec
 
 ### Test 5: Keyboard and screen-reader workflow
 
-**Status:** PENDING â€” initial hosted testing found that `Escape` did not close the floating workspace. The keyboard handler now routes `Escape` through the same recording cleanup and launcher-focus restoration path as the labeled **Close** button; hosted retest remains required.
+**Status:** PENDING â€” hosted keyboard testing confirmed `Escape` now closes the floating workspace and restores launcher focus. A subsequent edit check found lowercase replacement text at a sentence opening; edit application now capitalizes ordinary lowercase replacement openings while preserving mid-sentence and established mixed casing. Hosted workflow retest remains required.
 
 1. Complete open, draft edit, record, stop, review, accept/reject, undo/redo, history, commands, glossary, and send using only the keyboard.
 2. Confirm focus is visible, follows dialogs and proposals logically, and returns to the invoking launcher on close.

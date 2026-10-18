@@ -422,7 +422,7 @@ function resolveOperation(
   const insertionText = operation.text ?? ''
   const replacement =
     operation.type === 'replace'
-      ? insertionText
+      ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
       : operation.type === 'delete'
         ? ''
         : operation.type === 'insert_before'
@@ -746,6 +746,24 @@ function addBoundarySpacing(text: string, point: number, insertion: string): str
   )
     result = `${result} `
   return result
+}
+
+function capitalizeReplacementAtSentenceOpening(
+  text: string,
+  start: number,
+  replacement: string,
+): string {
+  const before = text.slice(0, start)
+  const isSentenceOpening = /(?:^|\n{2,}|[.?!…][”’"']?[ \t]+)[ \t]*[“‘"'([{]*[ \t]*$/u.test(before)
+  if (!isSentenceOpening) return replacement
+
+  return replacement.replace(
+    /^([ \t]*[“‘"'([{]*[ \t]*)([\p{Ll}][\p{L}\p{M}'’-]*)/u,
+    (whole, prefix: string, word: string) => {
+      if (/\p{Lu}/u.test(word.slice(1))) return whole
+      return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`
+    },
+  )
 }
 
 function executeStructuralPlan(

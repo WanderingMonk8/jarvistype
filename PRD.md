@@ -288,6 +288,8 @@ The user is not required to dictate a complete message in one session.
 
 **FR-EDIT-024:** Inline `insert before` and `insert after` operations shall add a missing boundary space when both adjacent values are word-like, preserve spacing already supplied by the user, and avoid inserting spaces between punctuation or paired delimiters and their content.
 
+**FR-EDIT-025:** Instructions that add text or punctuation at the beginning or end of an existing paragraph shall remain within that paragraph through `prepend` or `append`. Paragraph-scoped `insert before` and `insert after` shall be reserved for instructions that explicitly create a separate new paragraph.
+
 ### 7.6 Diff and history
 
 **FR-DIFF-001:** JarvisType shall display the complete current draft after every committed addition or edit.

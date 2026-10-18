@@ -1275,6 +1275,56 @@ test('reviews and commits a punctuation target resolved relative to a phrase', a
   }
 })
 
+test('keeps beginning and end insertions inside the targeted paragraph', async () => {
+  const userId = 'paragraph-boundary-user'
+  const chatId = 'paragraph-boundary-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Starting right, not starting over.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Put quotation marks around the paragraph.',
+    operations: [
+      {
+        id: 'opening-quote',
+        type: 'insert_before',
+        target: { paragraphOrdinal: 1 },
+        text: '"',
+      },
+      {
+        id: 'closing-quote',
+        type: 'insert_after',
+        target: { paragraphOrdinal: 1 },
+        text: '"',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'paragraph-boundary-interpret',
+      operationId: 'paragraph-boundary-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotes at the beginning and the end of this paragraph.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, '"Starting right, not starting over."')
+    assert.deepEqual(
+      response.proposal.plan.operations.map((operation) => operation.type),
+      ['prepend', 'append'],
+    )
+  }
+})
+
 test('offers explicit choices for paragraph-resolvable ambiguity without mutating the draft', async () => {
   const userId = 'unsafe-edit-user'
   const chatId = 'unsafe-edit-chat'

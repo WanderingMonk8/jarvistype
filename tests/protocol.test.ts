@@ -147,14 +147,6 @@ test('validates normalization connection and custom-model settings', () => {
   assert.equal(
     isFrontendRequest({
       protocolVersion: PROTOCOL_VERSION,
-      type: 'glossary.performance_fixture.toggle.request',
-      requestId: 'glossary-performance-fixture',
-    }),
-    true,
-  )
-  assert.equal(
-    isFrontendRequest({
-      protocolVersion: PROTOCOL_VERSION,
       type: 'phase4.settings.update.request',
       requestId: 'settings-request',
       settings: {

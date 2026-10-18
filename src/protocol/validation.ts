@@ -105,12 +105,7 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       isNonNegativeInteger(value.expectedVersion)
     )
   }
-  if (
-    value.type === 'phase4.load.request' ||
-    value.type === 'glossary.undo.request' ||
-    value.type === 'glossary.performance_fixture.toggle.request'
-  )
-    return true
+  if (value.type === 'phase4.load.request' || value.type === 'glossary.undo.request') return true
   if (value.type === 'phase4.settings.update.request') return isPhaseFourSettings(value.settings)
   if (value.type === 'glossary.upsert.request') {
     return (

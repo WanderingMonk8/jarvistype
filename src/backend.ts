@@ -24,12 +24,10 @@ import {
   selectRecentContext,
 } from './domain/context'
 import {
-  GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX,
   createGlossaryState,
   deleteGlossaryEntry,
   isGlossaryState,
   learnExplicitSpelling,
-  toggleGlossaryPerformanceFixture,
   undoGlossaryMutation,
   upsertGlossaryEntry,
   type GlossaryState,
@@ -165,8 +163,6 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
       await handleGlossaryDelete(request, context, activeRequest)
     } else if (request.type === 'glossary.undo.request') {
       await handleGlossaryUndo(request, context, activeRequest)
-    } else if (request.type === 'glossary.performance_fixture.toggle.request') {
-      await handleGlossaryPerformanceFixture(request, context, activeRequest)
     } else {
       await handleDraftSend(request, context)
     }
@@ -1521,32 +1517,6 @@ async function handleGlossaryUndo(
       settings,
       mutation.state,
       mutation.changed ? 'Latest glossary change undone.' : 'No glossary change to undo.',
-    )
-}
-
-async function handleGlossaryPerformanceFixture(
-  request: Extract<FrontendRequest, { type: 'glossary.performance_fixture.toggle.request' }>,
-  context: RequestContext,
-  activeRequest: ActiveRequest,
-): Promise<void> {
-  const settings = await loadSettings(context.userId)
-  const before = await loadGlossary(context.userId)
-  const removing = before.entries.some((entry) =>
-    entry.id.startsWith(GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX),
-  )
-  const mutation = toggleGlossaryPerformanceFixture(before)
-  if (mutation.changed) await persistGlossary(context.userId, mutation.state)
-  if (!activeRequest.cancelled)
-    await sendPhaseFourState(
-      request.requestId,
-      context,
-      settings,
-      mutation.state,
-      mutation.changed
-        ? removing
-          ? 'Phase 7 test glossary removed; personal entries were preserved.'
-          : `Phase 7 test glossary loaded to ${mutation.state.entries.length} entries as one undoable change.`
-        : 'The glossary is already at capacity; no test entries were added.',
     )
 }
 

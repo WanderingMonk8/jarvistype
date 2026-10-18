@@ -1,6 +1,5 @@
 export const GLOSSARY_SCHEMA_VERSION = 1 as const
 export const MAX_GLOSSARY_ENTRIES = 500
-export const GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX = 'jt-phase7-fixture-'
 
 export interface GlossaryEntry {
   id: string
@@ -128,51 +127,6 @@ export function undoGlossaryMutation(state: GlossaryState): GlossaryMutation {
     state: { ...state, entries: previous, undoStack: state.undoStack.slice(0, -1) },
     changed: true,
   }
-}
-
-export function toggleGlossaryPerformanceFixture(
-  state: GlossaryState,
-  now = new Date().toISOString(),
-): GlossaryMutation {
-  const hasFixture = state.entries.some((entry) =>
-    entry.id.startsWith(GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX),
-  )
-  if (hasFixture) {
-    return {
-      state: pushUndo(
-        state,
-        state.entries.filter(
-          (entry) => !entry.id.startsWith(GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX),
-        ),
-      ),
-      changed: true,
-    }
-  }
-
-  const keys = new Set(
-    state.entries.flatMap((entry) => [entry.canonical, ...entry.variants]).map(normalizeKey),
-  )
-  const additions: GlossaryEntry[] = []
-  for (let index = 1; state.entries.length + additions.length < MAX_GLOSSARY_ENTRIES; index += 1) {
-    const suffix = index.toString().padStart(4, '0')
-    const canonical = `JTPerfTerm${suffix}`
-    const variant = `jay tee performance term ${suffix}`
-    if (keys.has(normalizeKey(canonical)) || keys.has(normalizeKey(variant))) continue
-    keys.add(normalizeKey(canonical))
-    keys.add(normalizeKey(variant))
-    additions.push({
-      id: `${GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX}${suffix}`,
-      canonical,
-      variants: [variant],
-      hint: `Synthetic Phase 7 glossary performance fixture ${suffix}`,
-      source: 'manual',
-      useCount: index % 8,
-      createdAt: now,
-      updatedAt: now,
-    })
-  }
-  if (!additions.length) return { state, changed: false }
-  return { state: pushUndo(state, [...state.entries, ...additions]), changed: true }
 }
 
 export function isGlossaryState(value: unknown): value is GlossaryState {

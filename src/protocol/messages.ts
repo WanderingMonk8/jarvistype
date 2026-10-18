@@ -180,9 +180,6 @@ export type FrontendRequest =
       type: 'glossary.undo.request'
     })
   | (RequestEnvelope & {
-      type: 'glossary.performance_fixture.toggle.request'
-    })
-  | (RequestEnvelope & {
       type: 'draft.send.request'
       operationId: string
       chatId: string

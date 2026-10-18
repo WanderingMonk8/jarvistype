@@ -1423,7 +1423,6 @@ function editDistanceAtMostOne(left, right) {
 // src/domain/glossary.ts
 var GLOSSARY_SCHEMA_VERSION = 1;
 var MAX_GLOSSARY_ENTRIES = 500;
-var GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX = "jt-phase7-fixture-";
 function createGlossaryState() {
   return { schemaVersion: GLOSSARY_SCHEMA_VERSION, entries: [], undoStack: [] };
 }
@@ -1498,46 +1497,6 @@ function undoGlossaryMutation(state) {
     state: { ...state, entries: previous, undoStack: state.undoStack.slice(0, -1) },
     changed: true
   };
-}
-function toggleGlossaryPerformanceFixture(state, now = (/* @__PURE__ */ new Date()).toISOString()) {
-  const hasFixture = state.entries.some(
-    (entry) => entry.id.startsWith(GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX)
-  );
-  if (hasFixture) {
-    return {
-      state: pushUndo(
-        state,
-        state.entries.filter(
-          (entry) => !entry.id.startsWith(GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX)
-        )
-      ),
-      changed: true
-    };
-  }
-  const keys = new Set(
-    state.entries.flatMap((entry) => [entry.canonical, ...entry.variants]).map(normalizeKey)
-  );
-  const additions = [];
-  for (let index = 1; state.entries.length + additions.length < MAX_GLOSSARY_ENTRIES; index += 1) {
-    const suffix = index.toString().padStart(4, "0");
-    const canonical = `JTPerfTerm${suffix}`;
-    const variant = `jay tee performance term ${suffix}`;
-    if (keys.has(normalizeKey(canonical)) || keys.has(normalizeKey(variant))) continue;
-    keys.add(normalizeKey(canonical));
-    keys.add(normalizeKey(variant));
-    additions.push({
-      id: `${GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX}${suffix}`,
-      canonical,
-      variants: [variant],
-      hint: `Synthetic Phase 7 glossary performance fixture ${suffix}`,
-      source: "manual",
-      useCount: index % 8,
-      createdAt: now,
-      updatedAt: now
-    });
-  }
-  if (!additions.length) return { state, changed: false };
-  return { state: pushUndo(state, [...state.entries, ...additions]), changed: true };
 }
 function isGlossaryState(value) {
   if (!isRecord3(value) || value.schemaVersion !== GLOSSARY_SCHEMA_VERSION) return false;
@@ -1980,8 +1939,7 @@ function isFrontendRequest(value) {
   if (value.type === "draft.recording.undo.request") {
     return isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger3(value.expectedVersion);
   }
-  if (value.type === "phase4.load.request" || value.type === "glossary.undo.request" || value.type === "glossary.performance_fixture.toggle.request")
-    return true;
+  if (value.type === "phase4.load.request" || value.type === "glossary.undo.request") return true;
   if (value.type === "phase4.settings.update.request") return isPhaseFourSettings(value.settings);
   if (value.type === "glossary.upsert.request") {
     return (value.entryId === void 0 || isIdentifier2(value.entryId)) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.length <= 20 && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && typeof value.hint === "string" && value.hint.length <= 500;
@@ -2103,8 +2061,6 @@ async function handleRequest(request, context) {
       await handleGlossaryDelete(request, context, activeRequest);
     } else if (request.type === "glossary.undo.request") {
       await handleGlossaryUndo(request, context, activeRequest);
-    } else if (request.type === "glossary.performance_fixture.toggle.request") {
-      await handleGlossaryPerformanceFixture(request, context, activeRequest);
     } else {
       await handleDraftSend(request, context);
     }
@@ -3178,23 +3134,6 @@ async function handleGlossaryUndo(request, context, activeRequest) {
       settings,
       mutation.state,
       mutation.changed ? "Latest glossary change undone." : "No glossary change to undo."
-    );
-}
-async function handleGlossaryPerformanceFixture(request, context, activeRequest) {
-  const settings = await loadSettings(context.userId);
-  const before = await loadGlossary(context.userId);
-  const removing = before.entries.some(
-    (entry) => entry.id.startsWith(GLOSSARY_PERFORMANCE_FIXTURE_ID_PREFIX)
-  );
-  const mutation = toggleGlossaryPerformanceFixture(before);
-  if (mutation.changed) await persistGlossary(context.userId, mutation.state);
-  if (!activeRequest.cancelled)
-    await sendPhaseFourState(
-      request.requestId,
-      context,
-      settings,
-      mutation.state,
-      mutation.changed ? removing ? "Phase 7 test glossary removed; personal entries were preserved." : `Phase 7 test glossary loaded to ${mutation.state.entries.length} entries as one undoable change.` : "The glossary is already at capacity; no test entries were added."
     );
 }
 async function sendPhaseFourState(requestId, context, settings, glossary, notice) {

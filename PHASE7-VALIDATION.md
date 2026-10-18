@@ -16,7 +16,7 @@ Minimum supported Lumiverse version: `1.2.5`
 | F7-02 | Privacy-safe operational diagnostics     | LOCAL-PASS  | Provider exception text is redacted; user-visible failures carry a bounded diagnostic reference; regression tests reject private draft/provider leakage.                                  |
 | F7-03 | Protocol and structured-edit security    | LOCAL-PASS  | Closed-schema validation rejects malformed, oversized, unknown, overlapping, stale, and incompatible operations.                                                                          |
 | F7-04 | Prompt-injection resistance              | REMOTE-PASS | Hosted Test 4 confirmed instruction-like draft and quoted edit text remain inert data; only the reviewed allowlisted replacement executed after acceptance.                               |
-| F7-05 | Keyboard and assistive-technology access | PENDING     | Hosted keyboard, focus, screen-reader, zoom, contrast, reduced-motion, and repaired whole-workspace scrolling checks remain.                                                              |
+| F7-05 | Keyboard and assistive-technology access | PARTIAL     | Hosted keyboard and focus workflows passed through editing, review, history, commands, glossary, and confirmed send. The user deliberately deferred screen-reader verification.            |
 | F7-06 | Long-state performance budgets           | PENDING     | Maximum draft, context, glossary, and history profiling remains.                                                                                                                          |
 | F7-07 | Supported-platform compatibility         | PENDING     | Hosted desktop and narrow/mobile matrix remains.                                                                                                                                          |
 | F7-08 | Exactly-once safe send under stress      | LOCAL-PASS  | Automated duplicate-operation test proves one append and repeatable acknowledgements; hosted reconnect/delayed-ack checks remain.                                                         |
@@ -101,7 +101,7 @@ The hosted test confirmed that embedded instructions to ignore rules, reveal sec
 
 ### Test 5: Keyboard and screen-reader workflow
 
-**Status:** PENDING â€” hosted keyboard testing confirmed `Escape` now closes the floating workspace and restores launcher focus. A subsequent edit check found lowercase replacement text at a sentence opening; edit application now capitalizes ordinary lowercase replacement openings while preserving mid-sentence and established mixed casing. Hosted workflow retest remains required.
+**Status:** PARTIAL â€” October 17, 2026, version `1.6.7` through commit `0b37965`. Hosted keyboard testing passed launcher focus, `Escape` close and focus restoration, draft editing, paragraph ordinals, forward and reverse navigation, message and edit recording, proposal rejection and acceptance, sentence-opening replacement casing, undo/redo, history, command search, glossary entry/search/undo, contained arrow-key scrolling, confirmation cancellation, exactly-once send, automatic close, and launcher-focus restoration. The user deliberately deferred the screen-reader announcement portion; it is not counted as passed.
 
 1. Complete open, draft edit, record, stop, review, accept/reject, undo/redo, history, commands, glossary, and send using only the keyboard.
 2. Confirm focus is visible, follows dialogs and proposals logically, and returns to the invoking launcher on close.

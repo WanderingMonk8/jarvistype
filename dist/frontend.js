@@ -1820,7 +1820,9 @@ function setup(ctx) {
     if (eventTarget instanceof HTMLTextAreaElement || eventTarget instanceof HTMLSelectElement || eventTarget instanceof HTMLElement && eventTarget.isContentEditable) {
       return;
     }
-    const nestedPanel = eventTarget instanceof Element ? eventTarget.closest("[data-command-panel], .jt-floating__tools details") : null;
+    const nestedPanel = eventTarget instanceof Element ? eventTarget.closest(
+      "[data-paragraph-list], [data-command-panel], .jt-floating__tools details"
+    ) : null;
     const scrollTarget = nestedPanel && nestedPanel.scrollHeight > nestedPanel.clientHeight ? nestedPanel : floatingWidget.root;
     const pageDistance = Math.max(48, Math.floor(scrollTarget.clientHeight * 0.8));
     const distance = event.key === "ArrowUp" ? -48 : event.key === "ArrowDown" ? 48 : event.key === "PageUp" ? -pageDistance : pageDistance;

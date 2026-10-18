@@ -110,7 +110,7 @@ The hosted test confirmed that embedded instructions to ignore rules, reveal sec
 
 ### Test 6: Responsive, zoom, contrast, and motion
 
-**Status:** PENDING
+**Status:** PENDING â€” desktop 200% zoom and narrow/mobile layout checks passed on October 18, 2026. Long-draft testing found arrow and page keys scrolled the whole workspace instead of the focused numbered-paragraph region; keyboard routing now includes that bounded region and awaits hosted retest.
 
 1. Test desktop and narrow/mobile layouts at default size, 200% zoom, and increased font scaling.
 2. Confirm every proposal action remains reachable by scrolling and sticky review actions do not obscure content.

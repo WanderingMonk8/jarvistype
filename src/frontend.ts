@@ -1867,7 +1867,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
     const nestedPanel =
       eventTarget instanceof Element
-        ? eventTarget.closest<HTMLElement>('[data-command-panel], .jt-floating__tools details')
+        ? eventTarget.closest<HTMLElement>(
+            '[data-paragraph-list], [data-command-panel], .jt-floating__tools details',
+          )
         : null
     const scrollTarget =
       nestedPanel && nestedPanel.scrollHeight > nestedPanel.clientHeight

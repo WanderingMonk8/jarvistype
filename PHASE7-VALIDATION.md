@@ -19,8 +19,8 @@ Minimum supported Lumiverse version: `1.2.5`
 | F7-05 | Keyboard and assistive-technology access | PARTIAL     | Hosted keyboard and focus workflows passed through editing, review, history, commands, glossary, and confirmed send. The user deliberately deferred screen-reader verification.           |
 | F7-06 | Long-state performance budgets           | REMOTE-PASS | Hosted maximum-state testing passed for a near-100,000-character draft, 500 glossary entries, 50 retained history entries, and maximum bounded context.                                   |
 | F7-07 | Supported-platform compatibility         | PENDING     | Hosted desktop and narrow/mobile matrix remains.                                                                                                                                          |
-| F7-08 | Exactly-once safe send under stress      | LOCAL-PASS  | Automated duplicate-operation test proves one append and repeatable acknowledgements; hosted reconnect/delayed-ack checks remain.                                                         |
-| F7-09 | Complete package quality gate            | LOCAL-PASS  | Formatting, lint, strict typing, 106 tests, backend/frontend builds, and package validation pass.                                                                                         |
+| F7-08 | Exactly-once safe send under stress      | PASS        | Hosted normal and rapid-repeat confirmation paths produced one message; deterministic delayed-ack concurrency proves one append and repeatable acknowledgements.                          |
+| F7-09 | Complete package quality gate            | LOCAL-PASS  | Formatting, lint, strict typing, 107 tests, backend/frontend builds, and package validation pass.                                                                                         |
 
 ## Privacy and security decisions
 
@@ -128,7 +128,7 @@ The hosted test confirmed that embedded instructions to ignore rules, reveal sec
 
 ### Test 8: Exactly-once send and compatibility matrix
 
-**Status:** PENDING
+**Status:** IN PROGRESS â€” hosted desktop and mobile end-to-end capture, review, editing, send, automatic close, and cleanup passed on October 18, 2026. Rapid repeated **Confirm & Send** activation remained gated by Lumiverse confirmation and could not create multiple sends. The modal safely prevented a chat switch during confirmation. A manual reconnect race was deemed impractical because acknowledgement normally completes before network state can be changed; deterministic injection now holds acknowledgement open while a duplicate request arrives and verifies one append with repeatable successful acknowledgements.
 
 1. On each supported desktop/browser/mobile target, confirm microphone capture, final transcript handling, review, editing, and send.
 2. Double-activate **Confirm & Send**, switch chats during confirmation, delay acknowledgement, and reconnect during send.

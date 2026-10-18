@@ -18,6 +18,7 @@ const generationRequests: Array<{
 let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
+let appendAcknowledgementGate: Promise<void> | null = null
 let generationReturnsRawTranscript = false
 let generationNormalizedText: string | null = null
 let generationCommandDecisions: unknown[] = []
@@ -74,18 +75,19 @@ const spindleMock = {
   },
   chat: {
     getMessages: () => Promise.resolve(chatMessages),
-    appendMessage: (
+    appendMessage: async (
       chatId: string,
       message: { content: string },
       options?: { triggerGeneration?: boolean },
     ) => {
-      if (appendShouldFail) return Promise.reject(new Error('provider failure'))
+      if (appendShouldFail) throw new Error('provider failure')
       appended.push({
         chatId,
         content: message.content,
         triggerGeneration: options?.triggerGeneration === true,
       })
-      return Promise.resolve({ id: `message-${appended.length}`, generationId: 'generation-1' })
+      if (appendAcknowledgementGate) await appendAcknowledgementGate
+      return { id: `message-${appended.length}`, generationId: 'generation-1' }
     },
   },
   generate: {
@@ -135,6 +137,7 @@ test.beforeEach(() => {
   generationRequests.length = 0
   activeChatId = 'chat-default'
   appendShouldFail = false
+  appendAcknowledgementGate = null
   generationReturnsRawTranscript = false
   generationNormalizedText = null
   generationCommandDecisions = []
@@ -380,6 +383,36 @@ test('sends exactly clean text once, triggers generation, and clears only after 
     content: 'First\n\nSecond',
     triggerGeneration: true,
   })
+  assert.equal(
+    responses.filter((response) => response.payload.type === 'draft.send.response').length,
+    2,
+  )
+})
+
+test('coalesces a duplicate send while the first acknowledgement is delayed', async () => {
+  const userId = 'delayed-send-user'
+  const chatId = 'delayed-send-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Delayed acknowledgement marker')
+  responses.length = 0
+
+  let releaseAcknowledgement: () => void = () => undefined
+  appendAcknowledgementGate = new Promise<void>((resolve) => {
+    releaseAcknowledgement = resolve
+  })
+  const request = sendRequest(chatId, 'delayed-send-operation')
+  await dispatch(request, userId)
+  assert.equal(appended.length, 1)
+  assert.equal(responses.length, 0)
+
+  await dispatch({ ...request, requestId: 'delayed-send-retry' }, userId)
+  assert.equal(appended.length, 1)
+  assert.equal(responses.length, 0)
+
+  releaseAcknowledgement()
+  await settleAsyncWork()
+  await settleAsyncWork()
+  assert.equal(appended.length, 1)
   assert.equal(
     responses.filter((response) => response.payload.type === 'draft.send.response').length,
     2,

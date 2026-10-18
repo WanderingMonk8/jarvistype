@@ -45,15 +45,15 @@ Message recording and editing use separate controls so JarvisType does not have 
 
 ## Context-aware transcription
 
-JarvisType will use the five most recent eligible chat messages by default. Users will be able to change this number, including disabling chat context entirely. A separate hard size limit will keep requests bounded.
+By default, JarvisType scans the five most recent eligible chat messages for names, spelling, specialized terminology, and subject references. The user can select between zero and twenty messages; zero excludes chat history entirely. From that selected history, only the two newest messages and a compact extracted reference list are supplied to contextual normalization, with separate hard size limits keeping the request bounded.
 
-Each transcription can also use:
+Each contextual normalization request can also use:
 
-- The complete unsent draft for continuity.
+- The current recording and up to two recent chat messages for continuity.
 - The user's personal spelling glossary.
 - Preferred capitalization, spelling, and hyphenation.
 
-Context is intended to correct recognition errors, not rewrite or paraphrase the user's message.
+The working draft is not sent. Historical context is intended to correct recognition errors and resolve references, not rewrite the message or activate spoken commands.
 
 ## Explicit spelling and word references
 

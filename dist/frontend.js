@@ -410,7 +410,7 @@ var COMMAND_GROUPS = [
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
       [
         "As in reference",
-        "Say \u201CReplace \u2018can the worker\u2019 with \u2018Ken the worker.\u2019 Ken, as in Barbie and Ken,\u201D or \u201CReplace \u2018I feel\u2019 with \u2018I filled,\u2019 as in filling something up.\u201D The intended word must occur immediately before \u201Cas in\u201D and repeat afterward exactly or as a clear inflection."
+        "Use a qualified \u201Cas in\u201D reference anywhere you dictate new edit text: replace, insert before or after, prepend, or append. For example, \u201CPrepend \u2018I nod,\u2019 as in nodding one\u2019s head, to the first sentence.\u201D The intended word must occur immediately before \u201Cas in\u201D and repeat afterward exactly or as a clear inflection; otherwise the wording remains literal."
       ],
       [
         "Multiple changes",

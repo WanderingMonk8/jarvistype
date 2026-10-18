@@ -1818,6 +1818,79 @@ test('accepts a clear inflection after as in as an explanatory reference', async
   }
 })
 
+test('removes qualified as in references from every text-bearing edit operation', async () => {
+  const userId = 'all-edit-payload-references-user'
+  const chatId = 'all-edit-payload-references-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'Replace source.\n\nPrepend base.\n\nAppend base.\n\nInsert before base.\n\nInsert after base.',
+  )
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Apply every requested phrase while omitting explanatory references.',
+    operations: [
+      {
+        id: 'reference-replace',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'source' },
+        text: 'filled, as in filling something up',
+      },
+      {
+        id: 'reference-prepend',
+        type: 'prepend',
+        target: { paragraphOrdinal: 2 },
+        text: "I nod, as in nodding one's head",
+      },
+      {
+        id: 'reference-append',
+        type: 'append',
+        target: { paragraphOrdinal: 3 },
+        text: 'I agree, as in agreeing to proceed',
+      },
+      {
+        id: 'reference-insert-before',
+        type: 'insert_before',
+        target: { paragraphOrdinal: 4, exactText: 'before' },
+        text: 'walk, as in walking',
+      },
+      {
+        id: 'reference-insert-after',
+        type: 'insert_after',
+        target: { paragraphOrdinal: 5, exactText: 'after' },
+        text: 'pause, as in pausing',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'all-edit-payload-references-interpret',
+      operationId: 'all-edit-payload-references-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        "Replace source with filled, as in filling something up; prepend I nod, as in nodding one's head; append I agree, as in agreeing to proceed; insert walk, as in walking, before before; and insert pause, as in pausing, after after.",
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(
+      response.proposal.afterText,
+      'Replace filled.\n\nI nod Prepend base.\n\nAppend base. I agree\n\nInsert walk before base.\n\nInsert after pause base.',
+    )
+    assert.equal(response.proposal.afterText.includes('as in'), false)
+  }
+})
+
 test('allows as in when it is explicit replacement text rather than a reference cue', async () => {
   const userId = 'literal-as-in-edit-user'
   const chatId = 'literal-as-in-edit-chat'

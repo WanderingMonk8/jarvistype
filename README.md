@@ -65,7 +65,7 @@ Referential corrections also work for ordinary words, homophones, and near-homop
 
 > In the sentence where I say "can the worker," I meant "Ken the worker." Ken, as in Barbie and Ken.
 
-JarvisType treats `as in` as a reference cue only when the intended token occurs immediately before the cue and either repeats afterward, as `Ken` does in the example, or appears in an unmistakably related inflection such as `filled, as in filling something up`. Otherwise, `as in` remains literal wording. A qualified explanation identifies the intended spelling or meaning, applies only the requested replacement, and is omitted from the draft. One-time references remain local to the current session unless the user explicitly asks to remember them.
+JarvisType treats `as in` as a reference cue only when the intended token occurs immediately before the cue and either repeats afterward, as `Ken` does in the example, or appears in an unmistakably related inflection such as `filled, as in filling something up`. Otherwise, `as in` remains literal wording. A qualified explanation may disambiguate newly dictated text in a replace, insert, prepend, or append operation and is omitted from the draft. One-time references remain local to the current session unless the user explicitly asks to remember them.
 
 ## Conversational editing
 

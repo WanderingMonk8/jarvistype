@@ -360,7 +360,7 @@ function resolveOperation(
       operation,
       start: point,
       end: point,
-      replacement: operation.text ?? '',
+      replacement: addBoundarySpacing(cleanText, point, operation.text ?? ''),
       paragraphOrdinal: paragraph.ordinal,
     }
   }

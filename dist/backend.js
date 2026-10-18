@@ -791,7 +791,7 @@ function resolveOperation(cleanText, paragraphs, operation) {
       operation,
       start: point,
       end: point,
-      replacement: operation.text ?? "",
+      replacement: addBoundarySpacing(cleanText, point, operation.text ?? ""),
       paragraphOrdinal: paragraph.ordinal
     };
   }
@@ -2395,9 +2395,11 @@ async function handleEditInterpretation(request, context, activeRequest) {
     if (activeRequest.cancelled) return { error: "cancelled", session };
     if (!interpretedPlan) return { error: "interpretation", session };
     const plan = normalizeEditInputPayloads(
-      enforceAuthoritativeEditSpellings(
-        normalizeParagraphBoundaryInsertions(interpretedPlan, request.instructionTranscript),
-        spelling.learningCandidates
+      stripQualifiedAsInEditPayloads(
+        enforceAuthoritativeEditSpellings(
+          normalizeParagraphBoundaryInsertions(interpretedPlan, request.instructionTranscript),
+          spelling.learningCandidates
+        )
       ),
       glossary
     );
@@ -2793,20 +2795,23 @@ function hasQualifiedAsInReference(input) {
     const candidate = prefix.match(/([\p{L}\p{N}][\p{L}\p{N}'’-]*)$/u)?.[1];
     if (!candidate) continue;
     const suffix = input.slice((match.index ?? 0) + match[0].length);
-    const repeatedCandidate = new RegExp(
-      `(?:^|[^\\p{L}\\p{N}])${escapeRegularExpression(candidate)}(?=$|[^\\p{L}\\p{N}])`,
-      "iu"
-    );
-    if (repeatedCandidate.test(suffix)) return true;
-    const relatedTokens = suffix.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.slice(0, 12) ?? [];
-    if (relatedTokens.some((token) => sharesInflectionRoot(candidate, token))) return true;
+    if (hasRepeatedOrInflectedReference(candidate, suffix)) return true;
   }
   return false;
+}
+function hasRepeatedOrInflectedReference(candidate, suffix) {
+  const repeatedCandidate = new RegExp(
+    `(?:^|[^\\p{L}\\p{N}])${escapeRegularExpression(candidate)}(?=$|[^\\p{L}\\p{N}])`,
+    "iu"
+  );
+  if (repeatedCandidate.test(suffix)) return true;
+  const relatedTokens = suffix.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.slice(0, 12) ?? [];
+  return relatedTokens.some((token) => sharesInflectionRoot(candidate, token));
 }
 function sharesInflectionRoot(left, right) {
   if (left.toLocaleLowerCase() === right.toLocaleLowerCase()) return true;
   const leftRoots = inflectionRoots(left);
-  return inflectionRoots(right).some((root) => root.length >= 4 && leftRoots.includes(root));
+  return inflectionRoots(right).some((root) => root.length >= 3 && leftRoots.includes(root));
 }
 function inflectionRoots(value) {
   const word = value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -2880,6 +2885,24 @@ function enforceAuthoritativeEditSpellings(plan, candidates) {
         text = text.replace(inlinePattern, candidate.canonical);
       }
       return text === operation.text ? operation : { ...operation, text };
+    })
+  };
+}
+function stripQualifiedAsInEditPayloads(plan) {
+  return {
+    ...plan,
+    operations: plan.operations.map((operation) => {
+      if (typeof operation.text !== "string") return operation;
+      const match = [...operation.text.matchAll(/\bas\s+in\b/giu)].find((candidate) => {
+        const prefix = operation.text.slice(0, candidate.index).replace(/[\s,;:]+$/u, "");
+        const intended = prefix.match(/([\p{L}\p{N}][\p{L}\p{N}'’-]*)$/u)?.[1];
+        if (!intended) return false;
+        const suffix = operation.text.slice((candidate.index ?? 0) + candidate[0].length);
+        return hasRepeatedOrInflectedReference(intended, suffix);
+      });
+      if (!match) return operation;
+      const text = operation.text.slice(0, match.index).replace(/[\s,;:]+$/u, "").trimEnd();
+      return text && text !== operation.text ? { ...operation, text } : operation;
     })
   };
 }

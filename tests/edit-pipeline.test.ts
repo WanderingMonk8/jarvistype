@@ -154,6 +154,22 @@ test('supports insert, append, prepend, delete, and casing through the same pipe
   )
 })
 
+test('adds missing word boundaries for prepend and append operations', () => {
+  const text = 'Existing sentence.'
+  const paragraphs = [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'surround the paragraph with words',
+    operations: [
+      { id: 'prepend-word', type: 'prepend', target: { paragraphOrdinal: 1 }, text: 'Before' },
+      { id: 'append-word', type: 'append', target: { paragraphOrdinal: 1 }, text: 'After' },
+    ],
+  })
+
+  assert.equal(result.ok && result.afterText, 'Before Existing sentence. After')
+})
+
 test('adds deterministic paragraph boundaries for paragraph-targeted insertions', () => {
   const session = fixture()
   const after = executeEditPlan(session.cleanText, session.paragraphs, 1, {

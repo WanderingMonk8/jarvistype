@@ -114,7 +114,7 @@ export const COMMAND_GROUPS = [
       ['Spelled form', 'Replace Kalora with capitalized C-A-E-L-O-R-A.'],
       [
         'As in reference',
-        'Say “Replace ‘can the worker’ with ‘Ken the worker.’ Ken, as in Barbie and Ken,” or “Replace ‘I feel’ with ‘I filled,’ as in filling something up.” The intended word must occur immediately before “as in” and repeat afterward exactly or as a clear inflection.',
+        'Use a qualified “as in” reference anywhere you dictate new edit text: replace, insert before or after, prepend, or append. For example, “Prepend ‘I nod,’ as in nodding one’s head, to the first sentence.” The intended word must occur immediately before “as in” and repeat afterward exactly or as a clear inflection; otherwise the wording remains literal.',
       ],
       [
         'Multiple changes',

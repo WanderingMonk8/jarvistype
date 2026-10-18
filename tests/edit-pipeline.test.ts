@@ -162,12 +162,35 @@ test('adds missing word boundaries for prepend and append operations', () => {
     draftVersion: 1,
     explanation: 'surround the paragraph with words',
     operations: [
-      { id: 'prepend-word', type: 'prepend', target: { paragraphOrdinal: 1 }, text: 'Before' },
-      { id: 'append-word', type: 'append', target: { paragraphOrdinal: 1 }, text: 'After' },
+      { id: 'prepend-word', type: 'prepend', target: { paragraphOrdinal: 1 }, text: 'before' },
+      { id: 'append-word', type: 'append', target: { paragraphOrdinal: 1 }, text: 'after' },
     ],
   })
 
   assert.equal(result.ok && result.afterText, 'Before Existing sentence. After')
+
+  const continuation = executeEditPlan(
+    'Existing fragment',
+    [{ id: 'fragment', ordinal: 1, lineIndex: 0, text: 'Existing fragment' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'continue the current sentence',
+      operations: [
+        {
+          id: 'append-continuation',
+          type: 'append',
+          target: { paragraphOrdinal: 1 },
+          text: 'without capitalization',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    continuation.ok && continuation.afterText,
+    'Existing fragment without capitalization',
+  )
 })
 
 test('adds deterministic paragraph boundaries for paragraph-targeted insertions', () => {

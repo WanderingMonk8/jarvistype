@@ -787,11 +787,16 @@ function resolveOperation(cleanText, paragraphs, operation) {
   if (operation.type === "append" || operation.type === "prepend") {
     if (!paragraph) return `${operation.type} requires one paragraph target`;
     const point = operation.type === "append" ? range.end : range.start;
+    const insertionText2 = capitalizeReplacementAtSentenceOpening(
+      cleanText,
+      point,
+      operation.text ?? ""
+    );
     return {
       operation,
       start: point,
       end: point,
-      replacement: addBoundarySpacing(cleanText, point, operation.text ?? ""),
+      replacement: addBoundarySpacing(cleanText, point, insertionText2),
       paragraphOrdinal: paragraph.ordinal
     };
   }
@@ -826,15 +831,20 @@ function resolveOperation(cleanText, paragraphs, operation) {
     const insertedParagraph = (operation.text ?? "").trim();
     if (!insertedParagraph) return "paragraph insertion text is empty";
     const point = operation.type === "insert_before" ? range.start : range.end;
+    const capitalizedParagraph = capitalizeReplacementAtSentenceOpening(
+      cleanText,
+      point,
+      insertedParagraph
+    );
     return {
       operation,
       start: point,
       end: point,
-      replacement: operation.type === "insert_before" ? `${insertedParagraph}
+      replacement: operation.type === "insert_before" ? `${capitalizedParagraph}
 
 ` : `
 
-${insertedParagraph}`,
+${capitalizedParagraph}`,
       paragraphOrdinal: paragraph.ordinal
     };
   }
@@ -845,7 +855,15 @@ ${insertedParagraph}`,
     else if (hasSeparatorAfter && start === range.start) end += 1;
   }
   const insertionText = operation.text ?? "";
-  const replacement = operation.type === "replace" ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText) : operation.type === "delete" ? "" : operation.type === "insert_before" ? addBoundarySpacing(cleanText, start, insertionText) : operation.type === "insert_after" ? addBoundarySpacing(cleanText, end, insertionText) : applyCase(cleanText.slice(start, end), operation.caseMode);
+  const replacement = operation.type === "replace" ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText) : operation.type === "delete" ? "" : operation.type === "insert_before" ? addBoundarySpacing(
+    cleanText,
+    start,
+    capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
+  ) : operation.type === "insert_after" ? addBoundarySpacing(
+    cleanText,
+    end,
+    capitalizeReplacementAtSentenceOpening(cleanText, end, insertionText)
+  ) : applyCase(cleanText.slice(start, end), operation.caseMode);
   if (operation.type === "insert_before") end = start;
   else if (operation.type === "insert_after") start = end;
   return {
@@ -1040,7 +1058,9 @@ function addBoundarySpacing(text, point, insertion) {
 }
 function capitalizeReplacementAtSentenceOpening(text, start, replacement) {
   const before = text.slice(0, start);
-  const isSentenceOpening = /(?:^|\n{2,}|[.?!…][”’"']?[ \t]+)[ \t]*[“‘"'([{]*[ \t]*$/u.test(before);
+  const isSentenceOpening = /(?:^|\n{2,}|[.?!…][”’"']?(?:[ \t]+|$))[ \t]*[“‘"'([{]*[ \t]*$/u.test(
+    before
+  );
   if (!isSentenceOpening) return replacement;
   return replacement.replace(
     /^([ \t]*[“‘"'([{]*[ \t]*)([\p{Ll}][\p{L}\p{M}'’-]*)/u,

@@ -120,7 +120,7 @@ The hosted test confirmed that embedded instructions to ignore rules, reveal sec
 
 ### Test 7: Maximum-state performance
 
-**Status:** PENDING
+**Status:** PENDING â€” near-maximum draft launch, typing, rendering, scrolling, recovery, size enforcement, cancellation, close, and unload checks passed on October 18, 2026. Testing identified full numbered-paragraph DOM reconstruction on every keystroke as avoidable work; the preview now refreshes 200 ms after a typing pause, no later than 750 ms during continuous typing, and immediately on editor blur. Hosted retest and remaining maximum context, glossary, and history checks remain.
 
 1. Exercise a near-100,000-character draft with many paragraphs, maximum bounded context, a large glossary, and full retained history.
 2. Measure launcher response, typing, draft mutation, diff creation, context construction, rendering, cancellation, and unload behavior separately from provider latency.

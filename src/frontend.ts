@@ -456,6 +456,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   let mutationDrainPromise: Promise<void> | null = null
   let editGroupId: string | null = null
   let editGroupTimer: ReturnType<typeof setTimeout> | null = null
+  let paragraphRenderTimer: ReturnType<typeof setTimeout> | null = null
+  let paragraphRenderDeadline: ReturnType<typeof setTimeout> | null = null
+  let renderedParagraphText: string | null = null
   let sendFlowActive = false
   let activeRecording: ActiveRecording | null = null
   let recordingTimer: ReturnType<typeof setInterval> | null = null
@@ -499,6 +502,23 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.voicePhase === 'committing' ||
     state.voicePhase === 'review'
 
+  const flushParagraphPreview = () => {
+    if (paragraphRenderTimer) clearTimeout(paragraphRenderTimer)
+    if (paragraphRenderDeadline) clearTimeout(paragraphRenderDeadline)
+    paragraphRenderTimer = null
+    paragraphRenderDeadline = null
+    if (!alive || renderedParagraphText === desiredText) return
+    renderParagraphs(paragraphList, desiredText)
+    renderedParagraphText = desiredText
+  }
+
+  const scheduleParagraphPreview = () => {
+    if (renderedParagraphText === desiredText) return
+    if (paragraphRenderTimer) clearTimeout(paragraphRenderTimer)
+    paragraphRenderTimer = setTimeout(flushParagraphPreview, 200)
+    paragraphRenderDeadline ??= setTimeout(flushParagraphPreview, 750)
+  }
+
   const render = () => {
     backendStatus.textContent =
       state.backendState === 'ready'
@@ -537,7 +557,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     draftMeta.textContent = state.snapshot
       ? `Version ${state.snapshot.draftVersion} · ${desiredText.length.toLocaleString()} / ${MAX_DRAFT_CHARACTERS.toLocaleString()} characters${state.saving ? ' · Saving…' : ' · Saved'}`
       : 'Draft not loaded'
-    renderParagraphs(paragraphList, desiredText)
+    scheduleParagraphPreview()
     renderDiff(state.snapshot, diffPanel, diffParagraphs, diffRemoved, diffAdded)
     renderHistory(historyList, state.snapshot)
     historyPanel.hidden = !state.historyExpanded
@@ -947,6 +967,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const handleUndo = async () => {
     if (!state.snapshot || state.automatedBusy || state.sending) return
+    flushParagraphPreview()
     await drainMutations()
     if (!state.snapshot.canUndo || desiredText !== state.snapshot.cleanText) return
     state.automatedBusy = true
@@ -977,6 +998,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const handleRedo = async () => {
     if (!state.snapshot || state.automatedBusy || state.sending) return
+    flushParagraphPreview()
     await drainMutations()
     if (!state.snapshot.canRedo || desiredText !== state.snapshot.cleanText) return
     state.automatedBusy = true
@@ -1555,6 +1577,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
 
   const handleRecording = async (mode: 'message' | 'edit') => {
+    flushParagraphPreview()
     if (state.voicePhase === 'starting' || state.voicePhase === 'recording') {
       if (activeRecording?.mode === mode) stopActiveRecording()
       return
@@ -1627,6 +1650,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const handleSend = async () => {
     if (sendFlowActive || !state.snapshot) return
+    flushParagraphPreview()
     sendFlowActive = true
     render()
     try {
@@ -1721,6 +1745,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     void refreshHostState()
   }
   const handleChatSwitch = () => {
+    flushParagraphPreview()
     cancelActiveRecording('Recording cancelled because the active chat changed.')
     if (state.pendingProposal) rejectNormalizationProposal()
     void refreshHostState()
@@ -1737,6 +1762,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     window.setTimeout(() => editor.focus(), 0)
   }
   function closeFloatingComposer(): void {
+    flushParagraphPreview()
     if (activeRecording) {
       cancelActiveRecording('Recording cancelled because the floating composer was closed.')
     }
@@ -1911,6 +1937,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   retryButton.addEventListener('click', handleRetry)
   switchDraftButton.addEventListener('click', handleSwitchDraft)
   editor.addEventListener('input', handleEditorInput)
+  editor.addEventListener('blur', flushParagraphPreview)
   recordButton.addEventListener('click', handleRecordClick)
   recordEditButton.addEventListener('click', handleRecordEditClick)
   cancelEditRecordingButton.addEventListener('click', handleCancelEditRecordingClick)
@@ -1957,6 +1984,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     cancelActiveRecording('Recording cancelled during extension cleanup.')
     clearRecordingTimers()
     if (editGroupTimer) clearTimeout(editGroupTimer)
+    if (paragraphRenderTimer) clearTimeout(paragraphRenderTimer)
+    if (paragraphRenderDeadline) clearTimeout(paragraphRenderDeadline)
     registry.cancelAll()
     normalizationRegistry.cancelAll()
     sendRegistry.cancelAll()
@@ -1969,6 +1998,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     retryButton.removeEventListener('click', handleRetry)
     switchDraftButton.removeEventListener('click', handleSwitchDraft)
     editor.removeEventListener('input', handleEditorInput)
+    editor.removeEventListener('blur', flushParagraphPreview)
     recordButton.removeEventListener('click', handleRecordClick)
     recordEditButton.removeEventListener('click', handleRecordEditClick)
     cancelEditRecordingButton.removeEventListener('click', handleCancelEditRecordingClick)

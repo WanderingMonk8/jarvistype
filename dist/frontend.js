@@ -696,6 +696,9 @@ function setup(ctx) {
   let mutationDrainPromise = null;
   let editGroupId = null;
   let editGroupTimer = null;
+  let paragraphRenderTimer = null;
+  let paragraphRenderDeadline = null;
+  let renderedParagraphText = null;
   let sendFlowActive = false;
   let activeRecording = null;
   let recordingTimer = null;
@@ -725,6 +728,21 @@ function setup(ctx) {
   );
   const hasNativeStt = () => Boolean((ctx.host.capabilities["speech-to-text-v1"] ?? 0) >= 1 && ctx.stt);
   const voiceBusy = () => state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
+  const flushParagraphPreview = () => {
+    if (paragraphRenderTimer) clearTimeout(paragraphRenderTimer);
+    if (paragraphRenderDeadline) clearTimeout(paragraphRenderDeadline);
+    paragraphRenderTimer = null;
+    paragraphRenderDeadline = null;
+    if (!alive || renderedParagraphText === desiredText) return;
+    renderParagraphs(paragraphList, desiredText);
+    renderedParagraphText = desiredText;
+  };
+  const scheduleParagraphPreview = () => {
+    if (renderedParagraphText === desiredText) return;
+    if (paragraphRenderTimer) clearTimeout(paragraphRenderTimer);
+    paragraphRenderTimer = setTimeout(flushParagraphPreview, 200);
+    paragraphRenderDeadline ??= setTimeout(flushParagraphPreview, 750);
+  };
   const render = () => {
     backendStatus.textContent = state.backendState === "ready" ? "Ready" : state.backendState === "connecting" ? "Connecting\u2026" : "Unavailable";
     backendStatus.dataset.state = state.backendState;
@@ -741,7 +759,7 @@ function setup(ctx) {
     const editorEnabled = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.automatedBusy && !state.sending && !voiceBusy();
     editor.disabled = !editorEnabled;
     draftMeta.textContent = state.snapshot ? `Version ${state.snapshot.draftVersion} \xB7 ${desiredText.length.toLocaleString()} / ${MAX_DRAFT_CHARACTERS.toLocaleString()} characters${state.saving ? " \xB7 Saving\u2026" : " \xB7 Saved"}` : "Draft not loaded";
-    renderParagraphs(paragraphList, desiredText);
+    scheduleParagraphPreview();
     renderDiff(state.snapshot, diffPanel, diffParagraphs, diffRemoved, diffAdded);
     renderHistory(historyList, state.snapshot);
     historyPanel.hidden = !state.historyExpanded;
@@ -1047,6 +1065,7 @@ function setup(ctx) {
   };
   const handleUndo = async () => {
     if (!state.snapshot || state.automatedBusy || state.sending) return;
+    flushParagraphPreview();
     await drainMutations();
     if (!state.snapshot.canUndo || desiredText !== state.snapshot.cleanText) return;
     state.automatedBusy = true;
@@ -1075,6 +1094,7 @@ function setup(ctx) {
   };
   const handleRedo = async () => {
     if (!state.snapshot || state.automatedBusy || state.sending) return;
+    flushParagraphPreview();
     await drainMutations();
     if (!state.snapshot.canRedo || desiredText !== state.snapshot.cleanText) return;
     state.automatedBusy = true;
@@ -1559,6 +1579,7 @@ function setup(ctx) {
     }
   };
   const handleRecording = async (mode) => {
+    flushParagraphPreview();
     if (state.voicePhase === "starting" || state.voicePhase === "recording") {
       if (activeRecording?.mode === mode) stopActiveRecording();
       return;
@@ -1617,6 +1638,7 @@ function setup(ctx) {
   };
   const handleSend = async () => {
     if (sendFlowActive || !state.snapshot) return;
+    flushParagraphPreview();
     sendFlowActive = true;
     render();
     try {
@@ -1696,6 +1718,7 @@ function setup(ctx) {
     void refreshHostState();
   };
   const handleChatSwitch = () => {
+    flushParagraphPreview();
     cancelActiveRecording("Recording cancelled because the active chat changed.");
     if (state.pendingProposal) rejectNormalizationProposal();
     void refreshHostState();
@@ -1712,6 +1735,7 @@ function setup(ctx) {
     window.setTimeout(() => editor.focus(), 0);
   };
   function closeFloatingComposer() {
+    flushParagraphPreview();
     if (activeRecording) {
       cancelActiveRecording("Recording cancelled because the floating composer was closed.");
     }
@@ -1853,6 +1877,7 @@ function setup(ctx) {
   retryButton.addEventListener("click", handleRetry);
   switchDraftButton.addEventListener("click", handleSwitchDraft);
   editor.addEventListener("input", handleEditorInput);
+  editor.addEventListener("blur", flushParagraphPreview);
   recordButton.addEventListener("click", handleRecordClick);
   recordEditButton.addEventListener("click", handleRecordEditClick);
   cancelEditRecordingButton.addEventListener("click", handleCancelEditRecordingClick);
@@ -1897,6 +1922,8 @@ function setup(ctx) {
     cancelActiveRecording("Recording cancelled during extension cleanup.");
     clearRecordingTimers();
     if (editGroupTimer) clearTimeout(editGroupTimer);
+    if (paragraphRenderTimer) clearTimeout(paragraphRenderTimer);
+    if (paragraphRenderDeadline) clearTimeout(paragraphRenderDeadline);
     registry.cancelAll();
     normalizationRegistry.cancelAll();
     sendRegistry.cancelAll();
@@ -1909,6 +1936,7 @@ function setup(ctx) {
     retryButton.removeEventListener("click", handleRetry);
     switchDraftButton.removeEventListener("click", handleSwitchDraft);
     editor.removeEventListener("input", handleEditorInput);
+    editor.removeEventListener("blur", flushParagraphPreview);
     recordButton.removeEventListener("click", handleRecordClick);
     recordEditButton.removeEventListener("click", handleRecordEditClick);
     cancelEditRecordingButton.removeEventListener("click", handleCancelEditRecordingClick);

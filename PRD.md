@@ -485,6 +485,8 @@ A bare spoken `period` or `full stop` immediately following provider-supplied `.
 
 **FR-UI-015:** JarvisType shall use only documented Lumiverse placement and activation APIs. It shall not bind to, replace, or suppress the native microphone button through undocumented DOM selectors or event interception.
 
+**FR-UI-016:** For long drafts, JarvisType shall keep editor input immediate and batch reconstruction of the derived numbered-paragraph view. The preview shall refresh shortly after a typing pause, no later than a bounded interval during continuous typing, and immediately when the editor loses focus or a critical draft action begins.
+
 ## 8. Editing command model
 
 The editing subsystem uses the following logical pipeline:

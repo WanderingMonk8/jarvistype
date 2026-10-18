@@ -1807,6 +1807,12 @@ function setup(ctx) {
     }
   };
   const handleFloatingScrollKey = (event) => {
+    if (event.key === "Escape" && floatingWidget.isVisible()) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeFloatingComposer();
+      return;
+    }
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !["ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(event.key)) {
       return;
     }

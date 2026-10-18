@@ -1840,6 +1840,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
   }
   const handleFloatingScrollKey = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && floatingWidget.isVisible()) {
+      event.preventDefault()
+      event.stopPropagation()
+      closeFloatingComposer()
+      return
+    }
     if (
       event.defaultPrevented ||
       event.altKey ||

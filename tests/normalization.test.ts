@@ -15,6 +15,30 @@ test('supports spoken punctuation and paragraph commands', () => {
   assert.equal(result.changed, true)
 })
 
+test('capitalizes ordinary message and paragraph openings without changing established casing', () => {
+  assert.equal(
+    normalizeDeterministically('we drift into sleep, holding each other through the night.', [])
+      .text,
+    'We drift into sleep, holding each other through the night.',
+  )
+  assert.equal(
+    normalizeDeterministically('first thought new paragraph second thought period', []).text,
+    'First thought\n\nSecond thought.',
+  )
+  assert.equal(normalizeDeterministically('eBay is ready.', []).text, 'eBay is ready.')
+  assert.equal(
+    normalizeDeterministically('lowercase remains lowercase', [], { capitalizeOpening: false })
+      .text,
+    'lowercase remains lowercase',
+  )
+  assert.equal(
+    normalizeDeterministically('continuation new paragraph fresh thought', [], {
+      capitalizeOpening: false,
+    }).text,
+    'continuation\n\nFresh thought',
+  )
+})
+
 test('does not append a bare terminal command after provider terminal punctuation', () => {
   assert.equal(normalizeDeterministically('Is this working? period', []).text, 'Is this working?')
   assert.equal(normalizeDeterministically('Really! full stop.', []).text, 'Really!')

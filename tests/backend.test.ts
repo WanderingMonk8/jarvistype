@@ -480,6 +480,50 @@ test('requires review even when a transcript needs no normalization', async () =
   }
 })
 
+test('capitalizes a new message opening but preserves a continued sentence across recordings', async () => {
+  const newMessageUser = 'capitalized-opening-user'
+  const newMessageChat = 'capitalized-opening-chat'
+  activeChatId = newMessageChat
+
+  await dispatch(
+    recordingAppendRequest(
+      newMessageChat,
+      'capitalized-opening-segment',
+      0,
+      'we drift into sleep, holding each other through the night.',
+    ),
+    newMessageUser,
+  )
+  const opening = responses.at(-1)?.payload
+  assert.equal(opening?.type, 'transcript.normalization.response')
+  if (opening?.type === 'transcript.normalization.response') {
+    assert.equal(
+      opening.proposal.candidateText,
+      'We drift into sleep, holding each other through the night.',
+    )
+  }
+
+  const continuationUser = 'lowercase-continuation-user'
+  const continuationChat = 'lowercase-continuation-chat'
+  activeChatId = continuationChat
+  await seedDraft(continuationUser, continuationChat, 'We drift into sleep')
+  responses.length = 0
+  await dispatch(
+    recordingAppendRequest(
+      continuationChat,
+      'lowercase-continuation-segment',
+      1,
+      'and wake together.',
+    ),
+    continuationUser,
+  )
+  const continuation = responses.at(-1)?.payload
+  assert.equal(continuation?.type, 'transcript.normalization.response')
+  if (continuation?.type === 'transcript.normalization.response') {
+    assert.equal(continuation.proposal.candidateText, 'and wake together.')
+  }
+})
+
 test('allows non-mutating transcript review but blocks confirmation after the active chat changes', async () => {
   const userId = 'recording-mismatch-user'
   const chatId = 'recording-owner-chat'

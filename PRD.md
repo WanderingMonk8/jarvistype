@@ -364,6 +364,8 @@ A bare spoken `period` or `full stop` immediately following provider-supplied `.
 
 **FR-SPELL-012:** Automatic learning shall preserve the committed canonical spelling, capitalization, and hyphenation. A trailing whole-word rendition or explicit reference may be stored as a pronunciation or disambiguation cue when present.
 
+**FR-SPELL-013:** Ordinary lowercase words at the beginning of a newly recorded message segment or paragraph shall be capitalized automatically. Explicitly dictated casing, glossary-authoritative casing, established internal capitalization such as `eBay`, and provider-supplied quotation formatting shall remain authoritative.
+
 **FR-SPELL-013:** If an automatically learned spelling conflicts with an existing canonical entry or alias, JarvisType shall not silently overwrite either entry. It shall ask the user whether to keep both, replace the existing mapping, or cancel the new glossary change.
 
 **FR-SPELL-014:** After automatic learning, JarvisType shall display a reversible notification such as `Added "Caesar" to your glossary — Undo`.

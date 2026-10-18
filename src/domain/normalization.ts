@@ -104,6 +104,7 @@ const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
 export function normalizeDeterministically(
   raw: string,
   glossary: readonly GlossaryEntry[],
+  options: { capitalizeOpening?: boolean } = {},
 ): DeterministicNormalization {
   const protectedLiterals: string[] = []
   let text = raw.replace(
@@ -180,6 +181,16 @@ export function normalizeDeterministically(
   }
 
   text = cleanupPunctuationSpacing(text)
+  const capitalized = capitalizeMessageOpenings(
+    text,
+    [
+      ...glossary.map((entry) => entry.canonical),
+      ...learningCandidates.map((candidate) => candidate.canonical),
+    ],
+    options.capitalizeOpening !== false,
+  )
+  if (capitalized !== text) reasons.push('message opening capitalization')
+  text = capitalized
   return {
     text,
     changed: text !== raw,
@@ -189,6 +200,28 @@ export function normalizeDeterministically(
     authoritativePunctuationLiterals: [...new Set(protectedLiterals)],
     authoritativePunctuationMarks,
   }
+}
+
+function capitalizeMessageOpenings(
+  input: string,
+  protectedTerms: readonly string[],
+  capitalizeInitialOpening: boolean,
+): string {
+  const protectedWords = new Set(
+    protectedTerms.flatMap((term) => {
+      const firstWord = term.match(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/u)?.[0]
+      return firstWord ? [firstWord.toLocaleLowerCase()] : []
+    }),
+  )
+  return input.replace(
+    /(^|\n{2,})([ \t]*)([\p{Ll}][\p{L}\p{M}'’-]*)/gu,
+    (whole, boundary: string, spacing: string, word: string) => {
+      if (!boundary && !capitalizeInitialOpening) return whole
+      if (protectedWords.has(word.toLocaleLowerCase()) || /\p{Lu}/u.test(word.slice(1)))
+        return whole
+      return `${boundary}${spacing}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`
+    },
+  )
 }
 
 export function recoverHighConfidenceContextualCommands(input: string): ContextualCommandRecovery {

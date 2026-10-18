@@ -1587,7 +1587,7 @@ var LITERAL_PUNCTUATION_CONTEXTS = [
     "gi"
   )
 ];
-function normalizeDeterministically(raw, glossary) {
+function normalizeDeterministically(raw, glossary, options = {}) {
   const protectedLiterals = [];
   let text = raw.replace(
     new RegExp(
@@ -1655,6 +1655,16 @@ function normalizeDeterministically(raw, glossary) {
     }
   }
   text = cleanupPunctuationSpacing(text);
+  const capitalized = capitalizeMessageOpenings(
+    text,
+    [
+      ...glossary.map((entry) => entry.canonical),
+      ...learningCandidates.map((candidate) => candidate.canonical)
+    ],
+    options.capitalizeOpening !== false
+  );
+  if (capitalized !== text) reasons.push("message opening capitalization");
+  text = capitalized;
   return {
     text,
     changed: text !== raw,
@@ -1664,6 +1674,23 @@ function normalizeDeterministically(raw, glossary) {
     authoritativePunctuationLiterals: [...new Set(protectedLiterals)],
     authoritativePunctuationMarks
   };
+}
+function capitalizeMessageOpenings(input, protectedTerms, capitalizeInitialOpening) {
+  const protectedWords = new Set(
+    protectedTerms.flatMap((term) => {
+      const firstWord = term.match(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/u)?.[0];
+      return firstWord ? [firstWord.toLocaleLowerCase()] : [];
+    })
+  );
+  return input.replace(
+    /(^|\n{2,})([ \t]*)([\p{Ll}][\p{L}\p{M}'’-]*)/gu,
+    (whole, boundary, spacing, word) => {
+      if (!boundary && !capitalizeInitialOpening) return whole;
+      if (protectedWords.has(word.toLocaleLowerCase()) || /\p{Lu}/u.test(word.slice(1)))
+        return whole;
+      return `${boundary}${spacing}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`;
+    }
+  );
 }
 function recoverHighConfidenceContextualCommands(input) {
   const reasons = [];
@@ -2067,7 +2094,10 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       request.chatId,
       referenceContext.messages
     );
-    const deterministic = normalizeDeterministically(request.rawTranscript, glossary.entries);
+    const capitalizeOpening = shouldCapitalizeRecordingOpening(session.cleanText);
+    const deterministic = normalizeDeterministically(request.rawTranscript, glossary.entries, {
+      capitalizeOpening
+    });
     let candidateText = deterministic.text;
     let contextualModelUsed = false;
     const reasons = [...deterministic.reasons];
@@ -2098,7 +2128,9 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
         contextual.text,
         deterministic.authoritativePunctuationMarks
       ) && preservesLiteralAsIn(candidateText, contextual.text)) {
-        const enforced = normalizeDeterministically(contextual.text, glossary.entries);
+        const enforced = normalizeDeterministically(contextual.text, glossary.entries, {
+          capitalizeOpening
+        });
         candidateText = enforced.text;
         reasons.push(...contextual.reasons);
         reasons.push(...enforced.reasons);
@@ -2321,6 +2353,10 @@ function appendProposal(session, proposal) {
       contextualModelUsed: proposal.contextualModelUsed
     }
   });
+}
+function shouldCapitalizeRecordingOpening(cleanText) {
+  const priorText = cleanText.trimEnd();
+  return !priorText || /[.!?…][”’"')\]]*$/u.test(priorText);
 }
 async function handleEditInterpretation(request, context, activeRequest) {
   const result = await withDraftLock(context.userId, request.chatId, async () => {
@@ -2838,7 +2874,9 @@ function normalizeEditInputPayloads(plan, glossary) {
     ...plan,
     operations: plan.operations.map((operation) => {
       if (typeof operation.text !== "string") return operation;
-      const normalized = normalizeDeterministically(operation.text, glossary.entries).text;
+      const normalized = normalizeDeterministically(operation.text, glossary.entries, {
+        capitalizeOpening: false
+      }).text;
       return normalized === operation.text ? operation : { ...operation, text: normalized };
     })
   };

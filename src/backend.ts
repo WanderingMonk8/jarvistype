@@ -216,7 +216,10 @@ async function handleTranscriptNormalization(
       request.chatId,
       referenceContext.messages,
     )
-    const deterministic = normalizeDeterministically(request.rawTranscript, glossary.entries)
+    const capitalizeOpening = shouldCapitalizeRecordingOpening(session.cleanText)
+    const deterministic = normalizeDeterministically(request.rawTranscript, glossary.entries, {
+      capitalizeOpening,
+    })
     let candidateText = deterministic.text
     let contextualModelUsed = false
     const reasons = [...deterministic.reasons]
@@ -254,7 +257,9 @@ async function handleTranscriptNormalization(
         ) &&
         preservesLiteralAsIn(candidateText, contextual.text)
       ) {
-        const enforced = normalizeDeterministically(contextual.text, glossary.entries)
+        const enforced = normalizeDeterministically(contextual.text, glossary.entries, {
+          capitalizeOpening,
+        })
         candidateText = enforced.text
         reasons.push(...contextual.reasons)
         reasons.push(...enforced.reasons)
@@ -519,6 +524,11 @@ function appendProposal(session: PersistedDraftSession, proposal: NormalizationP
       contextualModelUsed: proposal.contextualModelUsed,
     },
   })
+}
+
+function shouldCapitalizeRecordingOpening(cleanText: string): boolean {
+  const priorText = cleanText.trimEnd()
+  return !priorText || /[.!?…][”’"')\]]*$/u.test(priorText)
 }
 
 async function handleEditInterpretation(
@@ -1159,7 +1169,9 @@ function normalizeEditInputPayloads(plan: EditPlan, glossary: GlossaryState): Ed
     ...plan,
     operations: plan.operations.map((operation) => {
       if (typeof operation.text !== 'string') return operation
-      const normalized = normalizeDeterministically(operation.text, glossary.entries).text
+      const normalized = normalizeDeterministically(operation.text, glossary.entries, {
+        capitalizeOpening: false,
+      }).text
       return normalized === operation.text ? operation : { ...operation, text: normalized }
     }),
   }

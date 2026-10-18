@@ -215,6 +215,22 @@ test('prunes provider punctuation attached to every spoken command family', () =
   )
   assert.equal(normalizeDeterministically('Use punctuation colon.', []).text, 'Use:')
   assert.equal(normalizeDeterministically('Use punctuation open quote.', []).text, 'Use “')
+  assert.equal(
+    normalizeDeterministically('quote Hello quote, and then we left period', []).text,
+    '“Hello” and then we left.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'Alpha open parenthesis, aside period close parenthesis, beta period',
+      [],
+    ).text,
+    'Alpha (aside.) beta.',
+  )
+  assert.equal(
+    normalizeDeterministically('quote Ready to leave quote? and then we left period', []).text,
+    '“Ready to leave”? and then we left.',
+  )
+  assert.equal(normalizeDeterministically('Hello comma, world period', []).text, 'Hello, world.')
 })
 
 test('recovers a standalone phonetic new-paragraph command without changing natural prose', () => {

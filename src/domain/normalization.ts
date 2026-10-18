@@ -384,14 +384,16 @@ function punctuationAfterSpokenCommand(
     commandReason === 'close parenthesis' ||
     commandReason === 'close bracket'
   if (!isClosingDelimiter) return ''
+  const terminalPunctuation = attachedPunctuation.replace(/[^.?!…]/gu, '')
+  if (!terminalPunctuation) return ''
   const contentBeforeCommand = source.slice(0, commandOffset).trimEnd()
   const contentAlreadyEndsSentence =
     /[.?!…]$/u.test(contentBeforeCommand) ||
     /\b(?:period|full stop|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots)$/iu.test(
       contentBeforeCommand,
     )
-  if (contentAlreadyEndsSentence && /^\.+$/u.test(attachedPunctuation)) return ''
-  return attachedPunctuation
+  if (contentAlreadyEndsSentence) return ''
+  return terminalPunctuation
 }
 
 function formatGeneratedQuotationOpenings(input: string, marker: string): string {

@@ -1,0 +1,264 @@
+export const DEFAULT_CONTEXT_MESSAGE_COUNT = 5
+export const MAX_CONTEXT_MESSAGE_COUNT = 20
+export const MAX_CONTEXT_CHARACTERS = 12_000
+export const NORMALIZATION_RECENT_MESSAGE_COUNT = 2
+export const NORMALIZATION_RECENT_CONTEXT_CHARACTERS = 4_000
+export const MAX_CONVERSATION_REFERENCE_CHARACTERS = 2_000
+
+export interface ContextSourceMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: unknown
+  extra?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}
+
+export interface ContextMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ContextSelection {
+  messages: ContextMessage[]
+  selectedCount: number
+  omittedCount: number
+  characterCount: number
+  truncated: boolean
+}
+
+export interface ConversationReferenceCorrection {
+  text: string
+  correctedTerms: Array<{ heard: string; canonical: string }>
+}
+
+export function clampContextMessageCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_CONTEXT_MESSAGE_COUNT
+  return Math.min(MAX_CONTEXT_MESSAGE_COUNT, Math.max(0, Math.trunc(value)))
+}
+
+export function selectRecentContext(
+  source: readonly ContextSourceMessage[],
+  requestedCount: number,
+  characterLimit = MAX_CONTEXT_CHARACTERS,
+): ContextSelection {
+  const count = clampContextMessageCount(requestedCount)
+  if (count === 0 || characterLimit <= 0) {
+    return {
+      messages: [],
+      selectedCount: 0,
+      omittedCount: eligibleCount(source),
+      characterCount: 0,
+      truncated: false,
+    }
+  }
+
+  const eligible = source.filter(isEligible)
+  const newest = eligible.slice(-count).reverse()
+  const selectedNewestFirst: ContextMessage[] = []
+  let remaining = Math.max(0, Math.trunc(characterLimit))
+  let truncated = false
+
+  for (const message of newest) {
+    if (remaining === 0) break
+    const content = message.content.trim()
+    if (content.length <= remaining) {
+      selectedNewestFirst.push({ role: message.role, content })
+      remaining -= content.length
+      continue
+    }
+    selectedNewestFirst.push({ role: message.role, content: content.slice(-remaining) })
+    remaining = 0
+    truncated = true
+  }
+
+  const messages = selectedNewestFirst.reverse()
+  return {
+    messages,
+    selectedCount: messages.length,
+    omittedCount: eligible.length - messages.length,
+    characterCount: messages.reduce((total, message) => total + message.content.length, 0),
+    truncated,
+  }
+}
+
+export function extractConversationReferences(
+  messages: readonly ContextMessage[],
+  characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS,
+): string[] {
+  if (characterLimit <= 0) return []
+  const references: string[] = []
+  const seen = new Set<string>()
+  let size = 0
+
+  const add = (value: string) => {
+    const normalized = value.trim()
+    const key = normalized.toLocaleLowerCase()
+    if (!normalized || seen.has(key) || size + normalized.length > characterLimit) return
+    seen.add(key)
+    references.push(normalized)
+    size += normalized.length
+  }
+
+  for (const message of messages) {
+    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
+    let sequence: string[] = []
+    const flushSequence = () => {
+      if (sequence.length > 1) add(sequence.slice(0, 4).join(' '))
+      for (const term of sequence) add(term)
+      sequence = []
+    }
+
+    for (const term of terms) {
+      if (isReferenceTerm(term)) {
+        sequence.push(term)
+      } else {
+        flushSequence()
+      }
+    }
+    flushSequence()
+  }
+
+  return references
+}
+
+export function correctFromConversationReferences(
+  text: string,
+  references: readonly string[],
+  protectedTerms: readonly string[] = [],
+): ConversationReferenceCorrection {
+  const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()))
+  const referenceByKey = new Map<string, string>()
+  for (const reference of references) {
+    if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(reference)) continue
+    referenceByKey.set(reference.toLocaleLowerCase(), reference)
+  }
+
+  const correctedTerms: Array<{ heard: string; canonical: string }> = []
+  const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard) => {
+    const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
+    const base = possessive ? heard.slice(0, -possessive.length) : heard
+    const baseKey = base.toLocaleLowerCase()
+    if (
+      base.length < 4 ||
+      !/^\p{Lu}/u.test(base) ||
+      protectedKeys.has(baseKey) ||
+      referenceByKey.has(baseKey)
+    )
+      return heard
+
+    const candidates = [...referenceByKey.values()].filter(
+      (reference) =>
+        reference.charAt(0).toLocaleLowerCase() === base.charAt(0).toLocaleLowerCase() &&
+        Math.abs(reference.length - base.length) <= 1 &&
+        editDistanceAtMostOne(baseKey, reference.toLocaleLowerCase()),
+    )
+    const uniqueCandidates = [
+      ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values(),
+    ]
+    if (uniqueCandidates.length !== 1) return heard
+
+    const canonical = uniqueCandidates[0]
+    correctedTerms.push({ heard: base, canonical })
+    return `${canonical}${possessive}`
+  })
+
+  return { text: correctedText, correctedTerms }
+}
+
+function eligibleCount(source: readonly ContextSourceMessage[]): number {
+  return source.filter(isEligible).length
+}
+
+function isEligible(message: ContextSourceMessage): message is ContextSourceMessage & {
+  role: 'user' | 'assistant'
+  content: string
+} {
+  return (
+    (message.role === 'user' || message.role === 'assistant') &&
+    typeof message.content === 'string' &&
+    message.content.trim().length > 0 &&
+    !isHidden(message.extra) &&
+    !isHidden(message.metadata)
+  )
+}
+
+function isHidden(record: Record<string, unknown> | undefined): boolean {
+  return Boolean(
+    record?.hidden === true ||
+    record?.is_hidden === true ||
+    record?.isHidden === true ||
+    record?.visibility === 'hidden' ||
+    record?.excluded_from_context === true,
+  )
+}
+
+const COMMON_CAPITALIZED_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'as',
+  'at',
+  'but',
+  'for',
+  'from',
+  'he',
+  'her',
+  'his',
+  'i',
+  'if',
+  'in',
+  'it',
+  'its',
+  'my',
+  'of',
+  'on',
+  'our',
+  'she',
+  'so',
+  'that',
+  'the',
+  'their',
+  'then',
+  'they',
+  'this',
+  'to',
+  'we',
+  'when',
+  'with',
+  'you',
+  'your',
+])
+
+function isReferenceTerm(term: string): boolean {
+  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(term.toLocaleLowerCase())) return false
+  return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1))
+}
+
+function editDistanceAtMostOne(left: string, right: string): boolean {
+  if (left === right) return true
+  if (Math.abs(left.length - right.length) > 1) return false
+
+  if (left.length === right.length) {
+    let differences = 0
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index] && ++differences > 1) return false
+    }
+    return differences === 1
+  }
+
+  const shorter = left.length < right.length ? left : right
+  const longer = left.length < right.length ? right : left
+  let shortIndex = 0
+  let longIndex = 0
+  let skipped = false
+  while (shortIndex < shorter.length && longIndex < longer.length) {
+    if (shorter[shortIndex] === longer[longIndex]) {
+      shortIndex += 1
+      longIndex += 1
+      continue
+    }
+    if (skipped) return false
+    skipped = true
+    longIndex += 1
+  }
+  return true
+}

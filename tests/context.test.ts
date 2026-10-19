@@ -83,6 +83,21 @@ test('corrects only a unique one-character proper-name match from conversation r
   )
 })
 
+test('corrects a unique two-character name ending only after a stable prefix', () => {
+  assert.deepEqual(correctFromConversationReferences('Willie carried the lamp.', ['Willum']), {
+    text: 'Willum carried the lamp.',
+    correctedTerms: [{ heard: 'Willie', canonical: 'Willum' }],
+  })
+  assert.equal(
+    correctFromConversationReferences('Willie carried the lamp.', ['Willum', 'Willem']).text,
+    'Willie carried the lamp.',
+  )
+  assert.equal(
+    correctFromConversationReferences('Kensay carried the lamp.', ['Kansai']).text,
+    'Kensay carried the lamp.',
+  )
+})
+
 test('leaves ambiguous, lowercase, and protected wording unchanged', () => {
   assert.equal(
     correctFromConversationReferences(

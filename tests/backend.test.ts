@@ -351,6 +351,38 @@ test('uses an unambiguous recent-chat proper name when the model leaves the STT 
   }
 })
 
+test('recovers a unique recent-chat name with a stable prefix and mistranscribed ending', async () => {
+  const userId = 'recent-name-ending-user'
+  const chatId = 'recent-name-ending-chat'
+  activeChatId = chatId
+  chatMessages = [
+    {
+      role: 'assistant',
+      content: 'Willum notched the reckoning into his tally-stick as he spoke.',
+    },
+  ]
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'recent-name-ending-segment',
+      0,
+      'As Willie leaves with the lamp, we stay at the table.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(
+      response.proposal.candidateText,
+      'As Willum leaves with the lamp, we stay at the table.',
+    )
+    assert.ok(response.proposal.reasons.includes('recent conversation spelling: Willie → Willum'))
+  }
+})
+
 test('blocks sending when the active chat does not own the draft', async () => {
   const userId = 'mismatch-user'
   const chatId = 'owner-chat'
@@ -1397,6 +1429,108 @@ test('resolves “last” punctuation from the end even when the model counts in
   )
   assert.equal(proposal.proposal.plan.operations[0]?.target.occurrence, undefined)
   assert.equal(proposal.proposal.plan.operations[0]?.target.occurrenceFromEnd, 1)
+})
+
+test('uses chat references for newly dictated edit text without changing the draft target', async () => {
+  const userId = 'edit-reference-user'
+  const chatId = 'edit-reference-chat'
+  activeChatId = chatId
+  chatMessages = [
+    {
+      role: 'assistant',
+      content: 'Willum notched the reckoning into his tally-stick as he spoke.',
+    },
+  ]
+  await seedDraft(userId, chatId, 'As Willie leaves with the lamp, we stay at the table.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace Willie with the dictated name.',
+    operations: [
+      {
+        id: 'replace-name-from-context',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'Willie' },
+        text: 'Willem',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-reference-interpret',
+      operationId: 'edit-reference-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace Willie with Willem.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'As Willum leaves with the lamp, we stay at the table.')
+  assert.equal(proposal.proposal.plan.operations[0]?.target.exactText, 'Willie')
+  assert.equal(proposal.proposal.plan.operations[0]?.text, 'Willum')
+
+  const prompt = JSON.parse(generationRequests.at(-1)?.messages?.at(-1)?.content ?? '{}') as Record<
+    string,
+    unknown
+  >
+  assert.ok(Array.isArray(prompt.conversationReferences))
+  assert.ok(prompt.conversationReferences.includes('Willum'))
+})
+
+test('keeps explicit edit spelling authoritative over a similar chat reference', async () => {
+  const userId = 'edit-reference-spelling-user'
+  const chatId = 'edit-reference-spelling-chat'
+  activeChatId = chatId
+  chatMessages = [
+    {
+      role: 'assistant',
+      content: 'Willum notched the reckoning into his tally-stick as he spoke.',
+    },
+  ]
+  await seedDraft(userId, chatId, 'The traveler arrives.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace the traveler with the explicitly spelled name.',
+    operations: [
+      {
+        id: 'replace-explicit-name',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'traveler' },
+        text: 'Willie',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-reference-spelling-interpret',
+      operationId: 'edit-reference-spelling-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace traveler with W-I-L-L-I-E, Willie.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'The Willie arrives.')
+    assert.equal(proposal.proposal.plan.operations[0]?.text, 'Willie')
+  }
 })
 
 test('keeps beginning and end insertions inside the targeted paragraph', async () => {

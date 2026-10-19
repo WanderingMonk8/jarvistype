@@ -1146,6 +1146,27 @@ function isSentenceOpeningAt(text, point) {
     before
   );
 }
+var CALENDAR_PROPER_NOUNS = /* @__PURE__ */ new Set([
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December"
+]);
 function lowercaseOrdinarySentenceOpening(text, start, evidenceText, evidenceStart, protectedCasingTerms) {
   const match = text.slice(start).match(/^([ \t]*[\u201c\u2018"'([{]*[ \t]*)(\p{Lu}[\p{L}\p{M}'\u2019-]*)/u);
   if (!match) return null;
@@ -1163,6 +1184,7 @@ function lowercaseOrdinarySentenceOpening(text, start, evidenceText, evidenceSta
 }
 function looksLikeProperNoun(text, wordStart, word, protectedCasingTerms) {
   if (/\p{Lu}/u.test(word.slice(1))) return true;
+  if (CALENDAR_PROPER_NOUNS.has(word)) return true;
   if (protectedCasingTerms.some((term) => {
     const termWords = term.match(/[\p{L}\p{M}'\u2019-]+/gu) ?? [];
     return termWords.includes(word);

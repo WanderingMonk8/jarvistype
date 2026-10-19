@@ -890,6 +890,28 @@ interface LowercasedSentenceOpening {
   text: string
 }
 
+const CALENDAR_PROPER_NOUNS = new Set([
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+])
+
 function lowercaseOrdinarySentenceOpening(
   text: string,
   start: number,
@@ -923,6 +945,7 @@ function looksLikeProperNoun(
   protectedCasingTerms: readonly string[],
 ): boolean {
   if (/\p{Lu}/u.test(word.slice(1))) return true
+  if (CALENDAR_PROPER_NOUNS.has(word)) return true
   if (
     protectedCasingTerms.some((term) => {
       const termWords: string[] = term.match(/[\p{L}\p{M}'\u2019-]+/gu) ?? []

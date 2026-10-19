@@ -419,6 +419,32 @@ test('keeps exact-text insertions inline and adds only missing boundary spacing'
   )
   assert.equal(beforeKnownName.ok && beforeKnownName.afterText, 'Perhaps Cooley waits.')
 
+  for (const calendarWord of ['Monday', 'January']) {
+    const text = `${calendarWord} works for us.`
+    const beforeCalendarTerm = executeEditPlan(
+      text,
+      [{ id: 'calendar-term', ordinal: 1, lineIndex: 0, text }],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'insert before a calendar proper noun',
+        operations: [
+          {
+            id: `before-${calendarWord}`,
+            type: 'insert_before',
+            target: { paragraphOrdinal: 1, exactText: calendarWord },
+            text: 'perhaps',
+          },
+        ],
+      },
+    )
+    assert.equal(
+      beforeCalendarTerm.ok && beforeCalendarTerm.afterText,
+      `Perhaps ${calendarWord} works for us.`,
+    )
+  }
+
   const alreadySpaced = executeEditPlan(session.cleanText, session.paragraphs, 1, {
     schemaVersion: 2,
     draftVersion: 1,
@@ -777,6 +803,36 @@ test('moves an exact word or phrase before or after another text target', () => 
     movedBeforeProperNoun.ok && movedBeforeProperNoun.afterText,
     'We leave. Soon New York waits.',
   )
+
+  for (const calendarWord of ['Tuesday', 'March']) {
+    const calendarTransition = applyManualEdit(
+      createDraftSession(`calendar-${calendarWord}-move-chat`),
+      `We leave soon. ${calendarWord} works for us.`,
+      { expectedVersion: 0, editGroupId: `seed-calendar-${calendarWord}` },
+    ).session
+    const movedBeforeCalendarTerm = executeEditPlan(
+      calendarTransition.cleanText,
+      calendarTransition.paragraphs,
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'move a word before a calendar proper noun',
+        operations: [
+          {
+            id: `move-before-${calendarWord}`,
+            type: 'move_before',
+            target: { exactText: 'soon' },
+            destination: { exactText: calendarWord },
+          },
+        ],
+      },
+    )
+    assert.equal(
+      movedBeforeCalendarTerm.ok && movedBeforeCalendarTerm.afterText,
+      `We leave. Soon ${calendarWord} works for us.`,
+    )
+  }
 
   assert.ok(
     parseEditPlan({

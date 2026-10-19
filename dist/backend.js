@@ -882,7 +882,7 @@ ${formattedParagraph}`,
     else if (hasSeparatorAfter && start === range.start) end += 1;
   }
   const insertionText = operation.text ?? "";
-  const replacement = operation.type === "replace" ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText) : operation.type === "delete" ? "" : operation.type === "insert_before" ? addBoundarySpacing(
+  const replacement = operation.type === "replace" ? preserveTargetCasing(cleanText.slice(start, end), insertionText) : operation.type === "delete" ? "" : operation.type === "insert_before" ? addBoundarySpacing(
     cleanText,
     start,
     capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
@@ -1107,6 +1107,28 @@ function capitalizeReplacementAtSentenceOpening(text, start, replacement) {
       return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`;
     }
   );
+}
+function preserveTargetCasing(target, replacement) {
+  if (/\p{Lu}/u.test(replacement)) return replacement;
+  const targetWords = target.match(/\p{L}+/gu) ?? [];
+  if (!targetWords.length) return replacement;
+  const hasCasedLetters = /\p{L}/u.test(target);
+  if (hasCasedLetters && target === target.toLocaleUpperCase())
+    return replacement.toLocaleUpperCase();
+  if (target === target.toLocaleLowerCase()) return replacement;
+  const isCapitalizedWord = (word) => /^\p{Lu}\p{Ll}*$/u.test(word) || /^\p{Lu}$/u.test(word);
+  const isLowercaseWord = (word) => /^\p{Ll}+$/u.test(word);
+  if (targetWords.length > 1 && targetWords.every(isCapitalizedWord))
+    return replacement.replace(
+      /\p{L}+/gu,
+      (word) => `${word.charAt(0).toLocaleUpperCase()}${word.slice(1).toLocaleLowerCase()}`
+    );
+  if (isCapitalizedWord(targetWords[0]) && targetWords.slice(1).every(isLowercaseWord))
+    return replacement.replace(
+      /\p{Ll}/u,
+      (letter) => letter.toLocaleUpperCase()
+    );
+  return replacement;
 }
 function executeStructuralPlan(cleanText, paragraphs, operations) {
   const working = paragraphs.map((paragraph) => ({
@@ -2531,8 +2553,10 @@ async function handleEditInterpretation(request, context, activeRequest) {
       }
       return { error: "target", detail: executed.reason, session };
     }
-    const learningCandidates = spelling.learningCandidates.filter(
-      (candidate) => executed.afterText.includes(candidate.canonical)
+    const learningCandidates = reconcileEditLearningCandidateCasing(
+      spelling.learningCandidates,
+      executed.operations,
+      executed.afterText
     );
     const proposal = {
       operationId: request.operationId,
@@ -2760,8 +2784,10 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
       afterText: executed.afterText,
       affectedParagraphOrdinals: executed.affectedParagraphOrdinals,
       explanation: plan.explanation,
-      learningCandidates: spelling.learningCandidates.filter(
-        (candidate) => executed.afterText.includes(candidate.canonical)
+      learningCandidates: reconcileEditLearningCandidateCasing(
+        spelling.learningCandidates,
+        executed.operations,
+        executed.afterText
       ),
       ...executed.resultingParagraphIds ? { resultingParagraphIds: executed.resultingParagraphIds } : {}
     };
@@ -3079,6 +3105,23 @@ function enforceAuthoritativeEditSpellings(plan, candidates) {
       return text === operation.text ? operation : { ...operation, text };
     })
   };
+}
+function reconcileEditLearningCandidateCasing(candidates, operations, afterText) {
+  return candidates.flatMap((candidate) => {
+    const candidatePattern = new RegExp(
+      `(?<![\\p{L}\\p{N}])${escapeRegularExpression(candidate.canonical)}(?![\\p{L}\\p{N}])`,
+      "giu"
+    );
+    const appliedSpellings = /* @__PURE__ */ new Set();
+    for (const operation of operations) {
+      for (const match of operation.afterText.matchAll(candidatePattern)) appliedSpellings.add(match[0]);
+    }
+    if (appliedSpellings.size === 1) {
+      const canonical = [...appliedSpellings][0];
+      if (afterText.includes(canonical)) return [{ ...candidate, canonical }];
+    }
+    return afterText.includes(candidate.canonical) ? [candidate] : [];
+  });
 }
 function stripQualifiedAsInEditPayloads(plan) {
   return {

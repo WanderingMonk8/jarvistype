@@ -2098,7 +2098,7 @@ test('restores explicit casing after the edit interpreter collapses spelled lett
   ])
 })
 
-test('uses normal casing for unmodified explicit spelling in edit input', async () => {
+test('uses the target casing for unmodified explicit spelling in edit input', async () => {
   const userId = 'default-edit-spelling-casing-user'
   const chatId = 'default-edit-spelling-casing-chat'
   activeChatId = chatId
@@ -2134,10 +2134,49 @@ test('uses normal casing for unmodified explicit spelling in edit input', async 
   const proposal = responses.at(-1)?.payload
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
-  assert.equal(proposal.proposal.afterText, 'The project codename is cooley.')
+  assert.equal(proposal.proposal.afterText, 'The project codename is Cooley.')
   assert.deepEqual(proposal.proposal.learningCandidates, [
-    { canonical: 'cooley', spokenVariant: 'C-O-O-L-E-Y' },
+    { canonical: 'Cooley', spokenVariant: 'C-O-O-L-E-Y' },
   ])
+})
+
+test('preserves sentence casing when replacing an opening phrase', async () => {
+  const userId = 'replacement-target-casing-user'
+  const chatId = 'replacement-target-casing-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Opening phrase continues into the draft.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace the opening phrase.',
+    operations: [
+      {
+        id: 'replace-opening-phrase',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'Opening phrase' },
+        text: 'replacement words',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'replacement-target-casing-interpret',
+      operationId: 'replacement-target-casing-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace Opening phrase with replacement words.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
 })
 
 test('keeps a one-time explanatory reference out of replacement text and glossary learning', async () => {

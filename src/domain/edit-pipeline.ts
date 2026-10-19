@@ -467,7 +467,7 @@ function resolveOperation(
   const insertionText = operation.text ?? ''
   const replacement =
     operation.type === 'replace'
-      ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
+      ? preserveTargetCasing(cleanText.slice(start, end), insertionText)
       : operation.type === 'delete'
         ? ''
         : operation.type === 'insert_before'
@@ -835,6 +835,31 @@ function capitalizeReplacementAtSentenceOpening(
       return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`
     },
   )
+}
+
+function preserveTargetCasing(target: string, replacement: string): string {
+  if (/\p{Lu}/u.test(replacement)) return replacement
+  const targetWords = target.match(/\p{L}+/gu) ?? []
+  if (!targetWords.length) return replacement
+
+  const hasCasedLetters = /\p{L}/u.test(target)
+  if (hasCasedLetters && target === target.toLocaleUpperCase())
+    return replacement.toLocaleUpperCase()
+  if (target === target.toLocaleLowerCase()) return replacement
+
+  const isCapitalizedWord = (word: string) =>
+    /^\p{Lu}\p{Ll}*$/u.test(word) || /^\p{Lu}$/u.test(word)
+  const isLowercaseWord = (word: string) => /^\p{Ll}+$/u.test(word)
+  if (targetWords.length > 1 && targetWords.every(isCapitalizedWord))
+    return replacement.replace(/\p{L}+/gu, (word) =>
+      `${word.charAt(0).toLocaleUpperCase()}${word.slice(1).toLocaleLowerCase()}`,
+    )
+  if (isCapitalizedWord(targetWords[0]!) && targetWords.slice(1).every(isLowercaseWord))
+    return replacement.replace(
+      /\p{Ll}/u,
+      (letter) => letter.toLocaleUpperCase(),
+    )
+  return replacement
 }
 
 function executeStructuralPlan(

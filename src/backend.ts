@@ -17,6 +17,7 @@ import {
   executeEditPlan,
   parseEditPlan,
   type EditPlan,
+  type ResolvedEditOperation,
   type EditTarget,
   type PunctuationTarget,
 } from './domain/edit-pipeline'
@@ -42,6 +43,7 @@ import {
   normalizeDeterministically,
   recoverHighConfidenceContextualCommands,
   SPOKEN_PUNCTUATION_COMMAND_PHRASES,
+  type SpellingLearningCandidate,
 } from './domain/normalization'
 import {
   APP_VERSION,
@@ -595,8 +597,10 @@ async function handleEditInterpretation(
       }
       return { error: 'target' as const, detail: executed.reason, session }
     }
-    const learningCandidates = spelling.learningCandidates.filter((candidate) =>
-      executed.afterText.includes(candidate.canonical),
+    const learningCandidates = reconcileEditLearningCandidateCasing(
+      spelling.learningCandidates,
+      executed.operations,
+      executed.afterText,
     )
     const proposal: EditProposal = {
       operationId: request.operationId,
@@ -878,8 +882,10 @@ async function handleEditCandidateSelection(
       afterText: executed.afterText,
       affectedParagraphOrdinals: executed.affectedParagraphOrdinals,
       explanation: plan.explanation,
-      learningCandidates: spelling.learningCandidates.filter((candidate) =>
-        executed.afterText.includes(candidate.canonical),
+      learningCandidates: reconcileEditLearningCandidateCasing(
+        spelling.learningCandidates,
+        executed.operations,
+        executed.afterText,
       ),
       ...(executed.resultingParagraphIds
         ? { resultingParagraphIds: executed.resultingParagraphIds }
@@ -1274,6 +1280,28 @@ function enforceAuthoritativeEditSpellings(
       return text === operation.text ? operation : { ...operation, text }
     }),
   }
+}
+
+function reconcileEditLearningCandidateCasing(
+  candidates: readonly SpellingLearningCandidate[],
+  operations: readonly ResolvedEditOperation[],
+  afterText: string,
+): SpellingLearningCandidate[] {
+  return candidates.flatMap((candidate) => {
+    const candidatePattern = new RegExp(
+      `(?<![\\p{L}\\p{N}])${escapeRegularExpression(candidate.canonical)}(?![\\p{L}\\p{N}])`,
+      'giu',
+    )
+    const appliedSpellings = new Set<string>()
+    for (const operation of operations) {
+      for (const match of operation.afterText.matchAll(candidatePattern)) appliedSpellings.add(match[0])
+    }
+    if (appliedSpellings.size === 1) {
+      const canonical = [...appliedSpellings][0]!
+      if (afterText.includes(canonical)) return [{ ...candidate, canonical }]
+    }
+    return afterText.includes(candidate.canonical) ? [candidate] : []
+  })
 }
 
 function stripQualifiedAsInEditPayloads(plan: EditPlan): EditPlan {

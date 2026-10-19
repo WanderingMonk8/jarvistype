@@ -83,7 +83,7 @@ test('resolves a unique paragraph-scoped replacement deterministically', () => {
   assert.equal(first.ok && first.afterText, 'First hiking sentence.\n\nSecond paragraph here.')
 })
 
-test('capitalizes replacement text only when it begins a sentence', () => {
+test('preserves the casing pattern of the replaced target', () => {
   const opening = executeEditPlan('Keyboard recording test.', [], 1, {
     schemaVersion: 2,
     draftVersion: 1,
@@ -113,6 +113,51 @@ test('capitalizes replacement text only when it begins a sentence', () => {
     ],
   })
   assert.equal(establishedCase.ok && establishedCase.afterText, 'eBay recording test.')
+
+  const sentenceCase = executeEditPlan('Opening phrase continues.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'preserve sentence case across a phrase',
+    operations: [
+      {
+        id: 'sentence-case',
+        type: 'replace',
+        target: { exactText: 'Opening phrase' },
+        text: 'replacement words',
+      },
+    ],
+  })
+  assert.equal(sentenceCase.ok && sentenceCase.afterText, 'Replacement words continues.')
+
+  const titleCase = executeEditPlan('Proper Name arrived.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'preserve title case across a phrase',
+    operations: [
+      {
+        id: 'title-case',
+        type: 'replace',
+        target: { exactText: 'Proper Name' },
+        text: 'new person',
+      },
+    ],
+  })
+  assert.equal(titleCase.ok && titleCase.afterText, 'New Person arrived.')
+
+  const uppercase = executeEditPlan('LOUD WORDS remain.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'preserve uppercase across a phrase',
+    operations: [
+      {
+        id: 'uppercase',
+        type: 'replace',
+        target: { exactText: 'LOUD WORDS' },
+        text: 'quiet phrase',
+      },
+    ],
+  })
+  assert.equal(uppercase.ok && uppercase.afterText, 'QUIET PHRASE remain.')
 })
 
 test('rejects missing, duplicate, stale, and overlapping targets atomically', () => {

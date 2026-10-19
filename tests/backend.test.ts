@@ -1732,6 +1732,52 @@ test('keeps beginning and end insertions inside the targeted paragraph', async (
   }
 })
 
+test('preserves lowercase text when appending or inserting after', async () => {
+  const userId = 'after-insertion-casing-user'
+  const chatId = 'after-insertion-casing-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First.\n\nSecond. End.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Preserve dictated casing in after-position insertions.',
+    operations: [
+      {
+        id: 'append-lowercase',
+        type: 'append',
+        target: { paragraphOrdinal: 1 },
+        text: 'continued',
+      },
+      {
+        id: 'insert-after-lowercase',
+        type: 'insert_after',
+        target: { paragraphOrdinal: 2, exactText: 'Second.' },
+        text: 'quietly',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'after-insertion-casing-interpret',
+      operationId: 'after-insertion-casing-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Append continued to paragraph 1 and insert quietly after Second in paragraph 2.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.afterText, 'First. continued\n\nSecond. quietly End.')
+})
+
 test('offers explicit choices for paragraph-resolvable ambiguity without mutating the draft', async () => {
   const userId = 'unsafe-edit-user'
   const chatId = 'unsafe-edit-chat'

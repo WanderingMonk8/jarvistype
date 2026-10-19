@@ -182,7 +182,7 @@ test('adds missing word boundaries for prepend and append operations', () => {
     ],
   })
 
-  assert.equal(result.ok && result.afterText, 'Before Existing sentence. After')
+  assert.equal(result.ok && result.afterText, 'Before Existing sentence. after')
 
   const continuation = executeEditPlan(
     'Existing fragment',
@@ -219,13 +219,13 @@ test('adds deterministic paragraph boundaries for paragraph-targeted insertions'
         id: 'after-paragraph',
         type: 'insert_after',
         target: { paragraphOrdinal: 1 },
-        text: 'Inserted paragraph.',
+        text: 'inserted paragraph.',
       },
     ],
   })
   assert.equal(
     after.ok && after.afterText,
-    'First mountain sentence.\n\nInserted paragraph.\n\nSecond paragraph here.',
+    'First mountain sentence.\n\ninserted paragraph.\n\nSecond paragraph here.',
   )
 
   const before = executeEditPlan(session.cleanText, session.paragraphs, 1, {
@@ -304,6 +304,26 @@ test('keeps exact-text insertions inline and adds only missing boundary spacing'
     alreadySpaced.ok && alreadySpaced.afterText,
     'First difficult mountain sentence.\n\nSecond paragraph here.',
   )
+
+  const afterSentence = executeEditPlan(
+    'Hello. Goodbye.',
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text: 'Hello. Goodbye.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'preserve dictated casing after a sentence',
+      operations: [
+        {
+          id: 'inline-after-sentence',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, exactText: 'Hello.' },
+          text: 'quietly',
+        },
+      ],
+    },
+  )
+  assert.equal(afterSentence.ok && afterSentence.afterText, 'Hello. quietly Goodbye.')
 })
 
 test('attaches inserted quotation marks directly to an exact sentence target', () => {

@@ -91,6 +91,10 @@ export const COMMAND_GROUPS = [
       ['Prepend', 'Prepend “Urgent:” to paragraph 1.'],
       ['Move', 'Move “approved” before “pending” in paragraph 1.'],
       [
+        'Fuzzy target fallback',
+        'If a spoken target has no exact match, JarvisType can use one uniquely similar word or phrase, including a split-word typo such as “mauled” for “Mao let.”',
+      ],
+      [
         'Punctuation targets',
         'Say “the second quote in paragraph 1”, “the last period in paragraph 1”, or “the quote after the phrase ‘this is very good’” with move, replace, insert, or delete.',
       ],

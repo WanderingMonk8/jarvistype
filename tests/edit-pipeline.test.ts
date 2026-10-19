@@ -776,3 +776,53 @@ test('resolves one high-confidence approximate phrase and rejects equal candidat
   })
   assert.deepEqual(rejected, { ok: false, reason: 'approximate text target is ambiguous' })
 })
+
+test('falls back from a missing exact target to one unique fuzzy phrase', () => {
+  const text = 'I look at her. Mao let her in return and step off the bed.'
+  const resolved = executeEditPlan(text, [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'replace the uniquely similar spoken phrase',
+    operations: [
+      {
+        id: 'fuzzy-exact-fallback',
+        type: 'replace',
+        target: { exactText: 'mauled her in return' },
+        text: 'welcomed her back',
+      },
+    ],
+  })
+  assert.equal(
+    resolved.ok && resolved.afterText,
+    'I look at her. Welcomed her back and step off the bed.',
+  )
+
+  const shortWord = executeEditPlan('The form is ready.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'replace one unique short typo',
+    operations: [
+      {
+        id: 'short-word-fuzzy-fallback',
+        type: 'replace',
+        target: { exactText: 'farm' },
+        text: 'document',
+      },
+    ],
+  })
+  assert.equal(shortWord.ok && shortWord.afterText, 'The document is ready.')
+
+  const ambiguous = executeEditPlan('Mao let one pass. Mao let two pass.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'do not guess between equal fuzzy targets',
+    operations: [
+      {
+        id: 'ambiguous-fuzzy-exact-fallback',
+        type: 'delete',
+        target: { exactText: 'mauled' },
+      },
+    ],
+  })
+  assert.deepEqual(ambiguous, { ok: false, reason: 'fuzzy text target is ambiguous' })
+})

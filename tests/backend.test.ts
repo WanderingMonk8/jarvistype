@@ -1533,6 +1533,55 @@ test('keeps explicit edit spelling authoritative over a similar chat reference',
   }
 })
 
+test('falls back to one fuzzy draft target when the spoken exact phrase is absent', async () => {
+  const userId = 'fuzzy-target-user'
+  const chatId = 'fuzzy-target-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'I look at her long body stretched out on bare feet. Mao let her in return and step off the bed.',
+  )
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace the spoken phrase using its unique fuzzy match.',
+    operations: [
+      {
+        id: 'replace-fuzzy-phrase',
+        type: 'replace',
+        target: { exactText: 'mauled her in return' },
+        text: 'welcomed her back',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'fuzzy-target-interpret',
+      operationId: 'fuzzy-target-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Replace the phrase mauled her in return with the phrase welcomed her back.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(
+      proposal.proposal.afterText,
+      'I look at her long body stretched out on bare feet. Welcomed her back and step off the bed.',
+    )
+    assert.equal(proposal.proposal.operations[0]?.beforeText, 'Mao let her in return')
+  }
+})
+
 test('keeps beginning and end insertions inside the targeted paragraph', async () => {
   const userId = 'paragraph-boundary-user'
   const chatId = 'paragraph-boundary-chat'

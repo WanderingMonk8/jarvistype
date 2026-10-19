@@ -388,11 +388,15 @@ function resolveOperation(
     start = match.start
     end = match.end
   } else if (operation.target.exactText !== undefined) {
-    const matches = findAll(cleanText, operation.target.exactText, range.start, range.end)
-    if (matches.length !== 1)
-      return matches.length ? 'text target is ambiguous' : 'text target was not found'
-    start = matches[0]!
-    end = start + operation.target.exactText.length
+    const match = findExactOrFuzzyMatch(
+      cleanText,
+      operation.target.exactText,
+      range.start,
+      range.end,
+    )
+    if (typeof match === 'string') return match
+    start = match.start
+    end = match.end
   } else if (operation.target.approximateText !== undefined) {
     const match = findApproximateMatch(
       cleanText,
@@ -610,11 +614,12 @@ function resolveTextTarget(
     start = match.start
     end = match.end
   } else if (target.exactText !== undefined) {
-    const matches = findAll(cleanText, target.exactText, range.start, range.end)
-    if (matches.length !== 1)
-      return matches.length ? `${label} is ambiguous` : `${label} was not found`
-    start = matches[0]!
-    end = start + target.exactText.length
+    const match = findExactOrFuzzyMatch(cleanText, target.exactText, range.start, range.end)
+    if (match === 'text target is ambiguous') return `${label} is ambiguous`
+    if (match === 'text target was not found') return `${label} was not found`
+    if (typeof match === 'string') return `${label}: ${match}`
+    start = match.start
+    end = match.end
   } else if (target.approximateText !== undefined) {
     const match = findApproximateMatch(cleanText, target.approximateText, range.start, range.end)
     if (typeof match === 'string') return `${label}: ${match}`
@@ -924,6 +929,24 @@ function findAll(text: string, search: string, start: number, end: number): numb
   return matches
 }
 
+function findExactOrFuzzyMatch(
+  text: string,
+  search: string,
+  start: number,
+  end: number,
+): { start: number; end: number } | string {
+  const exactMatches = findAll(text, search, start, end)
+  if (exactMatches.length > 1) return 'text target is ambiguous'
+  if (exactMatches.length === 1)
+    return { start: exactMatches[0]!, end: exactMatches[0]! + search.length }
+
+  const approximate = findApproximateMatch(text, search, start, end)
+  if (typeof approximate !== 'string') return approximate
+  return approximate.includes('ambiguous')
+    ? 'fuzzy text target is ambiguous'
+    : 'text target was not found'
+}
+
 function findApproximateMatch(
   text: string,
   search: string,
@@ -933,22 +956,50 @@ function findApproximateMatch(
   const wanted = tokenizeWithOffsets(search, 0, search.length)
   if (!wanted.length) return 'approximate text target was not found'
   const available = tokenizeWithOffsets(text, start, end)
-  if (available.length < wanted.length) return 'approximate text target was not found'
+  if (!available.length) return 'approximate text target was not found'
   const wantedText = wanted.map(({ value }) => value).join(' ')
-  const candidates: Array<{ start: number; end: number; score: number }> = []
-  for (let index = 0; index <= available.length - wanted.length; index += 1) {
-    const window = available.slice(index, index + wanted.length)
-    const candidateText = window.map(({ value }) => value).join(' ')
-    candidates.push({
-      start: window[0]!.start,
-      end: window.at(-1)!.end,
-      score: stringSimilarity(wantedText, candidateText),
-    })
+  const wantedCompact = wantedText.replace(/\s+/gu, '')
+  const candidates: Array<{
+    start: number
+    end: number
+    score: number
+    boundaryFallback: boolean
+    shortWordFallback: boolean
+  }> = []
+  const addCandidates = (length: number) => {
+    for (let index = 0; index <= available.length - length; index += 1) {
+      const window = available.slice(index, index + length)
+      const candidateText = window.map(({ value }) => value).join(' ')
+      const candidateCompact = candidateText.replace(/\s+/gu, '')
+      const compactScore = stringSimilarity(wantedCompact, candidateCompact)
+      candidates.push({
+        start: window[0]!.start,
+        end: window.at(-1)!.end,
+        score: Math.max(stringSimilarity(wantedText, candidateText), compactScore),
+        boundaryFallback:
+          length !== wanted.length &&
+          Math.min(wantedCompact.length, candidateCompact.length) >= 5 &&
+          Math.abs(wantedCompact.length - candidateCompact.length) <= 2 &&
+          compactScore >= 2 / 3,
+        shortWordFallback:
+          wanted.length === 1 &&
+          length === 1 &&
+          Math.min(wantedCompact.length, candidateCompact.length) >= 4 &&
+          Math.abs(wantedCompact.length - candidateCompact.length) <= 1 &&
+          compactScore >= 0.75,
+      })
+    }
   }
+  addCandidates(wanted.length)
+  if (wanted.length > 1) addCandidates(wanted.length - 1)
+  addCandidates(wanted.length + 1)
   candidates.sort((left, right) => right.score - left.score)
   const best = candidates[0]
-  if (!best || best.score < 0.78) return 'approximate text target was not found'
-  const runnerUp = candidates[1]
+  if (!best || (best.score < 0.78 && !best.boundaryFallback && !best.shortWordFallback))
+    return 'approximate text target was not found'
+  const runnerUp = candidates.find(
+    (candidate) => candidate.end <= best.start || candidate.start >= best.end,
+  )
   if (runnerUp && best.score - runnerUp.score < 0.12) return 'approximate text target is ambiguous'
   return { start: best.start, end: best.end }
 }

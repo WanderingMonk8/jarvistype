@@ -393,6 +393,10 @@ var COMMAND_GROUPS = [
       ["Prepend", "Prepend \u201CUrgent:\u201D to paragraph 1."],
       ["Move", "Move \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
       [
+        "Fuzzy target fallback",
+        "If a spoken target has no exact match, JarvisType can use one uniquely similar word or phrase, including a split-word typo such as \u201Cmauled\u201D for \u201CMao let.\u201D"
+      ],
+      [
         "Punctuation targets",
         "Say \u201Cthe second quote in paragraph 1\u201D, \u201Cthe last period in paragraph 1\u201D, or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
       ]

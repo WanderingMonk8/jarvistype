@@ -182,7 +182,7 @@ test('adds missing word boundaries for prepend and append operations', () => {
     ],
   })
 
-  assert.equal(result.ok && result.afterText, 'Before Existing sentence. after')
+  assert.equal(result.ok && result.afterText, 'Before Existing sentence. After')
 
   const continuation = executeEditPlan(
     'Existing fragment',
@@ -225,7 +225,7 @@ test('adds deterministic paragraph boundaries for paragraph-targeted insertions'
   })
   assert.equal(
     after.ok && after.afterText,
-    'First mountain sentence.\n\ninserted paragraph.\n\nSecond paragraph here.',
+    'First mountain sentence.\n\nInserted paragraph.\n\nSecond paragraph here.',
   )
 
   const before = executeEditPlan(session.cleanText, session.paragraphs, 1, {
@@ -244,6 +244,32 @@ test('adds deterministic paragraph boundaries for paragraph-targeted insertions'
   assert.equal(
     before.ok && before.afterText,
     'Opening paragraph.\n\nFirst mountain sentence.\n\nSecond paragraph here.',
+  )
+
+  const afterFragment = executeEditPlan(
+    'unfinished fragment\n\nSecond paragraph.',
+    [
+      { id: 'fragment', ordinal: 1, lineIndex: 0, text: 'unfinished fragment' },
+      { id: 'second', ordinal: 2, lineIndex: 2, text: 'Second paragraph.' },
+    ],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert after a non-terminal paragraph',
+      operations: [
+        {
+          id: 'after-fragment',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1 },
+          text: 'inserted paragraph.',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    afterFragment.ok && afterFragment.afterText,
+    'unfinished fragment\n\ninserted paragraph.\n\nSecond paragraph.',
   )
 })
 
@@ -323,7 +349,29 @@ test('keeps exact-text insertions inline and adds only missing boundary spacing'
       ],
     },
   )
-  assert.equal(afterSentence.ok && afterSentence.afterText, 'Hello. quietly Goodbye.')
+  assert.equal(afterSentence.ok && afterSentence.afterText, 'Hello. Quietly Goodbye.')
+
+  for (const target of ['Ready?', 'Stop!', 'Wait…', 'She said "go."']) {
+    const afterTerminalMark = executeEditPlan(
+      target,
+      [{ id: 'terminal', ordinal: 1, lineIndex: 0, text: target }],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'capitalize after terminal punctuation',
+        operations: [
+          {
+            id: 'after-terminal-mark',
+            type: 'insert_after',
+            target: { paragraphOrdinal: 1, exactText: target },
+            text: 'continue',
+          },
+        ],
+      },
+    )
+    assert.equal(afterTerminalMark.ok && afterTerminalMark.afterText, `${target} Continue`)
+  }
 })
 
 test('attaches inserted quotation marks directly to an exact sentence target', () => {

@@ -386,10 +386,11 @@ function resolveOperation(
   if (operation.type === 'append' || operation.type === 'prepend') {
     if (!paragraph) return `${operation.type} requires one paragraph target`
     const point = operation.type === 'append' ? range.end : range.start
-    const insertionText =
-      operation.type === 'prepend'
-        ? capitalizeReplacementAtSentenceOpening(cleanText, point, operation.text ?? '')
-        : (operation.text ?? '')
+    const insertionText = capitalizeReplacementAtSentenceOpening(
+      cleanText,
+      point,
+      operation.text ?? '',
+    )
     return {
       operation,
       start: point,
@@ -439,10 +440,11 @@ function resolveOperation(
     const insertedParagraph = (operation.text ?? '').trim()
     if (!insertedParagraph) return 'paragraph insertion text is empty'
     const point = operation.type === 'insert_before' ? range.start : range.end
-    const formattedParagraph =
-      operation.type === 'insert_before'
-        ? capitalizeReplacementAtSentenceOpening(cleanText, point, insertedParagraph)
-        : insertedParagraph
+    const formattedParagraph = capitalizeReplacementAtSentenceOpening(
+      cleanText,
+      point,
+      insertedParagraph,
+    )
     return {
       operation,
       start: point,
@@ -475,7 +477,11 @@ function resolveOperation(
               capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText),
             )
           : operation.type === 'insert_after'
-            ? addBoundarySpacing(cleanText, end, insertionText)
+            ? addBoundarySpacing(
+                cleanText,
+                end,
+                capitalizeReplacementAtSentenceOpening(cleanText, end, insertionText),
+              )
             : applyCase(cleanText.slice(start, end), operation.caseMode!)
   if (operation.type === 'insert_before') end = start
   else if (operation.type === 'insert_after') start = end
@@ -788,12 +794,14 @@ function addBoundarySpacing(text: string, point: number, insertion: string): str
   let result = insertion
   const left = text[point - 1] ?? ''
   const right = text[point] ?? ''
+  const leftIsClosingAsciiQuote =
+    (left === '"' || left === "'") && /[.?!\u2026]/u.test(text[point - 2] ?? '')
   if (/[ \t]/.test(left)) result = result.replace(/^[ \t]+/u, '')
   if (/[ \t]/.test(right)) result = result.replace(/[ \t]+$/u, '')
   if (
     left &&
     !/\s/.test(left) &&
-    !/[([{“‘"']/.test(left) &&
+    (!/[([{“‘"']/.test(left) || leftIsClosingAsciiQuote) &&
     !/^\s/.test(result) &&
     !/^[,.;:!?)}\]”’"']/.test(result)
   )

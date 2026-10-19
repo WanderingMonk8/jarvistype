@@ -1732,7 +1732,7 @@ test('keeps beginning and end insertions inside the targeted paragraph', async (
   }
 })
 
-test('preserves lowercase text when appending or inserting after', async () => {
+test('capitalizes append and insert-after text only after sentence-ending targets', async () => {
   const userId = 'after-insertion-casing-user'
   const chatId = 'after-insertion-casing-chat'
   activeChatId = chatId
@@ -1775,7 +1775,7 @@ test('preserves lowercase text when appending or inserting after', async () => {
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'edit.proposal.response')
   if (response?.type !== 'edit.proposal.response') return
-  assert.equal(response.proposal.afterText, 'First. continued\n\nSecond. quietly End.')
+  assert.equal(response.proposal.afterText, 'First. Continued\n\nSecond. Quietly End.')
 })
 
 test('offers explicit choices for paragraph-resolvable ambiguity without mutating the draft', async () => {

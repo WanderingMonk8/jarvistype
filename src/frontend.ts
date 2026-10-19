@@ -92,7 +92,7 @@ export const COMMAND_GROUPS = [
       ['Move', 'Move “approved” before “pending” in paragraph 1.'],
       [
         'Fuzzy target fallback',
-        'If a spoken target has no exact match, JarvisType can use one uniquely similar word or phrase, including a split-word typo such as “mauled” for “Mao let.”',
+        'If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as “mouthlet” for “Mao let.”',
       ],
       [
         'Punctuation targets',

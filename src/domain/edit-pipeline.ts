@@ -959,12 +959,14 @@ function findApproximateMatch(
   if (!available.length) return 'approximate text target was not found'
   const wantedText = wanted.map(({ value }) => value).join(' ')
   const wantedCompact = wantedText.replace(/\s+/gu, '')
+  const wantedPhonetic = phoneticKey(wantedCompact)
   const candidates: Array<{
     start: number
     end: number
     score: number
     boundaryFallback: boolean
     shortWordFallback: boolean
+    phoneticFallback: boolean
   }> = []
   const addCandidates = (length: number) => {
     for (let index = 0; index <= available.length - length; index += 1) {
@@ -972,10 +974,16 @@ function findApproximateMatch(
       const candidateText = window.map(({ value }) => value).join(' ')
       const candidateCompact = candidateText.replace(/\s+/gu, '')
       const compactScore = stringSimilarity(wantedCompact, candidateCompact)
+      const candidatePhonetic = phoneticKey(candidateCompact)
+      const phoneticScore = stringSimilarity(wantedPhonetic, candidatePhonetic)
       candidates.push({
         start: window[0]!.start,
         end: window.at(-1)!.end,
-        score: Math.max(stringSimilarity(wantedText, candidateText), compactScore),
+        score: Math.max(
+          stringSimilarity(wantedText, candidateText),
+          compactScore,
+          phoneticScore * 0.75 + compactScore * 0.25,
+        ),
         boundaryFallback:
           length !== wanted.length &&
           Math.min(wantedCompact.length, candidateCompact.length) >= 5 &&
@@ -987,6 +995,11 @@ function findApproximateMatch(
           Math.min(wantedCompact.length, candidateCompact.length) >= 4 &&
           Math.abs(wantedCompact.length - candidateCompact.length) <= 1 &&
           compactScore >= 0.75,
+        phoneticFallback:
+          Math.min(wantedPhonetic.length, candidatePhonetic.length) >= 4 &&
+          wantedPhonetic.charAt(0) === candidatePhonetic.charAt(0) &&
+          compactScore >= 0.5 &&
+          phoneticScore >= 0.8,
       })
     }
   }
@@ -995,7 +1008,13 @@ function findApproximateMatch(
   addCandidates(wanted.length + 1)
   candidates.sort((left, right) => right.score - left.score)
   const best = candidates[0]
-  if (!best || (best.score < 0.78 && !best.boundaryFallback && !best.shortWordFallback))
+  if (
+    !best ||
+    (best.score < 0.78 &&
+      !best.boundaryFallback &&
+      !best.shortWordFallback &&
+      !best.phoneticFallback)
+  )
     return 'approximate text target was not found'
   const runnerUp = candidates.find(
     (candidate) => candidate.end <= best.start || candidate.start >= best.end,
@@ -1039,6 +1058,41 @@ function stringSimilarity(left: string, right: string): number {
     for (let column = 0; column < columns; column += 1) previous[column] = current[column]!
   }
   return 1 - previous[columns - 1]! / Math.max(left.length, right.length, 1)
+}
+
+function phoneticKey(value: string): string {
+  const prepared = value
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase()
+    .replace(/ph/gu, 'f')
+    .replace(/ght/gu, 't')
+    .replace(/gh/gu, '')
+    .replace(/ck/gu, 'k')
+    .replace(/kn/gu, 'n')
+    .replace(/wr/gu, 'r')
+    .replace(/qu/gu, 'kw')
+  let key = ''
+  for (const character of prepared) {
+    const sound = phoneticSoundGroup(character)
+    if (sound && sound !== key.at(-1)) key += sound
+  }
+  return key
+}
+
+function phoneticSoundGroup(character: string): string {
+  if (/[aeiou]/u.test(character)) return 'A'
+  if (/[bp]/u.test(character)) return 'B'
+  if (/[fv]/u.test(character)) return 'F'
+  if (/[cgjkq]/u.test(character)) return 'K'
+  if (/[dt]/u.test(character)) return 'T'
+  if (/[sxz]/u.test(character)) return 'S'
+  if (character === 'l') return 'L'
+  if (character === 'm') return 'M'
+  if (character === 'n') return 'N'
+  if (character === 'r') return 'R'
+  if (/[hwy]/u.test(character)) return ''
+  return /[\p{L}\p{N}]/u.test(character) ? character : ''
 }
 
 function applyCase(value: string, mode: NonNullable<EditOperation['caseMode']>): string {

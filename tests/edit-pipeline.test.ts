@@ -797,6 +797,24 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
     'I look at her. Welcomed her back and step off the bed.',
   )
 
+  const providerCompound = executeEditPlan('I look at her. Mao let her in return.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'replace a provider-compounded spoken target',
+    operations: [
+      {
+        id: 'provider-compound-fuzzy-fallback',
+        type: 'replace',
+        target: { exactText: 'mouthlet' },
+        text: 'I smile at',
+      },
+    ],
+  })
+  assert.equal(
+    providerCompound.ok && providerCompound.afterText,
+    'I look at her. I smile at her in return.',
+  )
+
   const shortWord = executeEditPlan('The form is ready.', [], 1, {
     schemaVersion: 2,
     draftVersion: 1,
@@ -820,7 +838,7 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
       {
         id: 'ambiguous-fuzzy-exact-fallback',
         type: 'delete',
-        target: { exactText: 'mauled' },
+        target: { exactText: 'mouthlet' },
       },
     ],
   })

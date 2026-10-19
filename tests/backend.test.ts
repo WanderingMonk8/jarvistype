@@ -1533,7 +1533,7 @@ test('keeps explicit edit spelling authoritative over a similar chat reference',
   }
 })
 
-test('falls back to one fuzzy draft target when the spoken exact phrase is absent', async () => {
+test('falls back to one fuzzy draft target when the provider compounds a split phrase', async () => {
   const userId = 'fuzzy-target-user'
   const chatId = 'fuzzy-target-chat'
   activeChatId = chatId
@@ -1546,13 +1546,13 @@ test('falls back to one fuzzy draft target when the spoken exact phrase is absen
   editPlanResponse = {
     schemaVersion: 2,
     draftVersion: 1,
-    explanation: 'Replace the spoken phrase using its unique fuzzy match.',
+    explanation: 'Replace the provider-compounded phrase using its unique fuzzy match.',
     operations: [
       {
         id: 'replace-fuzzy-phrase',
         type: 'replace',
-        target: { exactText: 'mauled her in return' },
-        text: 'welcomed her back',
+        target: { exactText: 'mouthlet' },
+        text: 'I smile at',
       },
     ],
   }
@@ -1565,8 +1565,7 @@ test('falls back to one fuzzy draft target when the spoken exact phrase is absen
       operationId: 'fuzzy-target-operation',
       chatId,
       expectedVersion: 1,
-      instructionTranscript:
-        'Replace the phrase mauled her in return with the phrase welcomed her back.',
+      instructionTranscript: 'Replace the phrase mouthlet with I smile at.',
     },
     userId,
   )
@@ -1576,9 +1575,9 @@ test('falls back to one fuzzy draft target when the spoken exact phrase is absen
   if (proposal?.type === 'edit.proposal.response') {
     assert.equal(
       proposal.proposal.afterText,
-      'I look at her long body stretched out on bare feet. Welcomed her back and step off the bed.',
+      'I look at her long body stretched out on bare feet. I smile at her in return and step off the bed.',
     )
-    assert.equal(proposal.proposal.operations[0]?.beforeText, 'Mao let her in return')
+    assert.equal(proposal.proposal.operations[0]?.beforeText, 'Mao let')
   }
 })
 

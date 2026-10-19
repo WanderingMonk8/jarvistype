@@ -1961,10 +1961,7 @@ function replaceExplicitSpelling(input) {
       const letters = extractLetters(spoken);
       if (letters.length < 3) return whole;
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : void 0;
-      const canonical = applySpellingCasing(matchingCue ?? letters, casing);
-      if (!casing && !matchingCue) {
-        ambiguities.push(`Confirm the casing of \u201C${letters}\u201D.`);
-      }
+      const canonical = matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? letters, casing);
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
     }
@@ -1976,7 +1973,7 @@ function replaceExplicitSpelling(input) {
       const letters = extractLetters(spoken);
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : void 0;
       if (!/[A-Z]{2,}/.test(spoken) || !casing && !matchingCue) return whole;
-      const canonical = applySpellingCasing(matchingCue ?? spoken, casing);
+      const canonical = matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? spoken, casing);
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
     }
@@ -2000,7 +1997,7 @@ function cueMatchesLetters(cue, letters) {
   return Boolean(cue && cue.replace(/[-']/g, "").toLowerCase() === letters.toLowerCase());
 }
 function applySpellingCasing(value, casing) {
-  if (!casing) return value;
+  if (!casing) return value.toLowerCase();
   const normalized = casing.toLowerCase();
   if (normalized === "all caps" || normalized === "uppercase") return value.toUpperCase();
   if (normalized === "lowercase") return value.toLowerCase();

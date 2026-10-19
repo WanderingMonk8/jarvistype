@@ -247,6 +247,29 @@ test('recovers a standalone phonetic new-paragraph command without changing natu
 })
 
 test('collapses explicit spelling, obeys casing, and creates a learning candidate', () => {
+  const defaultCasing = normalizeDeterministically('Use C-O-O-L-E-Y period', [])
+  assert.equal(defaultCasing.text, 'Use cooley.')
+  assert.deepEqual(defaultCasing.learningCandidates, [
+    { canonical: 'cooley', spokenVariant: 'C-O-O-L-E-Y' },
+  ])
+  assert.deepEqual(defaultCasing.ambiguities, [])
+  assert.equal(
+    normalizeDeterministically('Use capitalized C-O-O-L-E-Y period', []).text,
+    'Use Cooley.',
+  )
+  assert.equal(
+    normalizeDeterministically('Use uppercase C-O-O-L-E-Y period', []).text,
+    'Use COOLEY.',
+  )
+  assert.equal(
+    normalizeDeterministically('Use lowercase C-O-O-L-E-Y period', []).text,
+    'Use cooley.',
+  )
+  assert.equal(
+    normalizeDeterministically('Use C-O-O-L-E-Y, Cooley period', []).text,
+    'Use Cooley.',
+  )
+
   const result = normalizeDeterministically('Write capitalized C-A-E-S-A-R Caesar period', [])
   assert.equal(result.text, 'Write Caesar.')
   assert.deepEqual(result.learningCandidates, [

@@ -429,10 +429,10 @@ function replaceExplicitSpelling(
       const letters = extractLetters(spoken)
       if (letters.length < 3) return whole
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : undefined
-      const canonical = applySpellingCasing(matchingCue ?? letters, casing)
-      if (!casing && !matchingCue) {
-        ambiguities.push(`Confirm the casing of “${letters}”.`)
-      }
+      const canonical =
+        matchingCue && !casing
+          ? matchingCue
+          : applySpellingCasing(matchingCue ?? letters, casing)
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`
     },
@@ -452,7 +452,10 @@ function replaceExplicitSpelling(
       const letters = extractLetters(spoken)
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : undefined
       if (!/[A-Z]{2,}/.test(spoken) || (!casing && !matchingCue)) return whole
-      const canonical = applySpellingCasing(matchingCue ?? spoken, casing)
+      const canonical =
+        matchingCue && !casing
+          ? matchingCue
+          : applySpellingCasing(matchingCue ?? spoken, casing)
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`
     },
@@ -490,7 +493,7 @@ function cueMatchesLetters(cue: string | undefined, letters: string): cue is str
 }
 
 function applySpellingCasing(value: string, casing: string | undefined): string {
-  if (!casing) return value
+  if (!casing) return value.toLowerCase()
   const normalized = casing.toLowerCase()
   if (normalized === 'all caps' || normalized === 'uppercase') return value.toUpperCase()
   if (normalized === 'lowercase') return value.toLowerCase()

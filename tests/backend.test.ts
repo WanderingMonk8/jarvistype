@@ -810,6 +810,28 @@ test('requires review before committing explicit spelling and learns only after 
   }
 })
 
+test('uses normal casing for unmodified explicit spelling', async () => {
+  const userId = 'default-spelling-casing-user'
+  const chatId = 'default-spelling-casing-chat'
+  activeChatId = chatId
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'default-spelling-casing-segment', 0, 'Use C-O-O-L-E-Y period'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type !== 'transcript.normalization.response') return
+  assert.equal(response.outcome, 'review')
+  assert.equal(response.proposal.candidateText, 'Use cooley.')
+  assert.deepEqual(response.proposal.learningCandidates, [
+    { canonical: 'cooley', spokenVariant: 'C-O-O-L-E-Y' },
+  ])
+  assert.deepEqual(response.proposal.ambiguities, [])
+})
+
 test('re-applies deterministic commands when contextual output returns the raw provider text', async () => {
   const userId = 'provider-punctuation-user'
   const chatId = 'provider-punctuation-chat'
@@ -1985,6 +2007,48 @@ test('uses authoritative explicit spelling instead of inserting the spelling cue
       { canonical: 'Caelora', spokenVariant: 'C-A-E-L-O-R-A' },
     ])
   }
+})
+
+test('uses normal casing for unmodified explicit spelling in edit input', async () => {
+  const userId = 'default-edit-spelling-casing-user'
+  const chatId = 'default-edit-spelling-casing-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'The project codename is Kalora.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Apply the explicit spelling.',
+    operations: [
+      {
+        id: 'spell-cooley',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'Kalora' },
+        text: 'C-O-O-L-E-Y',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'default-edit-spelling-casing-interpret',
+      operationId: 'default-edit-spelling-casing-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'In paragraph 1, replace Kalora with C-O-O-L-E-Y.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'The project codename is cooley.')
+  assert.deepEqual(proposal.proposal.learningCandidates, [
+    { canonical: 'cooley', spokenVariant: 'C-O-O-L-E-Y' },
+  ])
 })
 
 test('keeps a one-time explanatory reference out of replacement text and glossary learning', async () => {

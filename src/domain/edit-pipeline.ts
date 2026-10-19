@@ -56,6 +56,7 @@ export interface EditOperation {
   text?: string
   caseMode?: 'capitalize' | 'uppercase' | 'lowercase'
   destination?: EditTarget
+  deleteTrailingPunctuation?: boolean
 }
 
 export interface EditPlan {
@@ -173,7 +174,15 @@ export function executeEditPlan(
 
 function parseOperation(value: unknown): EditOperation | null {
   if (!isRecord(value) || !isIdentifier(value.id) || !isRecord(value.target)) return null
-  const allowedOperationKeys = new Set(['id', 'type', 'target', 'text', 'caseMode', 'destination'])
+  const allowedOperationKeys = new Set([
+    'id',
+    'type',
+    'target',
+    'text',
+    'caseMode',
+    'destination',
+    'deleteTrailingPunctuation',
+  ])
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null
   const type = value.type
   if (
@@ -194,6 +203,8 @@ function parseOperation(value: unknown): EditOperation | null {
   if (!target) return null
   const text = value.text
   const caseMode = value.caseMode
+  const deleteTrailingPunctuation = value.deleteTrailingPunctuation
+  if (deleteTrailingPunctuation !== undefined && deleteTrailingPunctuation !== true) return null
   const destination =
     value.destination === undefined
       ? undefined
@@ -204,10 +215,16 @@ function parseOperation(value: unknown): EditOperation | null {
   if (type === 'case') {
     if (caseMode !== 'capitalize' && caseMode !== 'uppercase' && caseMode !== 'lowercase')
       return null
-    if (text !== undefined || destination !== undefined) return null
+    if (text !== undefined || destination !== undefined || deleteTrailingPunctuation !== undefined)
+      return null
   } else if (type === 'delete' || type === 'split' || type === 'join_next') {
     if (text !== undefined || caseMode !== undefined) return null
     if (destination !== undefined) return null
+    if (
+      deleteTrailingPunctuation !== undefined &&
+      (type !== 'delete' || deleteTrailingPunctuation !== true)
+    )
+      return null
     if (
       type === 'join_next' &&
       (target.exactText !== undefined ||
@@ -216,7 +233,13 @@ function parseOperation(value: unknown): EditOperation | null {
     )
       return null
   } else if (type === 'move_before' || type === 'move_after') {
-    if (text !== undefined || caseMode !== undefined || !destination) return null
+    if (
+      text !== undefined ||
+      caseMode !== undefined ||
+      !destination ||
+      deleteTrailingPunctuation !== undefined
+    )
+      return null
     if (target.scope !== undefined || destination.scope !== undefined) return null
     const sourceIsText = hasInlineSelector(target)
     const destinationIsText = hasInlineSelector(destination)
@@ -225,7 +248,8 @@ function parseOperation(value: unknown): EditOperation | null {
     typeof text !== 'string' ||
     text.length > MAX_EDIT_TEXT_LENGTH ||
     caseMode !== undefined ||
-    destination !== undefined
+    destination !== undefined ||
+    deleteTrailingPunctuation !== undefined
   ) {
     return null
   }
@@ -236,6 +260,7 @@ function parseOperation(value: unknown): EditOperation | null {
     ...(typeof text === 'string' ? { text } : {}),
     ...(typeof caseMode === 'string' ? { caseMode } : {}),
     ...(destination ? { destination } : {}),
+    ...(deleteTrailingPunctuation === true ? { deleteTrailingPunctuation: true } : {}),
   }
 }
 
@@ -437,6 +462,10 @@ function resolveOperation(
     }
   }
   if (operation.type === 'delete') {
+    if (operation.deleteTrailingPunctuation) {
+      const trailingPunctuation = cleanText.slice(end, range.end).match(/^(?:\.{3}|[.!?…])/u)?.[0]
+      if (trailingPunctuation) end += trailingPunctuation.length
+    }
     const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
     const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
     if (hasSeparatorBefore && (hasSeparatorAfter || end === range.end)) start -= 1

@@ -80,7 +80,15 @@ function parseEditPlan(value) {
 }
 function parseOperation(value) {
   if (!isRecord(value) || !isIdentifier(value.id) || !isRecord(value.target)) return null;
-  const allowedOperationKeys = /* @__PURE__ */ new Set(["id", "type", "target", "text", "caseMode", "destination"]);
+  const allowedOperationKeys = /* @__PURE__ */ new Set([
+    "id",
+    "type",
+    "target",
+    "text",
+    "caseMode",
+    "destination",
+    "deleteTrailingPunctuation"
+  ]);
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null;
   const type = value.type;
   if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "move_before" && type !== "move_after")
@@ -89,24 +97,30 @@ function parseOperation(value) {
   if (!target) return null;
   const text = value.text;
   const caseMode = value.caseMode;
+  const deleteTrailingPunctuation = value.deleteTrailingPunctuation;
+  if (deleteTrailingPunctuation !== void 0 && deleteTrailingPunctuation !== true) return null;
   const destination = value.destination === void 0 ? void 0 : isRecord(value.destination) ? parseTarget(value.destination) : null;
   if (value.destination !== void 0 && !destination) return null;
   if (type === "case") {
     if (caseMode !== "capitalize" && caseMode !== "uppercase" && caseMode !== "lowercase")
       return null;
-    if (text !== void 0 || destination !== void 0) return null;
+    if (text !== void 0 || destination !== void 0 || deleteTrailingPunctuation !== void 0)
+      return null;
   } else if (type === "delete" || type === "split" || type === "join_next") {
     if (text !== void 0 || caseMode !== void 0) return null;
     if (destination !== void 0) return null;
+    if (deleteTrailingPunctuation !== void 0 && (type !== "delete" || deleteTrailingPunctuation !== true))
+      return null;
     if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
       return null;
   } else if (type === "move_before" || type === "move_after") {
-    if (text !== void 0 || caseMode !== void 0 || !destination) return null;
+    if (text !== void 0 || caseMode !== void 0 || !destination || deleteTrailingPunctuation !== void 0)
+      return null;
     if (target.scope !== void 0 || destination.scope !== void 0) return null;
     const sourceIsText = hasInlineSelector(target);
     const destinationIsText = hasInlineSelector(destination);
     if (sourceIsText !== destinationIsText) return null;
-  } else if (typeof text !== "string" || text.length > MAX_EDIT_TEXT_LENGTH || caseMode !== void 0 || destination !== void 0) {
+  } else if (typeof text !== "string" || text.length > MAX_EDIT_TEXT_LENGTH || caseMode !== void 0 || destination !== void 0 || deleteTrailingPunctuation !== void 0) {
     return null;
   }
   return {
@@ -115,7 +129,8 @@ function parseOperation(value) {
     target,
     ...typeof text === "string" ? { text } : {},
     ...typeof caseMode === "string" ? { caseMode } : {},
-    ...destination ? { destination } : {}
+    ...destination ? { destination } : {},
+    ...deleteTrailingPunctuation === true ? { deleteTrailingPunctuation: true } : {}
   };
 }
 function parseTarget(value) {

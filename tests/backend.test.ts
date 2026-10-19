@@ -1431,6 +1431,45 @@ test('resolves “last” punctuation from the end even when the model counts in
   assert.equal(proposal.proposal.plan.operations[0]?.target.occurrenceFromEnd, 1)
 })
 
+test('removes terminal punctuation when a short sentence is deleted', async () => {
+  const userId = 'short-sentence-delete-user'
+  const chatId = 'short-sentence-delete-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Enough! We should continue.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the short sentence.',
+    operations: [
+      {
+        id: 'delete-short-sentence',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'Enough' },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'short-sentence-delete-interpret',
+      operationId: 'short-sentence-delete-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the sentence Enough.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'We should continue.')
+  assert.equal(proposal.proposal.plan.operations[0]?.deleteTrailingPunctuation, true)
+})
+
 test('uses chat references for newly dictated edit text without changing the draft target', async () => {
   const userId = 'edit-reference-user'
   const chatId = 'edit-reference-chat'

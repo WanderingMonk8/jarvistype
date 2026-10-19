@@ -381,6 +381,54 @@ test('deletion consumes one adjacent horizontal separator without touching other
   assert.equal(middleWord.ok && middleWord.afterText, 'Keep wording.')
 })
 
+test('sentence deletion consumes adjacent terminal punctuation for short targets only when requested', () => {
+  for (const [text, target, expected] of [
+    ['Enough! Continue.', 'Enough', 'Continue.'],
+    ['Not today? Continue.', 'Not today', 'Continue.'],
+    ['Perhaps… Continue.', 'Perhaps', 'Continue.'],
+    ['Wait... Continue.', 'Wait', 'Continue.'],
+  ] as const) {
+    const result = executeEditPlan(
+      text,
+      [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'delete a short sentence',
+        operations: [
+          {
+            id: 'delete-short-sentence',
+            type: 'delete',
+            target: { paragraphOrdinal: 1, exactText: target },
+            deleteTrailingPunctuation: true,
+          },
+        ],
+      },
+    )
+    assert.equal(result.ok && result.afterText, expected)
+  }
+
+  const wordOnly = executeEditPlan(
+    'Enough! Continue.',
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text: 'Enough! Continue.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete a word',
+      operations: [
+        {
+          id: 'delete-word-only',
+          type: 'delete',
+          target: { paragraphOrdinal: 1, exactText: 'Enough' },
+        },
+      ],
+    },
+  )
+  assert.equal(wordOnly.ok && wordOnly.afterText, '! Continue.')
+})
+
 test('splits and joins paragraphs with controlled whitespace', () => {
   const seeded = applyManualEdit(
     createDraftSession('structure-chat'),

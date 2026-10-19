@@ -2098,7 +2098,7 @@ test('restores explicit casing after the edit interpreter collapses spelled lett
   ])
 })
 
-test('uses the target casing for unmodified explicit spelling in edit input', async () => {
+test('uses normal casing for unmodified explicit spelling in edit input', async () => {
   const userId = 'default-edit-spelling-casing-user'
   const chatId = 'default-edit-spelling-casing-chat'
   activeChatId = chatId
@@ -2134,9 +2134,9 @@ test('uses the target casing for unmodified explicit spelling in edit input', as
   const proposal = responses.at(-1)?.payload
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
-  assert.equal(proposal.proposal.afterText, 'The project codename is Cooley.')
+  assert.equal(proposal.proposal.afterText, 'The project codename is cooley.')
   assert.deepEqual(proposal.proposal.learningCandidates, [
-    { canonical: 'Cooley', spokenVariant: 'C-O-O-L-E-Y' },
+    { canonical: 'cooley', spokenVariant: 'C-O-O-L-E-Y' },
   ])
 })
 

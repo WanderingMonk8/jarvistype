@@ -83,7 +83,7 @@ test('resolves a unique paragraph-scoped replacement deterministically', () => {
   assert.equal(first.ok && first.afterText, 'First hiking sentence.\n\nSecond paragraph here.')
 })
 
-test('preserves the casing pattern of the replaced target', () => {
+test('capitalizes replacement text only when it begins a sentence', () => {
   const opening = executeEditPlan('Keyboard recording test.', [], 1, {
     schemaVersion: 2,
     draftVersion: 1,
@@ -132,7 +132,7 @@ test('preserves the casing pattern of the replaced target', () => {
   const titleCase = executeEditPlan('Proper Name arrived.', [], 1, {
     schemaVersion: 2,
     draftVersion: 1,
-    explanation: 'preserve title case across a phrase',
+    explanation: 'do not infer title case from the target phrase',
     operations: [
       {
         id: 'title-case',
@@ -142,12 +142,12 @@ test('preserves the casing pattern of the replaced target', () => {
       },
     ],
   })
-  assert.equal(titleCase.ok && titleCase.afterText, 'New Person arrived.')
+  assert.equal(titleCase.ok && titleCase.afterText, 'New person arrived.')
 
-  const uppercase = executeEditPlan('LOUD WORDS remain.', [], 1, {
+  const uppercase = executeEditPlan('The LOUD WORDS remain.', [], 1, {
     schemaVersion: 2,
     draftVersion: 1,
-    explanation: 'preserve uppercase across a phrase',
+    explanation: 'do not infer uppercase from the target phrase',
     operations: [
       {
         id: 'uppercase',
@@ -157,7 +157,7 @@ test('preserves the casing pattern of the replaced target', () => {
       },
     ],
   })
-  assert.equal(uppercase.ok && uppercase.afterText, 'QUIET PHRASE remain.')
+  assert.equal(uppercase.ok && uppercase.afterText, 'The quiet phrase remain.')
 })
 
 test('rejects missing, duplicate, stale, and overlapping targets atomically', () => {

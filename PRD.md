@@ -425,9 +425,9 @@ A bare spoken `period` or `full stop` immediately following provider-supplied `.
 
 **FR-REF-002:** Referential disambiguation shall support homophones, homonyms, near-homophones, names, and other phonetically confusable terms.
 
-**FR-REF-003:** During **Record Edit**, the user may identify the existing phrase, state the intended replacement, and provide a reference. For example: "In the sentence where I say 'can the worker,' I meant 'Ken the worker.' Ken, as in Barbie and Ken."
+**FR-REF-003:** During **Record Edit**, the user may provide a qualified reference for newly dictated text in any replace, insert-before, insert-after, prepend, or append operation. For example: "In the sentence where I say 'can the worker,' I meant 'Ken the worker.' Ken, as in Barbie and Ken," or "Prepend 'I nod,' as in nodding one's head, to the first sentence."
 
-**FR-REF-004:** When the command is unambiguous, JarvisType shall apply only the intended lexical replacement. The explanatory reference shall not be inserted into the draft unless the user explicitly asks to include it.
+**FR-REF-004:** When the command is unambiguous, JarvisType shall apply only the intended lexical input. The explanatory reference shall be removed from every text-bearing edit payload and shall not be inserted into the draft unless the user explicitly asks to include it.
 
 **FR-REF-005:** A one-time reference shall remain session-scoped by default. JarvisType shall persist it in the user's glossary only after an explicit request to remember it.
 

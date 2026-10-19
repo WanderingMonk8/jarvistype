@@ -351,6 +351,38 @@ test('uses an unambiguous recent-chat proper name when the model leaves the STT 
   }
 })
 
+test('recovers a unique recent-chat name with a stable prefix and mistranscribed ending', async () => {
+  const userId = 'recent-name-ending-user'
+  const chatId = 'recent-name-ending-chat'
+  activeChatId = chatId
+  chatMessages = [
+    {
+      role: 'assistant',
+      content: 'Willum notched the reckoning into his tally-stick as he spoke.',
+    },
+  ]
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'recent-name-ending-segment',
+      0,
+      'As Willie leaves with the lamp, we stay at the table.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(
+      response.proposal.candidateText,
+      'As Willum leaves with the lamp, we stay at the table.',
+    )
+    assert.ok(response.proposal.reasons.includes('recent conversation spelling: Willie → Willum'))
+  }
+})
+
 test('blocks sending when the active chat does not own the draft', async () => {
   const userId = 'mismatch-user'
   const chatId = 'owner-chat'
@@ -1352,6 +1384,203 @@ test('reviews and commits a punctuation target resolved relative to a phrase', a
   }
 })
 
+test('resolves “last” punctuation from the end even when the model counts incorrectly', async () => {
+  const userId = 'last-punctuation-user'
+  const chatId = 'last-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'I nod at Toggard and consider the offer. “Yes, we will take the inn. We will stay away for now. We are not ready to confront them”.',
+  )
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the last period in the paragraph.',
+    operations: [
+      {
+        id: 'delete-last-period',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, punctuation: 'period', occurrence: 3 },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'last-punctuation-interpret',
+      operationId: 'last-punctuation-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the last period of this paragraph.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'I nod at Toggard and consider the offer. “Yes, we will take the inn. We will stay away for now. We are not ready to confront them”',
+  )
+  assert.equal(proposal.proposal.plan.operations[0]?.target.occurrence, undefined)
+  assert.equal(proposal.proposal.plan.operations[0]?.target.occurrenceFromEnd, 1)
+})
+
+test('uses chat references for newly dictated edit text without changing the draft target', async () => {
+  const userId = 'edit-reference-user'
+  const chatId = 'edit-reference-chat'
+  activeChatId = chatId
+  chatMessages = [
+    {
+      role: 'assistant',
+      content: 'Willum notched the reckoning into his tally-stick as he spoke.',
+    },
+  ]
+  await seedDraft(userId, chatId, 'As Willie leaves with the lamp, we stay at the table.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace Willie with the dictated name.',
+    operations: [
+      {
+        id: 'replace-name-from-context',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'Willie' },
+        text: 'Willem',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-reference-interpret',
+      operationId: 'edit-reference-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace Willie with Willem.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'As Willum leaves with the lamp, we stay at the table.')
+  assert.equal(proposal.proposal.plan.operations[0]?.target.exactText, 'Willie')
+  assert.equal(proposal.proposal.plan.operations[0]?.text, 'Willum')
+
+  const prompt = JSON.parse(generationRequests.at(-1)?.messages?.at(-1)?.content ?? '{}') as Record<
+    string,
+    unknown
+  >
+  assert.ok(Array.isArray(prompt.conversationReferences))
+  assert.ok(prompt.conversationReferences.includes('Willum'))
+})
+
+test('keeps explicit edit spelling authoritative over a similar chat reference', async () => {
+  const userId = 'edit-reference-spelling-user'
+  const chatId = 'edit-reference-spelling-chat'
+  activeChatId = chatId
+  chatMessages = [
+    {
+      role: 'assistant',
+      content: 'Willum notched the reckoning into his tally-stick as he spoke.',
+    },
+  ]
+  await seedDraft(userId, chatId, 'The traveler arrives.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace the traveler with the explicitly spelled name.',
+    operations: [
+      {
+        id: 'replace-explicit-name',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'traveler' },
+        text: 'Willie',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-reference-spelling-interpret',
+      operationId: 'edit-reference-spelling-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace traveler with W-I-L-L-I-E, Willie.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'The Willie arrives.')
+    assert.equal(proposal.proposal.plan.operations[0]?.text, 'Willie')
+  }
+})
+
+test('falls back to one fuzzy draft target when the provider compounds a split phrase', async () => {
+  const userId = 'fuzzy-target-user'
+  const chatId = 'fuzzy-target-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'I look at her long body stretched out on bare feet. Mao let her in return and step off the bed.',
+  )
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace the provider-compounded phrase using its unique fuzzy match.',
+    operations: [
+      {
+        id: 'replace-fuzzy-phrase',
+        type: 'replace',
+        target: { exactText: 'mouthlet' },
+        text: 'I smile at',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'fuzzy-target-interpret',
+      operationId: 'fuzzy-target-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace the phrase mouthlet with I smile at.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(
+      proposal.proposal.afterText,
+      'I look at her long body stretched out on bare feet. I smile at her in return and step off the bed.',
+    )
+    assert.equal(proposal.proposal.operations[0]?.beforeText, 'Mao let')
+  }
+})
+
 test('keeps beginning and end insertions inside the targeted paragraph', async () => {
   const userId = 'paragraph-boundary-user'
   const chatId = 'paragraph-boundary-chat'
@@ -1814,6 +2043,79 @@ test('accepts a clear inflection after as in as an explanatory reference', async
   assert.equal(response?.type, 'edit.proposal.response')
   if (response?.type === 'edit.proposal.response') {
     assert.equal(response.proposal.afterText, 'I filled the bucket quickly.')
+    assert.equal(response.proposal.afterText.includes('as in'), false)
+  }
+})
+
+test('removes qualified as in references from every text-bearing edit operation', async () => {
+  const userId = 'all-edit-payload-references-user'
+  const chatId = 'all-edit-payload-references-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'Replace source.\n\nPrepend base.\n\nAppend base.\n\nInsert before base.\n\nInsert after base.',
+  )
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Apply every requested phrase while omitting explanatory references.',
+    operations: [
+      {
+        id: 'reference-replace',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'source' },
+        text: 'filled, as in filling something up',
+      },
+      {
+        id: 'reference-prepend',
+        type: 'prepend',
+        target: { paragraphOrdinal: 2 },
+        text: "I nod, as in nodding one's head",
+      },
+      {
+        id: 'reference-append',
+        type: 'append',
+        target: { paragraphOrdinal: 3 },
+        text: 'I agree, as in agreeing to proceed',
+      },
+      {
+        id: 'reference-insert-before',
+        type: 'insert_before',
+        target: { paragraphOrdinal: 4, exactText: 'before' },
+        text: 'walk, as in walking',
+      },
+      {
+        id: 'reference-insert-after',
+        type: 'insert_after',
+        target: { paragraphOrdinal: 5, exactText: 'after' },
+        text: 'pause, as in pausing',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'all-edit-payload-references-interpret',
+      operationId: 'all-edit-payload-references-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        "Replace source with filled, as in filling something up; prepend I nod, as in nodding one's head; append I agree, as in agreeing to proceed; insert walk, as in walking, before before; and insert pause, as in pausing, after after.",
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(
+      response.proposal.afterText,
+      'Replace filled.\n\nI nod Prepend base.\n\nAppend base. I agree\n\nInsert walk before base.\n\nInsert after pause base.',
+    )
     assert.equal(response.proposal.afterText.includes('as in'), false)
   }
 })

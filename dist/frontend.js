@@ -127,6 +127,7 @@ function parseTarget(value) {
     "scope",
     "punctuation",
     "occurrence",
+    "occurrenceFromEnd",
     "relativePosition",
     "relativeToText"
   ]);
@@ -165,6 +166,11 @@ function parseTarget(value) {
     if (!isPositiveInteger(value.occurrence) || value.occurrence > 1e4) return null;
     target.occurrence = value.occurrence;
   }
+  if (value.occurrenceFromEnd !== void 0) {
+    if (!isPositiveInteger(value.occurrenceFromEnd) || value.occurrenceFromEnd > 1e4) return null;
+    target.occurrenceFromEnd = value.occurrenceFromEnd;
+  }
+  if (target.occurrence !== void 0 && target.occurrenceFromEnd !== void 0) return null;
   if (value.relativePosition !== void 0) {
     if (value.relativePosition !== "before" && value.relativePosition !== "after") return null;
     target.relativePosition = value.relativePosition;
@@ -179,7 +185,7 @@ function parseTarget(value) {
   if (hasRelativePosition !== hasRelativeText) return null;
   if (target.punctuation !== void 0 && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
     return null;
-  if (target.punctuation === void 0 && (target.occurrence !== void 0 || hasRelativePosition || hasRelativeText))
+  if (target.punctuation === void 0 && (target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
     return null;
   return Object.keys(target).length ? target : null;
 }
@@ -387,8 +393,12 @@ var COMMAND_GROUPS = [
       ["Prepend", "Prepend \u201CUrgent:\u201D to paragraph 1."],
       ["Move", "Move \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
       [
+        "Fuzzy target fallback",
+        "If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as \u201Cmouthlet\u201D for \u201CMao let.\u201D"
+      ],
+      [
         "Punctuation targets",
-        "Say \u201Cthe second quote in paragraph 1\u201D or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
+        "Say \u201Cthe second quote in paragraph 1\u201D, \u201Cthe last period in paragraph 1\u201D, or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
       ]
     ]
   },
@@ -410,7 +420,7 @@ var COMMAND_GROUPS = [
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
       [
         "As in reference",
-        "Say \u201CReplace \u2018can the worker\u2019 with \u2018Ken the worker.\u2019 Ken, as in Barbie and Ken,\u201D or \u201CReplace \u2018I feel\u2019 with \u2018I filled,\u2019 as in filling something up.\u201D The intended word must occur immediately before \u201Cas in\u201D and repeat afterward exactly or as a clear inflection."
+        "Use a qualified \u201Cas in\u201D reference anywhere you dictate new edit text: replace, insert before or after, prepend, or append. For example, \u201CPrepend \u2018I nod,\u2019 as in nodding one\u2019s head, to the first sentence.\u201D The intended word must occur immediately before \u201Cas in\u201D and repeat afterward exactly or as a clear inflection; otherwise the wording remains literal."
       ],
       [
         "Multiple changes",

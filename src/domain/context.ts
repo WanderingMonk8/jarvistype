@@ -145,11 +145,8 @@ export function correctFromConversationReferences(
     )
       return heard
 
-    const candidates = [...referenceByKey.values()].filter(
-      (reference) =>
-        reference.charAt(0).toLocaleLowerCase() === base.charAt(0).toLocaleLowerCase() &&
-        Math.abs(reference.length - base.length) <= 1 &&
-        editDistanceAtMostOne(baseKey, reference.toLocaleLowerCase()),
+    const candidates = [...referenceByKey.values()].filter((reference) =>
+      isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase()),
     )
     const uniqueCandidates = [
       ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values(),
@@ -233,32 +230,35 @@ function isReferenceTerm(term: string): boolean {
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1))
 }
 
-function editDistanceAtMostOne(left: string, right: string): boolean {
-  if (left === right) return true
-  if (Math.abs(left.length - right.length) > 1) return false
+function isHighConfidenceReferenceMatch(heard: string, reference: string): boolean {
+  if (heard.charAt(0) !== reference.charAt(0) || Math.abs(heard.length - reference.length) > 1)
+    return false
+  if (editDistanceAtMost(heard, reference, 1)) return true
+  return (
+    Math.min(heard.length, reference.length) >= 6 &&
+    heard.slice(0, 4) === reference.slice(0, 4) &&
+    editDistanceAtMost(heard, reference, 2)
+  )
+}
 
-  if (left.length === right.length) {
-    let differences = 0
-    for (let index = 0; index < left.length; index += 1) {
-      if (left[index] !== right[index] && ++differences > 1) return false
+function editDistanceAtMost(left: string, right: string, maximum: number): boolean {
+  if (Math.abs(left.length - right.length) > maximum) return false
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index)
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex]
+    let rowMinimum = leftIndex
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1
+      const distance = Math.min(
+        previous[rightIndex]! + 1,
+        current[rightIndex - 1]! + 1,
+        previous[rightIndex - 1]! + cost,
+      )
+      current.push(distance)
+      rowMinimum = Math.min(rowMinimum, distance)
     }
-    return differences === 1
+    if (rowMinimum > maximum) return false
+    previous = current
   }
-
-  const shorter = left.length < right.length ? left : right
-  const longer = left.length < right.length ? right : left
-  let shortIndex = 0
-  let longIndex = 0
-  let skipped = false
-  while (shortIndex < shorter.length && longIndex < longer.length) {
-    if (shorter[shortIndex] === longer[longIndex]) {
-      shortIndex += 1
-      longIndex += 1
-      continue
-    }
-    if (skipped) return false
-    skipped = true
-    longIndex += 1
-  }
-  return true
+  return previous[right.length]! <= maximum
 }

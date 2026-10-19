@@ -45,6 +45,21 @@ test('accepts a closed supported schema and rejects unknown or oversized operati
     }),
     null,
   )
+  assert.equal(
+    parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'conflicting punctuation selectors',
+      operations: [
+        {
+          id: 'one',
+          type: 'delete',
+          target: { punctuation: 'period', occurrence: 2, occurrenceFromEnd: 1 },
+        },
+      ],
+    }),
+    null,
+  )
 })
 
 test('resolves a unique paragraph-scoped replacement deterministically', () => {
@@ -151,6 +166,45 @@ test('supports insert, append, prepend, delete, and casing through the same pipe
   assert.equal(
     result.ok && result.afterText,
     'FIRST mountain sentence.\n\nSecond paragraph here. Appended.',
+  )
+})
+
+test('adds missing word boundaries for prepend and append operations', () => {
+  const text = 'Existing sentence.'
+  const paragraphs = [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'surround the paragraph with words',
+    operations: [
+      { id: 'prepend-word', type: 'prepend', target: { paragraphOrdinal: 1 }, text: 'before' },
+      { id: 'append-word', type: 'append', target: { paragraphOrdinal: 1 }, text: 'after' },
+    ],
+  })
+
+  assert.equal(result.ok && result.afterText, 'Before Existing sentence. After')
+
+  const continuation = executeEditPlan(
+    'Existing fragment',
+    [{ id: 'fragment', ordinal: 1, lineIndex: 0, text: 'Existing fragment' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'continue the current sentence',
+      operations: [
+        {
+          id: 'append-continuation',
+          type: 'append',
+          target: { paragraphOrdinal: 1 },
+          text: 'without capitalization',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    continuation.ok && continuation.afterText,
+    'Existing fragment without capitalization',
   )
 })
 
@@ -633,6 +687,20 @@ test('addresses punctuation by occurrence or its position relative to an anchor 
   })
   assert.equal(moved.ok && moved.afterText, 'Alpha beta, gamma.')
 
+  const lastPeriod = executeEditPlan('One. “Two. Three. Four”.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the last period',
+    operations: [
+      {
+        id: 'delete-last-period',
+        type: 'delete',
+        target: { punctuation: 'period', occurrenceFromEnd: 1 },
+      },
+    ],
+  })
+  assert.equal(lastPeriod.ok && lastPeriod.afterText, 'One. “Two. Three. Four”')
+
   assert.deepEqual(
     executeEditPlan(quoted.cleanText, quoted.paragraphs, 1, {
       schemaVersion: 2,
@@ -707,4 +775,72 @@ test('resolves one high-confidence approximate phrase and rejects equal candidat
     ],
   })
   assert.deepEqual(rejected, { ok: false, reason: 'approximate text target is ambiguous' })
+})
+
+test('falls back from a missing exact target to one unique fuzzy phrase', () => {
+  const text = 'I look at her. Mao let her in return and step off the bed.'
+  const resolved = executeEditPlan(text, [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'replace the uniquely similar spoken phrase',
+    operations: [
+      {
+        id: 'fuzzy-exact-fallback',
+        type: 'replace',
+        target: { exactText: 'mauled her in return' },
+        text: 'welcomed her back',
+      },
+    ],
+  })
+  assert.equal(
+    resolved.ok && resolved.afterText,
+    'I look at her. Welcomed her back and step off the bed.',
+  )
+
+  const providerCompound = executeEditPlan('I look at her. Mao let her in return.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'replace a provider-compounded spoken target',
+    operations: [
+      {
+        id: 'provider-compound-fuzzy-fallback',
+        type: 'replace',
+        target: { exactText: 'mouthlet' },
+        text: 'I smile at',
+      },
+    ],
+  })
+  assert.equal(
+    providerCompound.ok && providerCompound.afterText,
+    'I look at her. I smile at her in return.',
+  )
+
+  const shortWord = executeEditPlan('The form is ready.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'replace one unique short typo',
+    operations: [
+      {
+        id: 'short-word-fuzzy-fallback',
+        type: 'replace',
+        target: { exactText: 'farm' },
+        text: 'document',
+      },
+    ],
+  })
+  assert.equal(shortWord.ok && shortWord.afterText, 'The document is ready.')
+
+  const ambiguous = executeEditPlan('Mao let one pass. Mao let two pass.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'do not guess between equal fuzzy targets',
+    operations: [
+      {
+        id: 'ambiguous-fuzzy-exact-fallback',
+        type: 'delete',
+        target: { exactText: 'mouthlet' },
+      },
+    ],
+  })
+  assert.deepEqual(ambiguous, { ok: false, reason: 'fuzzy text target is ambiguous' })
 })

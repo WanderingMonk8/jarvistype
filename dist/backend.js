@@ -3069,6 +3069,11 @@ function enforceAuthoritativeEditSpellings(plan, candidates) {
         }
         const inlinePattern = new RegExp(spellingPayload, "gi");
         text = text.replace(inlinePattern, candidate.canonical);
+        const collapsedCanonicalPattern = new RegExp(
+          `(?<![\\p{L}\\p{N}])${escapeRegularExpression(candidate.canonical)}(?![\\p{L}\\p{N}])`,
+          "giu"
+        );
+        text = text.replace(collapsedCanonicalPattern, candidate.canonical);
       }
       return text === operation.text ? operation : { ...operation, text };
     })

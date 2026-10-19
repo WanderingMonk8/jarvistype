@@ -2009,6 +2009,49 @@ test('uses authoritative explicit spelling instead of inserting the spelling cue
   }
 })
 
+test('restores explicit casing after the edit interpreter collapses spelled letters', async () => {
+  const userId = 'collapsed-edit-spelling-casing-user'
+  const chatId = 'collapsed-edit-spelling-casing-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'I arrive Safeway on the cooley and begin browsing.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Apply the explicitly requested casing.',
+    operations: [
+      {
+        id: 'capitalize-cooley',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'cooley' },
+        text: 'COOLEY',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'collapsed-edit-spelling-casing-interpret',
+      operationId: 'collapsed-edit-spelling-casing-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace cooley with capitalized C-O-O-L-E-Y.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'I arrive Safeway on the Cooley and begin browsing.')
+  assert.equal(proposal.proposal.plan.operations[0]?.text, 'Cooley')
+  assert.deepEqual(proposal.proposal.learningCandidates, [
+    { canonical: 'Cooley', spokenVariant: 'C-O-O-L-E-Y' },
+  ])
+})
+
 test('uses normal casing for unmodified explicit spelling in edit input', async () => {
   const userId = 'default-edit-spelling-casing-user'
   const chatId = 'default-edit-spelling-casing-chat'
@@ -2024,7 +2067,7 @@ test('uses normal casing for unmodified explicit spelling in edit input', async 
         id: 'spell-cooley',
         type: 'replace',
         target: { paragraphOrdinal: 1, exactText: 'Kalora' },
-        text: 'C-O-O-L-E-Y',
+        text: 'COOLEY',
       },
     ],
   }

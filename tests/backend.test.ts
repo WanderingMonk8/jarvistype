@@ -1467,7 +1467,47 @@ test('removes terminal punctuation when a short sentence is deleted', async () =
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'We should continue.')
-  assert.equal(proposal.proposal.plan.operations[0]?.deleteTrailingPunctuation, true)
+  assert.equal(proposal.proposal.plan.operations[0]?.includeTrailingPunctuation, true)
+})
+
+test('moves terminal punctuation with an explicitly targeted short sentence', async () => {
+  const userId = 'short-sentence-move-user'
+  const chatId = 'short-sentence-move-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Enough! Continue now.\n\nLater.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Move the short sentence after Later.',
+    operations: [
+      {
+        id: 'move-short-sentence',
+        type: 'move_after',
+        target: { paragraphOrdinal: 1, exactText: 'Enough' },
+        destination: { paragraphOrdinal: 2, exactText: 'Later.' },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'short-sentence-move-interpret',
+      operationId: 'short-sentence-move-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Move the sentence Enough after the sentence Later.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Continue now.\n\nLater. Enough!')
+  assert.equal(proposal.proposal.plan.operations[0]?.includeTrailingPunctuation, true)
 })
 
 test('uses chat references for newly dictated edit text without changing the draft target', async () => {

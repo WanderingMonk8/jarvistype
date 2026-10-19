@@ -56,7 +56,7 @@ export interface EditOperation {
   text?: string
   caseMode?: 'capitalize' | 'uppercase' | 'lowercase'
   destination?: EditTarget
-  deleteTrailingPunctuation?: boolean
+  includeTrailingPunctuation?: boolean
 }
 
 export interface EditPlan {
@@ -181,7 +181,7 @@ function parseOperation(value: unknown): EditOperation | null {
     'text',
     'caseMode',
     'destination',
-    'deleteTrailingPunctuation',
+    'includeTrailingPunctuation',
   ])
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null
   const type = value.type
@@ -203,8 +203,8 @@ function parseOperation(value: unknown): EditOperation | null {
   if (!target) return null
   const text = value.text
   const caseMode = value.caseMode
-  const deleteTrailingPunctuation = value.deleteTrailingPunctuation
-  if (deleteTrailingPunctuation !== undefined && deleteTrailingPunctuation !== true) return null
+  const includeTrailingPunctuation = value.includeTrailingPunctuation
+  if (includeTrailingPunctuation !== undefined && includeTrailingPunctuation !== true) return null
   const destination =
     value.destination === undefined
       ? undefined
@@ -215,14 +215,14 @@ function parseOperation(value: unknown): EditOperation | null {
   if (type === 'case') {
     if (caseMode !== 'capitalize' && caseMode !== 'uppercase' && caseMode !== 'lowercase')
       return null
-    if (text !== undefined || destination !== undefined || deleteTrailingPunctuation !== undefined)
+    if (text !== undefined || destination !== undefined || includeTrailingPunctuation !== undefined)
       return null
   } else if (type === 'delete' || type === 'split' || type === 'join_next') {
     if (text !== undefined || caseMode !== undefined) return null
     if (destination !== undefined) return null
     if (
-      deleteTrailingPunctuation !== undefined &&
-      (type !== 'delete' || deleteTrailingPunctuation !== true)
+      includeTrailingPunctuation !== undefined &&
+      (type !== 'delete' || includeTrailingPunctuation !== true)
     )
       return null
     if (
@@ -233,23 +233,18 @@ function parseOperation(value: unknown): EditOperation | null {
     )
       return null
   } else if (type === 'move_before' || type === 'move_after') {
-    if (
-      text !== undefined ||
-      caseMode !== undefined ||
-      !destination ||
-      deleteTrailingPunctuation !== undefined
-    )
-      return null
+    if (text !== undefined || caseMode !== undefined || !destination) return null
     if (target.scope !== undefined || destination.scope !== undefined) return null
     const sourceIsText = hasInlineSelector(target)
     const destinationIsText = hasInlineSelector(destination)
     if (sourceIsText !== destinationIsText) return null
+    if (includeTrailingPunctuation !== undefined && !sourceIsText) return null
   } else if (
     typeof text !== 'string' ||
     text.length > MAX_EDIT_TEXT_LENGTH ||
     caseMode !== undefined ||
     destination !== undefined ||
-    deleteTrailingPunctuation !== undefined
+    includeTrailingPunctuation !== undefined
   ) {
     return null
   }
@@ -260,7 +255,7 @@ function parseOperation(value: unknown): EditOperation | null {
     ...(typeof text === 'string' ? { text } : {}),
     ...(typeof caseMode === 'string' ? { caseMode } : {}),
     ...(destination ? { destination } : {}),
-    ...(deleteTrailingPunctuation === true ? { deleteTrailingPunctuation: true } : {}),
+    ...(includeTrailingPunctuation === true ? { includeTrailingPunctuation: true } : {}),
   }
 }
 
@@ -462,10 +457,8 @@ function resolveOperation(
     }
   }
   if (operation.type === 'delete') {
-    if (operation.deleteTrailingPunctuation) {
-      const trailingPunctuation = cleanText.slice(end, range.end).match(/^(?:\.{3}|[.!?…])/u)?.[0]
-      if (trailingPunctuation) end += trailingPunctuation.length
-    }
+    if (operation.includeTrailingPunctuation)
+      end = extendThroughTerminalPunctuation(cleanText, end, range.end)
     const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
     const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
     if (hasSeparatorBefore && (hasSeparatorAfter || end === range.end)) start -= 1
@@ -564,12 +557,15 @@ function executeInlineMove(
     'move destination',
   )
   if (typeof destination === 'string') return { ok: false, reason: destination }
-  if (source.start < destination.end && destination.start < source.end)
+  const sourceEnd = operation.includeTrailingPunctuation
+    ? extendThroughTerminalPunctuation(cleanText, source.end, source.scopeEnd)
+    : source.end
+  if (source.start < destination.end && destination.start < sourceEnd)
     return { ok: false, reason: 'move source and destination overlap' }
 
-  const movedText = cleanText.slice(source.start, source.end)
+  const movedText = cleanText.slice(source.start, sourceEnd)
   let removalStart = source.start
-  let removalEnd = source.end
+  let removalEnd = sourceEnd
   const hasSeparatorBefore =
     removalStart > source.scopeStart && /[ \t]/.test(cleanText[removalStart - 1] ?? '')
   const hasSeparatorAfter =
@@ -602,7 +598,7 @@ function executeInlineMove(
       {
         ...operation,
         startOffset: source.start,
-        endOffset: source.end,
+        endOffset: sourceEnd,
         beforeText: movedText,
         afterText: movedText,
         paragraphOrdinal: source.paragraphOrdinal,
@@ -612,6 +608,11 @@ function executeInlineMove(
       ...new Set([source.paragraphOrdinal, destination.paragraphOrdinal]),
     ].sort((left, right) => left - right),
   }
+}
+
+function extendThroughTerminalPunctuation(text: string, end: number, limit: number): number {
+  const punctuation = text.slice(end, limit).match(/^(?:\.{3}|[.!?…])/u)?.[0]
+  return punctuation ? end + punctuation.length : end
 }
 
 function resolveTextTarget(

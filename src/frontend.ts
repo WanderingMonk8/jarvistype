@@ -341,6 +341,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const rejectEditButton = requireElement<HTMLButtonElement>(tab.root, '[data-edit-reject]')
   const contextCountInput = requireElement<HTMLInputElement>(tab.root, '[data-context-count]')
   const contextualToggle = requireElement<HTMLInputElement>(tab.root, '[data-context-enabled]')
+  const grammarRepairSelect = requireElement<HTMLSelectElement>(
+    tab.root,
+    '[data-grammar-repair-mode]',
+  )
   const saveSettingsButton = requireElement<HTMLButtonElement>(tab.root, '[data-settings-save]')
   const normalizationConnectionSelect = requireElement<HTMLSelectElement>(
     tab.root,
@@ -429,6 +433,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     settings: {
       contextMessageCount: 5,
       contextualNormalizationEnabled: true,
+      grammarRepairMode: 'off',
       normalizationConnectionId: null,
       normalizationModelOverride: '',
     },
@@ -655,12 +660,15 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     editProposalPanel.hidden = !editProposal
     editProposalInstruction.textContent = editProposal?.instructionTranscript ?? ''
     editProposalOperations.textContent = editProposal
-      ? editProposal.operations
-          .map(
+      ? [
+          ...editProposal.operations.map(
             (operation) =>
               `${operation.type} · paragraph ${operation.paragraphOrdinal}${describeEditDestination(operation.destination)} · ${operation.beforeText || '∅'} → ${operation.afterText || '∅'}`,
-          )
-          .join('\n')
+          ),
+          ...(editProposal.grammarRepairChanges ?? []).map(
+            (change) => `grammar repair · ${change}`,
+          ),
+        ].join('\n')
       : ''
     editProposalBefore.textContent = editProposal?.beforeText ?? ''
     editProposalAfter.textContent = editProposal?.afterText ?? ''
@@ -681,6 +689,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     cancelEditCandidatesButton.disabled = !editCandidates || state.automatedBusy
     contextCountInput.value = String(state.settings.contextMessageCount)
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
+    grammarRepairSelect.value = state.settings.grammarRepairMode
     renderConnectionOptions(
       normalizationConnectionSelect,
       state.normalizationConnections,
@@ -1330,6 +1339,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       settings: {
         contextMessageCount,
         contextualNormalizationEnabled: contextualToggle.checked,
+        grammarRepairMode:
+          grammarRepairSelect.value === 'always'
+            ? 'always'
+            : grammarRepairSelect.value === 'when_needed'
+              ? 'when_needed'
+              : 'off',
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: normalizationModelPicker.getValue().trim(),
       },
@@ -2521,10 +2536,11 @@ function shellMarkup(): string {
         <div class="jt-form-grid">
           <label>Messages scanned for references (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
+          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Uses the selected normalization connection on affected paragraphs only. Every correction remains part of the edit proposal.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
-        <div class="jt-actions"><button type="button" data-settings-save>Save context settings</button></div>
+        <div class="jt-actions"><button type="button" data-settings-save>Save settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings…</p>
 
         <h4>Personal glossary</h4>

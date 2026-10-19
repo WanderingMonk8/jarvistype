@@ -23,6 +23,7 @@ let generationReturnsRawTranscript = false
 let generationNormalizedText: string | null = null
 let generationCommandDecisions: unknown[] = []
 let editPlanResponse: unknown = null
+let grammarRepairResponse: unknown = null
 let chatMessages: Array<{
   role: 'system' | 'user' | 'assistant'
   content: unknown
@@ -104,6 +105,8 @@ const spindleMock = {
       }
       if (input.task === 'Interpret this edit instruction against the numbered draft.')
         return Promise.resolve({ content: JSON.stringify(editPlanResponse) })
+      if (input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.')
+        return Promise.resolve({ content: JSON.stringify(grammarRepairResponse) })
       return Promise.resolve({
         content: JSON.stringify({
           normalizedText: generationReturnsRawTranscript
@@ -142,6 +145,7 @@ test.beforeEach(() => {
   generationNormalizedText = null
   generationCommandDecisions = []
   editPlanResponse = null
+  grammarRepairResponse = null
   chatMessages = []
 })
 
@@ -256,6 +260,7 @@ test('lists safe normalization connections and dispatches with selected connecti
       settings: {
         contextMessageCount: 5,
         contextualNormalizationEnabled: true,
+        grammarRepairMode: 'off',
         normalizationConnectionId: normalizationConnection.id,
         normalizationModelOverride: 'custom-text-model',
       },
@@ -2177,6 +2182,198 @@ test('preserves sentence casing when replacing an opening phrase', async () => {
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
+})
+
+test('applies and discloses an enabled conservative post-edit grammar repair', async () => {
+  const userId = 'grammar-repair-user'
+  const chatId = 'grammar-repair-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'grammar-repair-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'always',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'This is a narrow entrance.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace narrow with accessible.',
+    operations: [
+      {
+        id: 'replace-adjective',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'narrow' },
+        text: 'accessible',
+      },
+    ],
+  }
+  grammarRepairResponse = {
+    paragraphs: [{ ordinal: 1, text: 'This is an accessible entrance.' }],
+    changes: ['Changed “a” to “an” before “accessible”.'],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'grammar-repair-interpret',
+      operationId: 'grammar-repair-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace narrow with accessible.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'This is an accessible entrance.')
+  assert.deepEqual(proposal.proposal.grammarRepairChanges, [
+    'Changed “a” to “an” before “accessible”.',
+  ])
+  const grammarRequest = generationRequests.find((request) => {
+    const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+    return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+  })
+  assert.ok(grammarRequest)
+})
+
+test('falls back to the deterministic edit when grammar repair overreaches', async () => {
+  const userId = 'unsafe-grammar-repair-user'
+  const chatId = 'unsafe-grammar-repair-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'unsafe-grammar-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'always',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'This is a narrow entrance.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace narrow with accessible.',
+    operations: [
+      {
+        id: 'replace-adjective-unsafely',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'narrow' },
+        text: 'accessible',
+      },
+    ],
+  }
+  grammarRepairResponse = {
+    paragraphs: [
+      {
+        ordinal: 1,
+        text: 'A magnificent marble gateway welcomed every traveler into the transformed city.',
+      },
+    ],
+    changes: ['Rewrote the paragraph.'],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'unsafe-grammar-interpret',
+      operationId: 'unsafe-grammar-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace narrow with accessible.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'This is a accessible entrance.')
+  assert.equal(proposal.proposal.grammarRepairChanges, undefined)
+})
+
+test('skips a routine mid-sentence grammar call in when-needed mode', async () => {
+  const userId = 'conditional-grammar-repair-user'
+  const chatId = 'conditional-grammar-repair-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'conditional-grammar-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'when_needed',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'This is a narrow entrance.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace narrow with wide.',
+    operations: [
+      {
+        id: 'replace-routine-adjective',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'narrow' },
+        text: 'wide',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'conditional-grammar-interpret',
+      operationId: 'conditional-grammar-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace narrow with wide.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'This is a wide entrance.')
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+    }).length,
+    0,
+  )
 })
 
 test('keeps a one-time explanatory reference out of replacement text and glossary learning', async () => {

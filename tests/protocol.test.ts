@@ -152,11 +152,27 @@ test('validates normalization connection and custom-model settings', () => {
       settings: {
         contextMessageCount: 5,
         contextualNormalizationEnabled: true,
+        grammarRepairMode: 'when_needed',
         normalizationConnectionId: 'connection-1',
         normalizationModelOverride: 'custom-model',
       },
     }),
     true,
+  )
+  assert.equal(
+    isFrontendRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'invalid-grammar-mode',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'sometimes',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    }),
+    false,
   )
 })
 

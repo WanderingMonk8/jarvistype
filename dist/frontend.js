@@ -306,7 +306,7 @@ function isPermissionSnapshot(value) {
   return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function isPhaseFourSettings(value) {
-  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200;
+  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200;
 }
 function isNormalizationConnectionOption(value) {
   return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
@@ -317,7 +317,7 @@ function isNormalizationProposal(value) {
   ) && isNonNegativeInteger2(value.contextMessageCount) && isNonNegativeInteger2(value.contextCharacterCount) && typeof value.contextTruncated === "boolean" && typeof value.contextualModelUsed === "boolean";
 }
 function isEditProposal(value) {
-  return isRecord2(value) && isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger2(value.expectedVersion) && isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) && parseEditPlan(value.plan) !== null && Array.isArray(value.operations) && value.operations.length > 0 && value.operations.every(
+  return isRecord2(value) && isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger2(value.expectedVersion) && (value.grammarRepairChanges === void 0 || Array.isArray(value.grammarRepairChanges) && value.grammarRepairChanges.every((change) => isBoundedString(change, 1, 500))) && isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) && parseEditPlan(value.plan) !== null && Array.isArray(value.operations) && value.operations.length > 0 && value.operations.every(
     (operation) => isRecord2(operation) && isIdentifier2(operation.id) && typeof operation.type === "string" && isNonNegativeInteger2(operation.startOffset) && isNonNegativeInteger2(operation.endOffset) && typeof operation.beforeText === "string" && typeof operation.afterText === "string" && isPositiveInteger2(operation.paragraphOrdinal)
   ) && typeof value.beforeText === "string" && value.beforeText.length <= MAX_DRAFT_CHARACTERS && typeof value.afterText === "string" && value.afterText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.affectedParagraphOrdinals) && value.affectedParagraphOrdinals.every(isPositiveInteger2) && typeof value.explanation === "string" && value.explanation.length <= 1e3 && Array.isArray(value.learningCandidates) && value.learningCandidates.every(
     (candidate) => isRecord2(candidate) && isBoundedString(candidate.canonical, 1, 200) && typeof candidate.spokenVariant === "string" && candidate.spokenVariant.length <= 500
@@ -608,6 +608,10 @@ function setup(ctx) {
   const rejectEditButton = requireElement(tab.root, "[data-edit-reject]");
   const contextCountInput = requireElement(tab.root, "[data-context-count]");
   const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
+  const grammarRepairSelect = requireElement(
+    tab.root,
+    "[data-grammar-repair-mode]"
+  );
   const saveSettingsButton = requireElement(tab.root, "[data-settings-save]");
   const normalizationConnectionSelect = requireElement(
     tab.root,
@@ -692,6 +696,7 @@ function setup(ctx) {
     settings: {
       contextMessageCount: 5,
       contextualNormalizationEnabled: true,
+      grammarRepairMode: "off",
       normalizationConnectionId: null,
       normalizationModelOverride: ""
     },
@@ -822,9 +827,14 @@ function setup(ctx) {
     const editProposal = state.pendingEditProposal;
     editProposalPanel.hidden = !editProposal;
     editProposalInstruction.textContent = editProposal?.instructionTranscript ?? "";
-    editProposalOperations.textContent = editProposal ? editProposal.operations.map(
-      (operation) => `${operation.type} \xB7 paragraph ${operation.paragraphOrdinal}${describeEditDestination(operation.destination)} \xB7 ${operation.beforeText || "\u2205"} \u2192 ${operation.afterText || "\u2205"}`
-    ).join("\n") : "";
+    editProposalOperations.textContent = editProposal ? [
+      ...editProposal.operations.map(
+        (operation) => `${operation.type} \xB7 paragraph ${operation.paragraphOrdinal}${describeEditDestination(operation.destination)} \xB7 ${operation.beforeText || "\u2205"} \u2192 ${operation.afterText || "\u2205"}`
+      ),
+      ...(editProposal.grammarRepairChanges ?? []).map(
+        (change) => `grammar repair \xB7 ${change}`
+      )
+    ].join("\n") : "";
     editProposalBefore.textContent = editProposal?.beforeText ?? "";
     editProposalAfter.textContent = editProposal?.afterText ?? "";
     acceptEditButton.disabled = !editProposal || state.automatedBusy;
@@ -844,6 +854,7 @@ function setup(ctx) {
     cancelEditCandidatesButton.disabled = !editCandidates || state.automatedBusy;
     contextCountInput.value = String(state.settings.contextMessageCount);
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
+    grammarRepairSelect.value = state.settings.grammarRepairMode;
     renderConnectionOptions(
       normalizationConnectionSelect,
       state.normalizationConnections,
@@ -1382,6 +1393,7 @@ function setup(ctx) {
       settings: {
         contextMessageCount,
         contextualNormalizationEnabled: contextualToggle.checked,
+        grammarRepairMode: grammarRepairSelect.value === "always" ? "always" : grammarRepairSelect.value === "when_needed" ? "when_needed" : "off",
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: normalizationModelPicker.getValue().trim()
       }
@@ -2426,10 +2438,11 @@ function shellMarkup() {
         <div class="jt-form-grid">
           <label>Messages scanned for references (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
+          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Uses the selected normalization connection on affected paragraphs only. Every correction remains part of the edit proposal.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
-        <div class="jt-actions"><button type="button" data-settings-save>Save context settings</button></div>
+        <div class="jt-actions"><button type="button" data-settings-save>Save settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings\u2026</p>
 
         <h4>Personal glossary</h4>

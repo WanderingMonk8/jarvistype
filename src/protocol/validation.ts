@@ -332,6 +332,9 @@ function isPhaseFourSettings(value: unknown): boolean {
     isNonNegativeInteger(value.contextMessageCount) &&
     value.contextMessageCount <= 20 &&
     typeof value.contextualNormalizationEnabled === 'boolean' &&
+    (value.grammarRepairMode === 'off' ||
+      value.grammarRepairMode === 'when_needed' ||
+      value.grammarRepairMode === 'always') &&
     (value.normalizationConnectionId === null || isIdentifier(value.normalizationConnectionId)) &&
     typeof value.normalizationModelOverride === 'string' &&
     value.normalizationModelOverride.length <= 200
@@ -383,6 +386,9 @@ function isEditProposal(value: unknown): boolean {
     isIdentifier(value.operationId) &&
     isIdentifier(value.chatId) &&
     isNonNegativeInteger(value.expectedVersion) &&
+    (value.grammarRepairChanges === undefined ||
+      (Array.isArray(value.grammarRepairChanges) &&
+        value.grammarRepairChanges.every((change) => isBoundedString(change, 1, 500)))) &&
     isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) &&
     parseEditPlan(value.plan) !== null &&
     Array.isArray(value.operations) &&

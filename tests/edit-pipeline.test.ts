@@ -381,6 +381,54 @@ test('deletion consumes one adjacent horizontal separator without touching other
   assert.equal(middleWord.ok && middleWord.afterText, 'Keep wording.')
 })
 
+test('sentence deletion consumes adjacent terminal punctuation for short targets only when requested', () => {
+  for (const [text, target, expected] of [
+    ['Enough! Continue.', 'Enough', 'Continue.'],
+    ['Not today? Continue.', 'Not today', 'Continue.'],
+    ['Perhaps… Continue.', 'Perhaps', 'Continue.'],
+    ['Wait... Continue.', 'Wait', 'Continue.'],
+  ] as const) {
+    const result = executeEditPlan(
+      text,
+      [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'delete a short sentence',
+        operations: [
+          {
+            id: 'delete-short-sentence',
+            type: 'delete',
+            target: { paragraphOrdinal: 1, exactText: target },
+            includeTrailingPunctuation: true,
+          },
+        ],
+      },
+    )
+    assert.equal(result.ok && result.afterText, expected)
+  }
+
+  const wordOnly = executeEditPlan(
+    'Enough! Continue.',
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text: 'Enough! Continue.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete a word',
+      operations: [
+        {
+          id: 'delete-word-only',
+          type: 'delete',
+          target: { paragraphOrdinal: 1, exactText: 'Enough' },
+        },
+      ],
+    },
+  )
+  assert.equal(wordOnly.ok && wordOnly.afterText, '! Continue.')
+})
+
 test('splits and joins paragraphs with controlled whitespace', () => {
   const seeded = applyManualEdit(
     createDraftSession('structure-chat'),
@@ -531,6 +579,45 @@ test('moves an exact word or phrase before or after another text target', () => 
     }),
     null,
   )
+})
+
+test('moves terminal punctuation with a short sentence only when explicitly requested', () => {
+  const text = 'Enough! Continue now.\n\nLater.'
+  const paragraphs = [
+    { id: 'first', ordinal: 1, lineIndex: 0, text: 'Enough! Continue now.' },
+    { id: 'second', ordinal: 2, lineIndex: 2, text: 'Later.' },
+  ]
+  const sentenceMove = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'move the sentence Enough after Later',
+    operations: [
+      {
+        id: 'move-short-sentence',
+        type: 'move_after',
+        target: { paragraphOrdinal: 1, exactText: 'Enough' },
+        destination: { paragraphOrdinal: 2, exactText: 'Later.' },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
+  assert.equal(sentenceMove.ok && sentenceMove.afterText, 'Continue now.\n\nLater. Enough!')
+  assert.equal(sentenceMove.ok && sentenceMove.operations[0]?.beforeText, 'Enough!')
+
+  const wordMove = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'move the word Enough after Later',
+    operations: [
+      {
+        id: 'move-word',
+        type: 'move_after',
+        target: { paragraphOrdinal: 1, exactText: 'Enough' },
+        destination: { paragraphOrdinal: 2, exactText: 'Later.' },
+      },
+    ],
+  })
+  assert.equal(wordMove.ok && wordMove.afterText, '! Continue now.\n\nLater. Enough')
 })
 
 test('rejects ambiguous, overlapping, and unchanged inline moves atomically', () => {

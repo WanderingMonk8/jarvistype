@@ -588,6 +588,10 @@ async function handleEditInterpretation(
       session.paragraphs,
       session.draftVersion,
       plan,
+      [
+        ...glossary.entries.map((entry) => entry.canonical),
+        ...conversationReferences,
+      ],
     )
     if (!executed.ok) {
       const candidates = createEditCandidateContext(request, session, plan)
@@ -859,14 +863,15 @@ async function handleEditCandidateSelection(
       activeRequest.cancelled
     )
       return { error: true as const, session }
+    const glossary = await loadGlossary(context.userId)
     const executed = executeEditPlan(
       session.cleanText,
       session.paragraphs,
       session.draftVersion,
       plan,
+      glossary.entries.map((entry) => entry.canonical),
     )
     if (!executed.ok) return { error: true as const, session }
-    const glossary = await loadGlossary(context.userId)
     const spelling = normalizeDeterministically(
       candidateContext.candidateSet.instructionTranscript,
       glossary.entries,

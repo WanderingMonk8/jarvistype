@@ -618,13 +618,13 @@ function parseEditPlan(value) {
     explanation: value.explanation
   };
 }
-function executeEditPlan(cleanText, paragraphs, currentVersion, plan) {
+function executeEditPlan(cleanText, paragraphs, currentVersion, plan, protectedCasingTerms = []) {
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: "stale draft version" };
   const inlineMoves = plan.operations.filter(isInlineMoveOperation);
   if (inlineMoves.length) {
     if (inlineMoves.length !== plan.operations.length || inlineMoves.length > 1)
       return { ok: false, reason: "an inline move must be the only operation in its edit plan" };
-    return executeInlineMove(cleanText, paragraphs, inlineMoves[0]);
+    return executeInlineMove(cleanText, paragraphs, inlineMoves[0], protectedCasingTerms);
   }
   const structural = plan.operations.filter(isStructuralOperation);
   if (structural.length) {
@@ -634,7 +634,7 @@ function executeEditPlan(cleanText, paragraphs, currentVersion, plan) {
   }
   const patches = [];
   for (const operation of plan.operations) {
-    const patch = resolveOperation(cleanText, paragraphs, operation);
+    const patch = resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms);
     if (typeof patch === "string") return { ok: false, reason: patch };
     patches.push(patch);
   }
@@ -796,7 +796,7 @@ function parseTarget(value) {
     return null;
   return Object.keys(target).length ? target : null;
 }
-function resolveOperation(cleanText, paragraphs, operation) {
+function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms) {
   const paragraphMatches = paragraphs.filter(
     (paragraph2) => (operation.target.paragraphId === void 0 || paragraph2.id === operation.target.paragraphId) && (operation.target.paragraphOrdinal === void 0 || paragraph2.ordinal === operation.target.paragraphOrdinal)
   );
@@ -882,17 +882,33 @@ ${formattedParagraph}`,
     else if (hasSeparatorAfter && start === range.start) end += 1;
   }
   const insertionText = operation.text ?? "";
-  const replacement = operation.type === "replace" ? preserveTargetCasing(cleanText.slice(start, end), insertionText) : operation.type === "delete" ? "" : operation.type === "insert_before" ? addBoundarySpacing(
-    cleanText,
-    start,
-    capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
-  ) : operation.type === "insert_after" ? addBoundarySpacing(
+  if (operation.type === "insert_before") {
+    const formattedInsertion = capitalizeReplacementAtSentenceOpening(
+      cleanText,
+      start,
+      insertionText
+    );
+    const displacedOpening = isSentenceOpeningAt(cleanText, start) && /\p{L}/u.test(formattedInsertion) ? lowercaseOrdinarySentenceOpening(
+      cleanText,
+      start,
+      cleanText,
+      start,
+      protectedCasingTerms
+    ) : null;
+    return {
+      operation,
+      start,
+      end: displacedOpening?.end ?? start,
+      replacement: `${addBoundarySpacing(cleanText, start, formattedInsertion)}${displacedOpening?.text ?? ""}`,
+      paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset2(cleanText, start)
+    };
+  }
+  const replacement = operation.type === "replace" ? preserveTargetCasing(cleanText.slice(start, end), insertionText) : operation.type === "delete" ? "" : operation.type === "insert_after" ? addBoundarySpacing(
     cleanText,
     end,
     capitalizeReplacementAtSentenceOpening(cleanText, end, insertionText)
   ) : applyCase(cleanText.slice(start, end), operation.caseMode);
-  if (operation.type === "insert_before") end = start;
-  else if (operation.type === "insert_after") start = end;
+  if (operation.type === "insert_after") start = end;
   return {
     operation,
     start,
@@ -910,7 +926,7 @@ function isInlineMoveOperation(operation) {
 function hasInlineSelector(target) {
   return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0;
 }
-function executeInlineMove(cleanText, paragraphs, operation) {
+function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerms) {
   const source = resolveTextTarget(cleanText, paragraphs, operation.target, "move source");
   if (typeof source === "string") return { ok: false, reason: source };
   const destination = resolveTextTarget(
@@ -932,10 +948,26 @@ function executeInlineMove(cleanText, paragraphs, operation) {
   if (hasSeparatorBefore && (hasSeparatorAfter || removalEnd === source.scopeEnd || endsBeforeClosingPunctuation))
     removalStart -= 1;
   else if (hasSeparatorAfter && removalStart === source.scopeStart) removalEnd += 1;
-  const withoutSource = `${cleanText.slice(0, removalStart)}${cleanText.slice(removalEnd)}`;
+  let withoutSource = `${cleanText.slice(0, removalStart)}${cleanText.slice(removalEnd)}`;
+  if (isSentenceOpeningAt(cleanText, source.start))
+    withoutSource = capitalizeExistingSentenceOpening(withoutSource, removalStart);
   const originalInsertionPoint = operation.type === "move_before" ? destination.start : destination.end;
   const insertionPoint = originalInsertionPoint > removalStart ? originalInsertionPoint - (removalEnd - removalStart) : originalInsertionPoint;
-  const insertion = addBoundarySpacing(withoutSource, insertionPoint, movedText);
+  const formattedMovedText = capitalizeReplacementAtSentenceOpening(
+    withoutSource,
+    insertionPoint,
+    movedText
+  );
+  const displacedOpening = operation.type === "move_before" && isSentenceOpeningAt(withoutSource, insertionPoint) && /\p{L}/u.test(formattedMovedText) ? lowercaseOrdinarySentenceOpening(
+    withoutSource,
+    insertionPoint,
+    cleanText,
+    destination.start,
+    protectedCasingTerms
+  ) : null;
+  if (displacedOpening)
+    withoutSource = `${withoutSource.slice(0, insertionPoint)}${displacedOpening.text}${withoutSource.slice(displacedOpening.end)}`;
+  const insertion = addBoundarySpacing(withoutSource, insertionPoint, formattedMovedText);
   const afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`;
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: "edited draft is too large" };
@@ -949,7 +981,7 @@ function executeInlineMove(cleanText, paragraphs, operation) {
         startOffset: source.start,
         endOffset: sourceEnd,
         beforeText: movedText,
-        afterText: movedText,
+        afterText: formattedMovedText,
         paragraphOrdinal: source.paragraphOrdinal
       }
     ],
@@ -1107,6 +1139,59 @@ function capitalizeReplacementAtSentenceOpening(text, start, replacement) {
       return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`;
     }
   );
+}
+function isSentenceOpeningAt(text, point) {
+  const before = text.slice(0, point);
+  return /(?:^|\n{2,}|[.?!\u2026][\u201d\u2019"']?(?:[ \t]+|$))[ \t]*[\u201c\u2018"'([{]*[ \t]*$/u.test(
+    before
+  );
+}
+function lowercaseOrdinarySentenceOpening(text, start, evidenceText, evidenceStart, protectedCasingTerms) {
+  const match = text.slice(start).match(/^([ \t]*[\u201c\u2018"'([{]*[ \t]*)(\p{Lu}[\p{L}\p{M}'\u2019-]*)/u);
+  if (!match) return null;
+  const prefix = match[1];
+  const word = match[2];
+  if (looksLikeProperNoun(
+    evidenceText,
+    evidenceStart + prefix.length,
+    word,
+    protectedCasingTerms
+  ))
+    return null;
+  const loweredWord = `${word.charAt(0).toLocaleLowerCase()}${word.slice(1)}`;
+  return { end: start + match[0].length, text: `${prefix}${loweredWord}` };
+}
+function looksLikeProperNoun(text, wordStart, word, protectedCasingTerms) {
+  if (/\p{Lu}/u.test(word.slice(1))) return true;
+  if (protectedCasingTerms.some((term) => {
+    const termWords = term.match(/[\p{L}\p{M}'\u2019-]+/gu) ?? [];
+    return termWords.includes(word);
+  }))
+    return true;
+  const following = text.slice(wordStart + word.length);
+  if (/^[ \t]+\p{Lu}\p{Ll}+/u.test(following)) return true;
+  const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const occurrencePattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])${escapedWord}(?![\\p{L}\\p{N}])`,
+    "gu"
+  );
+  for (const occurrence of text.matchAll(occurrencePattern)) {
+    const occurrenceStart = occurrence.index;
+    if (occurrenceStart === wordStart) continue;
+    if (!isSentenceOpeningAt(text, occurrenceStart)) return true;
+  }
+  return false;
+}
+function capitalizeExistingSentenceOpening(text, start) {
+  const suffix = text.slice(start);
+  const capitalized = suffix.replace(
+    /^([ \t]*[\u201c\u2018"'([{]*[ \t]*)([\p{Ll}][\p{L}\p{M}'\u2019-]*)/u,
+    (whole, prefix, word) => {
+      if (/\p{Lu}/u.test(word.slice(1))) return whole;
+      return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`;
+    }
+  );
+  return `${text.slice(0, start)}${capitalized}`;
 }
 function preserveTargetCasing(target, replacement) {
   if (/\p{Lu}/u.test(replacement)) return replacement;
@@ -2543,7 +2628,11 @@ async function handleEditInterpretation(request, context, activeRequest) {
       session.cleanText,
       session.paragraphs,
       session.draftVersion,
-      plan
+      plan,
+      [
+        ...glossary.entries.map((entry) => entry.canonical),
+        ...conversationReferences
+      ]
     );
     if (!executed.ok) {
       const candidates = createEditCandidateContext(request, session, plan);
@@ -2761,14 +2850,15 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
     const activeChat = await spindle.chats.getActive(context.userId);
     if (!activeChat || activeChat.id !== request.chatId || session.draftVersion !== request.expectedVersion || activeRequest.cancelled)
       return { error: true, session };
+    const glossary = await loadGlossary(context.userId);
     const executed = executeEditPlan(
       session.cleanText,
       session.paragraphs,
       session.draftVersion,
-      plan
+      plan,
+      glossary.entries.map((entry) => entry.canonical)
     );
     if (!executed.ok) return { error: true, session };
-    const glossary = await loadGlossary(context.userId);
     const spelling = normalizeDeterministically(
       candidateContext.candidateSet.instructionTranscript,
       glossary.entries

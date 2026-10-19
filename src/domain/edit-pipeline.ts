@@ -116,13 +116,14 @@ export function executeEditPlan(
   paragraphs: readonly DraftParagraph[],
   currentVersion: number,
   plan: EditPlan,
+  protectedCasingTerms: readonly string[] = [],
 ): EditPipelineResult {
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
   const inlineMoves = plan.operations.filter(isInlineMoveOperation)
   if (inlineMoves.length) {
     if (inlineMoves.length !== plan.operations.length || inlineMoves.length > 1)
       return { ok: false, reason: 'an inline move must be the only operation in its edit plan' }
-    return executeInlineMove(cleanText, paragraphs, inlineMoves[0]!)
+    return executeInlineMove(cleanText, paragraphs, inlineMoves[0]!, protectedCasingTerms)
   }
   const structural = plan.operations.filter(isStructuralOperation)
   if (structural.length) {
@@ -132,7 +133,7 @@ export function executeEditPlan(
   }
   const patches: Patch[] = []
   for (const operation of plan.operations) {
-    const patch = resolveOperation(cleanText, paragraphs, operation)
+    const patch = resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms)
     if (typeof patch === 'string') return { ok: false, reason: patch }
     patches.push(patch)
   }
@@ -364,6 +365,7 @@ function resolveOperation(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
   operation: EditOperation,
+  protectedCasingTerms: readonly string[],
 ): Patch | string {
   const paragraphMatches = paragraphs.filter(
     (paragraph) =>
@@ -465,26 +467,43 @@ function resolveOperation(
     else if (hasSeparatorAfter && start === range.start) end += 1
   }
   const insertionText = operation.text ?? ''
+  if (operation.type === 'insert_before') {
+    const formattedInsertion = capitalizeReplacementAtSentenceOpening(
+      cleanText,
+      start,
+      insertionText,
+    )
+    const displacedOpening =
+      isSentenceOpeningAt(cleanText, start) && /\p{L}/u.test(formattedInsertion)
+        ? lowercaseOrdinarySentenceOpening(
+            cleanText,
+            start,
+            cleanText,
+            start,
+            protectedCasingTerms,
+          )
+        : null
+    return {
+      operation,
+      start,
+      end: displacedOpening?.end ?? start,
+      replacement: `${addBoundarySpacing(cleanText, start, formattedInsertion)}${displacedOpening?.text ?? ''}`,
+      paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset(cleanText, start),
+    }
+  }
   const replacement =
     operation.type === 'replace'
       ? preserveTargetCasing(cleanText.slice(start, end), insertionText)
       : operation.type === 'delete'
         ? ''
-        : operation.type === 'insert_before'
-          ? addBoundarySpacing(
-              cleanText,
-              start,
-              capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText),
-            )
-          : operation.type === 'insert_after'
+        : operation.type === 'insert_after'
             ? addBoundarySpacing(
                 cleanText,
                 end,
                 capitalizeReplacementAtSentenceOpening(cleanText, end, insertionText),
               )
             : applyCase(cleanText.slice(start, end), operation.caseMode!)
-  if (operation.type === 'insert_before') end = start
-  else if (operation.type === 'insert_after') start = end
+  if (operation.type === 'insert_after') start = end
   return {
     operation,
     start,
@@ -547,6 +566,7 @@ function executeInlineMove(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
   operation: InlineMoveOperation,
+  protectedCasingTerms: readonly string[],
 ): EditPipelineResult {
   const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'move source')
   if (typeof source === 'string') return { ok: false, reason: source }
@@ -578,14 +598,35 @@ function executeInlineMove(
     removalStart -= 1
   else if (hasSeparatorAfter && removalStart === source.scopeStart) removalEnd += 1
 
-  const withoutSource = `${cleanText.slice(0, removalStart)}${cleanText.slice(removalEnd)}`
+  let withoutSource = `${cleanText.slice(0, removalStart)}${cleanText.slice(removalEnd)}`
+  if (isSentenceOpeningAt(cleanText, source.start))
+    withoutSource = capitalizeExistingSentenceOpening(withoutSource, removalStart)
   const originalInsertionPoint =
     operation.type === 'move_before' ? destination.start : destination.end
   const insertionPoint =
     originalInsertionPoint > removalStart
       ? originalInsertionPoint - (removalEnd - removalStart)
       : originalInsertionPoint
-  const insertion = addBoundarySpacing(withoutSource, insertionPoint, movedText)
+  const formattedMovedText = capitalizeReplacementAtSentenceOpening(
+    withoutSource,
+    insertionPoint,
+    movedText,
+  )
+  const displacedOpening =
+    operation.type === 'move_before' &&
+    isSentenceOpeningAt(withoutSource, insertionPoint) &&
+    /\p{L}/u.test(formattedMovedText)
+      ? lowercaseOrdinarySentenceOpening(
+          withoutSource,
+          insertionPoint,
+          cleanText,
+          destination.start,
+          protectedCasingTerms,
+        )
+      : null
+  if (displacedOpening)
+    withoutSource = `${withoutSource.slice(0, insertionPoint)}${displacedOpening.text}${withoutSource.slice(displacedOpening.end)}`
+  const insertion = addBoundarySpacing(withoutSource, insertionPoint, formattedMovedText)
   const afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
@@ -600,7 +641,7 @@ function executeInlineMove(
         startOffset: source.start,
         endOffset: sourceEnd,
         beforeText: movedText,
-        afterText: movedText,
+        afterText: formattedMovedText,
         paragraphOrdinal: source.paragraphOrdinal,
       },
     ],
@@ -835,6 +876,87 @@ function capitalizeReplacementAtSentenceOpening(
       return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`
     },
   )
+}
+
+function isSentenceOpeningAt(text: string, point: number): boolean {
+  const before = text.slice(0, point)
+  return /(?:^|\n{2,}|[.?!\u2026][\u201d\u2019"']?(?:[ \t]+|$))[ \t]*[\u201c\u2018"'([{]*[ \t]*$/u.test(
+    before,
+  )
+}
+
+interface LowercasedSentenceOpening {
+  end: number
+  text: string
+}
+
+function lowercaseOrdinarySentenceOpening(
+  text: string,
+  start: number,
+  evidenceText: string,
+  evidenceStart: number,
+  protectedCasingTerms: readonly string[],
+): LowercasedSentenceOpening | null {
+  const match = text
+    .slice(start)
+    .match(/^([ \t]*[\u201c\u2018"'([{]*[ \t]*)(\p{Lu}[\p{L}\p{M}'\u2019-]*)/u)
+  if (!match) return null
+  const prefix = match[1]!
+  const word = match[2]!
+  if (
+    looksLikeProperNoun(
+      evidenceText,
+      evidenceStart + prefix.length,
+      word,
+      protectedCasingTerms,
+    )
+  )
+    return null
+  const loweredWord = `${word.charAt(0).toLocaleLowerCase()}${word.slice(1)}`
+  return { end: start + match[0].length, text: `${prefix}${loweredWord}` }
+}
+
+function looksLikeProperNoun(
+  text: string,
+  wordStart: number,
+  word: string,
+  protectedCasingTerms: readonly string[],
+): boolean {
+  if (/\p{Lu}/u.test(word.slice(1))) return true
+  if (
+    protectedCasingTerms.some((term) => {
+      const termWords: string[] = term.match(/[\p{L}\p{M}'\u2019-]+/gu) ?? []
+      return termWords.includes(word)
+    })
+  )
+    return true
+
+  const following = text.slice(wordStart + word.length)
+  if (/^[ \t]+\p{Lu}\p{Ll}+/u.test(following)) return true
+
+  const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const occurrencePattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])${escapedWord}(?![\\p{L}\\p{N}])`,
+    'gu',
+  )
+  for (const occurrence of text.matchAll(occurrencePattern)) {
+    const occurrenceStart = occurrence.index
+    if (occurrenceStart === wordStart) continue
+    if (!isSentenceOpeningAt(text, occurrenceStart)) return true
+  }
+  return false
+}
+
+function capitalizeExistingSentenceOpening(text: string, start: number): string {
+  const suffix = text.slice(start)
+  const capitalized = suffix.replace(
+    /^([ \t]*[\u201c\u2018"'([{]*[ \t]*)([\p{Ll}][\p{L}\p{M}'\u2019-]*)/u,
+    (whole, prefix: string, word: string) => {
+      if (/\p{Lu}/u.test(word.slice(1))) return whole
+      return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`
+    },
+  )
+  return `${text.slice(0, start)}${capitalized}`
 }
 
 function preserveTargetCasing(target: string, replacement: string): string {

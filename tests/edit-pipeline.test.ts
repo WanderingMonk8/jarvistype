@@ -358,6 +358,67 @@ test('keeps exact-text insertions inline and adds only missing boundary spacing'
   )
   assert.equal(before.ok && before.afterText, 'I will fill the bucket.')
 
+  const beforeSentenceOpening = executeEditPlan(
+    'Today we leave.',
+    [{ id: 'opening', ordinal: 1, lineIndex: 0, text: 'Today we leave.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert before the sentence opening',
+      operations: [
+        {
+          id: 'before-opening',
+          type: 'insert_before',
+          target: { paragraphOrdinal: 1, exactText: 'Today' },
+          text: 'perhaps',
+        },
+      ],
+    },
+  )
+  assert.equal(beforeSentenceOpening.ok && beforeSentenceOpening.afterText, 'Perhaps today we leave.')
+
+  const beforeProperNoun = executeEditPlan(
+    'New York waits.',
+    [{ id: 'proper-name', ordinal: 1, lineIndex: 0, text: 'New York waits.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert before a proper noun at the sentence opening',
+      operations: [
+        {
+          id: 'before-proper-name',
+          type: 'insert_before',
+          target: { paragraphOrdinal: 1, exactText: 'New York' },
+          text: 'perhaps',
+        },
+      ],
+    },
+  )
+  assert.equal(beforeProperNoun.ok && beforeProperNoun.afterText, 'Perhaps New York waits.')
+
+  const beforeKnownName = executeEditPlan(
+    'Cooley waits.',
+    [{ id: 'known-name', ordinal: 1, lineIndex: 0, text: 'Cooley waits.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert before a known one-word name',
+      operations: [
+        {
+          id: 'before-known-name',
+          type: 'insert_before',
+          target: { paragraphOrdinal: 1, exactText: 'Cooley' },
+          text: 'perhaps',
+        },
+      ],
+    },
+    ['Cooley'],
+  )
+  assert.equal(beforeKnownName.ok && beforeKnownName.afterText, 'Perhaps Cooley waits.')
+
   const alreadySpaced = executeEditPlan(session.cleanText, session.paragraphs, 1, {
     schemaVersion: 2,
     draftVersion: 1,
@@ -659,6 +720,62 @@ test('moves an exact word or phrase before or after another text target', () => 
   assert.deepEqual(
     movedAcrossParagraphs.ok && movedAcrossParagraphs.affectedParagraphOrdinals,
     [1, 2],
+  )
+
+  const sentenceTransition = applyManualEdit(
+    createDraftSession('sentence-transition-move-chat'),
+    'Quietly we leave. Tomorrow we rest.',
+    { expectedVersion: 0, editGroupId: 'seed-sentence-transition' },
+  ).session
+  const movedToSentenceOpening = executeEditPlan(
+    sentenceTransition.cleanText,
+    sentenceTransition.paragraphs,
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'move the opening word before the next sentence',
+      operations: [
+        {
+          id: 'move-to-opening',
+          type: 'move_before',
+          target: { exactText: 'Quietly' },
+          destination: { exactText: 'Tomorrow' },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    movedToSentenceOpening.ok && movedToSentenceOpening.afterText,
+    'We leave. Quietly tomorrow we rest.',
+  )
+
+  const properNounTransition = applyManualEdit(
+    createDraftSession('proper-name-move-chat'),
+    'We leave soon. New York waits.',
+    { expectedVersion: 0, editGroupId: 'seed-proper-name-transition' },
+  ).session
+  const movedBeforeProperNoun = executeEditPlan(
+    properNounTransition.cleanText,
+    properNounTransition.paragraphs,
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'move a word before a proper noun at a sentence opening',
+      operations: [
+        {
+          id: 'move-before-proper-name',
+          type: 'move_before',
+          target: { exactText: 'soon' },
+          destination: { exactText: 'New York' },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    movedBeforeProperNoun.ok && movedBeforeProperNoun.afterText,
+    'We leave. Soon New York waits.',
   )
 
   assert.ok(

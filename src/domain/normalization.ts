@@ -335,6 +335,10 @@ function replaceSpokenQuotationCommands(
   const reasons: string[] = []
   const generatedOpeningMarker = '\uE002'
   let text = input
+    .replace(/(\bopen quote\b[.,;:!?…—–-]*)[ \t]*["“”]/gi, '$1')
+    .replace(/["“”][ \t]*(\bclose quote\b)/gi, '$1')
+    .replace(/(\bopen single quote\b[.,;:!?…—–-]*)[ \t]*['‘’]/gi, '$1')
+    .replace(/['‘’][ \t]*(\bclose single quote\b)/gi, '$1')
 
   const replaceFixed = (pattern: RegExp, mark: string, reason: string, opening = false) => {
     text = text.replace(pattern, (_whole: string, attachedPunctuation: string, offset: number) => {
@@ -349,10 +353,16 @@ function replaceSpokenQuotationCommands(
   replaceFixed(/\bopen quote\b([.,;:!?…—–-]*)/gi, '“', 'quote', true)
   replaceFixed(/\bclose quote\b([.,;:!?…—–-]*)/gi, '”', 'quote')
 
-  const replacePaired = (pattern: RegExp, opening: string, closing: string, reason: string) => {
+  const replacePaired = (
+    pattern: RegExp,
+    opening: string,
+    closing: string,
+    reason: 'quote' | 'single quote',
+  ) => {
     if (hasLiteralQuoteContext) return
     const count = text.match(pattern)?.length ?? 0
     if (count < 2 || count % 2 !== 0) return
+    text = stripProviderRenderedQuotesBesidePairedCommands(text, reason)
     let occurrence = 0
     text = text.replace(pattern, (_whole: string, attachedPunctuation: string, offset: number) => {
       const isOpening = occurrence % 2 === 0
@@ -371,6 +381,24 @@ function replaceSpokenQuotationCommands(
   text = formatGeneratedQuotationOpenings(text, generatedOpeningMarker)
 
   return { text, marks, reasons }
+}
+
+function stripProviderRenderedQuotesBesidePairedCommands(
+  input: string,
+  reason: 'quote' | 'single quote',
+): string {
+  const phrase = reason === 'quote' ? 'quote' : 'single\\s+quote'
+  const quoteClass = reason === 'quote' ? '["“”]' : "['‘’]"
+  const pattern = new RegExp(
+    `(${quoteClass}[ \\t]*)?(\\b${phrase}\\b[.,;:!?…—–-]*)([ \\t]*${quoteClass})?`,
+    'gi',
+  )
+  let occurrence = 0
+  return input.replace(pattern, (_whole, before: string | undefined, command: string, after: string | undefined) => {
+    const isOpening = occurrence % 2 === 0
+    occurrence += 1
+    return isOpening ? `${before ?? ''}${command}` : `${command}${after ?? ''}`
+  })
 }
 
 function punctuationAfterSpokenCommand(

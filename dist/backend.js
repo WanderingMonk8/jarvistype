@@ -2016,7 +2016,7 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
   const marks = [];
   const reasons = [];
   const generatedOpeningMarker = "\uE002";
-  let text = input;
+  let text = input.replace(/(\bopen quote\b[.,;:!?…—–-]*)[ \t]*["“”]/gi, "$1").replace(/["“”][ \t]*(\bclose quote\b)/gi, "$1").replace(/(\bopen single quote\b[.,;:!?…—–-]*)[ \t]*['‘’]/gi, "$1").replace(/['‘’][ \t]*(\bclose single quote\b)/gi, "$1");
   const replaceFixed = (pattern, mark, reason, opening = false) => {
     text = text.replace(pattern, (_whole, attachedPunctuation, offset) => {
       marks.push(mark);
@@ -2033,6 +2033,7 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
     if (hasLiteralQuoteContext) return;
     const count = text.match(pattern)?.length ?? 0;
     if (count < 2 || count % 2 !== 0) return;
+    text = stripProviderRenderedQuotesBesidePairedCommands(text, reason);
     let occurrence = 0;
     text = text.replace(pattern, (_whole, attachedPunctuation, offset) => {
       const isOpening = occurrence % 2 === 0;
@@ -2047,6 +2048,20 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
   replacePaired(/\bquote\b([.,;:!?…—–-]*)/gi, "\u201C", "\u201D", "quote");
   text = formatGeneratedQuotationOpenings(text, generatedOpeningMarker);
   return { text, marks, reasons };
+}
+function stripProviderRenderedQuotesBesidePairedCommands(input, reason) {
+  const phrase = reason === "quote" ? "quote" : "single\\s+quote";
+  const quoteClass = reason === "quote" ? '["\u201C\u201D]' : "['\u2018\u2019]";
+  const pattern = new RegExp(
+    `(${quoteClass}[ \\t]*)?(\\b${phrase}\\b[.,;:!?\u2026\u2014\u2013-]*)([ \\t]*${quoteClass})?`,
+    "gi"
+  );
+  let occurrence = 0;
+  return input.replace(pattern, (_whole, before, command, after) => {
+    const isOpening = occurrence % 2 === 0;
+    occurrence += 1;
+    return isOpening ? `${before ?? ""}${command}` : `${command}${after ?? ""}`;
+  });
 }
 function punctuationAfterSpokenCommand(source, commandOffset, commandReason, attachedPunctuation) {
   const isClosingDelimiter = commandReason === "quote" || commandReason === "single quote" || commandReason === "close parenthesis" || commandReason === "close bracket";

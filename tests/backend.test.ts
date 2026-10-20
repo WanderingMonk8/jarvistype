@@ -388,6 +388,34 @@ test('recovers a unique recent-chat name with a stable prefix and mistranscribed
   }
 })
 
+test('recovers a short possessive character name from recent chat', async () => {
+  const userId = 'recent-short-possessive-name-user'
+  const chatId = 'recent-short-possessive-name-chat'
+  activeChatId = chatId
+  chatMessages = [
+    {
+      role: 'assistant',
+      content: 'Kat’s patience finally ran out, and Kat stepped away from the table.',
+    },
+  ]
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'recent-short-possessive-name-segment',
+      0,
+      "Cat's hands tightened around the cup.",
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type !== 'transcript.normalization.response') return
+  assert.equal(response.proposal.candidateText, "Kat's hands tightened around the cup.")
+  assert.ok(response.proposal.reasons.includes('recent conversation spelling: Cat → Kat'))
+})
+
 test('blocks sending when the active chat does not own the draft', async () => {
   const userId = 'mismatch-user'
   const chatId = 'owner-chat'

@@ -1536,15 +1536,17 @@ function correctFromConversationReferences(text, references, protectedTerms = []
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()));
   const referenceByKey = /* @__PURE__ */ new Map();
   for (const reference of references) {
-    if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(reference)) continue;
-    referenceByKey.set(reference.toLocaleLowerCase(), reference);
+    const possessive = reference.match(/(['’]s)$/iu)?.[0] ?? "";
+    const canonical = possessive ? reference.slice(0, -possessive.length) : reference;
+    if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(canonical)) continue;
+    referenceByKey.set(canonical.toLocaleLowerCase(), canonical);
   }
   const correctedTerms = [];
   const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard) => {
     const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? "";
     const base = possessive ? heard.slice(0, -possessive.length) : heard;
     const baseKey = base.toLocaleLowerCase();
-    if (base.length < 4 || !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
+    if (base.length < 3 || !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
       return heard;
     const candidates = [...referenceByKey.values()].filter(
       (reference) => isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase())
@@ -1611,10 +1613,16 @@ function isReferenceTerm(term) {
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1));
 }
 function isHighConfidenceReferenceMatch(heard, reference) {
-  if (heard.charAt(0) !== reference.charAt(0) || Math.abs(heard.length - reference.length) > 1)
-    return false;
+  if (Math.abs(heard.length - reference.length) > 1) return false;
+  if (heard.charAt(0) !== reference.charAt(0)) {
+    return heard.length === 3 && reference.length === 3 && heard.slice(1) === reference.slice(1) && hardInitialsMatch(heard.charAt(0), reference.charAt(0));
+  }
   if (editDistanceAtMost(heard, reference, 1)) return true;
   return Math.min(heard.length, reference.length) >= 6 && heard.slice(0, 4) === reference.slice(0, 4) && editDistanceAtMost(heard, reference, 2);
+}
+function hardInitialsMatch(left, right) {
+  const hardInitials = /* @__PURE__ */ new Set(["c", "k", "q"]);
+  return hardInitials.has(left) && hardInitials.has(right);
 }
 function editDistanceAtMost(left, right, maximum) {
   if (Math.abs(left.length - right.length) > maximum) return false;

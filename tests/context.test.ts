@@ -98,6 +98,18 @@ test('corrects a unique two-character name ending only after a stable prefix', (
   )
 })
 
+test('corrects a unique short phonetic name and preserves its possessive apostrophe', () => {
+  assert.deepEqual(correctFromConversationReferences("Cat's coat matched Cat’s boots.", ['Kat’s']), {
+    text: "Kat's coat matched Kat’s boots.",
+    correctedTerms: [
+      { heard: 'Cat', canonical: 'Kat' },
+      { heard: 'Cat', canonical: 'Kat' },
+    ],
+  })
+  assert.equal(correctFromConversationReferences("cat's coat", ['Kat']).text, "cat's coat")
+  assert.equal(correctFromConversationReferences("Cat's coat", ['Kat', 'Qat']).text, "Cat's coat")
+})
+
 test('leaves ambiguous, lowercase, and protected wording unchanged', () => {
   assert.equal(
     correctFromConversationReferences(

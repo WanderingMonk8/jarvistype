@@ -128,8 +128,10 @@ export function correctFromConversationReferences(
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()))
   const referenceByKey = new Map<string, string>()
   for (const reference of references) {
-    if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(reference)) continue
-    referenceByKey.set(reference.toLocaleLowerCase(), reference)
+    const possessive = reference.match(/(['’]s)$/iu)?.[0] ?? ''
+    const canonical = possessive ? reference.slice(0, -possessive.length) : reference
+    if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(canonical)) continue
+    referenceByKey.set(canonical.toLocaleLowerCase(), canonical)
   }
 
   const correctedTerms: Array<{ heard: string; canonical: string }> = []
@@ -138,7 +140,7 @@ export function correctFromConversationReferences(
     const base = possessive ? heard.slice(0, -possessive.length) : heard
     const baseKey = base.toLocaleLowerCase()
     if (
-      base.length < 4 ||
+      base.length < 3 ||
       !/^\p{Lu}/u.test(base) ||
       protectedKeys.has(baseKey) ||
       referenceByKey.has(baseKey)
@@ -231,14 +233,26 @@ function isReferenceTerm(term: string): boolean {
 }
 
 function isHighConfidenceReferenceMatch(heard: string, reference: string): boolean {
-  if (heard.charAt(0) !== reference.charAt(0) || Math.abs(heard.length - reference.length) > 1)
-    return false
+  if (Math.abs(heard.length - reference.length) > 1) return false
+  if (heard.charAt(0) !== reference.charAt(0)) {
+    return (
+      heard.length === 3 &&
+      reference.length === 3 &&
+      heard.slice(1) === reference.slice(1) &&
+      hardInitialsMatch(heard.charAt(0), reference.charAt(0))
+    )
+  }
   if (editDistanceAtMost(heard, reference, 1)) return true
   return (
     Math.min(heard.length, reference.length) >= 6 &&
     heard.slice(0, 4) === reference.slice(0, 4) &&
     editDistanceAtMost(heard, reference, 2)
   )
+}
+
+function hardInitialsMatch(left: string, right: string): boolean {
+  const hardInitials = new Set(['c', 'k', 'q'])
+  return hardInitials.has(left) && hardInitials.has(right)
 }
 
 function editDistanceAtMost(left: string, right: string, maximum: number): boolean {

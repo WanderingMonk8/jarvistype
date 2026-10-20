@@ -3054,6 +3054,11 @@ async function interpretEditInstruction(instructionTranscript, session, settings
     session.draftVersion
   );
   if (compoundSentenceDeletion) return compoundSentenceDeletion;
+  const paragraphQuotation = parseDeterministicParagraphQuotation(
+    instructionTranscript,
+    session.draftVersion
+  );
+  if (paragraphQuotation) return finalizeInterpretedPlan(instructionTranscript, paragraphQuotation);
   const deterministicPlan = parseDeterministicParagraphInsertion(
     instructionTranscript,
     session.draftVersion
@@ -3314,6 +3319,71 @@ function parseDeterministicParagraphInsertion(instructionTranscript, draftVersio
         type: match[1] === "before" ? "insert_before" : "insert_after",
         target: { paragraphOrdinal },
         text
+      }
+    ]
+  });
+}
+function parseDeterministicParagraphQuotation(instructionTranscript, draftVersion) {
+  const ordinalToken = "(\\d+|one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|seven|seventh|eight|eighth|nine|ninth|ten|tenth)";
+  const quotationToken = "(?:(single|double)\\s+)?(?:quotes?|quotations?|quotation\\s+marks?|quote\\s+marks?)";
+  const trimmed = instructionTranscript.trim();
+  const putMatch = trimmed.match(
+    new RegExp(
+      `^(?:put|place|add)\\s+${quotationToken}\\s+around\\s+(?:the\\s+)?paragraph(?:\\s+number)?\\s+${ordinalToken}[.!?]*$`,
+      "iu"
+    )
+  );
+  const wrapMatch = putMatch ? null : trimmed.match(
+    new RegExp(
+      `^(?:wrap|surround)\\s+(?:the\\s+)?paragraph(?:\\s+number)?\\s+${ordinalToken}\\s+(?:in|with)\\s+${quotationToken}[.!?]*$`,
+      "iu"
+    )
+  );
+  const match = putMatch ?? wrapMatch;
+  if (!match) return null;
+  const style = putMatch ? match[1] : match[2];
+  const spokenOrdinal = putMatch ? match[2] : match[1];
+  const ordinals = {
+    one: 1,
+    first: 1,
+    two: 2,
+    second: 2,
+    three: 3,
+    third: 3,
+    four: 4,
+    fourth: 4,
+    five: 5,
+    fifth: 5,
+    six: 6,
+    sixth: 6,
+    seven: 7,
+    seventh: 7,
+    eight: 8,
+    eighth: 8,
+    nine: 9,
+    ninth: 9,
+    ten: 10,
+    tenth: 10
+  };
+  const paragraphOrdinal = /^\d+$/u.test(spokenOrdinal ?? "") ? Number(spokenOrdinal) : ordinals[(spokenOrdinal ?? "").toLocaleLowerCase()];
+  if (!Number.isSafeInteger(paragraphOrdinal) || paragraphOrdinal < 1) return null;
+  const [opening, closing] = style?.toLocaleLowerCase() === "single" ? ["'", "'"] : ['"', '"'];
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation: `Put quotation marks around paragraph ${paragraphOrdinal}.`,
+    operations: [
+      {
+        id: "deterministic-open-paragraph-quotation",
+        type: "prepend",
+        target: { paragraphOrdinal },
+        text: opening
+      },
+      {
+        id: "deterministic-close-paragraph-quotation",
+        type: "append",
+        target: { paragraphOrdinal },
+        text: closing
       }
     ]
   });

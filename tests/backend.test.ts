@@ -610,9 +610,9 @@ test('appends a reviewed recording onto a concurrently changed same-chat draft',
   )
   assert.equal(committed.snapshot?.draftVersion, 3)
   assert.ok(
-    committed.snapshot?.recordingSegments.at(-1)?.normalization.reasons.includes(
-      'appended after concurrent draft change',
-    ),
+    committed.snapshot?.recordingSegments
+      .at(-1)
+      ?.normalization.reasons.includes('appended after concurrent draft change'),
   )
 })
 
@@ -1428,11 +1428,7 @@ test('deletes the first sentence when identical text also appears last', async (
   const userId = 'duplicate-sentence-user'
   const chatId = 'duplicate-sentence-chat'
   activeChatId = chatId
-  await seedDraft(
-    userId,
-    chatId,
-    'Quotation. Okay, you are really cutting deep here. Quotation.',
-  )
+  await seedDraft(userId, chatId, 'Quotation. Okay, you are really cutting deep here. Quotation.')
   responses.length = 0
   editPlanResponse = {
     schemaVersion: 2,
@@ -1467,21 +1463,14 @@ test('deletes the first sentence when identical text also appears last', async (
     paragraphOrdinal: 1,
     sentenceOrdinal: 1,
   })
-  assert.equal(
-    proposal.proposal.afterText,
-    'Okay, you are really cutting deep here. Quotation.',
-  )
+  assert.equal(proposal.proposal.afterText, 'Okay, you are really cutting deep here. Quotation.')
 })
 
 test('deletes identical first and last sentences in one compound instruction', async () => {
   const userId = 'compound-duplicate-sentence-user'
   const chatId = 'compound-duplicate-sentence-chat'
   activeChatId = chatId
-  await seedDraft(
-    userId,
-    chatId,
-    'Quotation. Okay, you are really cutting deep here. Quotation.',
-  )
+  await seedDraft(userId, chatId, 'Quotation. Okay, you are really cutting deep here. Quotation.')
   responses.length = 0
 
   await dispatch(
@@ -1525,9 +1514,7 @@ test('reviews and commits whole-paragraph deletion without leaving separator whi
     schemaVersion: 2,
     draftVersion: 1,
     explanation: 'Delete the first paragraph.',
-    operations: [
-      { id: 'delete-first-paragraph', type: 'delete', target: { paragraphOrdinal: 1 } },
-    ],
+    operations: [{ id: 'delete-first-paragraph', type: 'delete', target: { paragraphOrdinal: 1 } }],
   }
 
   await dispatch(
@@ -1576,9 +1563,7 @@ test('returns the authoritative snapshot when an edit proposal version becomes s
     schemaVersion: 2,
     draftVersion: 1,
     explanation: 'Delete the first paragraph.',
-    operations: [
-      { id: 'stale-delete-first', type: 'delete', target: { paragraphOrdinal: 1 } },
-    ],
+    operations: [{ id: 'stale-delete-first', type: 'delete', target: { paragraphOrdinal: 1 } }],
   }
 
   await dispatch(
@@ -2072,6 +2057,39 @@ test('keeps beginning and end insertions inside the targeted paragraph', async (
       ['prepend', 'append'],
     )
   }
+})
+
+test('puts one pair of quotations around a numbered paragraph instead of each sentence', async () => {
+  const userId = 'deterministic-paragraph-quotation-user'
+  const chatId = 'deterministic-paragraph-quotation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Second sentence. Third sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'deterministic-paragraph-quotation-interpret',
+      operationId: 'deterministic-paragraph-quotation-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotations around the paragraph 1.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, '"First sentence. Second sentence. Third sentence."')
+    assert.deepEqual(
+      response.proposal.plan.operations.map((operation) => operation.type),
+      ['prepend', 'append'],
+    )
+  }
+  assert.equal(generationRequests.length, 0)
 })
 
 test('capitalizes append and insert-after text only after sentence-ending targets', async () => {

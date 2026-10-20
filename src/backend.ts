@@ -596,10 +596,7 @@ async function handleEditInterpretation(
       session.paragraphs,
       session.draftVersion,
       plan,
-      [
-        ...glossary.entries.map((entry) => entry.canonical),
-        ...conversationReferences,
-      ],
+      [...glossary.entries.map((entry) => entry.canonical), ...conversationReferences],
     )
     if (!executed.ok) {
       const candidates = createEditCandidateContext(request, session, plan)
@@ -637,9 +634,7 @@ async function handleEditInterpretation(
       affectedParagraphOrdinals: executed.affectedParagraphOrdinals,
       explanation: plan.explanation,
       learningCandidates,
-      ...(grammarRepair.changes.length
-        ? { grammarRepairChanges: grammarRepair.changes }
-        : {}),
+      ...(grammarRepair.changes.length ? { grammarRepairChanges: grammarRepair.changes } : {}),
       ...(executed.resultingParagraphIds
         ? { resultingParagraphIds: executed.resultingParagraphIds }
         : {}),
@@ -791,8 +786,7 @@ async function handleEditConfirmation(
         ? { paragraphIdOrder: proposal.resultingParagraphIds }
         : {}),
     })
-    if (!mutation.applied)
-      return { error: 'stale-version' as const, session: mutation.session }
+    if (!mutation.applied) return { error: 'stale-version' as const, session: mutation.session }
     let glossary = await loadGlossary(context.userId)
     const learned = []
     for (const candidate of proposal.learningCandidates) {
@@ -821,13 +815,7 @@ async function handleEditConfirmation(
         : result.error === 'chat-mismatch'
           ? 'The active chat changed before approval. Nothing was edited.'
           : 'The edit proposal no longer matched the current draft. Nothing was edited.'
-    sendDraftError(
-      request,
-      context,
-      'EDIT_PROPOSAL_EXPIRED',
-      message,
-      result.session!,
-    )
+    sendDraftError(request, context, 'EDIT_PROPOSAL_EXPIRED', message, result.session!)
     return
   }
   send(
@@ -927,9 +915,7 @@ async function handleEditCandidateSelection(
         executed.operations,
         grammarRepair.text,
       ),
-      ...(grammarRepair.changes.length
-        ? { grammarRepairChanges: grammarRepair.changes }
-        : {}),
+      ...(grammarRepair.changes.length ? { grammarRepairChanges: grammarRepair.changes } : {}),
       ...(executed.resultingParagraphIds
         ? { resultingParagraphIds: executed.resultingParagraphIds }
         : {}),
@@ -975,6 +961,11 @@ async function interpretEditInstruction(
     session.draftVersion,
   )
   if (compoundSentenceDeletion) return compoundSentenceDeletion
+  const paragraphQuotation = parseDeterministicParagraphQuotation(
+    instructionTranscript,
+    session.draftVersion,
+  )
+  if (paragraphQuotation) return finalizeInterpretedPlan(instructionTranscript, paragraphQuotation)
   const deterministicPlan = parseDeterministicParagraphInsertion(
     instructionTranscript,
     session.draftVersion,
@@ -1101,7 +1092,10 @@ async function maybeRepairEditGrammar(
   const slices = paragraphSlices(proposedText)
   const affected = new Set(affectedParagraphOrdinals)
   const editable = slices.filter((paragraph) => affected.has(paragraph.ordinal))
-  if (!editable.length || editable.reduce((sum, paragraph) => sum + paragraph.text.length, 0) > 8_000)
+  if (
+    !editable.length ||
+    editable.reduce((sum, paragraph) => sum + paragraph.text.length, 0) > 8_000
+  )
     return { text: proposedText, changes: [] }
   const contextOrdinals = new Set<number>()
   for (const paragraph of editable) {
@@ -1226,9 +1220,7 @@ function editMayNeedGrammarRepair(
     })
   )
     return true
-  return /\b(?:a\s+[aeiou]|an\s+[bcdfghjklmnpqrstvwxyz])\p{L}*\b|([,.;:!?])\1/u.test(
-    proposedText,
-  )
+  return /\b(?:a\s+[aeiou]|an\s+[bcdfghjklmnpqrstvwxyz])\p{L}*\b|([,.;:!?])\1/u.test(proposedText)
 }
 
 function boundedGrammarProtectedTerms(values: readonly string[]): string[] {
@@ -1285,7 +1277,8 @@ function isSafeGrammarRepair(
   }
   const beforeWords = before.toLocaleLowerCase().match(/[\p{L}\p{N}'\u2019-]+/gu) ?? []
   const afterWords = after.toLocaleLowerCase().match(/[\p{L}\p{N}'\u2019-]+/gu) ?? []
-  const difference = multisetDifference(beforeWords, afterWords) + multisetDifference(afterWords, beforeWords)
+  const difference =
+    multisetDifference(beforeWords, afterWords) + multisetDifference(afterWords, beforeWords)
   return difference <= Math.max(8, Math.ceil(beforeWords.length * 0.2))
 }
 
@@ -1328,6 +1321,83 @@ function parseDeterministicParagraphInsertion(
         type: match[1] === 'before' ? 'insert_before' : 'insert_after',
         target: { paragraphOrdinal },
         text,
+      },
+    ],
+  })
+}
+
+function parseDeterministicParagraphQuotation(
+  instructionTranscript: string,
+  draftVersion: number,
+): EditPlan | null {
+  const ordinalToken =
+    '(\\d+|one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|seven|seventh|eight|eighth|nine|ninth|ten|tenth)'
+  const quotationToken =
+    '(?:(single|double)\\s+)?(?:quotes?|quotations?|quotation\\s+marks?|quote\\s+marks?)'
+  const trimmed = instructionTranscript.trim()
+  const putMatch = trimmed.match(
+    new RegExp(
+      `^(?:put|place|add)\\s+${quotationToken}\\s+around\\s+(?:the\\s+)?paragraph(?:\\s+number)?\\s+${ordinalToken}[.!?]*$`,
+      'iu',
+    ),
+  )
+  const wrapMatch = putMatch
+    ? null
+    : trimmed.match(
+        new RegExp(
+          `^(?:wrap|surround)\\s+(?:the\\s+)?paragraph(?:\\s+number)?\\s+${ordinalToken}\\s+(?:in|with)\\s+${quotationToken}[.!?]*$`,
+          'iu',
+        ),
+      )
+  const match = putMatch ?? wrapMatch
+  if (!match) return null
+
+  const style = putMatch ? match[1] : match[2]
+  const spokenOrdinal = putMatch ? match[2] : match[1]
+  const ordinals: Record<string, number> = {
+    one: 1,
+    first: 1,
+    two: 2,
+    second: 2,
+    three: 3,
+    third: 3,
+    four: 4,
+    fourth: 4,
+    five: 5,
+    fifth: 5,
+    six: 6,
+    sixth: 6,
+    seven: 7,
+    seventh: 7,
+    eight: 8,
+    eighth: 8,
+    nine: 9,
+    ninth: 9,
+    ten: 10,
+    tenth: 10,
+  }
+  const paragraphOrdinal = /^\d+$/u.test(spokenOrdinal ?? '')
+    ? Number(spokenOrdinal)
+    : ordinals[(spokenOrdinal ?? '').toLocaleLowerCase()]
+  if (!Number.isSafeInteger(paragraphOrdinal) || paragraphOrdinal! < 1) return null
+
+  const [opening, closing] = style?.toLocaleLowerCase() === 'single' ? ["'", "'"] : ['"', '"']
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation: `Put quotation marks around paragraph ${paragraphOrdinal}.`,
+    operations: [
+      {
+        id: 'deterministic-open-paragraph-quotation',
+        type: 'prepend',
+        target: { paragraphOrdinal },
+        text: opening,
+      },
+      {
+        id: 'deterministic-close-paragraph-quotation',
+        type: 'append',
+        target: { paragraphOrdinal },
+        text: closing,
       },
     ],
   })
@@ -1443,8 +1513,7 @@ function parseSentencePosition(
 ): { sentenceOrdinal: number } | { sentenceFromEnd: number } | null {
   if (/\b(?:second[- ]to[- ]last|penultimate)\s+sentence\b/iu.test(instructionTranscript))
     return { sentenceFromEnd: 2 }
-  if (/\b(?:last|final)\s+sentence\b/iu.test(instructionTranscript))
-    return { sentenceFromEnd: 1 }
+  if (/\b(?:last|final)\s+sentence\b/iu.test(instructionTranscript)) return { sentenceFromEnd: 1 }
   const match = instructionTranscript.match(
     /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th|seventh|7th|eighth|8th|ninth|9th|tenth|10th)\s+sentence\b/iu,
   )
@@ -1676,7 +1745,8 @@ function reconcileEditLearningCandidateCasing(
     )
     const appliedSpellings = new Set<string>()
     for (const operation of operations) {
-      for (const match of operation.afterText.matchAll(candidatePattern)) appliedSpellings.add(match[0])
+      for (const match of operation.afterText.matchAll(candidatePattern))
+        appliedSpellings.add(match[0])
     }
     if (appliedSpellings.size === 1) {
       const canonical = [...appliedSpellings][0]!

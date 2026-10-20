@@ -421,7 +421,13 @@ function punctuationAfterSpokenCommand(
     /\b(?:period|full stop|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots)$/iu.test(
       contentBeforeCommand,
     )
-  if (contentAlreadyEndsSentence) return ''
+  const quotedContentAlreadyEndsWithPunctuation =
+    (commandReason === 'quote' || commandReason === 'single quote') &&
+    (/[,;:—–-]$/u.test(contentBeforeCommand) ||
+      /\b(?:comma|semicolon|semi[ -]?colon|colon|em dash|en dash|hyphen|dash)$/iu.test(
+        contentBeforeCommand,
+      ))
+  if (contentAlreadyEndsSentence || quotedContentAlreadyEndsWithPunctuation) return ''
   return terminalPunctuation
 }
 

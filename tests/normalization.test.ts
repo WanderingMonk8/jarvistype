@@ -196,6 +196,18 @@ test('drops a provider period attached to a closing quote command after terminal
   assert.equal(normalizeDeterministically('quote Good morning. quote.', []).text, '“Good morning.”')
   assert.equal(normalizeDeterministically('open quote Really? close quote.', []).text, '“Really?”')
   assert.equal(normalizeDeterministically('quote Good morning quote.', []).text, '“Good morning”.')
+  assert.equal(
+    normalizeDeterministically('quote You knew my coffee order, quote. I repeat her words.', [])
+      .text,
+    '“You knew my coffee order,” I repeat her words.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'quote You knew my coffee order comma quote. I repeat her words.',
+      [],
+    ).text,
+    '“You knew my coffee order,” I repeat her words.',
+  )
 })
 
 test('does not duplicate provider-rendered quotation marks beside spoken quote commands', () => {
@@ -209,6 +221,13 @@ test('does not duplicate provider-rendered quotation marks beside spoken quote c
   assert.equal(
     normalizeDeterministically("She said single quote, ‘Hello.’ single quote.", []).text,
     'She said ‘Hello.’',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'I listen. Quote, "You knew my coffee order," Quote. I repeat her words.',
+      [],
+    ).text,
+    'I listen. “You knew my coffee order,” I repeat her words.',
   )
   assert.equal(
     normalizeDeterministically('She preserved "literal straight quotes" without commands.', []).text,

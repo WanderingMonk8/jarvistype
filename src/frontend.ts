@@ -1656,7 +1656,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     try {
       const granted = await ctx.permissions.request(missing, {
         reason:
-          'Verify the owning chat, add the confirmed draft as one user message, and start the normal Lumiverse response.',
+          'Verify the owning chat, add the draft as one user message, and start the normal Lumiverse response.',
       })
       state.permissions = sanitizeGrantedPermissions(granted)
       return required.every((permission) => granted.includes(permission))
@@ -1671,6 +1671,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (sendFlowActive || !state.snapshot) return
     flushParagraphPreview()
     sendFlowActive = true
+    state.sending = true
+    state.statusMessage = 'Preparing the draft to send…'
     render()
     try {
       await drainMutations()
@@ -1691,20 +1693,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       }
       if (!(await requestSendPermissions())) return
 
-      const confirmation = await ctx.ui.showConfirm({
-        title: 'Confirm and send draft?',
-        message:
-          'JarvisType will add exactly the clean draft text to this chat and start the normal Lumiverse response.',
-        variant: 'success',
-        confirmLabel: 'Confirm & Send',
-      })
-      if (!confirmation.confirmed) {
-        state.statusMessage = 'Send cancelled. The draft remains private.'
-        return
-      }
-
-      state.sending = true
-      state.statusMessage = 'Sending the confirmed clean draft…'
+      state.statusMessage = 'Sending the clean draft…'
       render()
       const operationId = createRequestId('send-operation')
       const outcome = await performRequest(
@@ -1718,7 +1707,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         },
         true,
       )
-      state.sending = false
       if (!alive) return
       if (outcome.status === 'resolved' && outcome.value.type === 'draft.send.response') {
         applySnapshot(outcome.value.snapshot, true)

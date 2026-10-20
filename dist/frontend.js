@@ -1664,7 +1664,7 @@ function setup(ctx) {
     if (missing.length === 0) return true;
     try {
       const granted = await ctx.permissions.request(missing, {
-        reason: "Verify the owning chat, add the confirmed draft as one user message, and start the normal Lumiverse response."
+        reason: "Verify the owning chat, add the draft as one user message, and start the normal Lumiverse response."
       });
       state.permissions = sanitizeGrantedPermissions(granted);
       return required.every((permission) => granted.includes(permission));
@@ -1677,6 +1677,8 @@ function setup(ctx) {
     if (sendFlowActive || !state.snapshot) return;
     flushParagraphPreview();
     sendFlowActive = true;
+    state.sending = true;
+    state.statusMessage = "Preparing the draft to send\u2026";
     render();
     try {
       await drainMutations();
@@ -1692,18 +1694,7 @@ function setup(ctx) {
         return;
       }
       if (!await requestSendPermissions()) return;
-      const confirmation = await ctx.ui.showConfirm({
-        title: "Confirm and send draft?",
-        message: "JarvisType will add exactly the clean draft text to this chat and start the normal Lumiverse response.",
-        variant: "success",
-        confirmLabel: "Confirm & Send"
-      });
-      if (!confirmation.confirmed) {
-        state.statusMessage = "Send cancelled. The draft remains private.";
-        return;
-      }
-      state.sending = true;
-      state.statusMessage = "Sending the confirmed clean draft\u2026";
+      state.statusMessage = "Sending the clean draft\u2026";
       render();
       const operationId = createRequestId("send-operation");
       const outcome = await performRequest(
@@ -1717,7 +1708,6 @@ function setup(ctx) {
         },
         true
       );
-      state.sending = false;
       if (!alive) return;
       if (outcome.status === "resolved" && outcome.value.type === "draft.send.response") {
         applySnapshot(outcome.value.snapshot, true);

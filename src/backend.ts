@@ -970,6 +970,11 @@ async function interpretEditInstruction(
   conversationReferences: string[],
   userId: string,
 ) {
+  const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
+    instructionTranscript,
+    session.draftVersion,
+  )
+  if (compoundSentenceDeletion) return compoundSentenceDeletion
   const deterministicPlan = parseDeterministicParagraphInsertion(
     instructionTranscript,
     session.draftVersion,
@@ -1020,6 +1025,51 @@ async function interpretEditInstruction(
     logSafeFailure('warn', 'EDIT_INTERPRETATION', error)
     return null
   }
+}
+
+function parseDeterministicCompoundSentenceDeletion(
+  instructionTranscript: string,
+  draftVersion: number,
+): EditPlan | null {
+  const match = instructionTranscript
+    .trim()
+    .match(
+      /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:delete|remove)\s+(?:the\s+)?first(?:\s+sentence)?\s+and\s+(?:the\s+)?(?:last|final)\s+sentences?(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?[.!?]*$/iu,
+    )
+  if (!match) return null
+  const leadingParagraph = match[1] === undefined ? undefined : Number(match[1])
+  const trailingParagraph = match[2] === undefined ? undefined : Number(match[2])
+  if (
+    (leadingParagraph !== undefined &&
+      (!Number.isSafeInteger(leadingParagraph) || leadingParagraph < 1)) ||
+    (trailingParagraph !== undefined &&
+      (!Number.isSafeInteger(trailingParagraph) || trailingParagraph < 1)) ||
+    (leadingParagraph !== undefined &&
+      trailingParagraph !== undefined &&
+      leadingParagraph !== trailingParagraph)
+  )
+    return null
+  const paragraphOrdinal = leadingParagraph ?? trailingParagraph
+  const paragraphTarget = paragraphOrdinal === undefined ? {} : { paragraphOrdinal }
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation: 'Delete the first and last sentences by position.',
+    operations: [
+      {
+        id: 'deterministic-delete-first-sentence',
+        type: 'delete',
+        target: { ...paragraphTarget, sentenceOrdinal: 1 },
+        includeTrailingPunctuation: true,
+      },
+      {
+        id: 'deterministic-delete-last-sentence',
+        type: 'delete',
+        target: { ...paragraphTarget, sentenceFromEnd: 1 },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
 }
 
 interface GrammarParagraphSlice {

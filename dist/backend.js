@@ -3049,6 +3049,11 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
   );
 }
 async function interpretEditInstruction(instructionTranscript, session, settings, glossary, conversationReferences, userId) {
+  const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
+    instructionTranscript,
+    session.draftVersion
+  );
+  if (compoundSentenceDeletion) return compoundSentenceDeletion;
   const deterministicPlan = parseDeterministicParagraphInsertion(
     instructionTranscript,
     session.draftVersion
@@ -3094,6 +3099,37 @@ async function interpretEditInstruction(instructionTranscript, session, settings
     logSafeFailure("warn", "EDIT_INTERPRETATION", error);
     return null;
   }
+}
+function parseDeterministicCompoundSentenceDeletion(instructionTranscript, draftVersion) {
+  const match = instructionTranscript.trim().match(
+    /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:delete|remove)\s+(?:the\s+)?first(?:\s+sentence)?\s+and\s+(?:the\s+)?(?:last|final)\s+sentences?(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?[.!?]*$/iu
+  );
+  if (!match) return null;
+  const leadingParagraph = match[1] === void 0 ? void 0 : Number(match[1]);
+  const trailingParagraph = match[2] === void 0 ? void 0 : Number(match[2]);
+  if (leadingParagraph !== void 0 && (!Number.isSafeInteger(leadingParagraph) || leadingParagraph < 1) || trailingParagraph !== void 0 && (!Number.isSafeInteger(trailingParagraph) || trailingParagraph < 1) || leadingParagraph !== void 0 && trailingParagraph !== void 0 && leadingParagraph !== trailingParagraph)
+    return null;
+  const paragraphOrdinal = leadingParagraph ?? trailingParagraph;
+  const paragraphTarget = paragraphOrdinal === void 0 ? {} : { paragraphOrdinal };
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation: "Delete the first and last sentences by position.",
+    operations: [
+      {
+        id: "deterministic-delete-first-sentence",
+        type: "delete",
+        target: { ...paragraphTarget, sentenceOrdinal: 1 },
+        includeTrailingPunctuation: true
+      },
+      {
+        id: "deterministic-delete-last-sentence",
+        type: "delete",
+        target: { ...paragraphTarget, sentenceFromEnd: 1 },
+        includeTrailingPunctuation: true
+      }
+    ]
+  });
 }
 async function maybeRepairEditGrammar(beforeText, proposedText, operations, affectedParagraphOrdinals, settings, glossary, conversationReferences, userId) {
   if (settings.grammarRepairMode === "off") return { text: proposedText, changes: [] };

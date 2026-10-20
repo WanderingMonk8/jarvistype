@@ -1473,6 +1473,48 @@ test('deletes the first sentence when identical text also appears last', async (
   )
 })
 
+test('deletes identical first and last sentences in one compound instruction', async () => {
+  const userId = 'compound-duplicate-sentence-user'
+  const chatId = 'compound-duplicate-sentence-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'Quotation. Okay, you are really cutting deep here. Quotation.',
+  )
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'compound-duplicate-sentence-interpret',
+      operationId: 'compound-duplicate-sentence-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the first and last sentences.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.deepEqual(
+    proposal.proposal.plan.operations.map((operation) => operation.target),
+    [{ sentenceOrdinal: 1 }, { sentenceFromEnd: 1 }],
+  )
+  assert.equal(proposal.proposal.afterText, 'Okay, you are really cutting deep here.')
+  assert.equal(
+    generationRequests.some(
+      (request) =>
+        JSON.parse(request.messages?.at(-1)?.content ?? '{}').task ===
+        'Interpret this edit instruction against the numbered draft.',
+    ),
+    false,
+  )
+})
+
 test('reviews and commits whole-paragraph deletion without leaving separator whitespace', async () => {
   const userId = 'delete-paragraph-user'
   const chatId = 'delete-paragraph-chat'

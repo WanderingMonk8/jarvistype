@@ -109,7 +109,7 @@ function parseOperation(value) {
   } else if (type === "delete" || type === "split" || type === "join_next") {
     if (text !== void 0 || caseMode !== void 0) return null;
     if (destination !== void 0) return null;
-    if (includeTrailingPunctuation !== void 0 && (type !== "delete" || includeTrailingPunctuation !== true))
+    if (includeTrailingPunctuation !== void 0 && (type === "join_next" || includeTrailingPunctuation !== true))
       return null;
     if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
       return null;

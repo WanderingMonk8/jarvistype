@@ -223,7 +223,7 @@ function parseOperation(value: unknown): EditOperation | null {
     if (destination !== undefined) return null
     if (
       includeTrailingPunctuation !== undefined &&
-      (type !== 'delete' || includeTrailingPunctuation !== true)
+      (type === 'join_next' || includeTrailingPunctuation !== true)
     )
       return null
     if (
@@ -661,6 +661,13 @@ function extendThroughTerminalPunctuation(text: string, end: number, limit: numb
   return punctuation ? end + punctuation.length : end
 }
 
+function extendThroughSentenceEnd(text: string, end: number): number {
+  if (/[.!?…][”’"')\]]*$/u.test(text.slice(0, end))) return end
+  const remainder = text.slice(end)
+  const terminal = /(?:\.{3}|[.!?…])[”’"')\]]*(?=\s|$)/u.exec(remainder)
+  return terminal ? end + (terminal.index ?? 0) + terminal[0].length : end
+}
+
 function resolveTextTarget(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
@@ -1022,7 +1029,10 @@ function executeStructuralPlan(
           ok: false,
           reason: matches.length ? 'split anchor is ambiguous' : 'split anchor was not found',
         }
-      const splitAt = matches[0]! + anchor.length
+      const anchorEnd = matches[0]! + anchor.length
+      const splitAt = operation.includeTrailingPunctuation
+        ? extendThroughSentenceEnd(sourceResult.text, anchorEnd)
+        : anchorEnd
       const left = sourceResult.text.slice(0, splitAt).trimEnd()
       const right = sourceResult.text.slice(splitAt).trimStart()
       if (!left || !right) return { ok: false, reason: 'split would create an empty paragraph' }

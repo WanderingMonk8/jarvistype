@@ -683,6 +683,35 @@ test('splits and joins paragraphs with controlled whitespace', () => {
   assert.equal(join.ok && join.afterText, 'First sentence. Second sentence. Closing paragraph.')
 })
 
+test('splits a sentence target after its terminal punctuation rather than an internal comma', () => {
+  const text =
+    'Opening sentence. The brief eruption of discussion seemed to die down once more, and the general passivity returned to campus. Friday arrived.'
+  const seeded = applyManualEdit(createDraftSession('sentence-split-chat'), text, {
+    expectedVersion: 0,
+    editGroupId: 'seed-sentence-split',
+  }).session
+  const split = executeEditPlan(seeded.cleanText, seeded.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'split after the sentence about the discussion',
+    operations: [
+      {
+        id: 'split-sentence-at-terminal',
+        type: 'split',
+        target: {
+          paragraphOrdinal: 1,
+          exactText: 'The brief eruption of discussion seemed to die down once more,',
+        },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
+  assert.equal(
+    split.ok && split.afterText,
+    'Opening sentence. The brief eruption of discussion seemed to die down once more, and the general passivity returned to campus.\n\nFriday arrived.',
+  )
+})
+
 test('moves paragraphs by captured identity and supports full-draft casing', () => {
   const seeded = applyManualEdit(createDraftSession('move-chat'), 'One.\n\nTwo.\n\nThree.', {
     expectedVersion: 0,

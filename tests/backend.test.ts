@@ -1376,6 +1376,54 @@ test('keeps spoken edit instructions out of the draft until the structured propo
   }
 })
 
+test('extends a sentence-targeted paragraph split through terminal punctuation', async () => {
+  const userId = 'sentence-split-user'
+  const chatId = 'sentence-split-chat'
+  activeChatId = chatId
+  const original =
+    'Opening sentence. The brief eruption of discussion seemed to die down once more, and the general passivity returned to campus. Friday arrived.'
+  await seedDraft(userId, chatId, original)
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Split after the requested sentence.',
+    operations: [
+      {
+        id: 'split-discussion-sentence',
+        type: 'split',
+        target: {
+          paragraphOrdinal: 1,
+          exactText: 'The brief eruption of discussion seemed to die down once more,',
+        },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-split-interpret',
+      operationId: 'sentence-split-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Split the paragraph after the sentence about the brief eruption of discussion.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.plan.operations[0]?.includeTrailingPunctuation, true)
+  assert.equal(
+    proposal.proposal.afterText,
+    'Opening sentence. The brief eruption of discussion seemed to die down once more, and the general passivity returned to campus.\n\nFriday arrived.',
+  )
+})
+
 test('reviews and commits whole-paragraph deletion without leaving separator whitespace', async () => {
   const userId = 'delete-paragraph-user'
   const chatId = 'delete-paragraph-chat'

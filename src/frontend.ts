@@ -672,7 +672,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       : ''
     editProposalBefore.textContent = editProposal?.beforeText ?? ''
     editProposalAfter.textContent = editProposal?.afterText ?? ''
-    acceptEditButton.disabled = !editProposal || state.automatedBusy
+    acceptEditButton.disabled =
+      !editProposal ||
+      state.automatedBusy ||
+      state.saving ||
+      desiredText !== state.snapshot?.cleanText ||
+      editProposal.expectedVersion !== state.snapshot?.draftVersion
     rejectEditButton.disabled = !editProposal || state.automatedBusy
     const editCandidates = state.pendingEditCandidates
     editCandidatesPanel.hidden = !editCandidates
@@ -970,6 +975,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const handleEditorInput = () => {
     desiredText = editor.value
+    if (state.pendingEditProposal || state.pendingEditCandidates) {
+      state.pendingEditProposal = null
+      state.pendingEditCandidates = null
+      state.voicePhase = 'error'
+      state.voiceMessage =
+        'The draft was changed manually. The pending edit proposal was discarded.'
+    }
     if (state.snapshot) saveDraftBackup(state.snapshot.chatId, desiredText)
     beginEditGroup()
     state.statusMessage = 'Saving the private draft…'
@@ -1181,8 +1193,23 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
 
   const acceptEditProposal = async () => {
+    flushParagraphPreview()
+    await drainMutations()
     const proposal = state.pendingEditProposal
     if (!proposal || state.automatedBusy) return
+    if (
+      !state.snapshot ||
+      desiredText !== state.snapshot.cleanText ||
+      proposal.chatId !== state.snapshot.chatId ||
+      proposal.expectedVersion !== state.snapshot.draftVersion
+    ) {
+      state.pendingEditProposal = null
+      state.voicePhase = 'error'
+      state.voiceMessage =
+        'The draft changed after this proposal was created. The stale proposal was discarded.'
+      render()
+      return
+    }
     state.automatedBusy = true
     state.voiceMessage = 'Applying the approved edit atomically…'
     render()
@@ -1213,6 +1240,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         state.phaseFourMessage = `Learned ${learnedNames} from the approved edit spelling. The glossary change is undoable.`
       }
     } else {
+      if (outcome.status === 'resolved' && outcome.value.type === 'app.error') {
+        if (outcome.value.snapshot) applySnapshot(outcome.value.snapshot, true)
+        state.pendingEditProposal = null
+      }
       state.voicePhase = 'error'
       state.voiceMessage =
         outcome.status === 'resolved' && outcome.value.type === 'app.error'

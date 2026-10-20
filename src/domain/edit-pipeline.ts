@@ -514,7 +514,7 @@ function resolveOperation(
 }
 
 type StructuralEditOperation = EditOperation & {
-  type: 'split' | 'join_next' | 'move_before' | 'move_after'
+  type: 'delete' | 'split' | 'join_next' | 'move_before' | 'move_after'
 }
 
 type InlineMoveOperation = EditOperation & {
@@ -530,6 +530,11 @@ interface StructuralParagraph {
 
 function isStructuralOperation(operation: EditOperation): operation is StructuralEditOperation {
   return (
+    (operation.type === 'delete' &&
+      !hasInlineSelector(operation.target) &&
+      operation.target.scope !== 'draft' &&
+      (operation.target.paragraphId !== undefined ||
+        operation.target.paragraphOrdinal !== undefined)) ||
     operation.type === 'split' ||
     operation.type === 'join_next' ||
     ((operation.type === 'move_before' || operation.type === 'move_after') &&
@@ -1005,7 +1010,10 @@ function executeStructuralPlan(
       : { start: 0, end: cleanText.length }
     let afterText = sourceResult.text
 
-    if (operation.type === 'split') {
+    if (operation.type === 'delete') {
+      working.splice(sourceIndex, 1)
+      afterText = ''
+    } else if (operation.type === 'split') {
       const anchor = operation.target.exactText
       if (!anchor) return { ok: false, reason: 'split requires an exact anchor' }
       const matches = findAll(sourceResult.text, anchor, 0, sourceResult.text.length)

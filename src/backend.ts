@@ -770,9 +770,12 @@ async function handleEditConfirmation(
   }
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const session = await loadDraft(context.userId, request.chatId)
+    if (session.draftVersion !== proposal.expectedVersion)
+      return { error: 'stale-version' as const, session }
     const activeChat = await spindle.chats.getActive(context.userId)
-    if (!activeChat || activeChat.id !== request.chatId || activeRequest.cancelled)
-      return { error: 'expired' as const, session }
+    if (!activeChat || activeChat.id !== request.chatId)
+      return { error: 'chat-mismatch' as const, session }
+    if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
     const executed = executeEditPlan(
       session.cleanText,
       session.paragraphs,
@@ -785,7 +788,7 @@ async function handleEditConfirmation(
       JSON.stringify(executed.resultingParagraphIds) !==
         JSON.stringify(proposal.resultingParagraphIds)
     )
-      return { error: 'expired' as const, session }
+      return { error: 'proposal-mismatch' as const, session }
     const mutation = applyAutomatedEdit(session, executed.afterText, {
       expectedVersion: proposal.expectedVersion,
       operationId: proposal.operationId,
@@ -793,7 +796,8 @@ async function handleEditConfirmation(
         ? { paragraphIdOrder: proposal.resultingParagraphIds }
         : {}),
     })
-    if (!mutation.applied) return { error: 'expired' as const, session: mutation.session }
+    if (!mutation.applied)
+      return { error: 'stale-version' as const, session: mutation.session }
     let glossary = await loadGlossary(context.userId)
     const learned = []
     for (const candidate of proposal.learningCandidates) {
@@ -816,11 +820,17 @@ async function handleEditConfirmation(
   })
   if (activeRequest.cancelled) return
   if ('error' in result) {
+    const message =
+      result.error === 'stale-version'
+        ? `The draft advanced to version ${result.session!.draftVersion} before approval. The stale proposal was discarded.`
+        : result.error === 'chat-mismatch'
+          ? 'The active chat changed before approval. Nothing was edited.'
+          : 'The edit proposal no longer matched the current draft. Nothing was edited.'
     sendDraftError(
       request,
       context,
       'EDIT_PROPOSAL_EXPIRED',
-      'The draft or active chat changed before approval. Nothing was edited.',
+      message,
       result.session!,
     )
     return

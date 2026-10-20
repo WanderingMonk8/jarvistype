@@ -918,7 +918,7 @@ ${formattedParagraph}`,
   };
 }
 function isStructuralOperation(operation) {
-  return operation.type === "split" || operation.type === "join_next" || (operation.type === "move_before" || operation.type === "move_after") && !isInlineMoveOperation(operation);
+  return operation.type === "delete" && !hasInlineSelector(operation.target) && operation.target.scope !== "draft" && (operation.target.paragraphId !== void 0 || operation.target.paragraphOrdinal !== void 0) || operation.type === "split" || operation.type === "join_next" || (operation.type === "move_before" || operation.type === "move_after") && !isInlineMoveOperation(operation);
 }
 function isInlineMoveOperation(operation) {
   return (operation.type === "move_before" || operation.type === "move_after") && operation.destination !== void 0 && hasInlineSelector(operation.target) && hasInlineSelector(operation.destination);
@@ -1230,7 +1230,10 @@ function executeStructuralPlan(cleanText, paragraphs, operations) {
     const original = paragraphs.find((paragraph) => paragraph.id === sourceResult.id);
     const originalRange = original ? paragraphRange(cleanText, original) : { start: 0, end: cleanText.length };
     let afterText2 = sourceResult.text;
-    if (operation.type === "split") {
+    if (operation.type === "delete") {
+      working.splice(sourceIndex, 1);
+      afterText2 = "";
+    } else if (operation.type === "split") {
       const anchor = operation.target.exactText;
       if (!anchor) return { ok: false, reason: "split requires an exact anchor" };
       const matches = findAll(sourceResult.text, anchor, 0, sourceResult.text.length);
@@ -2807,9 +2810,12 @@ async function handleEditConfirmation(request, context, activeRequest) {
   }
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const session = await loadDraft(context.userId, request.chatId);
+    if (session.draftVersion !== proposal.expectedVersion)
+      return { error: "stale-version", session };
     const activeChat = await spindle.chats.getActive(context.userId);
-    if (!activeChat || activeChat.id !== request.chatId || activeRequest.cancelled)
-      return { error: "expired", session };
+    if (!activeChat || activeChat.id !== request.chatId)
+      return { error: "chat-mismatch", session };
+    if (activeRequest.cancelled) return { error: "cancelled", session };
     const executed = executeEditPlan(
       session.cleanText,
       session.paragraphs,
@@ -2817,13 +2823,14 @@ async function handleEditConfirmation(request, context, activeRequest) {
       proposal.plan
     );
     if (!executed.ok || executed.afterText !== proposal.afterText || JSON.stringify(executed.resultingParagraphIds) !== JSON.stringify(proposal.resultingParagraphIds))
-      return { error: "expired", session };
+      return { error: "proposal-mismatch", session };
     const mutation = applyAutomatedEdit(session, executed.afterText, {
       expectedVersion: proposal.expectedVersion,
       operationId: proposal.operationId,
       ...proposal.resultingParagraphIds ? { paragraphIdOrder: proposal.resultingParagraphIds } : {}
     });
-    if (!mutation.applied) return { error: "expired", session: mutation.session };
+    if (!mutation.applied)
+      return { error: "stale-version", session: mutation.session };
     let glossary = await loadGlossary(context.userId);
     const learned = [];
     for (const candidate of proposal.learningCandidates) {
@@ -2846,11 +2853,12 @@ async function handleEditConfirmation(request, context, activeRequest) {
   });
   if (activeRequest.cancelled) return;
   if ("error" in result) {
+    const message = result.error === "stale-version" ? `The draft advanced to version ${result.session.draftVersion} before approval. The stale proposal was discarded.` : result.error === "chat-mismatch" ? "The active chat changed before approval. Nothing was edited." : "The edit proposal no longer matched the current draft. Nothing was edited.";
     sendDraftError(
       request,
       context,
       "EDIT_PROPOSAL_EXPIRED",
-      "The draft or active chat changed before approval. Nothing was edited.",
+      message,
       result.session
     );
     return;

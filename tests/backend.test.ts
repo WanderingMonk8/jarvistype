@@ -1318,6 +1318,118 @@ test('keeps spoken edit instructions out of the draft until the structured propo
   }
 })
 
+test('reviews and commits whole-paragraph deletion without leaving separator whitespace', async () => {
+  const userId = 'delete-paragraph-user'
+  const chatId = 'delete-paragraph-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the first paragraph.',
+    operations: [
+      { id: 'delete-first-paragraph', type: 'delete', target: { paragraphOrdinal: 1 } },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'delete-paragraph-interpret',
+      operationId: 'delete-paragraph-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the first paragraph.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Second paragraph.')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'delete-paragraph-confirm',
+      operationId: 'delete-paragraph-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type !== 'edit.proposal.response') return
+  assert.equal(committed.outcome, 'committed')
+  assert.equal(committed.snapshot?.cleanText, 'Second paragraph.')
+  assert.equal(committed.snapshot?.paragraphs.length, 1)
+})
+
+test('returns the authoritative snapshot when an edit proposal version becomes stale', async () => {
+  const userId = 'stale-edit-proposal-user'
+  const chatId = 'stale-edit-proposal-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the first paragraph.',
+    operations: [
+      { id: 'stale-delete-first', type: 'delete', target: { paragraphOrdinal: 1 } },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'stale-edit-interpret',
+      operationId: 'stale-edit-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the first paragraph.',
+    },
+    userId,
+  )
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.mutate.request',
+      requestId: 'stale-edit-manual-mutation',
+      operationId: 'stale-edit-manual-operation',
+      chatId,
+      expectedVersion: 1,
+      editGroupId: 'stale-edit-manual-group',
+      cleanText: 'First paragraph revised.\n\nSecond paragraph.',
+    },
+    userId,
+  )
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'stale-edit-confirm',
+      operationId: 'stale-edit-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+
+  const expired = responses.at(-1)?.payload
+  assert.equal(expired?.type, 'app.error')
+  if (expired?.type !== 'app.error') return
+  assert.equal(expired.code, 'EDIT_PROPOSAL_EXPIRED')
+  assert.match(expired.message, /advanced to version 2/)
+  assert.equal(expired.snapshot?.draftVersion, 2)
+  assert.equal(expired.snapshot?.cleanText, 'First paragraph revised.\n\nSecond paragraph.')
+})
+
 test('reviews and commits a word move through the structured edit pipeline', async () => {
   const userId = 'inline-move-user'
   const chatId = 'inline-move-chat'

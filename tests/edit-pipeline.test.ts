@@ -83,6 +83,29 @@ test('resolves a unique paragraph-scoped replacement deterministically', () => {
   assert.equal(first.ok && first.afterText, 'First hiking sentence.\n\nSecond paragraph here.')
 })
 
+test('deletes a whole paragraph together with its adjacent separator', () => {
+  const session = fixture()
+  const firstDeleted = executeEditPlan(session.cleanText, session.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the first paragraph',
+    operations: [{ id: 'delete-first', type: 'delete', target: { paragraphOrdinal: 1 } }],
+  })
+  assert.equal(firstDeleted.ok && firstDeleted.afterText, 'Second paragraph here.')
+  assert.deepEqual(
+    firstDeleted.ok && firstDeleted.resultingParagraphIds,
+    [session.paragraphs[1]!.id],
+  )
+
+  const lastDeleted = executeEditPlan(session.cleanText, session.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the last paragraph',
+    operations: [{ id: 'delete-last', type: 'delete', target: { paragraphOrdinal: 2 } }],
+  })
+  assert.equal(lastDeleted.ok && lastDeleted.afterText, 'First mountain sentence.')
+})
+
 test('capitalizes replacement text only when it begins a sentence', () => {
   const opening = executeEditPlan('Keyboard recording test.', [], 1, {
     schemaVersion: 2,

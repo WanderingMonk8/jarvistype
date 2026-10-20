@@ -50,9 +50,11 @@ export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   'open quote',
   'close quote',
   'quote',
+  'quotation',
   'open single quote',
   'close single quote',
   'single quote',
+  'single quotation',
 ] as const
 
 const PUNCTUATION: Array<[RegExp, string, string]> = [
@@ -78,7 +80,7 @@ const PUNCTUATION: Array<[RegExp, string, string]> = [
 ]
 
 const SPOKEN_PUNCTUATION_TERM_SOURCE =
-  'open single quote|close single quote|open quote|close quote|single quote|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe'
+  'open single quote|close single quote|open quote|close quote|single quotation|single quote|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe'
 
 const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
@@ -86,8 +88,8 @@ const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
   /\bdash(?=\s+(?:of|to|for|toward|through|across)\b)/gi,
   /\b(?:mad|quick|hundred-meter)\s+dash\b/gi,
   /\bcolon(?=\s+(?:cancer|health|screening|surgery|disease|pain|care)\b)/gi,
-  /\bquote(?=\s+(?:from|by|about|of)\b)/gi,
-  /\b(?:please|to|I|we|you|they|he|she|and)\s+quote\b/gi,
+  /\b(?:quote|quotation)(?=\s+(?:from|by|about|of)\b)/gi,
+  /\b(?:please|to|I|we|you|they|he|she|and)\s+(?:quote|quotation)\b/gi,
   /\b(?:brief|long|short|difficult|historical|modern|colonial|same|previous|current)\s+period\b/gi,
   /\b(?:Oxford|serial)\s+comma\b/gi,
   /\bpossessive\s+apostrophe\b/gi,
@@ -145,7 +147,9 @@ export function normalizeDeterministically(
 
   const quotation = replaceSpokenQuotationCommands(
     text,
-    protectedLiterals.some((literal) => /\b(?:single\s+)?quote\b/iu.test(literal)),
+    protectedLiterals.some((literal) =>
+      /\b(?:single\s+)?(?:quote|quotation)\b/iu.test(literal),
+    ),
   )
   text = quotation.text
   if (quotation.marks.length) reasons.push(...quotation.reasons)
@@ -276,7 +280,7 @@ function replaceExplicitPunctuationCommands(input: string): {
       reasons.push(command.reason)
       const normalizedPhrase = phrase.toLocaleLowerCase().replace(/^semi[ -]?colon$/, 'semicolon')
       const closingReason =
-        /^(?:close (?:parenthesis|paren|bracket|quote|single quote)|quote|single quote)$/u.test(
+        /^(?:close (?:parenthesis|paren|bracket|quote|single quote)|quote|quotation|single quote|single quotation)$/u.test(
           normalizedPhrase,
         )
           ? command.reason
@@ -316,9 +320,14 @@ function punctuationCommand(phrase: string): { mark: string; reason: string } | 
   if (normalized === 'hyphen') return { mark: '-', reason: 'hyphen' }
   if (normalized === 'apostrophe') return { mark: '’', reason: 'apostrophe' }
   if (normalized === 'open quote') return { mark: '“', reason: 'quote' }
-  if (normalized === 'close quote' || normalized === 'quote') return { mark: '”', reason: 'quote' }
+  if (normalized === 'close quote' || normalized === 'quote' || normalized === 'quotation')
+    return { mark: '”', reason: 'quote' }
   if (normalized === 'open single quote') return { mark: '‘', reason: 'single quote' }
-  if (normalized === 'close single quote' || normalized === 'single quote')
+  if (
+    normalized === 'close single quote' ||
+    normalized === 'single quote' ||
+    normalized === 'single quotation'
+  )
     return { mark: '’', reason: 'single quote' }
   return null
 }
@@ -375,8 +384,8 @@ function replaceSpokenQuotationCommands(
         : `${mark}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`
     })
   }
-  replacePaired(/\bsingle quote\b([.,;:!?…—–-]*)/gi, '‘', '’', 'single quote')
-  replacePaired(/\bquote\b([.,;:!?…—–-]*)/gi, '“', '”', 'quote')
+  replacePaired(/\bsingle (?:quote|quotation)\b([.,;:!?…—–-]*)/gi, '‘', '’', 'single quote')
+  replacePaired(/\b(?<!single\s)(?:quote|quotation)\b([.,;:!?…—–-]*)/gi, '“', '”', 'quote')
 
   text = formatGeneratedQuotationOpenings(text, generatedOpeningMarker)
 
@@ -387,7 +396,10 @@ function stripProviderRenderedQuotesBesidePairedCommands(
   input: string,
   reason: 'quote' | 'single quote',
 ): string {
-  const phrase = reason === 'quote' ? 'quote' : 'single\\s+quote'
+  const phrase =
+    reason === 'quote'
+      ? '(?<!single\\s)(?:quote|quotation)'
+      : 'single\\s+(?:quote|quotation)'
   const quoteClass = reason === 'quote' ? '["“”]' : "['‘’]"
   const pattern = new RegExp(
     `(${quoteClass}[ \\t]*)?(\\b${phrase}\\b[.,;:!?…—–-]*)([ \\t]*${quoteClass})?`,

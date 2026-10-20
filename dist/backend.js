@@ -1789,9 +1789,11 @@ var SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   "open quote",
   "close quote",
   "quote",
+  "quotation",
   "open single quote",
   "close single quote",
-  "single quote"
+  "single quote",
+  "single quotation"
 ];
 var PUNCTUATION = [
   [/\bnew paragraph\b([.,;:!?…—–-]*)/gi, "\n\n", "new paragraph"],
@@ -1814,15 +1816,15 @@ var PUNCTUATION = [
   [/\bdash\b([.,;:!?…—–-]*)/gi, "\u2014", "em dash"],
   [/\bapostrophe\b([.,;:!?…—–-]*)/gi, "\u2019", "apostrophe"]
 ];
-var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quote|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
+var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
 var LITERAL_PUNCTUATION_CONTEXTS = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
   /\btime\s+period\b/gi,
   /\bdash(?=\s+(?:of|to|for|toward|through|across)\b)/gi,
   /\b(?:mad|quick|hundred-meter)\s+dash\b/gi,
   /\bcolon(?=\s+(?:cancer|health|screening|surgery|disease|pain|care)\b)/gi,
-  /\bquote(?=\s+(?:from|by|about|of)\b)/gi,
-  /\b(?:please|to|I|we|you|they|he|she|and)\s+quote\b/gi,
+  /\b(?:quote|quotation)(?=\s+(?:from|by|about|of)\b)/gi,
+  /\b(?:please|to|I|we|you|they|he|she|and)\s+(?:quote|quotation)\b/gi,
   /\b(?:brief|long|short|difficult|historical|modern|colonial|same|previous|current)\s+period\b/gi,
   /\b(?:Oxford|serial)\s+comma\b/gi,
   /\bpossessive\s+apostrophe\b/gi,
@@ -1874,7 +1876,9 @@ function normalizeDeterministically(raw, glossary, options = {}) {
   learningCandidates.push(...spelling.learningCandidates);
   const quotation = replaceSpokenQuotationCommands(
     text,
-    protectedLiterals.some((literal) => /\b(?:single\s+)?quote\b/iu.test(literal))
+    protectedLiterals.some(
+      (literal) => /\b(?:single\s+)?(?:quote|quotation)\b/iu.test(literal)
+    )
   );
   text = quotation.text;
   if (quotation.marks.length) reasons.push(...quotation.reasons);
@@ -1979,7 +1983,7 @@ function replaceExplicitPunctuationCommands(input) {
       marks.push(command.mark);
       reasons.push(command.reason);
       const normalizedPhrase = phrase.toLocaleLowerCase().replace(/^semi[ -]?colon$/, "semicolon");
-      const closingReason = /^(?:close (?:parenthesis|paren|bracket|quote|single quote)|quote|single quote)$/u.test(
+      const closingReason = /^(?:close (?:parenthesis|paren|bracket|quote|single quote)|quote|quotation|single quote|single quotation)$/u.test(
         normalizedPhrase
       ) ? command.reason : "";
       return `${command.mark}${punctuationAfterSpokenCommand(
@@ -2016,9 +2020,10 @@ function punctuationCommand(phrase) {
   if (normalized === "hyphen") return { mark: "-", reason: "hyphen" };
   if (normalized === "apostrophe") return { mark: "\u2019", reason: "apostrophe" };
   if (normalized === "open quote") return { mark: "\u201C", reason: "quote" };
-  if (normalized === "close quote" || normalized === "quote") return { mark: "\u201D", reason: "quote" };
+  if (normalized === "close quote" || normalized === "quote" || normalized === "quotation")
+    return { mark: "\u201D", reason: "quote" };
   if (normalized === "open single quote") return { mark: "\u2018", reason: "single quote" };
-  if (normalized === "close single quote" || normalized === "single quote")
+  if (normalized === "close single quote" || normalized === "single quote" || normalized === "single quotation")
     return { mark: "\u2019", reason: "single quote" };
   return null;
 }
@@ -2054,13 +2059,13 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
       return isOpening ? `${generatedOpeningMarker}${mark}` : `${mark}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`;
     });
   };
-  replacePaired(/\bsingle quote\b([.,;:!?…—–-]*)/gi, "\u2018", "\u2019", "single quote");
-  replacePaired(/\bquote\b([.,;:!?…—–-]*)/gi, "\u201C", "\u201D", "quote");
+  replacePaired(/\bsingle (?:quote|quotation)\b([.,;:!?…—–-]*)/gi, "\u2018", "\u2019", "single quote");
+  replacePaired(/\b(?<!single\s)(?:quote|quotation)\b([.,;:!?…—–-]*)/gi, "\u201C", "\u201D", "quote");
   text = formatGeneratedQuotationOpenings(text, generatedOpeningMarker);
   return { text, marks, reasons };
 }
 function stripProviderRenderedQuotesBesidePairedCommands(input, reason) {
-  const phrase = reason === "quote" ? "quote" : "single\\s+quote";
+  const phrase = reason === "quote" ? "(?<!single\\s)(?:quote|quotation)" : "single\\s+(?:quote|quotation)";
   const quoteClass = reason === "quote" ? '["\u201C\u201D]' : "['\u2018\u2019]";
   const pattern = new RegExp(
     `(${quoteClass}[ \\t]*)?(\\b${phrase}\\b[.,;:!?\u2026\u2014\u2013-]*)([ \\t]*${quoteClass})?`,
@@ -3289,14 +3294,14 @@ function normalizeSentenceOperation(instructionTranscript, plan) {
 var SPOKEN_PUNCTUATION_TARGETS = [
   [/question\s+mark/iu, "question_mark"],
   [/exclamation\s+(?:mark|point)/iu, "exclamation_mark"],
-  [/single\s+quote/iu, "single_quote"],
+  [/single\s+(?:quote|quotation)/iu, "single_quote"],
   [/apostrophe/iu, "apostrophe"],
   [/semicolon/iu, "semicolon"],
   [/colon/iu, "colon"],
   [/ellipsis|three\s+dots/iu, "ellipsis"],
   [/period|full\s+stop/iu, "period"],
   [/comma/iu, "comma"],
-  [/(?:double\s+)?quote|quotation\s+mark/iu, "quote"],
+  [/(?:double\s+)?quote|quotation(?:\s+mark)?/iu, "quote"],
   [/en\s+dash/iu, "en_dash"],
   [/em\s+dash/iu, "em_dash"],
   [/hyphen/iu, "hyphen"],

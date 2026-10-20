@@ -105,7 +105,7 @@ test('preserves explicitly literal punctuation words', () => {
 
 test('preserves punctuation vocabulary in ordinary noun and verb contexts', () => {
   const natural =
-    'The semicolon is optional. An exclamation mark followed. A question mark appeared. The ellipsis means omission. The open parenthesis is unmatched. The close bracket is missing. A new line of products launched. The new paragraph discusses history. The Oxford comma was debated. The possessive apostrophe is required. Please quote the source and quote from the report. A difficult period ended.'
+    'The semicolon is optional. An exclamation mark followed. A question mark appeared. The ellipsis means omission. The open parenthesis is unmatched. The close bracket is missing. A new line of products launched. The new paragraph discusses history. The Oxford comma was debated. The possessive apostrophe is required. Please quote the source and quote from the report. The quotation from the book was memorable. A single quotation is also discussed. A difficult period ended.'
   assert.equal(normalizeDeterministically(natural, []).text, natural)
   assert.equal(
     normalizeDeterministically('A lone quote remains literal.', []).text,
@@ -114,6 +114,10 @@ test('preserves punctuation vocabulary in ordinary noun and verb contexts', () =
   assert.equal(
     normalizeDeterministically('Quote one, quote two, and quote three.', []).text,
     'Quote one, quote two, and quote three.',
+  )
+  assert.equal(
+    normalizeDeterministically('A lone quotation remains literal.', []).text,
+    'A lone quotation remains literal.',
   )
 })
 
@@ -161,12 +165,35 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
     'Mark it ‘Provisional’.',
   )
   assert.equal(
+    normalizeDeterministically('She said quotation proceed carefully quotation period', []).text,
+    'She said “Proceed carefully”.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'Mark it single quotation provisional single quotation period',
+      [],
+    ).text,
+    'Mark it ‘Provisional’.',
+  )
+  assert.equal(
     normalizeDeterministically('The quote from the book was memorable period', []).text,
     'The quote from the book was memorable.',
   )
   assert.equal(
     normalizeDeterministically('Write the word quote and literal single quote period', []).text,
     'Write quote and single quote.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'Write the word quotation and literal single quotation period',
+      [],
+    ).text,
+    'Write quotation and single quotation.',
+  )
+  assert.equal(
+    normalizeDeterministically('Alpha punctuation quotation beta punctuation single quotation', [])
+      .text,
+    'Alpha” beta’',
   )
   const authoritative = normalizeDeterministically('Alpha comma beta question mark', [])
   assert.deepEqual([...authoritative.authoritativePunctuationMarks].sort(), [',', '?'])
@@ -232,6 +259,13 @@ test('does not duplicate provider-rendered quotation marks beside spoken quote c
   assert.equal(
     normalizeDeterministically('She preserved "literal straight quotes" without commands.', []).text,
     'She preserved "literal straight quotes" without commands.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'I listen. Quotation, “You knew my coffee order.” Quotation, and respond.',
+      [],
+    ).text,
+    'I listen. “You knew my coffee order.” and respond.',
   )
 })
 

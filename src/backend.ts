@@ -1364,21 +1364,79 @@ function normalizeSentenceOperation(instructionTranscript: string, plan: EditPla
   const operation = sentenceOperations[0]!
   const sentenceIntent =
     operation.type === 'split'
-      ? /\bsplit\b[^\n]{0,100}\b(?:(?:after|following)\s+(?:(?:the|this|that|a|an|first|second|third|last|next|previous)\s+){0,3}sentence|at\s+(?:the\s+)?end\s+of\s+(?:(?:the|this|that|a|an|first|second|third|last|next|previous)\s+){0,3}sentence)\b/iu
+      ? /\bsplit\b[^\n]{0,100}\b(?:(?:after|following)\s+(?:(?:the|this|that|a|an|first|second|third|last|final|next|previous|penultimate|second[- ]to[- ]last)\s+){0,3}sentence|at\s+(?:the\s+)?end\s+of\s+(?:(?:the|this|that|a|an|first|second|third|last|final|next|previous|penultimate|second[- ]to[- ]last)\s+){0,3}sentence)\b/iu
       : new RegExp(
-          `\\b${operation.type === 'delete' ? '(?:delete|remove)' : 'move'}\\s+(?:(?:the|this|that|a|an|first|second|third|last|next|previous|short|one[- ]word)\\s+){0,4}sentence\\b`,
+          `\\b${operation.type === 'delete' ? '(?:delete|remove)' : 'move'}\\s+(?:(?:the|this|that|a|an|first|second|third|last|final|next|previous|penultimate|second[- ]to[- ]last|short|one[- ]word)\\s+){0,4}sentence\\b`,
           'iu',
         )
   if (!sentenceIntent.test(instructionTranscript)) return plan
+  const sentencePosition = parseSentencePosition(instructionTranscript)
 
   return {
     ...plan,
     operations: plan.operations.map((operation) =>
       operation === sentenceOperations[0]
-        ? { ...operation, includeTrailingPunctuation: true }
+        ? {
+            ...operation,
+            ...(sentencePosition
+              ? { target: applySentencePosition(operation.target, sentencePosition) }
+              : {}),
+            includeTrailingPunctuation: true,
+          }
         : operation,
     ),
   }
+}
+
+function parseSentencePosition(
+  instructionTranscript: string,
+): { sentenceOrdinal: number } | { sentenceFromEnd: number } | null {
+  if (/\b(?:second[- ]to[- ]last|penultimate)\s+sentence\b/iu.test(instructionTranscript))
+    return { sentenceFromEnd: 2 }
+  if (/\b(?:last|final)\s+sentence\b/iu.test(instructionTranscript))
+    return { sentenceFromEnd: 1 }
+  const match = instructionTranscript.match(
+    /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th|seventh|7th|eighth|8th|ninth|9th|tenth|10th)\s+sentence\b/iu,
+  )
+  if (!match) return null
+  const ordinals: Record<string, number> = {
+    first: 1,
+    '1st': 1,
+    second: 2,
+    '2nd': 2,
+    third: 3,
+    '3rd': 3,
+    fourth: 4,
+    '4th': 4,
+    fifth: 5,
+    '5th': 5,
+    sixth: 6,
+    '6th': 6,
+    seventh: 7,
+    '7th': 7,
+    eighth: 8,
+    '8th': 8,
+    ninth: 9,
+    '9th': 9,
+    tenth: 10,
+    '10th': 10,
+  }
+  return { sentenceOrdinal: ordinals[match[1]!.toLocaleLowerCase()]! }
+}
+
+function applySentencePosition(
+  target: EditTarget,
+  position: { sentenceOrdinal: number } | { sentenceFromEnd: number },
+): EditTarget {
+  const normalized = { ...target }
+  delete normalized.exactText
+  delete normalized.approximateText
+  delete normalized.punctuation
+  delete normalized.occurrence
+  delete normalized.occurrenceFromEnd
+  delete normalized.relativePosition
+  delete normalized.relativeToText
+  return { ...normalized, ...position }
 }
 
 const SPOKEN_PUNCTUATION_TARGETS: ReadonlyArray<readonly [RegExp, PunctuationTarget]> = [

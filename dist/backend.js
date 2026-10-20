@@ -703,7 +703,7 @@ function parseOperation(value) {
     if (destination !== void 0) return null;
     if (includeTrailingPunctuation !== void 0 && (type === "join_next" || includeTrailingPunctuation !== true))
       return null;
-    if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
+    if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0 || target.scope !== void 0))
       return null;
   } else if (type === "move_before" || type === "move_after") {
     if (text !== void 0 || caseMode !== void 0 || !destination) return null;
@@ -735,6 +735,8 @@ function parseTarget(value) {
     "punctuation",
     "occurrence",
     "occurrenceFromEnd",
+    "sentenceOrdinal",
+    "sentenceFromEnd",
     "relativePosition",
     "relativeToText"
   ]);
@@ -778,6 +780,15 @@ function parseTarget(value) {
     target.occurrenceFromEnd = value.occurrenceFromEnd;
   }
   if (target.occurrence !== void 0 && target.occurrenceFromEnd !== void 0) return null;
+  if (value.sentenceOrdinal !== void 0) {
+    if (!isPositiveInteger2(value.sentenceOrdinal) || value.sentenceOrdinal > 1e4) return null;
+    target.sentenceOrdinal = value.sentenceOrdinal;
+  }
+  if (value.sentenceFromEnd !== void 0) {
+    if (!isPositiveInteger2(value.sentenceFromEnd) || value.sentenceFromEnd > 1e4) return null;
+    target.sentenceFromEnd = value.sentenceFromEnd;
+  }
+  if (target.sentenceOrdinal !== void 0 && target.sentenceFromEnd !== void 0) return null;
   if (value.relativePosition !== void 0) {
     if (value.relativePosition !== "before" && value.relativePosition !== "after") return null;
     target.relativePosition = value.relativePosition;
@@ -793,6 +804,8 @@ function parseTarget(value) {
   if (target.punctuation !== void 0 && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
     return null;
   if (target.punctuation === void 0 && (target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
+    return null;
+  if ((target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0) && (target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.scope !== void 0 || target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
     return null;
   return Object.keys(target).length ? target : null;
 }
@@ -823,7 +836,12 @@ function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms
   }
   let start = range.start;
   let end = range.end;
-  if (operation.target.punctuation !== void 0) {
+  if (operation.target.sentenceOrdinal !== void 0 || operation.target.sentenceFromEnd !== void 0) {
+    const match = resolveSentenceTarget(cleanText, range.start, range.end, operation.target);
+    if (typeof match === "string") return match;
+    start = match.start;
+    end = match.end;
+  } else if (operation.target.punctuation !== void 0) {
     const match = resolvePunctuationTarget(cleanText, range.start, range.end, operation.target);
     if (typeof match === "string") return match;
     start = match.start;
@@ -924,7 +942,7 @@ function isInlineMoveOperation(operation) {
   return (operation.type === "move_before" || operation.type === "move_after") && operation.destination !== void 0 && hasInlineSelector(operation.target) && hasInlineSelector(operation.destination);
 }
 function hasInlineSelector(target) {
-  return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0;
+  return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0;
 }
 function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerms) {
   const source = resolveTextTarget(cleanText, paragraphs, operation.target, "move source");
@@ -1000,6 +1018,31 @@ function extendThroughSentenceEnd(text, end) {
   const terminal = /(?:\.{3}|[.!?…])[”’"')\]]*(?=\s|$)/u.exec(remainder);
   return terminal ? end + (terminal.index ?? 0) + terminal[0].length : end;
 }
+function resolveSentenceTarget(text, rangeStart, rangeEnd, target) {
+  const sentences = findSentenceRanges(text, rangeStart, rangeEnd);
+  const index = target.sentenceOrdinal !== void 0 ? target.sentenceOrdinal - 1 : sentences.length - (target.sentenceFromEnd ?? 0);
+  return sentences[index] ?? "sentence position was not found";
+}
+function findSentenceRanges(text, rangeStart, rangeEnd) {
+  const ranges = [];
+  let cursor = rangeStart;
+  while (cursor < rangeEnd) {
+    while (cursor < rangeEnd && /\s/u.test(text[cursor] ?? "")) cursor += 1;
+    if (cursor >= rangeEnd) break;
+    const start = cursor;
+    const remainder = text.slice(cursor, rangeEnd);
+    const terminal = /(?:\.{3}|[.!?…])[”’"')\]]*(?=\s|$)/u.exec(remainder);
+    if (!terminal) {
+      const trailingWhitespace = text.slice(start, rangeEnd).match(/\s*$/u)?.[0].length ?? 0;
+      ranges.push({ start, end: rangeEnd - trailingWhitespace });
+      break;
+    }
+    const end = cursor + (terminal.index ?? 0) + terminal[0].length;
+    ranges.push({ start, end });
+    cursor = end;
+  }
+  return ranges;
+}
 function resolveTextTarget(cleanText, paragraphs, target, label) {
   const paragraphMatches = paragraphs.filter(
     (paragraph2) => (target.paragraphId === void 0 || paragraph2.id === target.paragraphId) && (target.paragraphOrdinal === void 0 || paragraph2.ordinal === target.paragraphOrdinal)
@@ -1011,7 +1054,12 @@ function resolveTextTarget(cleanText, paragraphs, target, label) {
   const range = paragraph ? paragraphRange(cleanText, paragraph) : { start: 0, end: cleanText.length };
   let start;
   let end;
-  if (target.punctuation !== void 0) {
+  if (target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0) {
+    const match = resolveSentenceTarget(cleanText, range.start, range.end, target);
+    if (typeof match === "string") return `${label}: ${match}`;
+    start = match.start;
+    end = match.end;
+  } else if (target.punctuation !== void 0) {
     const match = resolvePunctuationTarget(cleanText, range.start, range.end, target);
     if (typeof match === "string") return `${label}: ${match}`;
     start = match.start;
@@ -1029,7 +1077,7 @@ function resolveTextTarget(cleanText, paragraphs, target, label) {
     start = match.start;
     end = match.end;
   } else {
-    return `${label} requires exact, approximate, or punctuation text`;
+    return `${label} requires exact, approximate, sentence, or punctuation text`;
   }
   return {
     start,
@@ -1240,16 +1288,28 @@ function executeStructuralPlan(cleanText, paragraphs, operations) {
       working.splice(sourceIndex, 1);
       afterText2 = "";
     } else if (operation.type === "split") {
-      const anchor = operation.target.exactText;
-      if (!anchor) return { ok: false, reason: "split requires an exact anchor" };
-      const matches = findAll(sourceResult.text, anchor, 0, sourceResult.text.length);
-      if (matches.length !== 1)
-        return {
-          ok: false,
-          reason: matches.length ? "split anchor is ambiguous" : "split anchor was not found"
-        };
-      const anchorEnd = matches[0] + anchor.length;
-      const splitAt = operation.includeTrailingPunctuation ? extendThroughSentenceEnd(sourceResult.text, anchorEnd) : anchorEnd;
+      let splitAt;
+      if (operation.target.sentenceOrdinal !== void 0 || operation.target.sentenceFromEnd !== void 0) {
+        const sentence = resolveSentenceTarget(
+          sourceResult.text,
+          0,
+          sourceResult.text.length,
+          operation.target
+        );
+        if (typeof sentence === "string") return { ok: false, reason: sentence };
+        splitAt = sentence.end;
+      } else {
+        const anchor = operation.target.exactText;
+        if (!anchor) return { ok: false, reason: "split requires an exact or sentence anchor" };
+        const matches = findAll(sourceResult.text, anchor, 0, sourceResult.text.length);
+        if (matches.length !== 1)
+          return {
+            ok: false,
+            reason: matches.length ? "split anchor is ambiguous" : "split anchor was not found"
+          };
+        const anchorEnd = matches[0] + anchor.length;
+        splitAt = operation.includeTrailingPunctuation ? extendThroughSentenceEnd(sourceResult.text, anchorEnd) : anchorEnd;
+      }
       const left = sourceResult.text.slice(0, splitAt).trimEnd();
       const right = sourceResult.text.slice(splitAt).trimStart();
       if (!left || !right) return { ok: false, reason: "split would create an empty paragraph" };
@@ -3279,17 +3339,66 @@ function normalizeSentenceOperation(instructionTranscript, plan) {
   );
   if (sentenceOperations.length !== 1) return plan;
   const operation = sentenceOperations[0];
-  const sentenceIntent = operation.type === "split" ? /\bsplit\b[^\n]{0,100}\b(?:(?:after|following)\s+(?:(?:the|this|that|a|an|first|second|third|last|next|previous)\s+){0,3}sentence|at\s+(?:the\s+)?end\s+of\s+(?:(?:the|this|that|a|an|first|second|third|last|next|previous)\s+){0,3}sentence)\b/iu : new RegExp(
-    `\\b${operation.type === "delete" ? "(?:delete|remove)" : "move"}\\s+(?:(?:the|this|that|a|an|first|second|third|last|next|previous|short|one[- ]word)\\s+){0,4}sentence\\b`,
+  const sentenceIntent = operation.type === "split" ? /\bsplit\b[^\n]{0,100}\b(?:(?:after|following)\s+(?:(?:the|this|that|a|an|first|second|third|last|final|next|previous|penultimate|second[- ]to[- ]last)\s+){0,3}sentence|at\s+(?:the\s+)?end\s+of\s+(?:(?:the|this|that|a|an|first|second|third|last|final|next|previous|penultimate|second[- ]to[- ]last)\s+){0,3}sentence)\b/iu : new RegExp(
+    `\\b${operation.type === "delete" ? "(?:delete|remove)" : "move"}\\s+(?:(?:the|this|that|a|an|first|second|third|last|final|next|previous|penultimate|second[- ]to[- ]last|short|one[- ]word)\\s+){0,4}sentence\\b`,
     "iu"
   );
   if (!sentenceIntent.test(instructionTranscript)) return plan;
+  const sentencePosition = parseSentencePosition(instructionTranscript);
   return {
     ...plan,
     operations: plan.operations.map(
-      (operation2) => operation2 === sentenceOperations[0] ? { ...operation2, includeTrailingPunctuation: true } : operation2
+      (operation2) => operation2 === sentenceOperations[0] ? {
+        ...operation2,
+        ...sentencePosition ? { target: applySentencePosition(operation2.target, sentencePosition) } : {},
+        includeTrailingPunctuation: true
+      } : operation2
     )
   };
+}
+function parseSentencePosition(instructionTranscript) {
+  if (/\b(?:second[- ]to[- ]last|penultimate)\s+sentence\b/iu.test(instructionTranscript))
+    return { sentenceFromEnd: 2 };
+  if (/\b(?:last|final)\s+sentence\b/iu.test(instructionTranscript))
+    return { sentenceFromEnd: 1 };
+  const match = instructionTranscript.match(
+    /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th|seventh|7th|eighth|8th|ninth|9th|tenth|10th)\s+sentence\b/iu
+  );
+  if (!match) return null;
+  const ordinals = {
+    first: 1,
+    "1st": 1,
+    second: 2,
+    "2nd": 2,
+    third: 3,
+    "3rd": 3,
+    fourth: 4,
+    "4th": 4,
+    fifth: 5,
+    "5th": 5,
+    sixth: 6,
+    "6th": 6,
+    seventh: 7,
+    "7th": 7,
+    eighth: 8,
+    "8th": 8,
+    ninth: 9,
+    "9th": 9,
+    tenth: 10,
+    "10th": 10
+  };
+  return { sentenceOrdinal: ordinals[match[1].toLocaleLowerCase()] };
+}
+function applySentencePosition(target, position) {
+  const normalized = { ...target };
+  delete normalized.exactText;
+  delete normalized.approximateText;
+  delete normalized.punctuation;
+  delete normalized.occurrence;
+  delete normalized.occurrenceFromEnd;
+  delete normalized.relativePosition;
+  delete normalized.relativeToText;
+  return { ...normalized, ...position };
 }
 var SPOKEN_PUNCTUATION_TARGETS = [
   [/question\s+mark/iu, "question_mark"],

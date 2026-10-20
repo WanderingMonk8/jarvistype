@@ -45,6 +45,8 @@ export interface EditTarget {
   punctuation?: PunctuationTarget
   occurrence?: number
   occurrenceFromEnd?: number
+  sentenceOrdinal?: number
+  sentenceFromEnd?: number
   relativePosition?: 'before' | 'after'
   relativeToText?: string
 }
@@ -230,6 +232,8 @@ function parseOperation(value: unknown): EditOperation | null {
       type === 'join_next' &&
       (target.exactText !== undefined ||
         target.approximateText !== undefined ||
+        target.sentenceOrdinal !== undefined ||
+        target.sentenceFromEnd !== undefined ||
         target.scope !== undefined)
     )
       return null
@@ -270,6 +274,8 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     'punctuation',
     'occurrence',
     'occurrenceFromEnd',
+    'sentenceOrdinal',
+    'sentenceFromEnd',
     'relativePosition',
     'relativeToText',
   ])
@@ -327,6 +333,15 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     target.occurrenceFromEnd = value.occurrenceFromEnd
   }
   if (target.occurrence !== undefined && target.occurrenceFromEnd !== undefined) return null
+  if (value.sentenceOrdinal !== undefined) {
+    if (!isPositiveInteger(value.sentenceOrdinal) || value.sentenceOrdinal > 10_000) return null
+    target.sentenceOrdinal = value.sentenceOrdinal
+  }
+  if (value.sentenceFromEnd !== undefined) {
+    if (!isPositiveInteger(value.sentenceFromEnd) || value.sentenceFromEnd > 10_000) return null
+    target.sentenceFromEnd = value.sentenceFromEnd
+  }
+  if (target.sentenceOrdinal !== undefined && target.sentenceFromEnd !== undefined) return null
   if (value.relativePosition !== undefined) {
     if (value.relativePosition !== 'before' && value.relativePosition !== 'after') return null
     target.relativePosition = value.relativePosition
@@ -353,6 +368,18 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
   if (
     target.punctuation === undefined &&
     (target.occurrence !== undefined ||
+      target.occurrenceFromEnd !== undefined ||
+      hasRelativePosition ||
+      hasRelativeText)
+  )
+    return null
+  if (
+    (target.sentenceOrdinal !== undefined || target.sentenceFromEnd !== undefined) &&
+    (target.exactText !== undefined ||
+      target.approximateText !== undefined ||
+      target.punctuation !== undefined ||
+      target.scope !== undefined ||
+      target.occurrence !== undefined ||
       target.occurrenceFromEnd !== undefined ||
       hasRelativePosition ||
       hasRelativeText)
@@ -404,7 +431,15 @@ function resolveOperation(
 
   let start = range.start
   let end = range.end
-  if (operation.target.punctuation !== undefined) {
+  if (
+    operation.target.sentenceOrdinal !== undefined ||
+    operation.target.sentenceFromEnd !== undefined
+  ) {
+    const match = resolveSentenceTarget(cleanText, range.start, range.end, operation.target)
+    if (typeof match === 'string') return match
+    start = match.start
+    end = match.end
+  } else if (operation.target.punctuation !== undefined) {
     const match = resolvePunctuationTarget(cleanText, range.start, range.end, operation.target)
     if (typeof match === 'string') return match
     start = match.start
@@ -555,7 +590,9 @@ function hasInlineSelector(target: EditTarget): boolean {
   return (
     target.exactText !== undefined ||
     target.approximateText !== undefined ||
-    target.punctuation !== undefined
+    target.punctuation !== undefined ||
+    target.sentenceOrdinal !== undefined ||
+    target.sentenceFromEnd !== undefined
   )
 }
 
@@ -668,6 +705,45 @@ function extendThroughSentenceEnd(text: string, end: number): number {
   return terminal ? end + (terminal.index ?? 0) + terminal[0].length : end
 }
 
+function resolveSentenceTarget(
+  text: string,
+  rangeStart: number,
+  rangeEnd: number,
+  target: EditTarget,
+): { start: number; end: number } | string {
+  const sentences = findSentenceRanges(text, rangeStart, rangeEnd)
+  const index =
+    target.sentenceOrdinal !== undefined
+      ? target.sentenceOrdinal - 1
+      : sentences.length - (target.sentenceFromEnd ?? 0)
+  return sentences[index] ?? 'sentence position was not found'
+}
+
+function findSentenceRanges(
+  text: string,
+  rangeStart: number,
+  rangeEnd: number,
+): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = []
+  let cursor = rangeStart
+  while (cursor < rangeEnd) {
+    while (cursor < rangeEnd && /\s/u.test(text[cursor] ?? '')) cursor += 1
+    if (cursor >= rangeEnd) break
+    const start = cursor
+    const remainder = text.slice(cursor, rangeEnd)
+    const terminal = /(?:\.{3}|[.!?…])[”’"')\]]*(?=\s|$)/u.exec(remainder)
+    if (!terminal) {
+      const trailingWhitespace = text.slice(start, rangeEnd).match(/\s*$/u)?.[0].length ?? 0
+      ranges.push({ start, end: rangeEnd - trailingWhitespace })
+      break
+    }
+    const end = cursor + (terminal.index ?? 0) + terminal[0].length
+    ranges.push({ start, end })
+    cursor = end
+  }
+  return ranges
+}
+
 function resolveTextTarget(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
@@ -691,7 +767,12 @@ function resolveTextTarget(
 
   let start: number
   let end: number
-  if (target.punctuation !== undefined) {
+  if (target.sentenceOrdinal !== undefined || target.sentenceFromEnd !== undefined) {
+    const match = resolveSentenceTarget(cleanText, range.start, range.end, target)
+    if (typeof match === 'string') return `${label}: ${match}`
+    start = match.start
+    end = match.end
+  } else if (target.punctuation !== undefined) {
     const match = resolvePunctuationTarget(cleanText, range.start, range.end, target)
     if (typeof match === 'string') return `${label}: ${match}`
     start = match.start
@@ -709,7 +790,7 @@ function resolveTextTarget(
     start = match.start
     end = match.end
   } else {
-    return `${label} requires exact, approximate, or punctuation text`
+    return `${label} requires exact, approximate, sentence, or punctuation text`
   }
 
   return {
@@ -1021,18 +1102,33 @@ function executeStructuralPlan(
       working.splice(sourceIndex, 1)
       afterText = ''
     } else if (operation.type === 'split') {
-      const anchor = operation.target.exactText
-      if (!anchor) return { ok: false, reason: 'split requires an exact anchor' }
-      const matches = findAll(sourceResult.text, anchor, 0, sourceResult.text.length)
-      if (matches.length !== 1)
-        return {
-          ok: false,
-          reason: matches.length ? 'split anchor is ambiguous' : 'split anchor was not found',
-        }
-      const anchorEnd = matches[0]! + anchor.length
-      const splitAt = operation.includeTrailingPunctuation
-        ? extendThroughSentenceEnd(sourceResult.text, anchorEnd)
-        : anchorEnd
+      let splitAt: number
+      if (
+        operation.target.sentenceOrdinal !== undefined ||
+        operation.target.sentenceFromEnd !== undefined
+      ) {
+        const sentence = resolveSentenceTarget(
+          sourceResult.text,
+          0,
+          sourceResult.text.length,
+          operation.target,
+        )
+        if (typeof sentence === 'string') return { ok: false, reason: sentence }
+        splitAt = sentence.end
+      } else {
+        const anchor = operation.target.exactText
+        if (!anchor) return { ok: false, reason: 'split requires an exact or sentence anchor' }
+        const matches = findAll(sourceResult.text, anchor, 0, sourceResult.text.length)
+        if (matches.length !== 1)
+          return {
+            ok: false,
+            reason: matches.length ? 'split anchor is ambiguous' : 'split anchor was not found',
+          }
+        const anchorEnd = matches[0]! + anchor.length
+        splitAt = operation.includeTrailingPunctuation
+          ? extendThroughSentenceEnd(sourceResult.text, anchorEnd)
+          : anchorEnd
+      }
       const left = sourceResult.text.slice(0, splitAt).trimEnd()
       const right = sourceResult.text.slice(splitAt).trimStart()
       if (!left || !right) return { ok: false, reason: 'split would create an empty paragraph' }

@@ -111,7 +111,7 @@ function parseOperation(value) {
     if (destination !== void 0) return null;
     if (includeTrailingPunctuation !== void 0 && (type === "join_next" || includeTrailingPunctuation !== true))
       return null;
-    if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
+    if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0 || target.scope !== void 0))
       return null;
   } else if (type === "move_before" || type === "move_after") {
     if (text !== void 0 || caseMode !== void 0 || !destination) return null;
@@ -143,6 +143,8 @@ function parseTarget(value) {
     "punctuation",
     "occurrence",
     "occurrenceFromEnd",
+    "sentenceOrdinal",
+    "sentenceFromEnd",
     "relativePosition",
     "relativeToText"
   ]);
@@ -186,6 +188,15 @@ function parseTarget(value) {
     target.occurrenceFromEnd = value.occurrenceFromEnd;
   }
   if (target.occurrence !== void 0 && target.occurrenceFromEnd !== void 0) return null;
+  if (value.sentenceOrdinal !== void 0) {
+    if (!isPositiveInteger(value.sentenceOrdinal) || value.sentenceOrdinal > 1e4) return null;
+    target.sentenceOrdinal = value.sentenceOrdinal;
+  }
+  if (value.sentenceFromEnd !== void 0) {
+    if (!isPositiveInteger(value.sentenceFromEnd) || value.sentenceFromEnd > 1e4) return null;
+    target.sentenceFromEnd = value.sentenceFromEnd;
+  }
+  if (target.sentenceOrdinal !== void 0 && target.sentenceFromEnd !== void 0) return null;
   if (value.relativePosition !== void 0) {
     if (value.relativePosition !== "before" && value.relativePosition !== "after") return null;
     target.relativePosition = value.relativePosition;
@@ -202,10 +213,12 @@ function parseTarget(value) {
     return null;
   if (target.punctuation === void 0 && (target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
     return null;
+  if ((target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0) && (target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.scope !== void 0 || target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
+    return null;
   return Object.keys(target).length ? target : null;
 }
 function hasInlineSelector(target) {
-  return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0;
+  return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0;
 }
 function isPunctuationTarget(value) {
   return value === "period" || value === "comma" || value === "colon" || value === "semicolon" || value === "question_mark" || value === "exclamation_mark" || value === "ellipsis" || value === "quote" || value === "single_quote" || value === "apostrophe" || value === "hyphen" || value === "en_dash" || value === "em_dash" || value === "open_parenthesis" || value === "close_parenthesis" || value === "open_bracket" || value === "close_bracket";

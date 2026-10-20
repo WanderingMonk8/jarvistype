@@ -1424,6 +1424,55 @@ test('extends a sentence-targeted paragraph split through terminal punctuation',
   )
 })
 
+test('deletes the first sentence when identical text also appears last', async () => {
+  const userId = 'duplicate-sentence-user'
+  const chatId = 'duplicate-sentence-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'Quotation. Okay, you are really cutting deep here. Quotation.',
+  )
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the first sentence.',
+    operations: [
+      {
+        id: 'delete-duplicate-first-sentence',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'Quotation.' },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'duplicate-sentence-interpret',
+      operationId: 'duplicate-sentence-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the first sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.deepEqual(proposal.proposal.plan.operations[0]?.target, {
+    paragraphOrdinal: 1,
+    sentenceOrdinal: 1,
+  })
+  assert.equal(
+    proposal.proposal.afterText,
+    'Okay, you are really cutting deep here. Quotation.',
+  )
+})
+
 test('reviews and commits whole-paragraph deletion without leaving separator whitespace', async () => {
   const userId = 'delete-paragraph-user'
   const chatId = 'delete-paragraph-chat'

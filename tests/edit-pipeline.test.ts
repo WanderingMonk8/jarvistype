@@ -36,6 +36,21 @@ test('accepts a closed supported schema and rejects unknown or oversized operati
       ],
     }),
   )
+  assert.ok(
+    parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete a sentence by position',
+      operations: [
+        {
+          id: 'sentence-one',
+          type: 'delete',
+          target: { paragraphOrdinal: 1, sentenceOrdinal: 1 },
+          includeTrailingPunctuation: true,
+        },
+      ],
+    }),
+  )
   assert.equal(
     parseEditPlan({
       schemaVersion: 2,
@@ -55,6 +70,21 @@ test('accepts a closed supported schema and rejects unknown or oversized operati
           id: 'one',
           type: 'delete',
           target: { punctuation: 'period', occurrence: 2, occurrenceFromEnd: 1 },
+        },
+      ],
+    }),
+    null,
+  )
+  assert.equal(
+    parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'conflicting sentence selectors',
+      operations: [
+        {
+          id: 'one',
+          type: 'delete',
+          target: { sentenceOrdinal: 1, sentenceFromEnd: 1 },
         },
       ],
     }),
@@ -710,6 +740,40 @@ test('splits a sentence target after its terminal punctuation rather than an int
     split.ok && split.afterText,
     'Opening sentence. The brief eruption of discussion seemed to die down once more, and the general passivity returned to campus.\n\nFriday arrived.',
   )
+})
+
+test('targets identical sentences by their ordinal position', () => {
+  const text = 'Quotation. The middle sentence remains. Quotation.'
+  const paragraphs = [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }]
+  const first = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the first sentence',
+    operations: [
+      {
+        id: 'delete-first-identical-sentence',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, sentenceOrdinal: 1 },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
+  assert.equal(first.ok && first.afterText, 'The middle sentence remains. Quotation.')
+
+  const last = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the last sentence',
+    operations: [
+      {
+        id: 'delete-last-identical-sentence',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, sentenceFromEnd: 1 },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
+  assert.equal(last.ok && last.afterText, 'Quotation. The middle sentence remains.')
 })
 
 test('moves paragraphs by captured identity and supports full-draft casing', () => {

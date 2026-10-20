@@ -558,6 +558,64 @@ test('commits recording segments once, in order, and undoes only the latest segm
   }
 })
 
+test('appends a reviewed recording onto a concurrently changed same-chat draft', async () => {
+  const userId = 'concurrent-recording-user'
+  const chatId = 'concurrent-recording-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First device text.')
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'concurrent-recording-segment', 1, 'Recorded on mobile.'),
+    userId,
+  )
+  const proposalResponse = responses.at(-1)?.payload
+  assert.equal(proposalResponse?.type, 'transcript.normalization.response')
+  if (proposalResponse?.type !== 'transcript.normalization.response') return
+  assert.equal(proposalResponse.outcome, 'review')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.mutate.request',
+      requestId: 'concurrent-desktop-mutation',
+      operationId: 'concurrent-desktop-operation',
+      chatId,
+      expectedVersion: 1,
+      editGroupId: 'concurrent-desktop-group',
+      cleanText: 'First device text. Updated on desktop.',
+    },
+    userId,
+  )
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.confirm.request',
+      requestId: 'concurrent-recording-confirm',
+      operationId: proposalResponse.proposal.operationId,
+      chatId,
+      expectedVersion: proposalResponse.proposal.expectedVersion,
+    },
+    userId,
+  )
+
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'transcript.normalization.response')
+  if (committed?.type !== 'transcript.normalization.response') return
+  assert.equal(committed.outcome, 'committed')
+  assert.equal(
+    committed.snapshot?.cleanText,
+    'First device text. Updated on desktop. Recorded on mobile.',
+  )
+  assert.equal(committed.snapshot?.draftVersion, 3)
+  assert.ok(
+    committed.snapshot?.recordingSegments.at(-1)?.normalization.reasons.includes(
+      'appended after concurrent draft change',
+    ),
+  )
+})
+
 test('requires review even when a transcript needs no normalization', async () => {
   const userId = 'unchanged-review-user'
   const chatId = 'unchanged-review-chat'

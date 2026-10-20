@@ -2608,12 +2608,16 @@ async function handleTranscriptConfirmation(request, context, activeRequest) {
   );
 }
 function appendProposal(session, proposal) {
+  const rebased = session.draftVersion !== proposal.expectedVersion;
   return appendRecordingTranscript(session, proposal.rawTranscript, {
-    expectedVersion: proposal.expectedVersion,
+    // A reviewed recording is an append-only operation. If another client changed
+    // the same chat-owned draft during review, preserve that newer draft and append
+    // the recording to it atomically instead of discarding the transcript.
+    expectedVersion: session.draftVersion,
     segmentId: proposal.operationId,
     committedTranscript: proposal.candidateText,
     normalization: {
-      reasons: proposal.reasons,
+      reasons: rebased ? [.../* @__PURE__ */ new Set([...proposal.reasons, "appended after concurrent draft change"])] : proposal.reasons,
       contextMessageCount: proposal.contextMessageCount,
       contextCharacterCount: proposal.contextCharacterCount,
       contextTruncated: proposal.contextTruncated,

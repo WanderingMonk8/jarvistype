@@ -1539,7 +1539,7 @@ function enforceAuthoritativeEditSpellings(
         const inlinePattern = new RegExp(spellingPayload, 'gi')
         text = text.replace(inlinePattern, candidate.canonical)
         const collapsedCanonicalPattern = new RegExp(
-          `(?<![\\p{L}\\p{N}])${escapeRegularExpression(candidate.canonical)}(?![\\p{L}\\p{N}])`,
+          `(?<![\\p{L}\\p{N}])${apostropheFlexiblePattern(candidate.canonical)}(?![\\p{L}\\p{N}])`,
           'giu',
         )
         text = text.replace(collapsedCanonicalPattern, candidate.canonical)
@@ -1556,7 +1556,7 @@ function reconcileEditLearningCandidateCasing(
 ): SpellingLearningCandidate[] {
   return candidates.flatMap((candidate) => {
     const candidatePattern = new RegExp(
-      `(?<![\\p{L}\\p{N}])${escapeRegularExpression(candidate.canonical)}(?![\\p{L}\\p{N}])`,
+      `(?<![\\p{L}\\p{N}])${apostropheFlexiblePattern(candidate.canonical)}(?![\\p{L}\\p{N}])`,
       'giu',
     )
     const appliedSpellings = new Set<string>()
@@ -1617,6 +1617,10 @@ function normalizeEditInputPayloads(
 
 function escapeRegularExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function apostropheFlexiblePattern(value: string): string {
+  return escapeRegularExpression(value).replace(/['\u2019]/gu, "['\\u2019]")
 }
 
 async function normalizeWithContext(

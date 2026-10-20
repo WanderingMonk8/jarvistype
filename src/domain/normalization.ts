@@ -126,6 +126,7 @@ export function normalizeDeterministically(
   const deduplicatedTerminalPunctuation = removeRedundantTerminalPunctuationCommands(text)
   if (deduplicatedTerminalPunctuation !== text) reasons.push('provider terminal punctuation')
   text = deduplicatedTerminalPunctuation
+  text = normalizeApostrophesInsideExplicitSpelling(text)
   const explicitPunctuation = replaceExplicitPunctuationCommands(text)
   text = explicitPunctuation.text
   reasons.push(...explicitPunctuation.reasons)
@@ -416,7 +417,7 @@ function replaceExplicitSpelling(
   const learningCandidates: SpellingLearningCandidate[] = []
   const ambiguities: string[] = []
   const separatedPattern =
-    /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash|[.,](?:\s+dash)?)\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/gi
+    /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash|[.,](?:\s+dash)?|['\u2019])\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/gi
   let text = input.replace(
     separatedPattern,
     (
@@ -483,13 +484,27 @@ function extractLetters(value: string): string {
   return (
     value
       .replace(/\bdash\b/gi, '-')
-      .match(/[A-Za-z]/g)
+      .match(/[A-Za-z'\u2019]/g)
       ?.join('') ?? ''
   )
 }
 
+function normalizeApostrophesInsideExplicitSpelling(value: string): string {
+  const spelledBeforeApostrophe =
+    /((?:(?:[A-Za-z]\s*(?:-|dash)\s*){2,}|(?:[A-Za-z]\s+){2,})[A-Za-z])\s*(?:-|dash)?\s*apostrophe\s*(?:-|dash)?\s*([A-Za-z])\b/gi
+  const spelledAfterApostrophe =
+    /\b([A-Za-z])\s*(?:-|dash)?\s*apostrophe\s*(?:-|dash)?\s*((?:[A-Za-z]\s*(?:-|dash)\s*){2,}[A-Za-z])/gi
+  return value
+    .replace(spelledBeforeApostrophe, '$1\u2019$2')
+    .replace(spelledAfterApostrophe, '$1\u2019$2')
+}
+
 function cueMatchesLetters(cue: string | undefined, letters: string): cue is string {
-  return Boolean(cue && cue.replace(/[-']/g, '').toLowerCase() === letters.toLowerCase())
+  return Boolean(
+    cue &&
+      cue.replace(/[-'\u2019]/g, '').toLowerCase() ===
+        letters.replace(/[-'\u2019]/g, '').toLowerCase(),
+  )
 }
 
 function applySpellingCasing(value: string, casing: string | undefined): string {
@@ -498,13 +513,14 @@ function applySpellingCasing(value: string, casing: string | undefined): string 
   if (normalized === 'all caps' || normalized === 'uppercase') return value.toUpperCase()
   if (normalized === 'lowercase') return value.toLowerCase()
   return value
-    .split(/([-'])/)
+    .split(/([-\u2019'])/)
     .map((part) =>
-      part === '-' || part === "'"
+      part === '-' || part === "'" || part === '\u2019'
         ? part
         : `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`,
     )
     .join('')
+    .replace(/(['\u2019])S$/u, '$1s')
 }
 
 function cleanupPunctuationSpacing(value: string): string {

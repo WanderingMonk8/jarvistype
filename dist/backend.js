@@ -1838,6 +1838,7 @@ function normalizeDeterministically(raw, glossary, options = {}) {
   const deduplicatedTerminalPunctuation = removeRedundantTerminalPunctuationCommands(text);
   if (deduplicatedTerminalPunctuation !== text) reasons.push("provider terminal punctuation");
   text = deduplicatedTerminalPunctuation;
+  text = normalizeApostrophesInsideExplicitSpelling(text);
   const explicitPunctuation = replaceExplicitPunctuationCommands(text);
   text = explicitPunctuation.text;
   reasons.push(...explicitPunctuation.reasons);
@@ -2062,7 +2063,7 @@ function formatGeneratedQuotationOpenings(input, marker) {
 function replaceExplicitSpelling(input) {
   const learningCandidates = [];
   const ambiguities = [];
-  const separatedPattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash|[.,](?:\s+dash)?)\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/gi;
+  const separatedPattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash|[.,](?:\s+dash)?|['\u2019])\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/gi;
   let text = input.replace(
     separatedPattern,
     (whole, casing, spoken, separator, cue) => {
@@ -2099,19 +2100,26 @@ function unmatchedCueSuffix(separator, cue, matchingCue) {
   return `${separator ?? ""} ${cue}`;
 }
 function extractLetters(value) {
-  return value.replace(/\bdash\b/gi, "-").match(/[A-Za-z]/g)?.join("") ?? "";
+  return value.replace(/\bdash\b/gi, "-").match(/[A-Za-z'\u2019]/g)?.join("") ?? "";
+}
+function normalizeApostrophesInsideExplicitSpelling(value) {
+  const spelledBeforeApostrophe = /((?:(?:[A-Za-z]\s*(?:-|dash)\s*){2,}|(?:[A-Za-z]\s+){2,})[A-Za-z])\s*(?:-|dash)?\s*apostrophe\s*(?:-|dash)?\s*([A-Za-z])\b/gi;
+  const spelledAfterApostrophe = /\b([A-Za-z])\s*(?:-|dash)?\s*apostrophe\s*(?:-|dash)?\s*((?:[A-Za-z]\s*(?:-|dash)\s*){2,}[A-Za-z])/gi;
+  return value.replace(spelledBeforeApostrophe, "$1\u2019$2").replace(spelledAfterApostrophe, "$1\u2019$2");
 }
 function cueMatchesLetters(cue, letters) {
-  return Boolean(cue && cue.replace(/[-']/g, "").toLowerCase() === letters.toLowerCase());
+  return Boolean(
+    cue && cue.replace(/[-'\u2019]/g, "").toLowerCase() === letters.replace(/[-'\u2019]/g, "").toLowerCase()
+  );
 }
 function applySpellingCasing(value, casing) {
   if (!casing) return value.toLowerCase();
   const normalized = casing.toLowerCase();
   if (normalized === "all caps" || normalized === "uppercase") return value.toUpperCase();
   if (normalized === "lowercase") return value.toLowerCase();
-  return value.split(/([-'])/).map(
-    (part) => part === "-" || part === "'" ? part : `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`
-  ).join("");
+  return value.split(/([-\u2019'])/).map(
+    (part) => part === "-" || part === "'" || part === "\u2019" ? part : `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`
+  ).join("").replace(/(['\u2019])S$/u, "$1s");
 }
 function cleanupPunctuationSpacing(value) {
   return value.replace(/[ \t]+([,.;:!?)\]])/g, "$1").replace(/([([])\s+/g, "$1").replace(/([“‘])[ \t]+/g, "$1").replace(/[ \t]+([”’])/g, "$1").replace(/[ \t]+…/g, "\u2026").replace(/(?<=\p{L})[ \t]*’[ \t]*(?=\p{L})/gu, "\u2019").replace(/[ \t]*-[ \t]*/g, "-").replace(/[,;:]\s*([.!?])/g, "$1").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").replace(/^[ \t]+/, "").replace(/\s+$/, "");
@@ -3380,7 +3388,7 @@ function enforceAuthoritativeEditSpellings(plan, candidates) {
         const inlinePattern = new RegExp(spellingPayload, "gi");
         text = text.replace(inlinePattern, candidate.canonical);
         const collapsedCanonicalPattern = new RegExp(
-          `(?<![\\p{L}\\p{N}])${escapeRegularExpression(candidate.canonical)}(?![\\p{L}\\p{N}])`,
+          `(?<![\\p{L}\\p{N}])${apostropheFlexiblePattern(candidate.canonical)}(?![\\p{L}\\p{N}])`,
           "giu"
         );
         text = text.replace(collapsedCanonicalPattern, candidate.canonical);
@@ -3392,7 +3400,7 @@ function enforceAuthoritativeEditSpellings(plan, candidates) {
 function reconcileEditLearningCandidateCasing(candidates, operations, afterText) {
   return candidates.flatMap((candidate) => {
     const candidatePattern = new RegExp(
-      `(?<![\\p{L}\\p{N}])${escapeRegularExpression(candidate.canonical)}(?![\\p{L}\\p{N}])`,
+      `(?<![\\p{L}\\p{N}])${apostropheFlexiblePattern(candidate.canonical)}(?![\\p{L}\\p{N}])`,
       "giu"
     );
     const appliedSpellings = /* @__PURE__ */ new Set();
@@ -3442,6 +3450,9 @@ function normalizeEditInputPayloads(plan, glossary, conversationReferences, prot
 }
 function escapeRegularExpression(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function apostropheFlexiblePattern(value) {
+  return escapeRegularExpression(value).replace(/['\u2019]/gu, "['\\u2019]");
 }
 async function normalizeWithContext(rawTranscript, deterministicCandidate, messages, conversationReferences, glossary, settings, userId) {
   try {

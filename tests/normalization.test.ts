@@ -283,6 +283,14 @@ test('collapses explicit spelling, obeys casing, and creates a learning candidat
     normalizeDeterministically('Write capitalized P-I-P dash B-O-Y Pip-Boy period', []).text,
     'Write Pip-Boy.',
   )
+  assert.equal(
+    normalizeDeterministically('Use capitalized K-A-T-apostrophe-S period', []).text,
+    'Use Kat’s.',
+  )
+  assert.equal(
+    normalizeDeterministically('Use capitalized O-apostrophe-C-O-N-N-O-R period', []).text,
+    'Use O’Connor.',
+  )
 })
 
 test('collapses guarded compact spelling emitted by speech-to-text', () => {

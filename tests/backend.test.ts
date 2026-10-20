@@ -2103,6 +2103,48 @@ test('restores explicit casing after the edit interpreter collapses spelled lett
   ])
 })
 
+test('keeps apostrophe-s lowercase in capitalized explicit spelling during editing', async () => {
+  const userId = 'possessive-edit-spelling-user'
+  const chatId = 'possessive-edit-spelling-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Judy’s hair tightens around cats.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Apply the explicitly spelled possessive.',
+    operations: [
+      {
+        id: 'spell-kats',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'cats' },
+        text: "Kat'S",
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'possessive-edit-spelling-interpret',
+      operationId: 'possessive-edit-spelling-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace cats with capitalized K-A-T-apostrophe-S.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Judy’s hair tightens around Kat’s.')
+  assert.deepEqual(proposal.proposal.learningCandidates, [
+    { canonical: 'Kat’s', spokenVariant: 'K-A-T’S' },
+  ])
+})
+
 test('uses normal casing for unmodified explicit spelling in edit input', async () => {
   const userId = 'default-edit-spelling-casing-user'
   const chatId = 'default-edit-spelling-casing-chat'

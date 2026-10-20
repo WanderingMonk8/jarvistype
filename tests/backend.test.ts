@@ -2430,6 +2430,23 @@ test('applies and discloses an enabled conservative post-edit grammar repair', a
     return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
   })
   assert.ok(grammarRequest)
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'grammar-repair-confirm',
+      operationId: 'grammar-repair-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type !== 'edit.proposal.response') return
+  assert.equal(committed.outcome, 'committed')
+  assert.equal(committed.snapshot?.cleanText, 'This is an accessible entrance.')
 })
 
 test('falls back to the deterministic edit when grammar repair overreaches', async () => {

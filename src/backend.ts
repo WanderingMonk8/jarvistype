@@ -776,20 +776,9 @@ async function handleEditConfirmation(
     if (!activeChat || activeChat.id !== request.chatId)
       return { error: 'chat-mismatch' as const, session }
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
-    const executed = executeEditPlan(
-      session.cleanText,
-      session.paragraphs,
-      session.draftVersion,
-      proposal.plan,
-    )
-    if (
-      !executed.ok ||
-      executed.afterText !== proposal.afterText ||
-      JSON.stringify(executed.resultingParagraphIds) !==
-        JSON.stringify(proposal.resultingParagraphIds)
-    )
+    if (session.cleanText !== proposal.beforeText)
       return { error: 'proposal-mismatch' as const, session }
-    const mutation = applyAutomatedEdit(session, executed.afterText, {
+    const mutation = applyAutomatedEdit(session, proposal.afterText, {
       expectedVersion: proposal.expectedVersion,
       operationId: proposal.operationId,
       ...(proposal.resultingParagraphIds

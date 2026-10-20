@@ -2819,15 +2819,9 @@ async function handleEditConfirmation(request, context, activeRequest) {
     if (!activeChat || activeChat.id !== request.chatId)
       return { error: "chat-mismatch", session };
     if (activeRequest.cancelled) return { error: "cancelled", session };
-    const executed = executeEditPlan(
-      session.cleanText,
-      session.paragraphs,
-      session.draftVersion,
-      proposal.plan
-    );
-    if (!executed.ok || executed.afterText !== proposal.afterText || JSON.stringify(executed.resultingParagraphIds) !== JSON.stringify(proposal.resultingParagraphIds))
+    if (session.cleanText !== proposal.beforeText)
       return { error: "proposal-mismatch", session };
-    const mutation = applyAutomatedEdit(session, executed.afterText, {
+    const mutation = applyAutomatedEdit(session, proposal.afterText, {
       expectedVersion: proposal.expectedVersion,
       operationId: proposal.operationId,
       ...proposal.resultingParagraphIds ? { paragraphIdOrder: proposal.resultingParagraphIds } : {}

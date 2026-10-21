@@ -11,6 +11,7 @@ JarvisType is a [Lumiverse](https://lumiverse.chat/) extension for composing cha
 - Build one message progressively across multiple recordings.
 - Review and accept or reject every **Record Message** transcription before it can enter the current draft.
 - Interpret separate **Record Edit** recordings as editing instructions.
+- Optionally run a conservative, reviewable grammar repair after deterministic edits.
 - Number paragraphs for precise spoken references.
 - Show the current message and the latest diff after every change.
 - Support undo and repeated editing before submission.

@@ -1155,7 +1155,6 @@ interface GrammarEditSegment {
 
 const GRAMMAR_REPAIR_TIMEOUT_MS = 3_000
 const MAX_GRAMMAR_SEGMENT_CHARACTERS = 3_000
-const POST_EDIT_GRAMMAR_REPAIR_ENABLED = false
 
 async function maybeRepairEditGrammar(
   beforeText: string,
@@ -1167,7 +1166,6 @@ async function maybeRepairEditGrammar(
   conversationReferences: readonly string[],
   userId: string,
 ): Promise<{ text: string; changes: string[] }> {
-  if (!POST_EDIT_GRAMMAR_REPAIR_ENABLED) return { text: proposedText, changes: [] }
   if (settings.grammarRepairMode === 'off') return { text: proposedText, changes: [] }
   if (!operations.some((operation) => /\p{L}/u.test(operation.beforeText + operation.afterText)))
     return { text: proposedText, changes: [] }
@@ -2319,7 +2317,7 @@ async function handleSettingsUpdate(
   const settings = {
     contextMessageCount: clampContextMessageCount(request.settings.contextMessageCount),
     contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled,
-    grammarRepairMode: 'off' as const,
+    grammarRepairMode: request.settings.grammarRepairMode,
     normalizationConnectionId: request.settings.normalizationConnectionId,
     normalizationModelOverride: request.settings.normalizationModelOverride.trim(),
   }
@@ -2864,7 +2862,10 @@ async function loadSettings(userId: string): Promise<PhaseFourSettings> {
       ? {
           contextMessageCount: clampContextMessageCount(raw.contextMessageCount),
           contextualNormalizationEnabled: raw.contextualNormalizationEnabled,
-          grammarRepairMode: 'off',
+          grammarRepairMode:
+            raw.grammarRepairMode === 'when_needed' || raw.grammarRepairMode === 'always'
+              ? raw.grammarRepairMode
+              : 'off',
           normalizationConnectionId:
             typeof raw.normalizationConnectionId === 'string' &&
             raw.normalizationConnectionId.length > 0

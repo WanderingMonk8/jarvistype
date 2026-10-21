@@ -1278,80 +1278,198 @@ function findApproximateMatch(
 ): { start: number; end: number } | string {
   const wanted = tokenizeWithOffsets(search, 0, search.length)
   if (!wanted.length) return 'approximate text target was not found'
-  const available = tokenizeWithOffsets(text, start, end)
+  const available = tokenizeCachedDraftRange(text, start, end)
   if (!available.length) return 'approximate text target was not found'
   const wantedText = wanted.map(({ value }) => value).join(' ')
   const wantedCompact = wantedText.replace(/\s+/gu, '')
   const wantedPhonetic = phoneticKey(wantedCompact)
+  const availableValues = available.map(({ value }) => value)
+  const availableText = availableValues.join(' ')
+  const availableCompact = availableValues.join('')
+  const spacedOffsets = new Uint32Array(available.length + 1)
+  const compactOffsets = new Uint32Array(available.length + 1)
+  for (let index = 0; index < available.length; index += 1) {
+    spacedOffsets[index + 1] =
+      spacedOffsets[index]! + availableValues[index]!.length + (index === 0 ? 0 : 1)
+    compactOffsets[index + 1] = compactOffsets[index]! + availableValues[index]!.length
+  }
+  const scoreCache = new Map<
+    string,
+    {
+      compactScore: number
+      text: string
+      phonetic: string
+      maxScoreUpperBound: number
+      score?: number
+      phoneticFallback?: boolean
+    }
+  >()
   const candidates: Array<{
     start: number
     end: number
-    score: number
+    order: number
+    score?: number
+    scores: {
+      compactScore: number
+      text: string
+      phonetic: string
+      maxScoreUpperBound: number
+      score?: number
+      phoneticFallback?: boolean
+    }
     boundaryFallback: boolean
     shortWordFallback: boolean
     phoneticFallback: boolean
   }> = []
   const addCandidates = (length: number) => {
     for (let index = 0; index <= available.length - length; index += 1) {
-      const window = available.slice(index, index + length)
-      const candidateText = window.map(({ value }) => value).join(' ')
-      const candidateCompact = candidateText.replace(/\s+/gu, '')
-      const compactScore = stringSimilarity(wantedCompact, candidateCompact)
-      const candidatePhonetic = phoneticKey(candidateCompact)
-      const phoneticScore = stringSimilarity(wantedPhonetic, candidatePhonetic)
-      candidates.push({
-        start: window[0]!.start,
-        end: window.at(-1)!.end,
-        score: Math.max(
-          stringSimilarity(wantedText, candidateText),
+      const windowEnd = index + length
+      const spacedStart = spacedOffsets[index]! + (index === 0 ? 0 : 1)
+      const spacedEnd = spacedOffsets[windowEnd]!
+      const candidateText = availableText.slice(spacedStart, spacedEnd)
+      const candidateCompact = availableCompact.slice(
+        compactOffsets[index]!,
+        compactOffsets[windowEnd]!,
+      )
+      let scores = scoreCache.get(candidateText)
+      if (!scores) {
+        const compactScore = stringSimilarity(wantedCompact, candidateCompact)
+        const candidatePhonetic = phoneticKey(candidateCompact)
+        scores = {
           compactScore,
-          phoneticScore * 0.75 + compactScore * 0.25,
-        ),
+          text: candidateText,
+          phonetic: candidatePhonetic,
+          maxScoreUpperBound: Math.max(
+            compactScore,
+            maximumSimilarityForLengths(wantedText.length, candidateText.length),
+            maximumSimilarityForLengths(wantedPhonetic.length, candidatePhonetic.length) * 0.75 +
+              compactScore * 0.25,
+          ),
+        }
+        scoreCache.set(candidateText, scores)
+      }
+      candidates.push({
+        start: available[index]!.start,
+        end: available[windowEnd - 1]!.end,
+        order: candidates.length,
+        scores,
         boundaryFallback:
           length !== wanted.length &&
           Math.min(wantedCompact.length, candidateCompact.length) >= 5 &&
           Math.abs(wantedCompact.length - candidateCompact.length) <= 2 &&
-          compactScore >= 2 / 3,
+          scores.compactScore >= 2 / 3,
         shortWordFallback:
           wanted.length === 1 &&
           length === 1 &&
           Math.min(wantedCompact.length, candidateCompact.length) >= 4 &&
           Math.abs(wantedCompact.length - candidateCompact.length) <= 1 &&
-          compactScore >= 0.75,
-        phoneticFallback:
-          Math.min(wantedPhonetic.length, candidatePhonetic.length) >= 4 &&
-          wantedPhonetic.charAt(0) === candidatePhonetic.charAt(0) &&
-          compactScore >= 0.5 &&
-          phoneticScore >= 0.8,
+          scores.compactScore >= 0.75,
+        phoneticFallback: false,
       })
     }
   }
   addCandidates(wanted.length)
   if (wanted.length > 1) addCandidates(wanted.length - 1)
   addCandidates(wanted.length + 1)
-  candidates.sort((left, right) => right.score - left.score)
-  const best = candidates[0]
+  const evaluationOrder = [...candidates].sort(
+    (left, right) =>
+      right.scores.compactScore - left.scores.compactScore || left.order - right.order,
+  )
+  let best: (typeof candidates)[number] | undefined
+  for (const candidate of evaluationOrder) {
+    if (
+      best?.score !== undefined &&
+      candidate.scores.maxScoreUpperBound < best.score - 0.12
+    )
+      continue
+    if (candidate.scores.score === undefined) {
+      const phoneticScore = stringSimilarity(wantedPhonetic, candidate.scores.phonetic)
+      const textScore =
+        wantedText === wantedCompact &&
+        candidate.scores.text === candidate.scores.text.replace(/\s+/gu, '')
+          ? candidate.scores.compactScore
+          : stringSimilarity(wantedText, candidate.scores.text)
+      candidate.scores.score = Math.max(
+        textScore,
+        candidate.scores.compactScore,
+        phoneticScore * 0.75 + candidate.scores.compactScore * 0.25,
+      )
+      candidate.scores.phoneticFallback =
+        Math.min(wantedPhonetic.length, candidate.scores.phonetic.length) >= 4 &&
+        wantedPhonetic.charAt(0) === candidate.scores.phonetic.charAt(0) &&
+        candidate.scores.compactScore >= 0.5 &&
+        phoneticScore >= 0.8
+    }
+    candidate.score = candidate.scores.score
+    candidate.phoneticFallback = candidate.scores.phoneticFallback ?? false
+    if (
+      candidate.score !== undefined &&
+      (!best ||
+        best.score === undefined ||
+        candidate.score > best.score ||
+        (candidate.score === best.score && candidate.order < best.order))
+    )
+      best = candidate
+  }
   if (
     !best ||
+    best.score === undefined ||
     (best.score < 0.78 &&
       !best.boundaryFallback &&
       !best.shortWordFallback &&
       !best.phoneticFallback)
   )
     return 'approximate text target was not found'
-  const runnerUp = candidates.find(
-    (candidate) => candidate.end <= best.start || candidate.start >= best.end,
-  )
-  if (runnerUp && best.score - runnerUp.score < 0.12) return 'approximate text target is ambiguous'
+  let runnerUp: (typeof candidates)[number] | undefined
+  for (const candidate of candidates) {
+    if (
+      candidate.score !== undefined &&
+      (candidate.end <= best.start || candidate.start >= best.end) &&
+      (!runnerUp || runnerUp.score === undefined || candidate.score > runnerUp.score)
+    )
+      runnerUp = candidate
+  }
+  if (runnerUp?.score !== undefined && best.score - runnerUp.score < 0.12)
+    return 'approximate text target is ambiguous'
   return { start: best.start, end: best.end }
+}
+
+function maximumSimilarityForLengths(leftLength: number, rightLength: number): number {
+  return 1 - Math.abs(leftLength - rightLength) / Math.max(leftLength, rightLength, 1)
+}
+
+interface FuzzyToken {
+  value: string
+  start: number
+  end: number
+}
+
+const MAX_FUZZY_TOKEN_CACHE_ENTRIES = 8
+const fuzzyTokenCache = new Map<string, FuzzyToken[]>()
+
+function tokenizeCachedDraftRange(text: string, start: number, end: number): FuzzyToken[] {
+  let tokens = fuzzyTokenCache.get(text)
+  if (tokens) {
+    fuzzyTokenCache.delete(text)
+    fuzzyTokenCache.set(text, tokens)
+  } else {
+    tokens = tokenizeWithOffsets(text, 0, text.length)
+    fuzzyTokenCache.set(text, tokens)
+    if (fuzzyTokenCache.size > MAX_FUZZY_TOKEN_CACHE_ENTRIES) {
+      const oldest = fuzzyTokenCache.keys().next().value
+      if (oldest !== undefined) fuzzyTokenCache.delete(oldest)
+    }
+  }
+  if (start === 0 && end === text.length) return tokens
+  return tokens.filter((token) => token.start >= start && token.end <= end)
 }
 
 function tokenizeWithOffsets(
   text: string,
   start: number,
   end: number,
-): Array<{ value: string; start: number; end: number }> {
-  const tokens: Array<{ value: string; start: number; end: number }> = []
+): FuzzyToken[] {
+  const tokens: FuzzyToken[] = []
   const segment = text.slice(start, end)
   for (const match of segment.matchAll(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)) {
     const offset = start + (match.index ?? 0)
@@ -1365,22 +1483,27 @@ function tokenizeWithOffsets(
 }
 
 function stringSimilarity(left: string, right: string): number {
-  const rows = left.length + 1
-  const columns = right.length + 1
-  const previous = Array.from({ length: columns }, (_, index) => index)
-  for (let row = 1; row < rows; row += 1) {
-    const current = new Array<number>(columns)
-    current[0] = row
-    for (let column = 1; column < columns; column += 1) {
-      current[column] = Math.min(
-        current[column - 1]! + 1,
-        previous[column]! + 1,
-        previous[column - 1]! + (left[row - 1] === right[column - 1] ? 0 : 1),
+  if (left === right) return 1
+  if (!left.length || !right.length) return 0
+  let rows = left
+  let columns = right
+  if (columns.length > rows.length) [rows, columns] = [columns, rows]
+  const distances = new Uint32Array(columns.length + 1)
+  for (let column = 0; column <= columns.length; column += 1) distances[column] = column
+  for (let row = 1; row <= rows.length; row += 1) {
+    let diagonal = distances[0]!
+    distances[0] = row
+    for (let column = 1; column <= columns.length; column += 1) {
+      const above = distances[column]!
+      distances[column] = Math.min(
+        distances[column - 1]! + 1,
+        above + 1,
+        diagonal + (rows[row - 1] === columns[column - 1] ? 0 : 1),
       )
+      diagonal = above
     }
-    for (let column = 0; column < columns; column += 1) previous[column] = current[column]!
   }
-  return 1 - previous[columns - 1]! / Math.max(left.length, right.length, 1)
+  return 1 - distances[columns.length]! / Math.max(left.length, right.length, 1)
 }
 
 function phoneticKey(value: string): string {

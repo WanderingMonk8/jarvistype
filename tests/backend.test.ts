@@ -1191,6 +1191,7 @@ test('does not let contextual normalization duplicate speech quotation marks', a
       'duplicated-speech-quotes-segment',
       1,
       'Begin speech. Yeah, no offense, but you do look like you have had a long day. Everything all right? End speech.',
+      'double',
     ),
     userId,
   )
@@ -1205,6 +1206,7 @@ test('does not let contextual normalization duplicate speech quotation marks', a
     )
     assert.equal(response.proposal.contextualModelUsed, false)
     assert.ok(response.proposal.reasons.includes('deterministic quotation fast path'))
+    assert.equal(response.proposal.reasons.includes('streamed quotation command recovery'), false)
   }
   assert.equal(generationRequests.length, 0)
 })
@@ -1224,6 +1226,7 @@ test('does not let contextual normalization duplicate single quotation marks', a
       'duplicated-single-quotes-segment',
       1,
       'Begin single. A private thought. End single.',
+      'single',
     ),
     userId,
   )
@@ -1235,6 +1238,7 @@ test('does not let contextual normalization duplicate single quotation marks', a
     assert.equal(response.proposal.candidateText, '‘A private thought.’')
     assert.equal(response.proposal.contextualModelUsed, false)
     assert.ok(response.proposal.reasons.includes('deterministic quotation fast path'))
+    assert.equal(response.proposal.reasons.includes('streamed quotation command recovery'), false)
   }
   assert.equal(generationRequests.length, 0)
 })

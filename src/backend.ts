@@ -390,6 +390,13 @@ function applyQuotationBoundaryHint(
       ? /^[\u2018'][\s\S]*[\u2019']$/u.test(trimmed)
       : /^[\u201c"][\s\S]*[\u201d"]$/u.test(trimmed)
   if (alreadyWrapped) return { text: rawTranscript, recovered: false }
+  const explicitCommands = normalizeDeterministically(trimmed, [], {
+    capitalizeOpening: false,
+  }).authoritativePunctuationMarks
+  const [opening, closing] = hint === 'single' ? ['\u2018', '\u2019'] : ['\u201c', '\u201d']
+  if (explicitCommands.includes(opening) && explicitCommands.includes(closing)) {
+    return { text: rawTranscript, recovered: false }
+  }
   const command = hint === 'single' ? 'single quotation' : 'quotation'
   return { text: `${command} ${trimmed} ${command}`, recovered: true }
 }

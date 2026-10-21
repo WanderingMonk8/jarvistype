@@ -2783,7 +2783,11 @@ test('applies and discloses an enabled conservative post-edit grammar repair', a
     },
     userId,
   )
-  await seedDraft(userId, chatId, 'This is a narrow entrance.')
+  await seedDraft(
+    userId,
+    chatId,
+    'Earlier one. Earlier two. This is a narrow entrance. Later one. Later two.',
+  )
   responses.length = 0
   editPlanResponse = {
     schemaVersion: 2,
@@ -2799,7 +2803,12 @@ test('applies and discloses an enabled conservative post-edit grammar repair', a
     ],
   }
   grammarRepairResponse = {
-    paragraphs: [{ ordinal: 1, text: 'This is an accessible entrance.' }],
+    segments: [
+      {
+        id: 'paragraph-1-segment-1',
+        text: 'Earlier two. This is an accessible entrance. Later one.',
+      },
+    ],
     changes: ['Changed “a” to “an” before “accessible”.'],
   }
 
@@ -2819,7 +2828,10 @@ test('applies and discloses an enabled conservative post-edit grammar repair', a
   const proposal = responses.at(-1)?.payload
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
-  assert.equal(proposal.proposal.afterText, 'This is an accessible entrance.')
+  assert.equal(
+    proposal.proposal.afterText,
+    'Earlier one. Earlier two. This is an accessible entrance. Later one. Later two.',
+  )
   assert.deepEqual(proposal.proposal.grammarRepairChanges, [
     'Changed “a” to “an” before “accessible”.',
   ])
@@ -2828,6 +2840,12 @@ test('applies and discloses an enabled conservative post-edit grammar repair', a
     return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
   })
   assert.ok(grammarRequest)
+  const grammarInput = JSON.parse(grammarRequest.messages?.at(-1)?.content ?? '{}') as {
+    segments?: Array<{ text?: string }>
+  }
+  assert.deepEqual(grammarInput.segments?.map((segment) => segment.text), [
+    'Earlier two. This is a accessible entrance. Later one.',
+  ])
 
   await dispatch(
     {
@@ -2844,7 +2862,10 @@ test('applies and discloses an enabled conservative post-edit grammar repair', a
   assert.equal(committed?.type, 'edit.proposal.response')
   if (committed?.type !== 'edit.proposal.response') return
   assert.equal(committed.outcome, 'committed')
-  assert.equal(committed.snapshot?.cleanText, 'This is an accessible entrance.')
+  assert.equal(
+    committed.snapshot?.cleanText,
+    'Earlier one. Earlier two. This is an accessible entrance. Later one. Later two.',
+  )
 })
 
 test('falls back to the deterministic edit when grammar repair overreaches', async () => {
@@ -2882,9 +2903,9 @@ test('falls back to the deterministic edit when grammar repair overreaches', asy
     ],
   }
   grammarRepairResponse = {
-    paragraphs: [
+    segments: [
       {
-        ordinal: 1,
+        id: 'paragraph-1-segment-1',
         text: 'A magnificent marble gateway welcomed every traveler into the transformed city.',
       },
     ],

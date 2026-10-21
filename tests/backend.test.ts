@@ -3644,6 +3644,94 @@ test('repairs a deterministic article artifact without a provider call', async (
   )
 })
 
+test('does not treat a domain period as a sentence boundary during cleanup', async () => {
+  const userId = 'domain-sentence-boundary-user'
+  const chatId = 'domain-sentence-boundary-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Visit example.com for details.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'domain-sentence-boundary-interpret',
+      operationId: 'domain-sentence-boundary-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace details with info.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Visit example.com for info.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('rejects a provider casing change to a domain', async () => {
+  const userId = 'grammar-domain-user'
+  const chatId = 'grammar-domain-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'grammar-domain-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'always',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'Visit example.com for details.')
+  responses.length = 0
+  generationRequests.length = 0
+  grammarRepairResponse = {
+    edits: [
+      {
+        segmentId: 'paragraph-1-segment-1',
+        find: 'example.com',
+        replace: 'example.Com',
+        reason: 'Capitalized the domain.',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'grammar-domain-interpret',
+      operationId: 'grammar-domain-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace details with info.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Visit example.com for info.')
+  assert.equal(proposal.proposal.grammarRepairChanges, undefined)
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+    }).length,
+    1,
+  )
+})
+
 test('aborts an in-flight grammar request when the operation is cancelled', async () => {
   const userId = 'cancelled-grammar-repair-user'
   const chatId = 'cancelled-grammar-repair-chat'

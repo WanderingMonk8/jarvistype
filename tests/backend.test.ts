@@ -2091,6 +2091,63 @@ test('replaces one exact word deterministically when the edit model returns no p
   )
 })
 
+test('removes an unquoted phrase label from deterministic replacement text', async () => {
+  const userId = 'deterministic-phrase-label-user'
+  const chatId = 'deterministic-phrase-label-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She pauses, then mutters.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = null
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'deterministic-phrase-label-interpret',
+      operationId: 'deterministic-phrase-label-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace mutters with the phrase needs you.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'She pauses, then needs you.')
+  assert.equal(proposal.proposal.plan.operations[0]?.text, 'needs you')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('preserves a phrase label when it is inside quoted replacement text', async () => {
+  const userId = 'deterministic-literal-phrase-label-user'
+  const chatId = 'deterministic-literal-phrase-label-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Use placeholder here.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'deterministic-literal-phrase-label-interpret',
+      operationId: 'deterministic-literal-phrase-label-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace placeholder with “the phrase needs you”.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'Use the phrase needs you here.')
+  }
+})
+
 test('falls back to one fuzzy draft target when the provider compounds a split phrase', async () => {
   const userId = 'fuzzy-target-user'
   const chatId = 'fuzzy-target-chat'

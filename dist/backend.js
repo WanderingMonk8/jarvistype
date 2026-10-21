@@ -3429,9 +3429,9 @@ function parseDeterministicSimpleReplacement(instructionTranscript, session) {
   if (leadingParagraph !== void 0 && (!Number.isSafeInteger(leadingParagraph) || leadingParagraph < 1) || trailingParagraph !== void 0 && (!Number.isSafeInteger(trailingParagraph) || trailingParagraph < 1) || leadingParagraph !== void 0 && trailingParagraph !== void 0 && leadingParagraph !== trailingParagraph)
     return null;
   const spokenTarget = unwrapEditArgument(
-    (match[2] ?? "").replace(/^(?:the\s+)?(?:word|phrase)\s+/iu, "")
+    stripUnquotedEditArgumentLabel(match[2] ?? "")
   );
-  const replacement = unwrapEditArgument(match[3] ?? "");
+  const replacement = unwrapEditArgument(stripUnquotedEditArgumentLabel(match[3] ?? ""));
   if (!spokenTarget || !replacement || isSemanticReplacementTarget(spokenTarget) || /\b(?:period|full\s+stop|question\s+mark|exclamation\s+(?:mark|point)|ellipsis|new\s+(?:line|paragraph))\s*$/iu.test(
     replacement
   ))
@@ -3454,6 +3454,11 @@ function parseDeterministicSimpleReplacement(instructionTranscript, session) {
       }
     ]
   });
+}
+function stripUnquotedEditArgumentLabel(value) {
+  const trimmed = value.trim();
+  if (/^["'“‘]/u.test(trimmed)) return trimmed;
+  return trimmed.replace(/^(?:the\s+)?(?:word|words|phrase)\s*[:,]?\s+/iu, "");
 }
 function adoptUnambiguousDraftCasing(session, spokenTarget, paragraphOrdinal) {
   const paragraphs = paragraphOrdinal === void 0 ? session.paragraphs : session.paragraphs.filter((paragraph) => paragraph.ordinal === paragraphOrdinal);

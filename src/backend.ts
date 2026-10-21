@@ -1489,9 +1489,9 @@ function parseDeterministicSimpleReplacement(
     return null
 
   const spokenTarget = unwrapEditArgument(
-    (match[2] ?? '').replace(/^(?:the\s+)?(?:word|phrase)\s+/iu, ''),
+    stripUnquotedEditArgumentLabel(match[2] ?? ''),
   )
-  const replacement = unwrapEditArgument(match[3] ?? '')
+  const replacement = unwrapEditArgument(stripUnquotedEditArgumentLabel(match[3] ?? ''))
   if (
     !spokenTarget ||
     !replacement ||
@@ -1519,6 +1519,12 @@ function parseDeterministicSimpleReplacement(
       },
     ],
   })
+}
+
+function stripUnquotedEditArgumentLabel(value: string): string {
+  const trimmed = value.trim()
+  if (/^["'“‘]/u.test(trimmed)) return trimmed
+  return trimmed.replace(/^(?:the\s+)?(?:word|words|phrase)\s*[:,]?\s+/iu, '')
 }
 
 function adoptUnambiguousDraftCasing(

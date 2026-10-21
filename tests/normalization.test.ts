@@ -165,6 +165,18 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
     'Alpha (beta)\ngamma [delta]',
   )
   assert.equal(
+    normalizeDeterministically('Alpha begin bracket beta end bracket.', []).text,
+    'Alpha <beta>.',
+  )
+  assert.equal(
+    normalizeDeterministically('Alpha command begin bracket beta command end bracket', []).text,
+    'Alpha <beta>',
+  )
+  assert.equal(
+    normalizeDeterministically('The begin bracket play starts today period', []).text,
+    'The begin bracket play starts today.',
+  )
+  assert.equal(
     normalizeDeterministically('Alpha punctuation quote beta punctuation single quote', []).text,
     'Alpha” beta’',
   )

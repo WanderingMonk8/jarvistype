@@ -2241,6 +2241,8 @@ var SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   "close paren",
   "open bracket",
   "close bracket",
+  "begin bracket",
+  "end bracket",
   "question mark",
   "exclamation mark",
   "exclamation point",
@@ -2279,6 +2281,8 @@ var PUNCTUATION = [
   [/\bclose (?:parenthesis|paren)\b([.,;:!?…—–-]*)/gi, ")", "close parenthesis"],
   [/\bopen bracket\b([.,;:!?…—–-]*)/gi, "[", "open bracket"],
   [/\bclose bracket\b([.,;:!?…—–-]*)/gi, "]", "close bracket"],
+  [/\bbegin bracket\b([.,;:!?…—–-]*)/gi, "<", "begin bracket"],
+  [/\bend bracket\b([.,;:!?…—–-]*)/gi, ">", "end bracket"],
   [/\bquestion mark\b([.,;:!?…—–-]*)/gi, "?", "question mark"],
   [/\bexclamation (?:mark|point)\b([.,;:!?…—–-]*)/gi, "!", "exclamation mark"],
   [/\bsemi[ -]?colon\b([.,;:!?…—–-]*)/gi, ";", "semicolon"],
@@ -2293,13 +2297,14 @@ var PUNCTUATION = [
   [/\bdash\b([.,;:!?…—–-]*)/gi, "\u2014", "em dash"],
   [/\bapostrophe\b([.,;:!?…—–-]*)/gi, "\u2019", "apostrophe"]
 ];
-var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
+var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
 var LITERAL_PUNCTUATION_CONTEXTS = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
   /\btime\s+period\b/gi,
   /\bdash(?=\s+(?:of|to|for|toward|through|across)\b)/gi,
   /\b(?:mad|quick|hundred-meter)\s+dash\b/gi,
   /\bcolon(?=\s+(?:cancer|health|screening|surgery|disease|pain|care)\b)/gi,
+  /\b(?:begin|end)\s+bracket\b(?=\s+(?:play|tournament|competition|round|stage|season|game|match|format|system|structure)\b)/gi,
   /\b(?:quote|quotation)(?=\s+(?:from|by|about|of)\b)/gi,
   /\b(?:please|to|I|we|you|they|he|she|and)\s+(?:quote|quotation)\b/gi,
   /\b(?:brief|long|short|difficult|historical|modern|colonial|same|previous|current)\s+period\b/gi,
@@ -2501,6 +2506,8 @@ function punctuationCommand(phrase) {
     return { mark: ")", reason: "close parenthesis" };
   if (normalized === "open bracket") return { mark: "[", reason: "open bracket" };
   if (normalized === "close bracket") return { mark: "]", reason: "close bracket" };
+  if (normalized === "begin bracket") return { mark: "<", reason: "begin bracket" };
+  if (normalized === "end bracket") return { mark: ">", reason: "end bracket" };
   if (normalized === "question mark") return { mark: "?", reason: "question mark" };
   if (normalized === "exclamation mark" || normalized === "exclamation point")
     return { mark: "!", reason: "exclamation mark" };
@@ -2636,7 +2643,7 @@ function stripProviderRenderedQuotesBesidePairedCommands(input, reason) {
   );
 }
 function punctuationAfterSpokenCommand(source, commandOffset, commandReason, attachedPunctuation) {
-  const isClosingDelimiter = commandReason === "quote" || commandReason === "single quote" || commandReason === "close parenthesis" || commandReason === "close bracket";
+  const isClosingDelimiter = commandReason === "quote" || commandReason === "single quote" || commandReason === "close parenthesis" || commandReason === "close bracket" || commandReason === "end bracket";
   if (!isClosingDelimiter) return "";
   const terminalPunctuation = attachedPunctuation.replace(/[^.?!…]/gu, "");
   if (!terminalPunctuation) return "";
@@ -2720,7 +2727,7 @@ function applySpellingCasing(value, casing) {
   ).join("").replace(/(['\u2019])S$/u, "$1s");
 }
 function cleanupPunctuationSpacing(value) {
-  return value.replace(/[ \t]+([,.;:!?)\]])/g, "$1").replace(/([([])\s+/g, "$1").replace(/([“‘])[ \t]+/g, "$1").replace(/[ \t]+([”’])/g, "$1").replace(/[ \t]+…/g, "\u2026").replace(/(?<=\p{L})[ \t]*’[ \t]*(?=\p{L})/gu, "\u2019").replace(/[ \t]*-[ \t]*/g, "-").replace(/[,;:]\s*([.!?])/g, "$1").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").replace(/^[ \t]+/, "").replace(/\s+$/, "");
+  return value.replace(/[ \t]+([,.;:!?)\]>])/g, "$1").replace(/([(<[])\s+/g, "$1").replace(/([“‘])[ \t]+/g, "$1").replace(/[ \t]+([”’])/g, "$1").replace(/[ \t]+…/g, "\u2026").replace(/(?<=\p{L})[ \t]*’[ \t]*(?=\p{L})/gu, "\u2019").replace(/[ \t]*-[ \t]*/g, "-").replace(/[,;:]\s*([.!?])/g, "$1").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").replace(/^[ \t]+/, "").replace(/\s+$/, "");
 }
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

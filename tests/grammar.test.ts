@@ -154,4 +154,9 @@ test('leaves speech tags, file names, domains, and URLs intact', () => {
     repairDeterministicGrammar('https://example.com/?a=b').text,
     'https://example.com/?a=b',
   )
+  assert.equal(
+    repairDeterministicGrammar('user@example.com is here.').text,
+    'user@example.com is here.',
+  )
+  assert.equal(repairDeterministicGrammar('file_name is here.').text, 'file_name is here.')
 })

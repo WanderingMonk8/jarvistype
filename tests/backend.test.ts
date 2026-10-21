@@ -4476,6 +4476,12 @@ test('cleaner end-to-end matrix', async () => {
       expected: 'Open https://example.com/?a=b today.',
     },
     {
+      name: 'email and dotted identifier guard',
+      draft: 'user@example.com is here.',
+      instruction: 'Replace here with present.',
+      expected: 'user@example.com is present.',
+    },
+    {
       name: 'speech tag guard',
       draft: 'He said “Stop!” and left.',
       instruction: 'Replace left with stayed.',

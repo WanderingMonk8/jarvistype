@@ -2194,6 +2194,7 @@ function capitalizeSentenceOpenings(text, protectedTerms, changes) {
       if (protectedWords.has(lower) || /\p{Lu}/u.test(rest)) return whole;
       if (/^(?:www|http|https)$/iu.test(word)) return whole;
       const afterWord = source.slice(offset + boundary.length + openers.length + word.length);
+      if (/^[@_]/u.test(afterWord)) return whole;
       const domainSuffix = afterWord.match(/^\.([\p{L}\d-]+)/u)?.[1];
       if (domainSuffix && COMMON_COMPACT_SUFFIXES.has(domainSuffix.toLocaleLowerCase()))
         return whole;

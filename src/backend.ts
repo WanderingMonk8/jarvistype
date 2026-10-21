@@ -237,20 +237,27 @@ async function handleTranscriptNormalization(
     let candidateText = deterministic.text
     let contextualModelUsed = false
     const reasons = [...deterministic.reasons]
+    const explicitQuotationAliasHandled = didHandleExplicitQuotationAlias(
+      recoveredBoundary.text,
+      candidateText,
+    )
     if (recoveredBoundary.recovered) reasons.push('streamed quotation command recovery')
     if (normalizedAgainstNewerDraft) reasons.push('normalized against newer same-chat draft')
     const ambiguities = [...deterministic.ambiguities]
     const learningCandidates = [...deterministic.learningCandidates]
     if (settings.contextualNormalizationEnabled) {
-      const contextual = await normalizeWithContext(
-        recoveredBoundary.text,
-        candidateText,
-        selected.messages,
-        conversationReferences,
-        glossary,
-        settings,
-        context.userId,
-      )
+      const contextual = explicitQuotationAliasHandled
+        ? null
+        : await normalizeWithContext(
+            recoveredBoundary.text,
+            candidateText,
+            selected.messages,
+            conversationReferences,
+            glossary,
+            settings,
+            context.userId,
+          )
+      if (explicitQuotationAliasHandled) reasons.push('deterministic quotation fast path')
       if (contextual) {
         ambiguities.push(...contextual.ambiguities)
       }
@@ -427,15 +434,37 @@ function preservesAuthoritativePunctuationMarks(
   const quotationMarks = new Set(['\u201c', '\u201d', '\u2018', '\u2019', '"', "'"])
   const requiredCounts = new Map<string, number>()
   for (const mark of marks) requiredCounts.set(mark, (requiredCounts.get(mark) ?? 0) + 1)
+  if ([...requiredCounts.keys()].some((mark) => quotationMarks.has(mark))) {
+    for (const mark of quotationMarks) {
+      if (
+        countExactOccurrences(contextualCandidate, mark) !==
+        countExactOccurrences(deterministicCandidate, mark)
+      )
+        return false
+    }
+  }
   for (const [mark, requiredCount] of requiredCounts) {
     const contextualCount = countExactOccurrences(contextualCandidate, mark)
-    if (quotationMarks.has(mark)) {
-      if (contextualCount !== countExactOccurrences(deterministicCandidate, mark)) return false
-    } else if (contextualCount < requiredCount) {
+    if (!quotationMarks.has(mark) && contextualCount < requiredCount) {
       return false
     }
   }
   return true
+}
+
+function didHandleExplicitQuotationAlias(rawTranscript: string, candidateText: string): boolean {
+  return (
+    [
+      ['begin speech', 'end speech'],
+      ['begin single', 'end single'],
+    ] as const
+  ).some(
+    ([begin, end]) =>
+      containsCaseInsensitive(rawTranscript, begin) &&
+      containsCaseInsensitive(rawTranscript, end) &&
+      !containsCaseInsensitive(candidateText, begin) &&
+      !containsCaseInsensitive(candidateText, end),
+  )
 }
 
 function countExactOccurrences(value: string, search: string): number {

@@ -1074,6 +1074,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     recordingDeadline = null
   }
 
+  const clearRecordingDeadline = () => {
+    if (recordingDeadline) clearTimeout(recordingDeadline)
+    recordingDeadline = null
+  }
+
   const cancelActiveRecording = (message: string) => {
     const recording = activeRecording
     if (!recording) return
@@ -1490,7 +1495,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const recording = activeRecording
     if (!recording || recording.runId !== runId) return
     activeRecording = null
-    clearRecordingTimers()
+    clearRecordingDeadline()
     state.voiceElapsedMs = Math.max(0, Date.now() - recordingStartedAt)
     state.voiceProvisionalText = ''
     state.voiceFinalText = transcript.text
@@ -1498,6 +1503,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (transcript.text.trim().length === 0) {
       state.voicePhase = 'error'
       state.voiceMessage = 'No usable speech was recognized. Nothing was appended.'
+      clearRecordingTimers()
       render()
       return
     }
@@ -1507,14 +1513,20 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         ? 'Transcription complete. Interpreting the edit as structured operations…'
         : 'Transcription complete. Applying bounded context, punctuation, spelling, and glossary rules…'
     render()
-    if (recording.mode === 'edit')
-      await interpretEditTranscript(transcript.text, recording.operationId)
-    else
-      await commitRecordingTranscript(
-        transcript.text,
-        recording.operationId,
-        recording.quotationBoundaryHint ?? undefined,
-      )
+    try {
+      if (recording.mode === 'edit')
+        await interpretEditTranscript(transcript.text, recording.operationId)
+      else
+        await commitRecordingTranscript(
+          transcript.text,
+          recording.operationId,
+          recording.quotationBoundaryHint ?? undefined,
+        )
+    } finally {
+      state.voiceElapsedMs = Math.max(0, Date.now() - recordingStartedAt)
+      clearRecordingTimers()
+      if (alive) render()
+    }
   }
 
   const failRecording = (runId: string, error: unknown) => {
@@ -1587,7 +1599,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         quotationBoundaryHint: null,
         mode,
       }
-      recordingStartedAt = Date.now()
+      const startedAt = Date.now()
+      recordingStartedAt = startedAt
       state.voicePhase = 'starting'
       state.voiceElapsedMs = 0
       state.voiceProvider = session.provider
@@ -1595,8 +1608,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.voiceMessage =
         mode === 'edit' ? 'Starting edit-instruction capture…' : 'Starting microphone capture…'
       recordingTimer = setInterval(() => {
-        if (!activeRecording || activeRecording.runId !== runId) return
-        state.voiceElapsedMs = Date.now() - recordingStartedAt
+        if (recordingStartedAt !== startedAt) return
+        state.voiceElapsedMs = Date.now() - startedAt
         render()
       }, 250)
       recordingDeadline = setTimeout(() => {

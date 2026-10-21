@@ -1194,6 +1194,10 @@ function setup(ctx) {
     recordingTimer = null;
     recordingDeadline = null;
   };
+  const clearRecordingDeadline = () => {
+    if (recordingDeadline) clearTimeout(recordingDeadline);
+    recordingDeadline = null;
+  };
   const cancelActiveRecording = (message) => {
     const recording = activeRecording;
     if (!recording) return;
@@ -1527,7 +1531,7 @@ function setup(ctx) {
     const recording = activeRecording;
     if (!recording || recording.runId !== runId) return;
     activeRecording = null;
-    clearRecordingTimers();
+    clearRecordingDeadline();
     state.voiceElapsedMs = Math.max(0, Date.now() - recordingStartedAt);
     state.voiceProvisionalText = "";
     state.voiceFinalText = transcript.text;
@@ -1535,20 +1539,27 @@ function setup(ctx) {
     if (transcript.text.trim().length === 0) {
       state.voicePhase = "error";
       state.voiceMessage = "No usable speech was recognized. Nothing was appended.";
+      clearRecordingTimers();
       render();
       return;
     }
     state.voicePhase = "committing";
     state.voiceMessage = recording.mode === "edit" ? "Transcription complete. Interpreting the edit as structured operations\u2026" : "Transcription complete. Applying bounded context, punctuation, spelling, and glossary rules\u2026";
     render();
-    if (recording.mode === "edit")
-      await interpretEditTranscript(transcript.text, recording.operationId);
-    else
-      await commitRecordingTranscript(
-        transcript.text,
-        recording.operationId,
-        recording.quotationBoundaryHint ?? void 0
-      );
+    try {
+      if (recording.mode === "edit")
+        await interpretEditTranscript(transcript.text, recording.operationId);
+      else
+        await commitRecordingTranscript(
+          transcript.text,
+          recording.operationId,
+          recording.quotationBoundaryHint ?? void 0
+        );
+    } finally {
+      state.voiceElapsedMs = Math.max(0, Date.now() - recordingStartedAt);
+      clearRecordingTimers();
+      if (alive) render();
+    }
   };
   const failRecording = (runId, error) => {
     if (activeRecording?.runId !== runId) return;
@@ -1616,15 +1627,16 @@ function setup(ctx) {
         quotationBoundaryHint: null,
         mode
       };
-      recordingStartedAt = Date.now();
+      const startedAt = Date.now();
+      recordingStartedAt = startedAt;
       state.voicePhase = "starting";
       state.voiceElapsedMs = 0;
       state.voiceProvider = session.provider;
       state.voiceProvisionalText = "";
       state.voiceMessage = mode === "edit" ? "Starting edit-instruction capture\u2026" : "Starting microphone capture\u2026";
       recordingTimer = setInterval(() => {
-        if (!activeRecording || activeRecording.runId !== runId) return;
-        state.voiceElapsedMs = Date.now() - recordingStartedAt;
+        if (recordingStartedAt !== startedAt) return;
+        state.voiceElapsedMs = Date.now() - startedAt;
         render();
       }, 250);
       recordingDeadline = setTimeout(() => {

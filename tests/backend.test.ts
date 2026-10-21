@@ -1181,6 +1181,7 @@ test('does not let contextual normalization duplicate speech quotation marks', a
   activeChatId = chatId
   await seedDraft(userId, chatId, 'Earlier')
   responses.length = 0
+  generationRequests.length = 0
   generationNormalizedText =
     '““Yeah, no offense, but you do look like you have had a long day. Everything all right?”'
 
@@ -1203,7 +1204,9 @@ test('does not let contextual normalization duplicate speech quotation marks', a
       '“Yeah, no offense, but you do look like you have had a long day. Everything all right?”',
     )
     assert.equal(response.proposal.contextualModelUsed, false)
+    assert.ok(response.proposal.reasons.includes('deterministic quotation fast path'))
   }
+  assert.equal(generationRequests.length, 0)
 })
 
 test('does not let contextual normalization duplicate single quotation marks', async () => {
@@ -1212,6 +1215,7 @@ test('does not let contextual normalization duplicate single quotation marks', a
   activeChatId = chatId
   await seedDraft(userId, chatId, 'Earlier')
   responses.length = 0
+  generationRequests.length = 0
   generationNormalizedText = '‘‘A private thought.’'
 
   await dispatch(
@@ -1229,6 +1233,34 @@ test('does not let contextual normalization duplicate single quotation marks', a
   if (response?.type === 'transcript.normalization.response') {
     assert.equal(response.outcome, 'review')
     assert.equal(response.proposal.candidateText, '‘A private thought.’')
+    assert.equal(response.proposal.contextualModelUsed, false)
+    assert.ok(response.proposal.reasons.includes('deterministic quotation fast path'))
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('rejects mixed-style duplicate quotes from contextual normalization', async () => {
+  const userId = 'mixed-duplicate-quotes-user'
+  const chatId = 'mixed-duplicate-quotes-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationNormalizedText = 'She said \u201c"Proceed carefully\u201d.'
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'mixed-duplicate-quotes-segment',
+      1,
+      'She said quote proceed carefully quote period',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.candidateText, 'She said \u201cProceed carefully\u201d.')
     assert.equal(response.proposal.contextualModelUsed, false)
   }
 })

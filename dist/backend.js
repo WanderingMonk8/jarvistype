@@ -3418,7 +3418,8 @@ async function interpretEditInstruction(instructionTranscript, session, settings
   if (compoundSentenceDeletion) return compoundSentenceDeletion;
   const paragraphQuotation = parseDeterministicParagraphQuotation(
     instructionTranscript,
-    session.draftVersion
+    session.draftVersion,
+    session.paragraphs.length
   );
   if (paragraphQuotation) return finalizeInterpretedPlan(instructionTranscript, paragraphQuotation);
   const sentenceQuotation = parseDeterministicSentenceQuotationInsertion(
@@ -3910,26 +3911,61 @@ function parseDeterministicInlineInsertion(instructionTranscript, session) {
     ]
   });
 }
-function parseDeterministicParagraphQuotation(instructionTranscript, draftVersion) {
-  const ordinalToken = "(\\d+|one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|seven|seventh|eight|eighth|nine|ninth|ten|tenth)";
-  const quotationToken = "(?:(single|double)\\s+)?(?:quotes?|quotations?|quotation\\s+marks?|quote\\s+marks?)";
+function parseDeterministicParagraphQuotation(instructionTranscript, draftVersion, paragraphCount) {
+  const ordinalToken = "(?:\\d+(?:st|nd|rd|th)?|one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|seven|seventh|eight|eighth|nine|ninth|ten|tenth|last|final|penultimate|second[- ]to[- ]last)";
+  const quotationToken = "(?:(?<style>single|double)\\s+)?(?:quotation\\s+marks?|quote\\s+marks?|quotations?|quotes?)";
+  const quotedTarget = `(?:the\\s+)?(?:(?<before>${ordinalToken})\\s+)?paragraph(?:\\s+number)?(?:\\s+(?<after>${ordinalToken}))?`;
   const trimmed = instructionTranscript.trim();
-  const putMatch = trimmed.match(
+  const aroundMatch = trimmed.match(
     new RegExp(
-      `^(?:put|place|add)\\s+${quotationToken}\\s+around\\s+(?:the\\s+)?paragraph(?:\\s+number)?\\s+${ordinalToken}[.!?]*$`,
+      `^(?:put|place|add|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:around|to|on|before\\s+and\\s+after|at\\s+(?:the\\s+)?(?:beginning|start)\\s+and\\s+(?:the\\s+)?end\\s+of)\\s+${quotedTarget}[.!?]*$`,
       "iu"
     )
   );
-  const wrapMatch = putMatch ? null : trimmed.match(
+  const withMatch = aroundMatch ? null : trimmed.match(
     new RegExp(
-      `^(?:wrap|surround)\\s+(?:the\\s+)?paragraph(?:\\s+number)?\\s+${ordinalToken}\\s+(?:in|with)\\s+${quotationToken}[.!?]*$`,
+      `^(?:put|place|add|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*${quotedTarget}\\s+(?:in|with)\\s+${quotationToken}[.!?]*$`,
       "iu"
     )
   );
-  const match = putMatch ?? wrapMatch;
+  const quoteVerbMatch = aroundMatch || withMatch ? null : trimmed.match(
+    new RegExp(`^(?:quote|quotation-mark)\\s+(?:a|an|the)?\\s*${quotedTarget}[.!?]*$`, "iu")
+  );
+  const match = aroundMatch ?? withMatch ?? quoteVerbMatch;
   if (!match) return null;
-  const style = putMatch ? match[1] : match[2];
-  const spokenOrdinal = putMatch ? match[2] : match[1];
+  const paragraphOrdinal = parseParagraphOrdinalToken(
+    match.groups?.before ?? match.groups?.after,
+    paragraphCount
+  );
+  if (paragraphOrdinal === null) return null;
+  const [opening, closing] = match.groups?.style?.toLocaleLowerCase() === "single" ? ["\u2018", "\u2019"] : ["\u201C", "\u201D"];
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation: `Put quotation marks around paragraph ${paragraphOrdinal}.`,
+    operations: [
+      {
+        id: "deterministic-open-paragraph-quotation",
+        type: "prepend",
+        target: { paragraphOrdinal },
+        text: opening
+      },
+      {
+        id: "deterministic-close-paragraph-quotation",
+        type: "append",
+        target: { paragraphOrdinal },
+        text: closing
+      }
+    ]
+  });
+}
+function parseParagraphOrdinalToken(value, paragraphCount) {
+  if (value === void 0) return null;
+  const normalized = value.toLocaleLowerCase().replace(/^(\d+)(?:st|nd|rd|th)$/u, "$1");
+  if (normalized === "last" || normalized === "final")
+    return paragraphCount >= 1 ? paragraphCount : null;
+  if (normalized === "penultimate" || normalized === "second to last" || normalized === "second-to-last")
+    return paragraphCount >= 2 ? paragraphCount - 1 : null;
   const ordinals = {
     one: 1,
     first: 1,
@@ -3952,28 +3988,8 @@ function parseDeterministicParagraphQuotation(instructionTranscript, draftVersio
     ten: 10,
     tenth: 10
   };
-  const paragraphOrdinal = /^\d+$/u.test(spokenOrdinal ?? "") ? Number(spokenOrdinal) : ordinals[(spokenOrdinal ?? "").toLocaleLowerCase()];
-  if (!Number.isSafeInteger(paragraphOrdinal) || paragraphOrdinal < 1) return null;
-  const [opening, closing] = style?.toLocaleLowerCase() === "single" ? ["'", "'"] : ['"', '"'];
-  return parseEditPlan({
-    schemaVersion: 2,
-    draftVersion,
-    explanation: `Put quotation marks around paragraph ${paragraphOrdinal}.`,
-    operations: [
-      {
-        id: "deterministic-open-paragraph-quotation",
-        type: "prepend",
-        target: { paragraphOrdinal },
-        text: opening
-      },
-      {
-        id: "deterministic-close-paragraph-quotation",
-        type: "append",
-        target: { paragraphOrdinal },
-        text: closing
-      }
-    ]
-  });
+  const ordinal = /^\d+$/u.test(normalized) ? Number(normalized) : ordinals[normalized];
+  return Number.isSafeInteger(ordinal) && ordinal >= 1 ? ordinal : null;
 }
 function parseDeterministicReferentialReplacement(instructionTranscript, session) {
   if (!hasQualifiedAsInReference(instructionTranscript)) return null;

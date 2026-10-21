@@ -2551,13 +2551,137 @@ test('puts one pair of quotations around a numbered paragraph instead of each se
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'edit.proposal.response')
   if (response?.type === 'edit.proposal.response') {
-    assert.equal(response.proposal.afterText, '"First sentence. Second sentence. Third sentence."')
+    assert.equal(response.proposal.afterText, '“First sentence. Second sentence. Third sentence.”')
     assert.deepEqual(
       response.proposal.plan.operations.map((operation) => operation.type),
       ['prepend', 'append'],
     )
   }
   assert.equal(generationRequests.length, 0)
+})
+
+test('supports every alias and word order of the paragraph quotation command', async () => {
+  const userId = 'paragraph-quotation-alias-user'
+  const chatId = 'paragraph-quotation-alias-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph text.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const instructions = [
+    'Put quotations around the first paragraph.',
+    'Put quotation marks around the first paragraph.',
+    'Put quote marks around the first paragraph.',
+    'Put quotes around the first paragraph.',
+    'Place quotations around the first paragraph.',
+    'Add quotes to the first paragraph.',
+    'Surround the first paragraph with quotes.',
+    'Wrap the first paragraph in quotation marks.',
+    'Put the first paragraph in quotes.',
+    'Quote the first paragraph.',
+    'Put quote marks on the first paragraph.',
+    'Put quotation marks before and after the first paragraph.',
+    'Put quotation marks at the beginning and end of the first paragraph.',
+  ]
+  for (const [index, instructionTranscript] of instructions.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `paragraph-quotation-alias-interpret-${index}`,
+        operationId: `paragraph-quotation-alias-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instructionTranscript)
+    if (response?.type === 'edit.proposal.response') {
+      assert.equal(response.proposal.afterText, '“First paragraph text.”', instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('supports single-style paragraph quotations', async () => {
+  const userId = 'paragraph-quotation-single-user'
+  const chatId = 'paragraph-quotation-single-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph text.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'paragraph-quotation-single-interpret',
+      operationId: 'paragraph-quotation-single-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put single quotation marks around the first paragraph.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, '‘First paragraph text.’')
+  }
+})
+
+test('supports last and penultimate paragraph quotation positions', async () => {
+  const userId = 'paragraph-quotation-position-user'
+  const chatId = 'paragraph-quotation-position-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'paragraph-quotation-last-interpret',
+      operationId: 'paragraph-quotation-last-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotes around the last paragraph.',
+    },
+    userId,
+  )
+  const last = responses.at(-1)?.payload
+  assert.equal(last?.type, 'edit.proposal.response')
+  if (last?.type === 'edit.proposal.response') {
+    assert.equal(
+      last.proposal.afterText,
+      'First paragraph.\n\nSecond paragraph.\n\n“Third paragraph.”',
+    )
+  }
+
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'paragraph-quotation-penultimate-interpret',
+      operationId: 'paragraph-quotation-penultimate-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotes around the penultimate paragraph.',
+    },
+    userId,
+  )
+  const penultimate = responses.at(-1)?.payload
+  assert.equal(penultimate?.type, 'edit.proposal.response')
+  if (penultimate?.type === 'edit.proposal.response') {
+    assert.equal(
+      penultimate.proposal.afterText,
+      'First paragraph.\n\n“Second paragraph.”\n\nThird paragraph.',
+    )
+  }
 })
 
 test('capitalizes append and insert-after text only after sentence-ending targets', async () => {

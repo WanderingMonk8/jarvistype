@@ -2548,6 +2548,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
         contextual.text,
         deterministic.authoritativePunctuationLiterals
       ) && preservesAuthoritativePunctuationMarks(
+        candidateText,
         contextual.text,
         deterministic.authoritativePunctuationMarks
       ) && preservesLiteralAsIn(candidateText, contextual.text)) {
@@ -2667,11 +2668,17 @@ function preservesAuthoritativePunctuationLiterals(deterministicCandidate, conte
   }
   return true;
 }
-function preservesAuthoritativePunctuationMarks(contextualCandidate, marks) {
+function preservesAuthoritativePunctuationMarks(deterministicCandidate, contextualCandidate, marks) {
+  const quotationMarks = /* @__PURE__ */ new Set(["\u201C", "\u201D", "\u2018", "\u2019", '"', "'"]);
   const requiredCounts = /* @__PURE__ */ new Map();
   for (const mark of marks) requiredCounts.set(mark, (requiredCounts.get(mark) ?? 0) + 1);
   for (const [mark, requiredCount] of requiredCounts) {
-    if (countExactOccurrences(contextualCandidate, mark) < requiredCount) return false;
+    const contextualCount = countExactOccurrences(contextualCandidate, mark);
+    if (quotationMarks.has(mark)) {
+      if (contextualCount !== countExactOccurrences(deterministicCandidate, mark)) return false;
+    } else if (contextualCount < requiredCount) {
+      return false;
+    }
   }
   return true;
 }

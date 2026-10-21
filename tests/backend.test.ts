@@ -1175,6 +1175,64 @@ test('does not let contextual normalization discard commanded quotation marks', 
   }
 })
 
+test('does not let contextual normalization duplicate speech quotation marks', async () => {
+  const userId = 'duplicated-speech-quotes-user'
+  const chatId = 'duplicated-speech-quotes-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationNormalizedText =
+    '““Yeah, no offense, but you do look like you have had a long day. Everything all right?”'
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'duplicated-speech-quotes-segment',
+      1,
+      'Begin speech. Yeah, no offense, but you do look like you have had a long day. Everything all right? End speech.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(
+      response.proposal.candidateText,
+      '“Yeah, no offense, but you do look like you have had a long day. Everything all right?”',
+    )
+    assert.equal(response.proposal.contextualModelUsed, false)
+  }
+})
+
+test('does not let contextual normalization duplicate single quotation marks', async () => {
+  const userId = 'duplicated-single-quotes-user'
+  const chatId = 'duplicated-single-quotes-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationNormalizedText = '‘‘A private thought.’'
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'duplicated-single-quotes-segment',
+      1,
+      'Begin single. A private thought. End single.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(response.proposal.candidateText, '‘A private thought.’')
+    assert.equal(response.proposal.contextualModelUsed, false)
+  }
+})
+
 test('formats an opening produced by a spoken quote command', async () => {
   const userId = 'formatted-commanded-quotes-user'
   const chatId = 'formatted-commanded-quotes-chat'

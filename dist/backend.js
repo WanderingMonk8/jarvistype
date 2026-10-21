@@ -921,7 +921,13 @@ ${formattedParagraph}`,
       paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset2(cleanText, start)
     };
   }
-  const replacement = operation.type === "replace" ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText) : operation.type === "delete" ? "" : operation.type === "insert_after" ? addBoundarySpacing(
+  const replacement = operation.type === "replace" ? alignReplacementInitialCasing(
+    cleanText,
+    start,
+    end,
+    insertionText,
+    protectedCasingTerms
+  ) : operation.type === "delete" ? "" : operation.type === "insert_after" ? addBoundarySpacing(
     cleanText,
     end,
     capitalizeReplacementAtSentenceOpening(cleanText, end, insertionText)
@@ -1193,6 +1199,23 @@ function capitalizeReplacementAtSentenceOpening(text, start, replacement) {
       return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`;
     }
   );
+}
+function alignReplacementInitialCasing(text, start, end, replacement, protectedCasingTerms) {
+  if (isSentenceOpeningAt(text, start))
+    return capitalizeReplacementAtSentenceOpening(text, start, replacement);
+  const replacedOpening = text.slice(start, end).match(/^[ \t]*[\u201c\u2018"'([{]*[ \t]*(\p{L})/u)?.[1];
+  if (!replacedOpening || !/\p{Ll}/u.test(replacedOpening)) return replacement;
+  const evidenceText = `${replacement}
+
+${text}`;
+  const lowered = lowercaseOrdinarySentenceOpening(
+    replacement,
+    0,
+    evidenceText,
+    0,
+    protectedCasingTerms
+  );
+  return lowered ? `${lowered.text}${replacement.slice(lowered.end)}` : replacement;
 }
 function isSentenceOpeningAt(text, point) {
   const before = text.slice(0, point);
@@ -2734,7 +2757,12 @@ async function handleEditInterpretation(request, context, activeRequest) {
       session.paragraphs,
       session.draftVersion,
       plan,
-      [...glossary.entries.map((entry) => entry.canonical), ...conversationReferences]
+      [
+        ...glossary.entries.map((entry) => entry.canonical),
+        ...conversationReferences,
+        ...spelling.learningCandidates.map((candidate) => candidate.canonical),
+        ...qualifiedAsInProtectedTerms(request.instructionTranscript)
+      ]
     );
     if (!executed.ok) {
       const candidates = createEditCandidateContext(request, session, plan);
@@ -2960,12 +2988,20 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
       loadGlossary(context.userId),
       loadSettings(context.userId)
     ]);
+    const spelling = normalizeDeterministically(
+      candidateContext.candidateSet.instructionTranscript,
+      glossary.entries
+    );
     const executed = executeEditPlan(
       session.cleanText,
       session.paragraphs,
       session.draftVersion,
       plan,
-      glossary.entries.map((entry) => entry.canonical)
+      [
+        ...glossary.entries.map((entry) => entry.canonical),
+        ...spelling.learningCandidates.map((candidate) => candidate.canonical),
+        ...qualifiedAsInProtectedTerms(candidateContext.candidateSet.instructionTranscript)
+      ]
     );
     if (!executed.ok) return { error: true, session };
     const grammarRepair = await maybeRepairEditGrammar(
@@ -2979,10 +3015,6 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
       context.userId
     );
     if (activeRequest.cancelled) return { error: true, session };
-    const spelling = normalizeDeterministically(
-      candidateContext.candidateSet.instructionTranscript,
-      glossary.entries
-    );
     const proposal = {
       operationId: request.operationId,
       chatId: request.chatId,
@@ -3620,6 +3652,17 @@ function hasQualifiedAsInReference(input) {
     if (hasRepeatedOrInflectedReference(candidate, suffix)) return true;
   }
   return false;
+}
+function qualifiedAsInProtectedTerms(input) {
+  const terms = /* @__PURE__ */ new Set();
+  for (const match of input.matchAll(/\bas\s+in\b/giu)) {
+    const prefix = input.slice(0, match.index).replace(/[\s,;:]+$/u, "");
+    const candidate = prefix.match(/([\p{L}\p{N}][\p{L}\p{N}'\u2019-]*)$/u)?.[1];
+    if (!candidate) continue;
+    const suffix = input.slice((match.index ?? 0) + match[0].length);
+    if (hasRepeatedOrInflectedReference(candidate, suffix)) terms.add(candidate);
+  }
+  return [...terms];
 }
 function hasRepeatedOrInflectedReference(candidate, suffix) {
   const repeatedCandidate = new RegExp(

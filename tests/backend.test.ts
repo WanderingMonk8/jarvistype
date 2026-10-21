@@ -2095,7 +2095,7 @@ test('removes an unquoted phrase label from deterministic replacement text', asy
   const userId = 'deterministic-phrase-label-user'
   const chatId = 'deterministic-phrase-label-chat'
   activeChatId = chatId
-  await seedDraft(userId, chatId, 'She pauses, then mutters.')
+  await seedDraft(userId, chatId, 'She pauses, then my voice mutters.')
   responses.length = 0
   generationRequests.length = 0
   editPlanResponse = null
@@ -2108,7 +2108,7 @@ test('removes an unquoted phrase label from deterministic replacement text', asy
       operationId: 'deterministic-phrase-label-operation',
       chatId,
       expectedVersion: 1,
-      instructionTranscript: 'Replace mutters with the phrase needs you.',
+      instructionTranscript: 'Replace the phrase My voice mutters with the phrase My voice needs you.',
     },
     userId,
   )
@@ -2116,8 +2116,8 @@ test('removes an unquoted phrase label from deterministic replacement text', asy
   const proposal = responses.at(-1)?.payload
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
-  assert.equal(proposal.proposal.afterText, 'She pauses, then needs you.')
-  assert.equal(proposal.proposal.plan.operations[0]?.text, 'needs you')
+  assert.equal(proposal.proposal.afterText, 'She pauses, then my voice needs you.')
+  assert.equal(proposal.proposal.plan.operations[0]?.text, 'My voice needs you')
   assert.equal(generationRequests.length, 0)
 })
 

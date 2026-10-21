@@ -528,7 +528,13 @@ function resolveOperation(
   }
   const replacement =
     operation.type === 'replace'
-      ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
+      ? alignReplacementInitialCasing(
+          cleanText,
+          start,
+          end,
+          insertionText,
+          protectedCasingTerms,
+        )
       : operation.type === 'delete'
         ? ''
         : operation.type === 'insert_after'
@@ -969,6 +975,32 @@ function capitalizeReplacementAtSentenceOpening(
       return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`
     },
   )
+}
+
+function alignReplacementInitialCasing(
+  text: string,
+  start: number,
+  end: number,
+  replacement: string,
+  protectedCasingTerms: readonly string[],
+): string {
+  if (isSentenceOpeningAt(text, start))
+    return capitalizeReplacementAtSentenceOpening(text, start, replacement)
+
+  const replacedOpening = text
+    .slice(start, end)
+    .match(/^[ \t]*[\u201c\u2018"'([{]*[ \t]*(\p{L})/u)?.[1]
+  if (!replacedOpening || !/\p{Ll}/u.test(replacedOpening)) return replacement
+
+  const evidenceText = `${replacement}\n\n${text}`
+  const lowered = lowercaseOrdinarySentenceOpening(
+    replacement,
+    0,
+    evidenceText,
+    0,
+    protectedCasingTerms,
+  )
+  return lowered ? `${lowered.text}${replacement.slice(lowered.end)}` : replacement
 }
 
 function isSentenceOpeningAt(text: string, point: number): boolean {

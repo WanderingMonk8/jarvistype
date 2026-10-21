@@ -157,6 +157,45 @@ test('capitalizes replacement text only when it begins a sentence', () => {
   })
   assert.equal(middle.ok && middle.afterText, 'A accessible recording test.')
 
+  const providerCapitalizedMiddle = executeEditPlan('She said my answer was ready.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'match the lowercase target opening in the middle of a sentence',
+    operations: [
+      {
+        id: 'provider-capitalized-middle',
+        type: 'replace',
+        target: { exactText: 'my answer' },
+        text: 'My response',
+      },
+    ],
+  })
+  assert.equal(
+    providerCapitalizedMiddle.ok && providerCapitalizedMiddle.afterText,
+    'She said my response was ready.',
+  )
+
+  const protectedMiddle = executeEditPlan(
+    'She greeted the new arrival.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'preserve a protected proper noun in the middle of a sentence',
+      operations: [
+        {
+          id: 'protected-middle',
+          type: 'replace',
+          target: { exactText: 'the new arrival' },
+          text: 'Alice Morgan',
+        },
+      ],
+    },
+    ['Alice Morgan'],
+  )
+  assert.equal(protectedMiddle.ok && protectedMiddle.afterText, 'She greeted Alice Morgan.')
+
   const establishedCase = executeEditPlan('Keyboard recording test.', [], 1, {
     schemaVersion: 2,
     draftVersion: 1,

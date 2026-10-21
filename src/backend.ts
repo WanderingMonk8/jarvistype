@@ -587,7 +587,12 @@ async function handleEditInterpretation(
       session.paragraphs,
       session.draftVersion,
       plan,
-      [...glossary.entries.map((entry) => entry.canonical), ...conversationReferences],
+      [
+        ...glossary.entries.map((entry) => entry.canonical),
+        ...conversationReferences,
+        ...spelling.learningCandidates.map((candidate) => candidate.canonical),
+        ...qualifiedAsInProtectedTerms(request.instructionTranscript),
+      ],
     )
     if (!executed.ok) {
       const candidates = createEditCandidateContext(request, session, plan)
@@ -867,12 +872,20 @@ async function handleEditCandidateSelection(
       loadGlossary(context.userId),
       loadSettings(context.userId),
     ])
+    const spelling = normalizeDeterministically(
+      candidateContext.candidateSet.instructionTranscript,
+      glossary.entries,
+    )
     const executed = executeEditPlan(
       session.cleanText,
       session.paragraphs,
       session.draftVersion,
       plan,
-      glossary.entries.map((entry) => entry.canonical),
+      [
+        ...glossary.entries.map((entry) => entry.canonical),
+        ...spelling.learningCandidates.map((candidate) => candidate.canonical),
+        ...qualifiedAsInProtectedTerms(candidateContext.candidateSet.instructionTranscript),
+      ],
     )
     if (!executed.ok) return { error: true as const, session }
     const grammarRepair = await maybeRepairEditGrammar(
@@ -886,10 +899,6 @@ async function handleEditCandidateSelection(
       context.userId,
     )
     if (activeRequest.cancelled) return { error: true as const, session }
-    const spelling = normalizeDeterministically(
-      candidateContext.candidateSet.instructionTranscript,
-      glossary.entries,
-    )
     const proposal: EditProposal = {
       operationId: request.operationId,
       chatId: request.chatId,
@@ -1726,6 +1735,18 @@ function hasQualifiedAsInReference(input: string): boolean {
     if (hasRepeatedOrInflectedReference(candidate, suffix)) return true
   }
   return false
+}
+
+function qualifiedAsInProtectedTerms(input: string): string[] {
+  const terms = new Set<string>()
+  for (const match of input.matchAll(/\bas\s+in\b/giu)) {
+    const prefix = input.slice(0, match.index).replace(/[\s,;:]+$/u, '')
+    const candidate = prefix.match(/([\p{L}\p{N}][\p{L}\p{N}'\u2019-]*)$/u)?.[1]
+    if (!candidate) continue
+    const suffix = input.slice((match.index ?? 0) + match[0].length)
+    if (hasRepeatedOrInflectedReference(candidate, suffix)) terms.add(candidate)
+  }
+  return [...terms]
 }
 
 function hasRepeatedOrInflectedReference(candidate: string, suffix: string): boolean {

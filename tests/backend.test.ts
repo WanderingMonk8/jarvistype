@@ -1687,7 +1687,6 @@ test('deletes the first sentence when identical text also appears last', async (
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.deepEqual(proposal.proposal.plan.operations[0]?.target, {
-    paragraphOrdinal: 1,
     sentenceOrdinal: 1,
   })
   assert.equal(proposal.proposal.afterText, 'Okay, you are really cutting deep here. Quotation.')
@@ -1729,7 +1728,6 @@ test('treats take off as a positional sentence deletion command', async () => {
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.deepEqual(proposal.proposal.plan.operations[0]?.target, {
-    paragraphOrdinal: 1,
     sentenceOrdinal: 1,
   })
   assert.equal(proposal.proposal.afterText, 'Keep this sentence. Quotation.')
@@ -1771,6 +1769,132 @@ test('takes off identical first and last sentences in one compound instruction',
     ),
     false,
   )
+})
+
+test('deletes one positional sentence without a provider interpretation', async () => {
+  const userId = 'single-sentence-deletion-user'
+  const chatId = 'single-sentence-deletion-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Second sentence. And speech.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'single-sentence-deletion-interpret',
+      operationId: 'single-sentence-deletion-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the last sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.deepEqual(
+    proposal.proposal.plan.operations.map((operation) => operation.target),
+    [{ sentenceFromEnd: 1 }],
+  )
+  assert.equal(proposal.proposal.afterText, 'First sentence. Second sentence.')
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
+test('deletes positional sentences across every alias and paragraph scope', async () => {
+  const userId = 'sentence-deletion-alias-user'
+  const chatId = 'sentence-deletion-alias-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First one. First two.\n\nSecond one. Second two. Second three.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases = [
+    [
+      'In paragraph 2, delete the first sentence.',
+      'First one. First two.\n\nSecond two. Second three.',
+    ],
+    [
+      'Remove the second sentence in paragraph 2.',
+      'First one. First two.\n\nSecond one. Second three.',
+    ],
+    [
+      'Take off the final sentence of paragraph 2.',
+      'First one. First two.\n\nSecond one. Second two.',
+    ],
+    ['Erase the last sentence.', 'First one. First two.\n\nSecond one. Second two.'],
+    ['Cut the first sentence.', 'First two.\n\nSecond one. Second two. Second three.'],
+    [
+      'Delete the penultimate sentence in paragraph 2.',
+      'First one. First two.\n\nSecond one. Second three.',
+    ],
+  ] as const
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `sentence-deletion-alias-interpret-${index}`,
+        operationId: `sentence-deletion-alias-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type === 'edit.proposal.response') {
+      assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('deletes positional paragraphs without a provider interpretation', async () => {
+  const userId = 'paragraph-deletion-position-user'
+  const chatId = 'paragraph-deletion-position-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First.\n\nSecond.\n\nThird.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases = [
+    ['Delete the last paragraph.', 'First.\n\nSecond.'],
+    ['Remove paragraph 2.', 'First.\n\nThird.'],
+    ['Take off the penultimate paragraph.', 'First.\n\nThird.'],
+    ['Erase the first paragraph.', 'Second.\n\nThird.'],
+  ] as const
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `paragraph-deletion-position-interpret-${index}`,
+        operationId: `paragraph-deletion-position-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type === 'edit.proposal.response') {
+      assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
 })
 
 test('reviews and commits whole-paragraph deletion without leaving separator whitespace', async () => {

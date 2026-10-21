@@ -1039,6 +1039,13 @@ async function interpretEditInstruction(
     session.draftVersion,
   )
   if (compoundSentenceDeletion) return compoundSentenceDeletion
+  const sentenceDeletion = parseDeterministicSentenceDeletion(
+    instructionTranscript,
+    session.draftVersion,
+  )
+  if (sentenceDeletion) return sentenceDeletion
+  const paragraphDeletion = parseDeterministicParagraphDeletion(instructionTranscript, session)
+  if (paragraphDeletion) return paragraphDeletion
   const paragraphQuotation = parseDeterministicParagraphQuotation(
     instructionTranscript,
     session.draftVersion,
@@ -1158,6 +1165,84 @@ function parseDeterministicCompoundSentenceDeletion(
         id: 'deterministic-delete-last-sentence',
         type: 'delete',
         target: { ...paragraphTarget, sentenceFromEnd: 1 },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
+}
+
+function parseDeterministicParagraphDeletion(
+  instructionTranscript: string,
+  session: PersistedDraftSession,
+): EditPlan | null {
+  const ordinalToken =
+    '(?:\\d+(?:st|nd|rd|th)?|one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|seven|seventh|eight|eighth|nine|ninth|ten|tenth|last|final|penultimate|second[- ]to[- ]last)'
+  const match = instructionTranscript
+    .trim()
+    .match(
+      new RegExp(
+        `^(?:delete|remove|take\\s+(?:off|out)|erase|cut)\\s+(?:the|this|that)?\\s*(?:(?<before>${ordinalToken})\\s+)?paragraphs?(?:\\s+number)?(?:\\s+(?<after>${ordinalToken}))?[.!?]*$`,
+        'iu',
+      ),
+    )
+  if (!match) return null
+  const paragraphOrdinal = parseParagraphOrdinalToken(
+    match.groups?.before ?? match.groups?.after,
+    session.paragraphs.length,
+  )
+  if (paragraphOrdinal === null) return null
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: `Delete paragraph ${paragraphOrdinal}.`,
+    operations: [
+      {
+        id: 'deterministic-delete-paragraph',
+        type: 'delete',
+        target: { paragraphOrdinal },
+      },
+    ],
+  })
+}
+
+function parseDeterministicSentenceDeletion(
+  instructionTranscript: string,
+  draftVersion: number,
+): EditPlan | null {
+  const trimmed = instructionTranscript.trim()
+  const scope = trimmed.match(/^in\s+paragraph\s+(\d+)\s*,?\s*/iu)
+  const leadingParagraph = scope ? Number(scope[1]) : undefined
+  const body = scope ? trimmed.slice(scope[0].length) : trimmed
+  const match = body.match(
+    /^(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+(?:the|this|that)?\s*(?:(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final|penultimate|second[- ]to[- ]last|\d+(?:st|nd|rd|th)?)\s+)?sentences?\b(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?[.!?]*$/iu,
+  )
+  if (!match) return null
+  const trailingParagraph = match[1] === undefined ? undefined : Number(match[1])
+  if (
+    (leadingParagraph !== undefined &&
+      (!Number.isSafeInteger(leadingParagraph) || leadingParagraph < 1)) ||
+    (trailingParagraph !== undefined &&
+      (!Number.isSafeInteger(trailingParagraph) || trailingParagraph < 1)) ||
+    (leadingParagraph !== undefined &&
+      trailingParagraph !== undefined &&
+      leadingParagraph !== trailingParagraph)
+  )
+    return null
+  const sentencePosition = parseSentencePosition(instructionTranscript)
+  if (!sentencePosition) return null
+  const paragraphOrdinal = leadingParagraph ?? trailingParagraph
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation: 'Delete the identified sentence by position.',
+    operations: [
+      {
+        id: 'deterministic-delete-sentence',
+        type: 'delete',
+        target: {
+          ...(paragraphOrdinal === undefined ? {} : { paragraphOrdinal }),
+          ...sentencePosition,
+        },
         includeTrailingPunctuation: true,
       },
     ],

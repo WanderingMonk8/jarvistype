@@ -3047,6 +3047,11 @@ async function interpretEditInstruction(instructionTranscript, session, settings
   if (deterministicPlan) return finalizeInterpretedPlan(instructionTranscript, deterministicPlan);
   const referentialPlan = parseDeterministicReferentialReplacement(instructionTranscript, session);
   if (referentialPlan) return referentialPlan;
+  const simpleReplacement = parseDeterministicSimpleReplacement(
+    instructionTranscript,
+    session
+  );
+  if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement);
   const qualifiedAsInReference = hasQualifiedAsInReference(instructionTranscript);
   try {
     const response = await spindle.generate.quiet({
@@ -3409,6 +3414,74 @@ function parseDeterministicReferentialReplacement(instructionTranscript, session
   );
   return resolved.ok && resolved.afterText !== session.cleanText ? plan : null;
 }
+function parseDeterministicSimpleReplacement(instructionTranscript, session) {
+  if (/[\r\n;]/u.test(instructionTranscript) || /\bas\s+in\b/iu.test(instructionTranscript) || /[,;]\s*(?:and\s+)?(?:replace|change|swap|substitute|delete|remove|insert|add|append|prepend|move|relocate|shift|split|break|join|merge)\b/iu.test(
+    instructionTranscript
+  ))
+    return null;
+  const command = instructionTranscript.trim().replace(/[.!?]+$/u, "").trim();
+  const match = command.match(
+    /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:replace|change|swap|substitute)\s+(.+?)\s+(?:with|to|into|for)\s+(.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu
+  );
+  if (!match) return null;
+  const leadingParagraph = match[1] === void 0 ? void 0 : Number(match[1]);
+  const trailingParagraph = match[4] === void 0 ? void 0 : Number(match[4]);
+  if (leadingParagraph !== void 0 && (!Number.isSafeInteger(leadingParagraph) || leadingParagraph < 1) || trailingParagraph !== void 0 && (!Number.isSafeInteger(trailingParagraph) || trailingParagraph < 1) || leadingParagraph !== void 0 && trailingParagraph !== void 0 && leadingParagraph !== trailingParagraph)
+    return null;
+  const spokenTarget = unwrapEditArgument(
+    (match[2] ?? "").replace(/^(?:the\s+)?(?:word|phrase)\s+/iu, "")
+  );
+  const replacement = unwrapEditArgument(match[3] ?? "");
+  if (!spokenTarget || !replacement || isSemanticReplacementTarget(spokenTarget) || /\b(?:period|full\s+stop|question\s+mark|exclamation\s+(?:mark|point)|ellipsis|new\s+(?:line|paragraph))\s*$/iu.test(
+    replacement
+  ))
+    return null;
+  const paragraphOrdinal = leadingParagraph ?? trailingParagraph;
+  const targetText = adoptUnambiguousDraftCasing(session, spokenTarget, paragraphOrdinal);
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: `Replace \u201C${targetText}\u201D with the dictated text.`,
+    operations: [
+      {
+        id: "deterministic-simple-replacement",
+        type: "replace",
+        target: {
+          ...paragraphOrdinal === void 0 ? {} : { paragraphOrdinal },
+          exactText: targetText
+        },
+        text: replacement
+      }
+    ]
+  });
+}
+function adoptUnambiguousDraftCasing(session, spokenTarget, paragraphOrdinal) {
+  const paragraphs = paragraphOrdinal === void 0 ? session.paragraphs : session.paragraphs.filter((paragraph) => paragraph.ordinal === paragraphOrdinal);
+  const spellings = /* @__PURE__ */ new Set();
+  const pattern = new RegExp(escapeRegularExpression(spokenTarget), "giu");
+  for (const paragraph of paragraphs) {
+    for (const match of paragraph.text.matchAll(pattern)) spellings.add(match[0]);
+  }
+  return spellings.size === 1 ? [...spellings][0] : spokenTarget;
+}
+function unwrapEditArgument(value) {
+  const trimmed = value.trim();
+  const wrappers = [
+    ['"', '"'],
+    ["'", "'"],
+    ["\u201C", "\u201D"],
+    ["\u2018", "\u2019"]
+  ];
+  const wrapper = wrappers.find(
+    ([opening, closing]) => trimmed.length >= opening.length + closing.length && trimmed.startsWith(opening) && trimmed.endsWith(closing)
+  );
+  return (wrapper ? trimmed.slice(wrapper[0].length, -wrapper[1].length) : trimmed).trim();
+}
+function isSemanticReplacementTarget(target) {
+  return /^(?:(?:the|this|that)\s+)?(?:(?:first|second|third|last|final|next|previous|penultimate|second[- ]to[- ]last|\d+(?:st|nd|rd|th)?)\s+)?(?:sentence|paragraph|period|full\s+stop|comma|colon|semicolon|question\s+mark|exclamation\s+(?:mark|point)|quote|quotation|apostrophe|ellipsis|dash|hyphen|parenthes(?:is|es)|bracket)s?\b/iu.test(
+    target
+  );
+}
 function guardAsInInterpretation(instructionTranscript, plan) {
   if (!/\bas\s+in\b/iu.test(instructionTranscript)) return plan;
   if (hasQualifiedAsInReference(instructionTranscript)) return plan;
@@ -3620,7 +3693,10 @@ function enforceAuthoritativeEditSpellings(plan, candidates) {
       let text = operation.text;
       for (const candidate of candidates) {
         const spellingPayload = `${escapeRegularExpression(candidate.spokenVariant)}(?:\\s*[,;:]\\s*[A-Za-z][A-Za-z'-]*)?`;
-        const wholePayloadPattern = new RegExp(`^\\s*${spellingPayload}[.!?]?\\s*$`, "i");
+        const wholePayloadPattern = new RegExp(
+          `^\\s*(?:(?:capitalized|uppercase|lowercase)\\s+)?${spellingPayload}[.!?]?\\s*$`,
+          "i"
+        );
         if (wholePayloadPattern.test(text)) {
           text = candidate.canonical;
           continue;

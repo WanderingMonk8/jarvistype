@@ -964,6 +964,11 @@ async function interpretEditInstruction(
   if (deterministicPlan) return finalizeInterpretedPlan(instructionTranscript, deterministicPlan)
   const referentialPlan = parseDeterministicReferentialReplacement(instructionTranscript, session)
   if (referentialPlan) return referentialPlan
+  const simpleReplacement = parseDeterministicSimpleReplacement(
+    instructionTranscript,
+    session,
+  )
+  if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement)
   const qualifiedAsInReference = hasQualifiedAsInReference(instructionTranscript)
   try {
     const response = await spindle.generate.quiet({
@@ -1453,6 +1458,109 @@ function parseDeterministicReferentialReplacement(
   return resolved.ok && resolved.afterText !== session.cleanText ? plan : null
 }
 
+function parseDeterministicSimpleReplacement(
+  instructionTranscript: string,
+  session: PersistedDraftSession,
+): EditPlan | null {
+  if (
+    /[\r\n;]/u.test(instructionTranscript) ||
+    /\bas\s+in\b/iu.test(instructionTranscript) ||
+    /[,;]\s*(?:and\s+)?(?:replace|change|swap|substitute|delete|remove|insert|add|append|prepend|move|relocate|shift|split|break|join|merge)\b/iu.test(
+      instructionTranscript,
+    )
+  )
+    return null
+  const command = instructionTranscript.trim().replace(/[.!?]+$/u, '').trim()
+  const match = command.match(
+    /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:replace|change|swap|substitute)\s+(.+?)\s+(?:with|to|into|for)\s+(.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu,
+  )
+  if (!match) return null
+  const leadingParagraph = match[1] === undefined ? undefined : Number(match[1])
+  const trailingParagraph = match[4] === undefined ? undefined : Number(match[4])
+  if (
+    (leadingParagraph !== undefined &&
+      (!Number.isSafeInteger(leadingParagraph) || leadingParagraph < 1)) ||
+    (trailingParagraph !== undefined &&
+      (!Number.isSafeInteger(trailingParagraph) || trailingParagraph < 1)) ||
+    (leadingParagraph !== undefined &&
+      trailingParagraph !== undefined &&
+      leadingParagraph !== trailingParagraph)
+  )
+    return null
+
+  const spokenTarget = unwrapEditArgument(
+    (match[2] ?? '').replace(/^(?:the\s+)?(?:word|phrase)\s+/iu, ''),
+  )
+  const replacement = unwrapEditArgument(match[3] ?? '')
+  if (
+    !spokenTarget ||
+    !replacement ||
+    isSemanticReplacementTarget(spokenTarget) ||
+    /\b(?:period|full\s+stop|question\s+mark|exclamation\s+(?:mark|point)|ellipsis|new\s+(?:line|paragraph))\s*$/iu.test(
+      replacement,
+    )
+  )
+    return null
+  const paragraphOrdinal = leadingParagraph ?? trailingParagraph
+  const targetText = adoptUnambiguousDraftCasing(session, spokenTarget, paragraphOrdinal)
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: `Replace “${targetText}” with the dictated text.`,
+    operations: [
+      {
+        id: 'deterministic-simple-replacement',
+        type: 'replace',
+        target: {
+          ...(paragraphOrdinal === undefined ? {} : { paragraphOrdinal }),
+          exactText: targetText,
+        },
+        text: replacement,
+      },
+    ],
+  })
+}
+
+function adoptUnambiguousDraftCasing(
+  session: PersistedDraftSession,
+  spokenTarget: string,
+  paragraphOrdinal: number | undefined,
+): string {
+  const paragraphs =
+    paragraphOrdinal === undefined
+      ? session.paragraphs
+      : session.paragraphs.filter((paragraph) => paragraph.ordinal === paragraphOrdinal)
+  const spellings = new Set<string>()
+  const pattern = new RegExp(escapeRegularExpression(spokenTarget), 'giu')
+  for (const paragraph of paragraphs) {
+    for (const match of paragraph.text.matchAll(pattern)) spellings.add(match[0])
+  }
+  return spellings.size === 1 ? [...spellings][0]! : spokenTarget
+}
+
+function unwrapEditArgument(value: string): string {
+  const trimmed = value.trim()
+  const wrappers: ReadonlyArray<readonly [string, string]> = [
+    ['"', '"'],
+    ["'", "'"],
+    ['“', '”'],
+    ['‘', '’'],
+  ]
+  const wrapper = wrappers.find(
+    ([opening, closing]) =>
+      trimmed.length >= opening.length + closing.length &&
+      trimmed.startsWith(opening) &&
+      trimmed.endsWith(closing),
+  )
+  return (wrapper ? trimmed.slice(wrapper[0].length, -wrapper[1].length) : trimmed).trim()
+}
+
+function isSemanticReplacementTarget(target: string): boolean {
+  return /^(?:(?:the|this|that)\s+)?(?:(?:first|second|third|last|final|next|previous|penultimate|second[- ]to[- ]last|\d+(?:st|nd|rd|th)?)\s+)?(?:sentence|paragraph|period|full\s+stop|comma|colon|semicolon|question\s+mark|exclamation\s+(?:mark|point)|quote|quotation|apostrophe|ellipsis|dash|hyphen|parenthes(?:is|es)|bracket)s?\b/iu.test(
+    target,
+  )
+}
+
 function guardAsInInterpretation(instructionTranscript: string, plan: EditPlan): EditPlan | null {
   if (!/\bas\s+in\b/iu.test(instructionTranscript)) return plan
   if (hasQualifiedAsInReference(instructionTranscript)) return plan
@@ -1711,7 +1819,10 @@ function enforceAuthoritativeEditSpellings(
       let text = operation.text
       for (const candidate of candidates) {
         const spellingPayload = `${escapeRegularExpression(candidate.spokenVariant)}(?:\\s*[,;:]\\s*[A-Za-z][A-Za-z'-]*)?`
-        const wholePayloadPattern = new RegExp(`^\\s*${spellingPayload}[.!?]?\\s*$`, 'i')
+        const wholePayloadPattern = new RegExp(
+          `^\\s*(?:(?:capitalized|uppercase|lowercase)\\s+)?${spellingPayload}[.!?]?\\s*$`,
+          'i',
+        )
         if (wholePayloadPattern.test(text)) {
           text = candidate.canonical
           continue

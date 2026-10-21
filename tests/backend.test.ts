@@ -2003,12 +2003,7 @@ test('uses chat references for newly dictated edit text without changing the dra
   assert.equal(proposal.proposal.plan.operations[0]?.target.exactText, 'Willie')
   assert.equal(proposal.proposal.plan.operations[0]?.text, 'Willum')
 
-  const prompt = JSON.parse(generationRequests.at(-1)?.messages?.at(-1)?.content ?? '{}') as Record<
-    string,
-    unknown
-  >
-  assert.ok(Array.isArray(prompt.conversationReferences))
-  assert.ok(prompt.conversationReferences.includes('Willum'))
+  assert.equal(generationRequests.length, 0)
 })
 
 test('keeps explicit edit spelling authoritative over a similar chat reference', async () => {
@@ -2056,6 +2051,44 @@ test('keeps explicit edit spelling authoritative over a similar chat reference',
     assert.equal(proposal.proposal.afterText, 'The Willie arrives.')
     assert.equal(proposal.proposal.plan.operations[0]?.text, 'Willie')
   }
+})
+
+test('replaces one exact word deterministically when the edit model returns no plan', async () => {
+  const userId = 'deterministic-simple-replacement-user'
+  const chatId = 'deterministic-simple-replacement-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'He leaned closer. “The engine needs repair,” she muttered.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = null
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'deterministic-simple-replacement-interpret',
+      operationId: 'deterministic-simple-replacement-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace muttered with needs you.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'He leaned closer. “The engine needs repair,” she needs you.')
+  assert.deepEqual(proposal.proposal.plan.operations[0]?.target, { exactText: 'muttered' })
+  assert.equal(proposal.proposal.plan.operations[0]?.text, 'needs you')
+  assert.equal(
+    generationRequests.some(
+      (request) =>
+        JSON.parse(request.messages?.at(-1)?.content ?? '{}').task ===
+        'Interpret this edit instruction against the numbered draft.',
+    ),
+    false,
+  )
 })
 
 test('falls back to one fuzzy draft target when the provider compounds a split phrase', async () => {
@@ -2261,11 +2294,7 @@ test('offers explicit choices for paragraph-resolvable ambiguity without mutatin
     },
     userId,
   )
-  const interpretationPrompt = generationRequests.at(-1)?.messages?.[0]?.content ?? ''
-  assert.match(
-    interpretationPrompt,
-    /application will present those occurrences as explicit choices/,
-  )
+  assert.equal(generationRequests.length, 0)
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'edit.candidates.response')
   if (response?.type !== 'edit.candidates.response') return

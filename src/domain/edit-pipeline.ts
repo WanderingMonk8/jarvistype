@@ -113,19 +113,36 @@ export function parseEditPlan(value: unknown): EditPlan | null {
   }
 }
 
+export interface EditExecutionOptions {
+  /**
+   * Diagnostic switch used by the isolation tests: skip per-operation casing,
+   * boundary spacing, and separator trimming so the raw patch can be compared
+   * against the universal deterministic cleanup.
+   */
+  skipOperationFormatting?: boolean
+}
+
 export function executeEditPlan(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
   currentVersion: number,
   plan: EditPlan,
   protectedCasingTerms: readonly string[] = [],
+  options: EditExecutionOptions = {},
 ): EditPipelineResult {
+  const formatText = options.skipOperationFormatting !== true
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
   const inlineMoves = plan.operations.filter(isInlineMoveOperation)
   if (inlineMoves.length) {
     if (inlineMoves.length !== plan.operations.length || inlineMoves.length > 1)
       return { ok: false, reason: 'an inline move must be the only operation in its edit plan' }
-    return executeInlineMove(cleanText, paragraphs, inlineMoves[0]!, protectedCasingTerms)
+    return executeInlineMove(
+      cleanText,
+      paragraphs,
+      inlineMoves[0]!,
+      protectedCasingTerms,
+      formatText,
+    )
   }
   const structural = plan.operations.filter(isStructuralOperation)
   if (structural.length) {
@@ -135,7 +152,13 @@ export function executeEditPlan(
   }
   const patches: Patch[] = []
   for (const operation of plan.operations) {
-    const patch = resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms)
+    const patch = resolveOperation(
+      cleanText,
+      paragraphs,
+      operation,
+      protectedCasingTerms,
+      formatText,
+    )
     if (typeof patch === 'string') return { ok: false, reason: patch }
     patches.push(patch)
   }
@@ -393,6 +416,7 @@ function resolveOperation(
   paragraphs: readonly DraftParagraph[],
   operation: EditOperation,
   protectedCasingTerms: readonly string[],
+  formatText: boolean,
 ): Patch | string {
   const paragraphMatches = paragraphs.filter(
     (paragraph) =>
@@ -415,16 +439,14 @@ function resolveOperation(
   if (operation.type === 'append' || operation.type === 'prepend') {
     if (!paragraph) return `${operation.type} requires one paragraph target`
     const point = operation.type === 'append' ? range.end : range.start
-    const insertionText = capitalizeReplacementAtSentenceOpening(
-      cleanText,
-      point,
-      operation.text ?? '',
-    )
+    const insertionText = formatText
+      ? capitalizeReplacementAtSentenceOpening(cleanText, point, operation.text ?? '')
+      : (operation.text ?? '')
     return {
       operation,
       start: point,
       end: point,
-      replacement: addBoundarySpacing(cleanText, point, insertionText),
+      replacement: formatText ? addBoundarySpacing(cleanText, point, insertionText) : insertionText,
       paragraphOrdinal: paragraph.ordinal,
     }
   }
@@ -477,11 +499,9 @@ function resolveOperation(
     const insertedParagraph = (operation.text ?? '').trim()
     if (!insertedParagraph) return 'paragraph insertion text is empty'
     const point = operation.type === 'insert_before' ? range.start : range.end
-    const formattedParagraph = capitalizeReplacementAtSentenceOpening(
-      cleanText,
-      point,
-      insertedParagraph,
-    )
+    const formattedParagraph = formatText
+      ? capitalizeReplacementAtSentenceOpening(cleanText, point, insertedParagraph)
+      : insertedParagraph
     return {
       operation,
       start: point,
@@ -496,45 +516,51 @@ function resolveOperation(
   if (operation.type === 'delete') {
     if (operation.includeTrailingPunctuation)
       end = extendThroughTerminalPunctuation(cleanText, end, range.end)
-    const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
-    const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
-    if (hasSeparatorBefore && (hasSeparatorAfter || end === range.end)) start -= 1
-    else if (hasSeparatorAfter && start === range.start) end += 1
+    if (formatText) {
+      const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
+      const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
+      if (hasSeparatorBefore && (hasSeparatorAfter || end === range.end)) start -= 1
+      else if (hasSeparatorAfter && start === range.start) end += 1
+    }
   }
   const insertionText = operation.text ?? ''
   if (operation.type === 'insert_before') {
-    const formattedInsertion = capitalizeReplacementAtSentenceOpening(
-      cleanText,
-      start,
-      insertionText,
-    )
+    const formattedInsertion = formatText
+      ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
+      : insertionText
     const displacedOpening =
-      isSentenceOpeningAt(cleanText, start) && /\p{L}/u.test(formattedInsertion)
+      formatText && isSentenceOpeningAt(cleanText, start) && /\p{L}/u.test(formattedInsertion)
         ? lowercaseOrdinarySentenceOpening(cleanText, start, cleanText, start, protectedCasingTerms)
         : null
     return {
       operation,
       start,
       end: displacedOpening?.end ?? start,
-      replacement: `${addBoundarySpacing(cleanText, start, formattedInsertion)}${displacedOpening?.text ?? ''}`,
+      replacement: formatText
+        ? `${addBoundarySpacing(cleanText, start, formattedInsertion)}${displacedOpening?.text ?? ''}`
+        : formattedInsertion,
       paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset(cleanText, start),
     }
   }
   const insertAfterPoint =
-    operation.type === 'insert_after'
+    formatText && operation.type === 'insert_after'
       ? advancePastAdjacentSentenceEnding(cleanText, end, range.end, insertionText)
       : end
   const replacement =
     operation.type === 'replace'
-      ? alignReplacementInitialCasing(cleanText, start, end, insertionText, protectedCasingTerms)
+      ? formatText
+        ? alignReplacementInitialCasing(cleanText, start, end, insertionText, protectedCasingTerms)
+        : insertionText
       : operation.type === 'delete'
         ? ''
         : operation.type === 'insert_after'
-          ? addBoundarySpacing(
-              cleanText,
-              insertAfterPoint,
-              capitalizeReplacementAtSentenceOpening(cleanText, insertAfterPoint, insertionText),
-            )
+          ? formatText
+            ? addBoundarySpacing(
+                cleanText,
+                insertAfterPoint,
+                capitalizeReplacementAtSentenceOpening(cleanText, insertAfterPoint, insertionText),
+              )
+            : insertionText
           : applyCase(cleanText.slice(start, end), operation.caseMode!)
   if (operation.type === 'insert_after') {
     start = insertAfterPoint
@@ -625,6 +651,7 @@ function executeInlineMove(
   paragraphs: readonly DraftParagraph[],
   operation: InlineMoveOperation,
   protectedCasingTerms: readonly string[],
+  formatText: boolean,
 ): EditPipelineResult {
   const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'move source')
   if (typeof source === 'string') return { ok: false, reason: source }
@@ -650,14 +677,15 @@ function executeInlineMove(
     removalEnd < source.scopeEnd && /[ \t]/.test(cleanText[removalEnd] ?? '')
   const endsBeforeClosingPunctuation = /[,.;:!?)}\]”’]/.test(cleanText[removalEnd] ?? '')
   if (
+    formatText &&
     hasSeparatorBefore &&
     (hasSeparatorAfter || removalEnd === source.scopeEnd || endsBeforeClosingPunctuation)
   )
     removalStart -= 1
-  else if (hasSeparatorAfter && removalStart === source.scopeStart) removalEnd += 1
+  else if (formatText && hasSeparatorAfter && removalStart === source.scopeStart) removalEnd += 1
 
   let withoutSource = `${cleanText.slice(0, removalStart)}${cleanText.slice(removalEnd)}`
-  if (isSentenceOpeningAt(cleanText, source.start))
+  if (formatText && isSentenceOpeningAt(cleanText, source.start))
     withoutSource = capitalizeExistingSentenceOpening(withoutSource, removalStart)
   const originalInsertionPoint =
     operation.type === 'move_before' ? destination.start : destination.end
@@ -665,12 +693,11 @@ function executeInlineMove(
     originalInsertionPoint > removalStart
       ? originalInsertionPoint - (removalEnd - removalStart)
       : originalInsertionPoint
-  const formattedMovedText = capitalizeReplacementAtSentenceOpening(
-    withoutSource,
-    insertionPoint,
-    movedText,
-  )
+  const formattedMovedText = formatText
+    ? capitalizeReplacementAtSentenceOpening(withoutSource, insertionPoint, movedText)
+    : movedText
   const displacedOpening =
+    formatText &&
     operation.type === 'move_before' &&
     isSentenceOpeningAt(withoutSource, insertionPoint) &&
     /\p{L}/u.test(formattedMovedText)
@@ -684,7 +711,9 @@ function executeInlineMove(
       : null
   if (displacedOpening)
     withoutSource = `${withoutSource.slice(0, insertionPoint)}${displacedOpening.text}${withoutSource.slice(displacedOpening.end)}`
-  const insertion = addBoundarySpacing(withoutSource, insertionPoint, formattedMovedText)
+  const insertion = formatText
+    ? addBoundarySpacing(withoutSource, insertionPoint, formattedMovedText)
+    : formattedMovedText
   const afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }

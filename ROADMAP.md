@@ -872,6 +872,7 @@ Make the feature-complete beta safe and dependable across supported environments
 - Keep cancel and unload responsive during provider delay.
 - Separate provider latency from extension latency.
 - Measure post-edit grammar latency independently, confirm `Off` adds no provider call, and verify `When needed` avoids calls for edits that do not touch grammatical boundaries or produce a detectable artifact.
+- Keep basic post-edit cleanup deterministic and provider-free: spacing, sentence capitalization, repeated words, article agreement, and errant punctuation run on the affected sentences under every mode.
 
 #### Compatibility and send
 

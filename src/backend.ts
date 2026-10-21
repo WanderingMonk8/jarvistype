@@ -40,7 +40,12 @@ import {
   upsertGlossaryEntry,
   type GlossaryState,
 } from './domain/glossary'
-import { hasAmbiguousArticleIssue, repairDeterministicGrammar } from './domain/grammar'
+import {
+  hasAmbiguousArticleIssue,
+  opensInsideDoubleQuote,
+  repairDeterministicGrammar,
+} from './domain/grammar'
+import type { DeterministicGrammarOptions } from './domain/grammar'
 import {
   normalizeDeterministically,
   recoverHighConfidenceContextualCommands,
@@ -1293,10 +1298,7 @@ async function maybeRepairEditGrammar(
   signal: AbortSignal,
 ): Promise<{ text: string; changes: string[] }> {
   const unchanged = { text: proposedText, changes: [] }
-  if (settings.grammarRepairMode === 'off') return unchanged
   if (proposedText === beforeText) return unchanged
-  if (!operations.some((operation) => /\p{L}/u.test(operation.beforeText + operation.afterText)))
-    return unchanged
   if (operations.every((operation) => operation.type === 'case')) return unchanged
 
   const slices = paragraphSlices(proposedText)
@@ -1319,29 +1321,30 @@ async function maybeRepairEditGrammar(
     segments,
   )
 
-  // Cheap, local repairs run first: they resolve the common article and spacing
-  // artifacts without a provider round trip, and they stay available as a
-  // fallback when the provider is slow, unavailable, or overreaches.
+  // Local cleanup is always on and never surfaces a reason: it is part of the
+  // deterministic edit, not a provider grammar pass.
+  const capitalizeSentenceStarts = !operations.some((operation) => operation.type === 'case')
   const deterministicTexts = new Map<string, string>()
-  const deterministicChanges: string[] = []
   for (const segment of segments) {
-    const local = repairSegmentFocus(segment)
-    if (!local.changes.length) continue
-    if (!isSafeGrammarRepair(segment.text, local.text, protectedTerms)) continue
+    const local = repairSegmentFocus(segment, { protectedTerms, capitalizeSentenceStarts })
+    if (local.text === segment.text) continue
+    if (!isSafeLocalCleanup(segment.text, local.text, protectedTerms)) continue
     deterministicTexts.set(segment.id, local.text)
-    deterministicChanges.push(...local.changes)
   }
   const deterministicText = joinGrammarSegments(proposedText, segments, deterministicTexts)
-  const fallback = {
-    text: deterministicText,
-    changes: boundedGrammarChanges(deterministicChanges),
-  }
+  const fallback = { text: deterministicText, changes: [] }
 
+  if (settings.grammarRepairMode === 'off') return fallback
+
+  const hasLetters = operations.some((operation) =>
+    /\p{L}/u.test(operation.beforeText + operation.afterText),
+  )
   const providerCharacters = segments.reduce(
     (sum, segment) => sum + (deterministicTexts.get(segment.id) ?? segment.text).length,
     0,
   )
   const needsProvider =
+    hasLetters &&
     providerCharacters <= MAX_GRAMMAR_SEGMENT_CHARACTERS &&
     (settings.grammarRepairMode === 'always' ||
       editMayNeedGrammarRepair(beforeText, operations) ||
@@ -1427,7 +1430,10 @@ async function maybeRepairEditGrammar(
       const before = deterministicTexts.get(segment.id) ?? segment.text
       let after = working.get(segment.id) ?? before
       if (after === before) continue
-      const normalized = repairDeterministicGrammar(after)
+      const normalized = repairDeterministicGrammar(after, {
+        protectedTerms,
+        capitalizeSentenceStarts,
+      })
       if (normalized.changes.length) after = normalized.text
       if (after.includes('\n\n') || !isSafeGrammarRepair(before, after, protectedTerms)) continue
       acceptedTexts.set(segment.id, after)
@@ -1445,7 +1451,7 @@ async function maybeRepairEditGrammar(
     for (const [id, text] of acceptedTexts) combined.set(id, text)
     const repaired = joinGrammarSegments(proposedText, segments, combined)
     if (repaired.length > MAX_DRAFT_CHARACTERS) return fallback
-    const changes = boundedGrammarChanges([...deterministicChanges, ...appliedChanges])
+    const changes = boundedGrammarChanges(appliedChanges)
     logGrammarRepairOutcome('applied localized repairs', startedAt)
     return {
       text: repaired,
@@ -1469,15 +1475,21 @@ function logGrammarRepairOutcome(outcome: string, startedAt: number): void {
   spindle.log.info(`JarvisType grammar repair ${outcome} in ${elapsed} ms.`)
 }
 
-function repairSegmentFocus(segment: GrammarEditSegment): {
+function repairSegmentFocus(
+  segment: GrammarEditSegment,
+  options: DeterministicGrammarOptions,
+): {
   text: string
   changes: string[]
 } {
   const prefix = segment.text.slice(0, segment.focusStart)
   const focus = segment.text.slice(segment.focusStart, segment.focusEnd)
   const suffix = segment.text.slice(segment.focusEnd)
-  const local = repairDeterministicGrammar(focus)
-  if (!local.changes.length) return local
+  const local = repairDeterministicGrammar(focus, {
+    ...options,
+    insideQuoteAtStart: opensInsideDoubleQuote(prefix),
+  })
+  if (!local.changes.length) return { text: segment.text, changes: [] }
   return { text: `${prefix}${local.text}${suffix}`, changes: local.changes }
 }
 
@@ -1686,6 +1698,23 @@ function paragraphSlices(text: string): GrammarParagraphSlice[] {
     slices.push({ ordinal, start, end: text.length, text: text.slice(start) })
   }
   return slices
+}
+
+function isSafeLocalCleanup(
+  before: string,
+  after: string,
+  protectedTerms: readonly string[],
+): boolean {
+  if (!after.trim() || after.length > before.length + 200) return false
+  if (after.includes('\n\n') && !before.includes('\n\n')) return false
+  for (const term of protectedTerms) {
+    if (
+      term &&
+      countCaseInsensitiveOccurrences(before, term) !== countCaseInsensitiveOccurrences(after, term)
+    )
+      return false
+  }
+  return true
 }
 
 function isSafeGrammarRepair(

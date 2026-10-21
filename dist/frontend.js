@@ -2199,11 +2199,11 @@ function detectQuotationBoundaryHint(input) {
   const singleOpening = /^(?:open\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?\b/iu;
   const singleClosing = /\b(?:close\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu;
   const singleCount = trimmed.match(/\b(?:open\s+|close\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?\b/giu)?.length ?? 0;
-  const doubleCount = trimmed.match(
-    /\b(?:open\s+|close\s+)?(?<!single\s)(?:quote|quotation)(?:\s+marks?)?\b/giu
-  )?.length ?? 0;
-  if (singleCount >= 2 && singleOpening.test(trimmed) && singleClosing.test(trimmed)) return "single";
-  if (doubleCount >= 2 && doubleOpening.test(trimmed) && doubleClosing.test(trimmed)) return "double";
+  const doubleCount = trimmed.match(/\b(?:open\s+|close\s+)?(?<!single\s)(?:quote|quotation)(?:\s+marks?)?\b/giu)?.length ?? 0;
+  if (singleCount >= 2 && singleOpening.test(trimmed) && singleClosing.test(trimmed))
+    return "single";
+  if (doubleCount >= 2 && doubleOpening.test(trimmed) && doubleClosing.test(trimmed))
+    return "double";
   return null;
 }
 function formatDuration(durationMs) {
@@ -2519,7 +2519,7 @@ function shellMarkup() {
         <div class="jt-form-grid">
           <label>Messages scanned for references (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
-          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Uses the selected normalization connection only for the edited sentence and nearby context. Slow checks fall back to the rule-based edit, and every correction remains part of the proposal.</small></label>
+          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>

@@ -1975,22 +1975,71 @@ var CONSONANT_SOUND_U_WORDS = [
   "unit",
   "univ"
 ];
+var ABBREVIATIONS = /* @__PURE__ */ new Set([
+  "mr",
+  "mrs",
+  "ms",
+  "dr",
+  "prof",
+  "sr",
+  "jr",
+  "st",
+  "vs",
+  "etc",
+  "e.g",
+  "i.e",
+  "a.m",
+  "p.m",
+  "u.s",
+  "u.k"
+]);
+var COMMON_COMPACT_SUFFIXES = /* @__PURE__ */ new Set([
+  "com",
+  "org",
+  "net",
+  "io",
+  "dev",
+  "ai",
+  "co",
+  "edu",
+  "gov",
+  "txt",
+  "pdf",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "json",
+  "html",
+  "css",
+  "js",
+  "ts",
+  "md",
+  "docx",
+  "xlsx",
+  "zip"
+]);
 var DUPLICATE_WORD_PATTERN = /\b(the|a|an|and|or|of|to|in|on|at|for|with|from|by|is|was|were|be|been|has|it)\b(?:\s+\1\b)+/giu;
 var REPEATED_SPACE_PATTERN = /(?<=[^\s.!?\u2026])[ \t]{2,}(?=\S)/gu;
-var SPACE_BEFORE_PUNCTUATION_PATTERN = /(?<=[\p{L}\p{N}"'\u201d\u2019)\]])([ \t]+)([,;:!?]|\.(?!\.))/gu;
+var SPACE_BEFORE_PUNCTUATION_PATTERN = /(?<=[\p{L}\p{N}"'\u201d\u2019)\]])([ \t]+)([,;:!?\u2026]|\.(?!\.))/gu;
 var REPEATED_PUNCTUATION_PATTERN = /([,;:])\1+/gu;
 var ARTICLE_PATTERN = /\b(a|an)[ \t]+([\p{L}][\p{L}'\u2019-]*)/giu;
 var SKIPPED_ARTICLE_TARGETS = /* @__PURE__ */ new Set(["a", "an"]);
-function repairDeterministicGrammar(text) {
+function repairDeterministicGrammar(text, options = {}) {
   const changes = [];
   let repaired = text;
-  repaired = repaired.replace(DUPLICATE_WORD_PATTERN, (match, word) => {
-    pushChange(changes, `Removed a repeated \u201C${word}\u201D.`);
-    return word;
-  });
+  repaired = normalizeErrantPunctuation(repaired, changes);
   const beforeSpaceCollapse = repaired;
   repaired = repaired.replace(REPEATED_SPACE_PATTERN, " ");
   if (repaired !== beforeSpaceCollapse) pushChange(changes, "Collapsed repeated spaces.");
+  repaired = repaired.replace(/([“‘([{])([ \t]+)/gu, (_match, delimiter) => {
+    pushChange(changes, `Removed a space after \u201C${delimiter}\u201D.`);
+    return delimiter;
+  });
+  repaired = repaired.replace(/([ \t]+)([”’)\]])/gu, (_match, _spaces, delimiter) => {
+    pushChange(changes, `Removed a space before \u201C${delimiter}\u201D.`);
+    return delimiter;
+  });
   repaired = repaired.replace(
     SPACE_BEFORE_PUNCTUATION_PATTERN,
     (_match, _spaces, punctuation) => {
@@ -1998,9 +2047,14 @@ function repairDeterministicGrammar(text) {
       return punctuation;
     }
   );
+  repaired = insertMissingSpaces(repaired, changes);
   repaired = repaired.replace(REPEATED_PUNCTUATION_PATTERN, (match, punctuation) => {
     pushChange(changes, `Collapsed repeated \u201C${punctuation}\u201D.`);
     return punctuation;
+  });
+  repaired = repaired.replace(DUPLICATE_WORD_PATTERN, (match, word) => {
+    pushChange(changes, `Removed a repeated \u201C${word}\u201D.`);
+    return word;
   });
   repaired = repaired.replace(ARTICLE_PATTERN, (match, article, word) => {
     if (article === "AN" || SKIPPED_ARTICLE_TARGETS.has(word.toLocaleLowerCase())) return match;
@@ -2011,7 +2065,19 @@ function repairDeterministicGrammar(text) {
     pushChange(changes, `Changed \u201C${article}\u201D to \u201C${next}\u201D before \u201C${clip(word, 40)}\u201D.`);
     return `${next}${match.slice(article.length)}`;
   });
+  if (options.capitalizeSentenceStarts !== false && !options.insideQuoteAtStart) {
+    repaired = capitalizeSentenceOpenings(repaired, options.protectedTerms ?? [], changes);
+  }
   return { text: repaired, changes };
+}
+function opensInsideDoubleQuote(prefix) {
+  let depth = 0;
+  for (const character of prefix) {
+    if (character === "\u201C") depth += 1;
+    else if (character === "\u201D") depth = Math.max(0, depth - 1);
+    else if (character === '"') depth = depth === 0 ? 1 : 0;
+  }
+  return depth > 0;
 }
 function hasAmbiguousArticleIssue(text) {
   for (const match of text.matchAll(ARTICLE_PATTERN)) {
@@ -2022,6 +2088,108 @@ function hasAmbiguousArticleIssue(text) {
     if (desiredArticle(word) === null) return true;
   }
   return false;
+}
+function normalizeErrantPunctuation(text, changes) {
+  let result = text.replace(/([.!?\u2026])[ \t]*[,;:]+/gu, (_match, terminal) => {
+    pushChange(changes, "Removed errant punctuation after a sentence ending.");
+    return terminal;
+  });
+  result = result.replace(
+    /([,;:])[ \t]*([.!?\u2026])/gu,
+    (_match, _separator, terminal) => {
+      pushChange(changes, "Removed errant punctuation before a sentence ending.");
+      return terminal;
+    }
+  );
+  result = result.replace(/(?<!\.)\.{2}(?!\.)/gu, () => {
+    pushChange(changes, "Collapsed a repeated period.");
+    return ".";
+  });
+  result = result.replace(/([?!])\.(?![.?!])/gu, (_match, terminal) => {
+    pushChange(changes, "Removed a period after a sentence ending.");
+    return terminal;
+  });
+  result = result.replace(/(?<!\.)\.(?=[?!])/gu, () => {
+    pushChange(changes, "Removed a period before a sentence ending.");
+    return "";
+  });
+  return result;
+}
+function insertMissingSpaces(text, changes) {
+  let result = text.replace(
+    /([,;:])(?=[\p{L}\p{N}])/gu,
+    (match, mark, offset, source) => {
+      const previous = source[offset - 1] ?? "";
+      const next = source[offset + 1] ?? "";
+      if ((mark === "," || mark === ":") && /\d/u.test(previous) && /\d/u.test(next)) return match;
+      if (mark === ":" && next === "/") return match;
+      pushChange(changes, `Added a space after \u201C${mark}\u201D.`);
+      return `${mark} `;
+    }
+  );
+  result = result.replace(
+    /([!?])(?=[\p{L}])/gu,
+    (match, mark, offset, source) => {
+      if (mark === "?") {
+        const before = source.slice(Math.max(0, offset - 40), offset);
+        if (/https?:\/\/\S*$/u.test(before)) return match;
+        if (/^[\p{L}\d]+=/u.test(source.slice(offset + 1))) return match;
+      }
+      pushChange(changes, `Added a space after \u201C${mark}\u201D.`);
+      return `${mark} `;
+    }
+  );
+  result = result.replace(/\.(?=[\p{Lu}])/gu, (match, offset, source) => {
+    const previous = source[offset - 1] ?? "";
+    if (/\d/u.test(previous)) return match;
+    if (!previous) return match;
+    const word = source.slice(0, offset).match(/(\p{L}[\p{L}.'\u2019]*)$/u)?.[1] ?? "";
+    if (isAbbreviationOrInitialism(word)) return match;
+    const suffix = source.slice(offset + 1).match(/^[\p{L}\d-]+/u)?.[0] ?? "";
+    if (COMMON_COMPACT_SUFFIXES.has(suffix.toLocaleLowerCase())) return match;
+    pushChange(changes, "Added a space after a period.");
+    return ". ";
+  });
+  return result;
+}
+function isAbbreviationOrInitialism(word) {
+  const lower = word.toLocaleLowerCase().replace(/['\u2019]/gu, "");
+  if (ABBREVIATIONS.has(lower)) return true;
+  if (/^\p{L}$/u.test(word)) return true;
+  if (/^(?:\p{L}\.){1,}\p{L}$/u.test(word)) return true;
+  return false;
+}
+function capitalizeSentenceOpenings(text, protectedTerms, changes) {
+  const protectedWords = new Set(
+    protectedTerms.flatMap((term) => {
+      const firstWord = term.match(/[\p{L}\p{M}][\p{L}\p{M}'\u2019-]*/u)?.[0];
+      return firstWord ? [firstWord.toLocaleLowerCase()] : [];
+    })
+  );
+  return text.replace(
+    /(^|([.!?])(["'\u201d\u2019)\]]*)[ \t]+)(["'\u201c\u2018([{]*)(\p{Ll})([\p{L}\p{M}'\u2019-]*)/gu,
+    (whole, boundary, terminal, closers, openers, first, rest, offset, source) => {
+      if (openers && /["'\u201c\u2018]/u.test(openers)) return whole;
+      if (terminal) {
+        if (terminal === "." && source[offset - 1] === ".") return whole;
+        if (closers && /["'\u201d\u2019]/u.test(closers)) return whole;
+        const beforeTerminal = source.slice(0, offset);
+        const word2 = beforeTerminal.match(/(\p{L}[\p{L}.'\u2019]*)$/u)?.[1] ?? "";
+        if (isAbbreviationOrInitialism(word2)) return whole;
+        if (opensInsideDoubleQuote(source.slice(0, offset + boundary.length))) return whole;
+      }
+      const word = `${first}${rest}`;
+      const lower = word.toLocaleLowerCase();
+      if (protectedWords.has(lower) || /\p{Lu}/u.test(rest)) return whole;
+      if (/^(?:www|http|https)$/iu.test(word)) return whole;
+      const afterWord = source.slice(offset + boundary.length + openers.length + word.length);
+      const domainSuffix = afterWord.match(/^\.([\p{L}\d-]+)/u)?.[1];
+      if (domainSuffix && COMMON_COMPACT_SUFFIXES.has(domainSuffix.toLocaleLowerCase()))
+        return whole;
+      pushChange(changes, `Capitalized \u201C${clip(word, 40)}\u201D.`);
+      return `${boundary}${openers}${capitalize(word)}`;
+    }
+  );
 }
 function desiredArticle(word) {
   if (!/^\p{Ll}/u.test(word)) return null;
@@ -3595,10 +3763,7 @@ var MAX_GRAMMAR_PROTECTED_TERMS = 40;
 var MAX_GRAMMAR_PROTECTED_CHARACTERS = 800;
 async function maybeRepairEditGrammar(beforeText, proposedText, operations, affectedParagraphOrdinals, settings, glossary, conversationReferences, userId, signal) {
   const unchanged = { text: proposedText, changes: [] };
-  if (settings.grammarRepairMode === "off") return unchanged;
   if (proposedText === beforeText) return unchanged;
-  if (!operations.some((operation) => /\p{L}/u.test(operation.beforeText + operation.afterText)))
-    return unchanged;
   if (operations.every((operation) => operation.type === "case")) return unchanged;
   const slices = paragraphSlices(proposedText);
   const beforeSlices = paragraphSlices(beforeText);
@@ -3615,25 +3780,25 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
     [...glossary.entries.map((entry) => entry.canonical), ...conversationReferences],
     segments
   );
+  const capitalizeSentenceStarts = !operations.some((operation) => operation.type === "case");
   const deterministicTexts = /* @__PURE__ */ new Map();
-  const deterministicChanges = [];
   for (const segment of segments) {
-    const local = repairSegmentFocus(segment);
-    if (!local.changes.length) continue;
-    if (!isSafeGrammarRepair(segment.text, local.text, protectedTerms)) continue;
+    const local = repairSegmentFocus(segment, { protectedTerms, capitalizeSentenceStarts });
+    if (local.text === segment.text) continue;
+    if (!isSafeLocalCleanup(segment.text, local.text, protectedTerms)) continue;
     deterministicTexts.set(segment.id, local.text);
-    deterministicChanges.push(...local.changes);
   }
   const deterministicText = joinGrammarSegments(proposedText, segments, deterministicTexts);
-  const fallback = {
-    text: deterministicText,
-    changes: boundedGrammarChanges(deterministicChanges)
-  };
+  const fallback = { text: deterministicText, changes: [] };
+  if (settings.grammarRepairMode === "off") return fallback;
+  const hasLetters = operations.some(
+    (operation) => /\p{L}/u.test(operation.beforeText + operation.afterText)
+  );
   const providerCharacters = segments.reduce(
     (sum, segment) => sum + (deterministicTexts.get(segment.id) ?? segment.text).length,
     0
   );
-  const needsProvider = providerCharacters <= MAX_GRAMMAR_SEGMENT_CHARACTERS && (settings.grammarRepairMode === "always" || editMayNeedGrammarRepair(beforeText, operations) || segments.some(
+  const needsProvider = hasLetters && providerCharacters <= MAX_GRAMMAR_SEGMENT_CHARACTERS && (settings.grammarRepairMode === "always" || editMayNeedGrammarRepair(beforeText, operations) || segments.some(
     (segment) => hasAmbiguousArticleIssue(segment.text.slice(segment.focusStart, segment.focusEnd))
   ));
   if (!needsProvider) return fallback;
@@ -3706,7 +3871,10 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
       const before = deterministicTexts.get(segment.id) ?? segment.text;
       let after = working.get(segment.id) ?? before;
       if (after === before) continue;
-      const normalized = repairDeterministicGrammar(after);
+      const normalized = repairDeterministicGrammar(after, {
+        protectedTerms,
+        capitalizeSentenceStarts
+      });
       if (normalized.changes.length) after = normalized.text;
       if (after.includes("\n\n") || !isSafeGrammarRepair(before, after, protectedTerms)) continue;
       acceptedTexts.set(segment.id, after);
@@ -3721,7 +3889,7 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
     for (const [id, text] of acceptedTexts) combined.set(id, text);
     const repaired = joinGrammarSegments(proposedText, segments, combined);
     if (repaired.length > MAX_DRAFT_CHARACTERS) return fallback;
-    const changes = boundedGrammarChanges([...deterministicChanges, ...appliedChanges]);
+    const changes = boundedGrammarChanges(appliedChanges);
     logGrammarRepairOutcome("applied localized repairs", startedAt);
     return {
       text: repaired,
@@ -3743,12 +3911,15 @@ function logGrammarRepairOutcome(outcome, startedAt) {
   const elapsed = Math.max(0, Math.round(performance.now() - startedAt));
   spindle.log.info(`JarvisType grammar repair ${outcome} in ${elapsed} ms.`);
 }
-function repairSegmentFocus(segment) {
+function repairSegmentFocus(segment, options) {
   const prefix = segment.text.slice(0, segment.focusStart);
   const focus = segment.text.slice(segment.focusStart, segment.focusEnd);
   const suffix = segment.text.slice(segment.focusEnd);
-  const local = repairDeterministicGrammar(focus);
-  if (!local.changes.length) return local;
+  const local = repairDeterministicGrammar(focus, {
+    ...options,
+    insideQuoteAtStart: opensInsideDoubleQuote(prefix)
+  });
+  if (!local.changes.length) return { text: segment.text, changes: [] };
   return { text: `${prefix}${local.text}${suffix}`, changes: local.changes };
 }
 function parseGrammarRepairEdits(parsed, segments) {
@@ -3899,6 +4070,15 @@ function paragraphSlices(text) {
     slices.push({ ordinal, start, end: text.length, text: text.slice(start) });
   }
   return slices;
+}
+function isSafeLocalCleanup(before, after, protectedTerms) {
+  if (!after.trim() || after.length > before.length + 200) return false;
+  if (after.includes("\n\n") && !before.includes("\n\n")) return false;
+  for (const term of protectedTerms) {
+    if (term && countCaseInsensitiveOccurrences(before, term) !== countCaseInsensitiveOccurrences(after, term))
+      return false;
+  }
+  return true;
 }
 function isSafeGrammarRepair(before, after, protectedTerms) {
   if (!after.trim() || Math.abs(after.length - before.length) > Math.max(200, before.length * 0.25))

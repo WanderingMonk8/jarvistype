@@ -2161,7 +2161,7 @@ test('reviews and commits a punctuation target resolved relative to a phrase', a
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.outcome, 'review')
-  assert.equal(proposal.proposal.afterText, 'She said “this is very good!, and smiled.')
+  assert.equal(proposal.proposal.afterText, 'She said “this is very good! and smiled.')
 
   await dispatch(
     {
@@ -2178,7 +2178,7 @@ test('reviews and commits a punctuation target resolved relative to a phrase', a
   assert.equal(committed?.type, 'edit.proposal.response')
   if (committed?.type === 'edit.proposal.response') {
     assert.equal(committed.outcome, 'committed')
-    assert.equal(committed.snapshot?.cleanText, 'She said “this is very good!, and smiled.')
+    assert.equal(committed.snapshot?.cleanText, 'She said “this is very good! and smiled.')
   }
 })
 
@@ -3516,9 +3516,7 @@ test('falls back to the deterministic edit when grammar repair overreaches', asy
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'This is an accessible entrance.')
-  assert.deepEqual(proposal.proposal.grammarRepairChanges, [
-    'Changed “a” to “an” before “accessible”.',
-  ])
+  assert.equal(proposal.proposal.grammarRepairChanges, undefined)
 })
 
 test('skips a routine mid-sentence grammar call in when-needed mode', async () => {
@@ -3636,9 +3634,7 @@ test('repairs a deterministic article artifact without a provider call', async (
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'This is an accessible entrance.')
-  assert.deepEqual(proposal.proposal.grammarRepairChanges, [
-    'Changed “a” to “an” before “accessible”.',
-  ])
+  assert.equal(proposal.proposal.grammarRepairChanges, undefined)
   assert.equal(
     generationRequests.filter((request) => {
       const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
@@ -3722,6 +3718,149 @@ test('aborts an in-flight grammar request when the operation is cancelled', asyn
         response.payload.type === 'edit.proposal.response' || response.payload.type === 'app.error',
     ),
     false,
+  )
+})
+
+test('cleans local grammar after an edit even when provider repair is off', async () => {
+  const userId = 'universal-cleanup-off-user'
+  const chatId = 'universal-cleanup-off-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier. This is a wide entrance.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'universal-cleanup-off-interpret',
+      operationId: 'universal-cleanup-off-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace wide with accessible.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Earlier. This is an accessible entrance.')
+  assert.equal(proposal.proposal.grammarRepairChanges, undefined)
+  assert.equal(generationRequests.length, 0)
+})
+
+test('fixes errant punctuation and sentence casing left by an edit', async () => {
+  const userId = 'universal-cleanup-punctuation-user'
+  const chatId = 'universal-cleanup-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Second sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Leave errant punctuation and casing for local cleanup.',
+    operations: [
+      {
+        id: 'leave-errant-punctuation',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'Second sentence.' },
+        text: 'second sentence.,',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'universal-cleanup-punctuation-interpret',
+      operationId: 'universal-cleanup-punctuation-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace Second sentence with second sentence.,',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'First sentence. Second sentence.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('does not clean sentences outside the edited sentence', async () => {
+  const userId = 'universal-cleanup-scope-user'
+  const chatId = 'universal-cleanup-scope-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'this one stays lower. This is a wide entrance.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'universal-cleanup-scope-interpret',
+      operationId: 'universal-cleanup-scope-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace wide with accessible.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'this one stays lower. This is an accessible entrance.')
+})
+
+test('does not undo an explicit case command with sentence capitalization', async () => {
+  const userId = 'universal-cleanup-case-user'
+  const chatId = 'universal-cleanup-case-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Second sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Lowercase the paragraph.',
+    operations: [
+      {
+        id: 'lowercase-paragraph',
+        type: 'case',
+        caseMode: 'lowercase',
+        target: { paragraphOrdinal: 1 },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'universal-cleanup-case-interpret',
+      operationId: 'universal-cleanup-case-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Lowercase paragraph 1.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'first sentence. second sentence.')
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+    }).length,
+    0,
   )
 })
 

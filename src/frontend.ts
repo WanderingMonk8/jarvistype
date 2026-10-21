@@ -80,19 +80,28 @@ export const COMMAND_GROUPS = [
   {
     title: 'Change text',
     examples: [
-      ['Replace', 'Replace “pending” with “approved” in paragraph 2.'],
+      [
+        'Replace',
+        'Replace, change, swap, or substitute a target—for example, “Change ‘pending’ to ‘approved’ in paragraph 2.”',
+      ],
       [
         'Delete',
-        'Say “delete,” “remove,” or “take off,” followed by the target—for example, “Take off the second sentence in paragraph 1.”',
+        'Say “delete,” “remove,” “take off,” “take out,” “erase,” or “cut,” followed by the target—for example, “Take off the second sentence in paragraph 1.”',
       ],
-      ['Insert before', 'Insert “Urgent:” before the first sentence.'],
+      ['Insert before', 'Insert, add, place, or put “Urgent:” before the first sentence.'],
       [
         'Insert after',
-        'Insert a new paragraph after paragraph 2 that says “The route is approved.”',
+        'Insert, add, place, or put a new paragraph after paragraph 2 that says “The route is approved.”',
       ],
-      ['Append', 'Append “Please confirm attendance.” to paragraph 1.'],
-      ['Prepend', 'Prepend “Urgent:” to paragraph 1.'],
-      ['Move', 'Move “approved” before “pending” in paragraph 1.'],
+      [
+        'Append',
+        'Append, add to the end, place at the end, put at the end, or tack onto the end of paragraph 1.',
+      ],
+      [
+        'Prepend',
+        'Prepend, add to the beginning, place at the start, or put at the beginning of paragraph 1.',
+      ],
+      ['Move', 'Move, relocate, or shift “approved” before “pending” in paragraph 1.'],
       [
         'Fuzzy target fallback',
         'If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as “mouthlet” for “Mao let.”',
@@ -106,8 +115,8 @@ export const COMMAND_GROUPS = [
   {
     title: 'Structure and order',
     examples: [
-      ['Split', 'Split paragraph 1 after “The launch checklist is ready.”'],
-      ['Join', 'Join paragraph 1 with the following paragraph.'],
+      ['Split', 'Split, break, or divide paragraph 1 after “The launch checklist is ready.”'],
+      ['Join', 'Join, merge, or combine paragraph 1 with the following paragraph.'],
       ['Move before', 'Move paragraph 3 before paragraph 1.'],
       ['Move after', 'Move paragraph 1 after paragraph 2.'],
     ],
@@ -115,9 +124,9 @@ export const COMMAND_GROUPS = [
   {
     title: 'Capitalization and spelling',
     examples: [
-      ['Uppercase', 'Change the entire draft to uppercase.'],
-      ['Lowercase', 'Change paragraph 2 to lowercase.'],
-      ['Capitalize', 'Capitalize “Project Atlas” in paragraph 1.'],
+      ['Uppercase', 'Uppercase the draft, or make the entire draft all caps.'],
+      ['Lowercase', 'Lowercase paragraph 2, or make paragraph 2 lowercase.'],
+      ['Capitalize', 'Capitalize “Project Atlas,” or capitalize its first letter.'],
       ['Spelled form', 'Replace Kalora with capitalized C-A-E-L-O-R-A.'],
       [
         'As in reference',

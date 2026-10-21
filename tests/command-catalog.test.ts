@@ -92,3 +92,30 @@ test('command catalog advertises delete command synonyms', () => {
     assert.ok(catalog.includes(command), `missing delete command synonym: ${command}`)
   }
 })
+
+test('command catalog advertises flexible editing synonyms', () => {
+  const examples: Array<readonly [string, string]> = []
+  for (const group of COMMAND_GROUPS) examples.push(...group.examples)
+  const catalog = examples
+    .map(([activation, example]) => `${activation} ${example}`.toLowerCase())
+    .join(' ')
+
+  for (const command of [
+    'change',
+    'swap',
+    'substitute',
+    'add',
+    'place',
+    'put',
+    'tack onto',
+    'relocate',
+    'shift',
+    'break',
+    'divide',
+    'merge',
+    'combine',
+    'all caps',
+  ]) {
+    assert.ok(catalog.includes(command), `missing editing synonym: ${command}`)
+  }
+})

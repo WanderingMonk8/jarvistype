@@ -410,19 +410,28 @@ var COMMAND_GROUPS = [
   {
     title: "Change text",
     examples: [
-      ["Replace", "Replace \u201Cpending\u201D with \u201Capproved\u201D in paragraph 2."],
+      [
+        "Replace",
+        "Replace, change, swap, or substitute a target\u2014for example, \u201CChange \u2018pending\u2019 to \u2018approved\u2019 in paragraph 2.\u201D"
+      ],
       [
         "Delete",
-        "Say \u201Cdelete,\u201D \u201Cremove,\u201D or \u201Ctake off,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
+        "Say \u201Cdelete,\u201D \u201Cremove,\u201D \u201Ctake off,\u201D \u201Ctake out,\u201D \u201Cerase,\u201D or \u201Ccut,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
       ],
-      ["Insert before", "Insert \u201CUrgent:\u201D before the first sentence."],
+      ["Insert before", "Insert, add, place, or put \u201CUrgent:\u201D before the first sentence."],
       [
         "Insert after",
-        "Insert a new paragraph after paragraph 2 that says \u201CThe route is approved.\u201D"
+        "Insert, add, place, or put a new paragraph after paragraph 2 that says \u201CThe route is approved.\u201D"
       ],
-      ["Append", "Append \u201CPlease confirm attendance.\u201D to paragraph 1."],
-      ["Prepend", "Prepend \u201CUrgent:\u201D to paragraph 1."],
-      ["Move", "Move \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
+      [
+        "Append",
+        "Append, add to the end, place at the end, put at the end, or tack onto the end of paragraph 1."
+      ],
+      [
+        "Prepend",
+        "Prepend, add to the beginning, place at the start, or put at the beginning of paragraph 1."
+      ],
+      ["Move", "Move, relocate, or shift \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
       [
         "Fuzzy target fallback",
         "If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as \u201Cmouthlet\u201D for \u201CMao let.\u201D"
@@ -436,8 +445,8 @@ var COMMAND_GROUPS = [
   {
     title: "Structure and order",
     examples: [
-      ["Split", "Split paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
-      ["Join", "Join paragraph 1 with the following paragraph."],
+      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
+      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph."],
       ["Move before", "Move paragraph 3 before paragraph 1."],
       ["Move after", "Move paragraph 1 after paragraph 2."]
     ]
@@ -445,9 +454,9 @@ var COMMAND_GROUPS = [
   {
     title: "Capitalization and spelling",
     examples: [
-      ["Uppercase", "Change the entire draft to uppercase."],
-      ["Lowercase", "Change paragraph 2 to lowercase."],
-      ["Capitalize", "Capitalize \u201CProject Atlas\u201D in paragraph 1."],
+      ["Uppercase", "Uppercase the draft, or make the entire draft all caps."],
+      ["Lowercase", "Lowercase paragraph 2, or make paragraph 2 lowercase."],
+      ["Capitalize", "Capitalize \u201CProject Atlas,\u201D or capitalize its first letter."],
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
       [
         "As in reference",

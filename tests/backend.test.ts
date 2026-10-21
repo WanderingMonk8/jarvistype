@@ -1431,7 +1431,7 @@ test('keeps spoken edit instructions out of the draft until the structured propo
   }
 })
 
-test('extends a sentence-targeted paragraph split through terminal punctuation', async () => {
+test('extends a sentence-targeted paragraph break through terminal punctuation', async () => {
   const userId = 'sentence-split-user'
   const chatId = 'sentence-split-chat'
   activeChatId = chatId
@@ -1464,7 +1464,7 @@ test('extends a sentence-targeted paragraph split through terminal punctuation',
       chatId,
       expectedVersion: 1,
       instructionTranscript:
-        'Split the paragraph after the sentence about the brief eruption of discussion.',
+        'Break the paragraph after the sentence about the brief eruption of discussion.',
     },
     userId,
   )
@@ -1916,7 +1916,7 @@ test('removes terminal punctuation when a short sentence is deleted', async () =
   assert.equal(proposal.proposal.plan.operations[0]?.includeTrailingPunctuation, true)
 })
 
-test('moves terminal punctuation with an explicitly targeted short sentence', async () => {
+test('relocates terminal punctuation with an explicitly targeted short sentence', async () => {
   const userId = 'short-sentence-move-user'
   const chatId = 'short-sentence-move-chat'
   activeChatId = chatId
@@ -1944,7 +1944,7 @@ test('moves terminal punctuation with an explicitly targeted short sentence', as
       operationId: 'short-sentence-move-operation',
       chatId,
       expectedVersion: 1,
-      instructionTranscript: 'Move the sentence Enough after the sentence Later.',
+      instructionTranscript: 'Relocate the sentence Enough after the sentence Later.',
     },
     userId,
   )
@@ -2294,7 +2294,7 @@ test('offers explicit choices for paragraph-resolvable ambiguity without mutatin
   }
 })
 
-test('interprets an explicit new-paragraph command deterministically', async () => {
+test('interprets an explicit add-new-paragraph synonym deterministically', async () => {
   const userId = 'paragraph-insert-user'
   const chatId = 'paragraph-insert-chat'
   activeChatId = chatId
@@ -2310,7 +2310,7 @@ test('interprets an explicit new-paragraph command deterministically', async () 
       chatId,
       expectedVersion: 1,
       instructionTranscript:
-        'Insert a new paragraph after paragraph 2 that says, The route has been approved.',
+        'Add a new paragraph after paragraph 2 that says, The route has been approved.',
     },
     userId,
   )

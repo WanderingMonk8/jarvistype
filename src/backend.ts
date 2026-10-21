@@ -2040,35 +2040,75 @@ function parseDeterministicSentenceQuotationInsertion(
   draftVersion: number,
 ): EditPlan | null {
   if (/[\r\n;]/u.test(instructionTranscript)) return null
+  const trimmed = instructionTranscript.trim()
   const sentenceOrdinalToken =
     '(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final|penultimate|second[- ]to[- ]last|\\d+(?:st|nd|rd|th)?)'
-  const match = instructionTranscript
-    .trim()
-    .match(
-      new RegExp(
-        `^(?:in\\s+paragraph\\s+(\\d+)\\s*,?\\s*)?(?:insert|add|put|place)\\s+(?:a|an|the)?\\s*(?:(single|double|opening|closing|open|close)\\s+)?(?:quotation\\s+marks?|quote\\s+marks?|quotations?|quotes?)\\s+(before|after|around)\\s+(?:the\\s+)?(?:${sentenceOrdinalToken}\\s+)?sentences?\\b[.!?]*$`,
-        'iu',
-      ),
-    )
-  if (!match) return null
-  const paragraphOrdinal = match[1] === undefined ? undefined : Number(match[1])
-  if (
-    paragraphOrdinal !== undefined &&
-    (!Number.isSafeInteger(paragraphOrdinal) || paragraphOrdinal < 1)
+  const commandPrefix =
+    '(?:insert|add|put|place)\\s+(?:a|an|the)?\\s*(?:(?<style>single|double|opening|closing|open|close)\\s+)?(?:quotation\\s+marks?|quote\\s+marks?|quotations?|quotes?)\\s+(?<direction>before|after|around)\\s+'
+  const paragraphPrefix = '(?:in\\s+paragraph\\s+(?<paragraph>\\d+)\\s*,?\\s*)?'
+  const positional = trimmed.match(
+    new RegExp(
+      `^${paragraphPrefix}${commandPrefix}(?:the\\s+)?(?:${sentenceOrdinalToken}\\s+)?sentences?\\b[.!?]*$`,
+      'iu',
+    ),
   )
-    return null
-  const sentencePosition = parseSentencePosition(instructionTranscript)
-  if (!sentencePosition) return null
-
-  const style = (match[2] ?? '').toLocaleLowerCase()
-  const direction = (match[3] ?? '').toLocaleLowerCase()
-  const [opening, closing] = style === 'single' ? ['\u2018', '\u2019'] : ['\u201c', '\u201d']
-  const target = {
-    ...(paragraphOrdinal === undefined ? {} : { paragraphOrdinal }),
-    ...sentencePosition,
+  if (positional) {
+    const paragraphOrdinal = parseOptionalParagraphOrdinal(positional.groups?.paragraph)
+    if (paragraphOrdinal === false) return null
+    const sentencePosition = parseSentencePosition(trimmed)
+    if (sentencePosition) {
+      return buildSentenceQuotationPlan(
+        {
+          ...(paragraphOrdinal === undefined ? {} : { paragraphOrdinal }),
+          ...sentencePosition,
+        },
+        positional.groups?.style ?? '',
+        positional.groups?.direction ?? '',
+        draftVersion,
+      )
+    }
   }
+
+  const exact = trimmed.match(
+    new RegExp(
+      `^${paragraphPrefix}${commandPrefix}(?:the\\s+)?(?:sentence|phrase|words?|text)\\b\\s*[,:]?\\s*(?<target>[\\s\\S]+)$`,
+      'iu',
+    ),
+  )
+  if (!exact) return null
+  const paragraphOrdinal = parseOptionalParagraphOrdinal(exact.groups?.paragraph)
+  if (paragraphOrdinal === false) return null
+  const targetText = unwrapEditArgument(stripUnquotedEditArgumentLabel(exact.groups?.target ?? ''))
+  if (!targetText) return null
+  return buildSentenceQuotationPlan(
+    {
+      ...(paragraphOrdinal === undefined ? {} : { paragraphOrdinal }),
+      exactText: targetText,
+    },
+    exact.groups?.style ?? '',
+    exact.groups?.direction ?? '',
+    draftVersion,
+  )
+}
+
+function parseOptionalParagraphOrdinal(value: string | undefined): number | undefined | false {
+  if (value === undefined) return undefined
+  const ordinal = Number(value)
+  return Number.isSafeInteger(ordinal) && ordinal >= 1 ? ordinal : false
+}
+
+function buildSentenceQuotationPlan(
+  target: EditTarget,
+  style: string,
+  direction: string,
+  draftVersion: number,
+): EditPlan | null {
+  const normalizedStyle = style.toLocaleLowerCase()
+  const normalizedDirection = direction.toLocaleLowerCase()
+  const [opening, closing] =
+    normalizedStyle === 'single' ? ['\u2018', '\u2019'] : ['\u201c', '\u201d']
   const operations: EditPlan['operations'] =
-    direction === 'around'
+    normalizedDirection === 'around'
       ? [
           {
             id: 'deterministic-open-sentence-quotation',
@@ -2086,14 +2126,14 @@ function parseDeterministicSentenceQuotationInsertion(
       : [
           {
             id: 'deterministic-sentence-quotation',
-            type: direction === 'before' ? 'insert_before' : 'insert_after',
+            type: normalizedDirection === 'before' ? 'insert_before' : 'insert_after',
             target,
             text:
-              style === 'opening' || style === 'open'
+              normalizedStyle === 'opening' || normalizedStyle === 'open'
                 ? opening
-                : style === 'closing' || style === 'close'
+                : normalizedStyle === 'closing' || normalizedStyle === 'close'
                   ? closing
-                  : direction === 'before'
+                  : normalizedDirection === 'before'
                     ? opening
                     : closing,
           },
@@ -2102,9 +2142,9 @@ function parseDeterministicSentenceQuotationInsertion(
     schemaVersion: 2,
     draftVersion,
     explanation:
-      direction === 'around'
+      normalizedDirection === 'around'
         ? 'Put quotation marks around the identified sentence.'
-        : `Insert a quotation mark ${direction} the identified sentence.`,
+        : `Insert a quotation mark ${normalizedDirection} the identified sentence.`,
     operations,
   })
 }

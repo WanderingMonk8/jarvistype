@@ -1809,6 +1809,62 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('inserts quotation marks around an exact sentence target', async () => {
+  const userId = 'exact-sentence-quotation-user'
+  const chatId = 'exact-sentence-quotation-chat'
+  activeChatId = chatId
+  const draft =
+    '“Yeah, Round Midnight is a special tune. I play it, like you said, in all kinds of moods.” I pick up the paper cup and gulp down the coffee in one courageous move. Let out a long breath, the grimace returning fully. All right, this is some special coffee. Well, anyway, yeah, your whole discography.'
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases = [
+    [
+      'Insert quotes before the sentence, All right, this is some special coffee.',
+      draft.replace(
+        'All right, this is some special coffee.',
+        '“All right, this is some special coffee.',
+      ),
+    ],
+    [
+      'Insert a quotation mark after the sentence, All right, this is some special coffee.',
+      draft.replace(
+        'All right, this is some special coffee.',
+        'All right, this is some special coffee.”',
+      ),
+    ],
+    [
+      'Put quotation marks around the sentence, All right, this is some special coffee.',
+      draft.replace(
+        'All right, this is some special coffee.',
+        '“All right, this is some special coffee.”',
+      ),
+    ],
+  ] as const
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `exact-sentence-quotation-interpret-${index}`,
+        operationId: `exact-sentence-quotation-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type === 'edit.proposal.response') {
+      assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
 test('deletes positional sentences across every alias and paragraph scope', async () => {
   const userId = 'sentence-deletion-alias-user'
   const chatId = 'sentence-deletion-alias-chat'

@@ -2402,6 +2402,81 @@ test('falls back to one fuzzy draft target when the provider compounds a split p
   }
 })
 
+test('replaces a positional sentence without a provider interpretation', async () => {
+  const userId = 'sentence-replacement-user'
+  const chatId = 'sentence-replacement-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'First sentence. Second sentence. So, I guess you can name your price and speech.',
+  )
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-replacement-interpret',
+      operationId: 'sentence-replacement-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Replace the last sentence with, so I guess you can name your price now.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'First sentence. Second sentence. So I guess you can name your price now.',
+  )
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
+test('replaces a positional sentence scoped to a paragraph', async () => {
+  const userId = 'scoped-sentence-replacement-user'
+  const chatId = 'scoped-sentence-replacement-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'First paragraph. Still first.\n\nSecond paragraph. Last one here.',
+  )
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'scoped-sentence-replacement-interpret',
+      operationId: 'scoped-sentence-replacement-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'In paragraph 2, replace the first sentence with Hello there.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'First paragraph. Still first.\n\nHello there. Last one here.',
+  )
+})
+
 test('keeps beginning and end insertions inside the targeted paragraph', async () => {
   const userId = 'paragraph-boundary-user'
   const chatId = 'paragraph-boundary-chat'

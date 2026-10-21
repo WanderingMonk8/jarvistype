@@ -2094,7 +2094,7 @@ function normalizeErrantPunctuation(text, changes) {
     return terminal;
   });
   result = result.replace(
-    /([,;:])[ \t]*([.!?\u2026])/gu,
+    /([,;:]+)[ \t]*([.!?\u2026])/gu,
     (_match, _separator, terminal) => {
       pushChange(changes, "Removed errant punctuation before a sentence ending.");
       return terminal;

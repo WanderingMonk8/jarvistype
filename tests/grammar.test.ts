@@ -123,6 +123,7 @@ test('normalizes errant punctuation left behind by edits', () => {
   assert.equal(repairDeterministicGrammar('Really.! Next.').text, 'Really! Next.')
   assert.equal(repairDeterministicGrammar('word,.').text, 'Word.')
   assert.equal(repairDeterministicGrammar('word..').text, 'Word.')
+  assert.equal(repairDeterministicGrammar('word;;.').text, 'Word.')
   assert.equal(repairDeterministicGrammar('Wait...?').text, 'Wait...?')
   assert.equal(repairDeterministicGrammar('word!?').text, 'Word!?')
   assert.equal(repairDeterministicGrammar('“Stop!”, she shouted.').text, '“Stop!”, she shouted.')

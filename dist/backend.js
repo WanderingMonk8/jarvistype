@@ -2288,7 +2288,7 @@ function isFrontendRequest(value) {
     return isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger3(value.expectedVersion);
   }
   if (value.type === "transcript.normalize.request") {
-    return isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger3(value.expectedVersion) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS);
+    return isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger3(value.expectedVersion) && isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) && (value.quotationBoundaryHint === void 0 || value.quotationBoundaryHint === "double" || value.quotationBoundaryHint === "single");
   }
   if (value.type === "transcript.confirm.request" || value.type === "edit.confirm.request") {
     return isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger3(value.expectedVersion);
@@ -2473,18 +2473,23 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       referenceContext.messages
     );
     const capitalizeOpening = shouldCapitalizeRecordingOpening(session.cleanText);
-    const deterministic = normalizeDeterministically(request.rawTranscript, glossary.entries, {
+    const recoveredBoundary = applyQuotationBoundaryHint(
+      request.rawTranscript,
+      request.quotationBoundaryHint
+    );
+    const deterministic = normalizeDeterministically(recoveredBoundary.text, glossary.entries, {
       capitalizeOpening
     });
     let candidateText = deterministic.text;
     let contextualModelUsed = false;
     const reasons = [...deterministic.reasons];
+    if (recoveredBoundary.recovered) reasons.push("streamed quotation command recovery");
     if (normalizedAgainstNewerDraft) reasons.push("normalized against newer same-chat draft");
     const ambiguities = [...deterministic.ambiguities];
     const learningCandidates = [...deterministic.learningCandidates];
     if (settings.contextualNormalizationEnabled) {
       const contextual = await normalizeWithContext(
-        request.rawTranscript,
+        recoveredBoundary.text,
         candidateText,
         selected.messages,
         conversationReferences,
@@ -2597,6 +2602,15 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     },
     context
   );
+}
+function applyQuotationBoundaryHint(rawTranscript, hint) {
+  if (!hint) return { text: rawTranscript, recovered: false };
+  const trimmed = rawTranscript.trim();
+  if (!trimmed) return { text: rawTranscript, recovered: false };
+  const alreadyWrapped = hint === "single" ? /^[\u2018'][\s\S]*[\u2019']$/u.test(trimmed) : /^[\u201c"][\s\S]*[\u201d"]$/u.test(trimmed);
+  if (alreadyWrapped) return { text: rawTranscript, recovered: false };
+  const command = hint === "single" ? "single quotation" : "quotation";
+  return { text: `${command} ${trimmed} ${command}`, recovered: true };
 }
 function preservesAuthoritativeSpellings(deterministicCandidate, contextualCandidate, spellings) {
   for (const canonical of new Set(spellings.map((spelling) => spelling.canonical))) {

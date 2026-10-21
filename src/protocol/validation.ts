@@ -72,7 +72,10 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       isIdentifier(value.operationId) &&
       isIdentifier(value.chatId) &&
       isNonNegativeInteger(value.expectedVersion) &&
-      isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS)
+      isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) &&
+      (value.quotationBoundaryHint === undefined ||
+        value.quotationBoundaryHint === 'double' ||
+        value.quotationBoundaryHint === 'single')
     )
   }
   if (value.type === 'transcript.confirm.request' || value.type === 'edit.confirm.request') {

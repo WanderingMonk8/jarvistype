@@ -186,8 +186,22 @@ test('validates transcript normalization and recording undo requests', () => {
       chatId: 'chat-1',
       expectedVersion: 2,
       rawTranscript: 'A completed transcript.',
+      quotationBoundaryHint: 'double',
     }),
     true,
+  )
+  assert.equal(
+    isFrontendRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.normalize.request',
+      requestId: 'recording-request-invalid-hint',
+      operationId: 'recording-operation-invalid-hint',
+      chatId: 'chat-1',
+      expectedVersion: 2,
+      rawTranscript: 'A completed transcript.',
+      quotationBoundaryHint: 'curly',
+    }),
+    false,
   )
   assert.equal(
     isFrontendRequest({

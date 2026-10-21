@@ -1201,6 +1201,34 @@ test('formats an opening produced by a spoken quote command', async () => {
   }
 })
 
+test('recovers paired boundary quotations observed only in the streaming transcript', async () => {
+  const userId = 'streamed-boundary-quotes-user'
+  const chatId = 'streamed-boundary-quotes-chat'
+  activeChatId = chatId
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'streamed-boundary-quotes-segment',
+      0,
+      'No offense, but you do look like you have had a long day.',
+      'double',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.rawTranscript, 'No offense, but you do look like you have had a long day.')
+    assert.equal(
+      response.proposal.candidateText,
+      '“No offense, but you do look like you have had a long day.”',
+    )
+    assert.ok(response.proposal.reasons.includes('streamed quotation command recovery'))
+  }
+})
+
 test('does not append a second period after a punctuated spoken quotation', async () => {
   const userId = 'closing-quote-period-user'
   const chatId = 'closing-quote-period-chat'
@@ -3284,6 +3312,7 @@ function recordingAppendRequest(
   operationId: string,
   expectedVersion: number,
   rawTranscript: string,
+  quotationBoundaryHint?: 'double' | 'single',
 ) {
   return {
     protocolVersion: PROTOCOL_VERSION,
@@ -3293,6 +3322,7 @@ function recordingAppendRequest(
     chatId,
     expectedVersion,
     rawTranscript,
+    ...(quotationBoundaryHint ? { quotationBoundaryHint } : {}),
   }
 }
 

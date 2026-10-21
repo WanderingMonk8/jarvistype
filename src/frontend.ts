@@ -168,6 +168,7 @@ interface ActiveRecording {
   session: SpindleSTTSession
   finalSegments: string[]
   interimText: string
+  quotationBoundaryHint: 'double' | 'single' | null
   mode: 'message' | 'edit'
 }
 
@@ -1088,6 +1089,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const commitRecordingTranscript = async (
     rawTranscript: string,
     operationId: string,
+    quotationBoundaryHint?: 'double' | 'single',
   ): Promise<void> => {
     const snapshot = state.snapshot
     const requestTransitionId = chatTransitionId
@@ -1107,6 +1109,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       chatId: snapshot.chatId,
       expectedVersion: snapshot.draftVersion,
       rawTranscript,
+      ...(quotationBoundaryHint ? { quotationBoundaryHint } : {}),
     })
     if (!alive) return
     if (
@@ -1506,7 +1509,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     render()
     if (recording.mode === 'edit')
       await interpretEditTranscript(transcript.text, recording.operationId)
-    else await commitRecordingTranscript(transcript.text, recording.operationId)
+    else
+      await commitRecordingTranscript(
+        transcript.text,
+        recording.operationId,
+        recording.quotationBoundaryHint ?? undefined,
+      )
   }
 
   const failRecording = (runId: string, error: unknown) => {
@@ -1563,7 +1571,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           } else {
             current.interimText = result.text
           }
-          state.voiceProvisionalText = joinTranscriptUpdates(finalSegments, current.interimText)
+          const streamedTranscript = joinTranscriptUpdates(finalSegments, current.interimText)
+          current.quotationBoundaryHint =
+            detectQuotationBoundaryHint(streamedTranscript) ?? current.quotationBoundaryHint
+          state.voiceProvisionalText = streamedTranscript
           render()
         },
       })
@@ -1573,6 +1584,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         session,
         finalSegments,
         interimText: '',
+        quotationBoundaryHint: null,
         mode,
       }
       recordingStartedAt = Date.now()
@@ -2239,6 +2251,24 @@ function renderHistory(list: HTMLOListElement, snapshot: DraftSnapshot | null): 
 
 function joinTranscriptUpdates(finalSegments: string[], interimText: string): string {
   return [...finalSegments, interimText].filter(Boolean).join(' ').trim()
+}
+
+function detectQuotationBoundaryHint(input: string): 'double' | 'single' | null {
+  const trimmed = input.trim()
+  const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu
+  const doubleClosing = /\b(?:close\s+)?(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu
+  const singleOpening = /^(?:open\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?\b/iu
+  const singleClosing = /\b(?:close\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu
+  const singleCount =
+    trimmed.match(/\b(?:open\s+|close\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?\b/giu)
+      ?.length ?? 0
+  const doubleCount =
+    trimmed.match(
+      /\b(?:open\s+|close\s+)?(?<!single\s)(?:quote|quotation)(?:\s+marks?)?\b/giu,
+    )?.length ?? 0
+  if (singleCount >= 2 && singleOpening.test(trimmed) && singleClosing.test(trimmed)) return 'single'
+  if (doubleCount >= 2 && doubleOpening.test(trimmed) && doubleClosing.test(trimmed)) return 'double'
+  return null
 }
 
 function formatDuration(durationMs: number): string {

@@ -227,18 +227,23 @@ async function handleTranscriptNormalization(
       referenceContext.messages,
     )
     const capitalizeOpening = shouldCapitalizeRecordingOpening(session.cleanText)
-    const deterministic = normalizeDeterministically(request.rawTranscript, glossary.entries, {
+    const recoveredBoundary = applyQuotationBoundaryHint(
+      request.rawTranscript,
+      request.quotationBoundaryHint,
+    )
+    const deterministic = normalizeDeterministically(recoveredBoundary.text, glossary.entries, {
       capitalizeOpening,
     })
     let candidateText = deterministic.text
     let contextualModelUsed = false
     const reasons = [...deterministic.reasons]
+    if (recoveredBoundary.recovered) reasons.push('streamed quotation command recovery')
     if (normalizedAgainstNewerDraft) reasons.push('normalized against newer same-chat draft')
     const ambiguities = [...deterministic.ambiguities]
     const learningCandidates = [...deterministic.learningCandidates]
     if (settings.contextualNormalizationEnabled) {
       const contextual = await normalizeWithContext(
-        request.rawTranscript,
+        recoveredBoundary.text,
         candidateText,
         selected.messages,
         conversationReferences,
@@ -363,6 +368,22 @@ async function handleTranscriptNormalization(
     },
     context,
   )
+}
+
+function applyQuotationBoundaryHint(
+  rawTranscript: string,
+  hint: 'double' | 'single' | undefined,
+): { text: string; recovered: boolean } {
+  if (!hint) return { text: rawTranscript, recovered: false }
+  const trimmed = rawTranscript.trim()
+  if (!trimmed) return { text: rawTranscript, recovered: false }
+  const alreadyWrapped =
+    hint === 'single'
+      ? /^[\u2018'][\s\S]*[\u2019']$/u.test(trimmed)
+      : /^[\u201c"][\s\S]*[\u201d"]$/u.test(trimmed)
+  if (alreadyWrapped) return { text: rawTranscript, recovered: false }
+  const command = hint === 'single' ? 'single quotation' : 'quotation'
+  return { text: `${command} ${trimmed} ${command}`, recovered: true }
 }
 
 function preservesAuthoritativeSpellings(

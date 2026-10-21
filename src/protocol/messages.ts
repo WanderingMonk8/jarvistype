@@ -127,6 +127,7 @@ export type FrontendRequest =
       chatId: string
       expectedVersion: number
       rawTranscript: string
+      quotationBoundaryHint?: 'double' | 'single'
     })
   | (RequestEnvelope & {
       type: 'transcript.confirm.request'

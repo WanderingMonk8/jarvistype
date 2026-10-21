@@ -3430,6 +3430,11 @@ async function interpretEditInstruction(instructionTranscript, session, settings
   if (inlineInsertion) return finalizeInterpretedPlan(instructionTranscript, inlineInsertion);
   const referentialPlan = parseDeterministicReferentialReplacement(instructionTranscript, session);
   if (referentialPlan) return referentialPlan;
+  const qualifiedReferencePlan = parseDeterministicQualifiedAsInReplacement(
+    instructionTranscript,
+    session
+  );
+  if (qualifiedReferencePlan) return qualifiedReferencePlan;
   const sentenceReplacement = parseDeterministicSentenceReplacement(instructionTranscript, session);
   if (sentenceReplacement)
     return finalizeInterpretedPlan(instructionTranscript, sentenceReplacement);
@@ -4041,6 +4046,25 @@ function parseDeterministicSentenceReplacement(instructionTranscript, session) {
       }
     ]
   });
+}
+function parseDeterministicQualifiedAsInReplacement(instructionTranscript, session) {
+  if (/[\r\n;]/u.test(instructionTranscript)) return null;
+  if (!hasQualifiedAsInReference(instructionTranscript)) return null;
+  const referenceIndex = instructionTranscript.search(/\bas\s+in\b/iu);
+  if (referenceIndex < 1) return null;
+  const reference = instructionTranscript.slice(referenceIndex);
+  if (/\b(?:and|then)\s+(?:replace|change|swap|substitute|delete|remove|insert|add|append|prepend|move|relocate|shift|split|break|join|merge)\b/iu.test(
+    reference
+  ))
+    return null;
+  const command = instructionTranscript.slice(0, referenceIndex).replace(/[\s,;:]+$/u, "").trim();
+  if (!command) return null;
+  const plan = parseDeterministicSimpleReplacement(command, session);
+  if (!plan) return null;
+  const operation = plan.operations[0];
+  if (!operation || typeof operation.text !== "string" || /\bas\s+in\b/iu.test(operation.text) || operation.target.exactText === void 0)
+    return null;
+  return plan;
 }
 function parseDeterministicSimpleReplacement(instructionTranscript, session) {
   if (/[\r\n;]/u.test(instructionTranscript) || /\bas\s+in\b/iu.test(instructionTranscript) || /[,;]\s*(?:and\s+)?(?:replace|change|swap|substitute|delete|remove|insert|add|append|prepend|move|relocate|shift|split|break|join|merge)\b/iu.test(

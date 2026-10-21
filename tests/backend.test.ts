@@ -3421,6 +3421,45 @@ test('aborts an in-flight grammar request when the operation is cancelled', asyn
   )
 })
 
+test('replaces with a qualified as in reference without a provider interpretation', async () => {
+  const userId = 'qualified-reference-replacement-user'
+  const chatId = 'qualified-reference-replacement-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, "So, I guess you can name your price. I'm in debt to you now.")
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'qualified-reference-replacement-interpret',
+      operationId: 'qualified-reference-replacement-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Replace in debt with indebted, as in, you are indebted and therefore owe people money.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    "So, I guess you can name your price. I'm indebted to you now.",
+  )
+  assert.equal(proposal.proposal.operations[0]?.text, 'indebted')
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
 test('keeps a one-time explanatory reference out of replacement text and glossary learning', async () => {
   const userId = 'reference-edit-user'
   const chatId = 'reference-edit-chat'

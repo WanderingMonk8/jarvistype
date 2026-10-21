@@ -2416,7 +2416,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     if (!spindle.permissions.has("chats") || !spindle.permissions.has("generation")) {
       return { kind: "error", error: "permission", session };
     }
-    if (session.draftVersion !== request.expectedVersion) return { kind: "stale", session };
+    const normalizedAgainstNewerDraft = session.draftVersion !== request.expectedVersion;
     const [settings, glossary, messages] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
@@ -2440,6 +2440,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     let candidateText = deterministic.text;
     let contextualModelUsed = false;
     const reasons = [...deterministic.reasons];
+    if (normalizedAgainstNewerDraft) reasons.push("normalized against newer same-chat draft");
     const ambiguities = [...deterministic.ambiguities];
     const learningCandidates = [...deterministic.learningCandidates];
     if (settings.contextualNormalizationEnabled) {
@@ -2520,7 +2521,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     const proposal = {
       operationId: request.operationId,
       chatId: request.chatId,
-      expectedVersion: request.expectedVersion,
+      expectedVersion: session.draftVersion,
       rawTranscript: request.rawTranscript,
       candidateText,
       reasons: [...new Set(reasons)],
@@ -2542,16 +2543,6 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       context,
       "PERMISSION_DENIED",
       "Chat and generation access are required for bounded transcript normalization.",
-      result.session
-    );
-    return;
-  }
-  if (result.kind === "stale") {
-    sendDraftError(
-      request,
-      context,
-      "NORMALIZATION_FAILED",
-      "The draft changed before normalization completed. Record again after it finishes saving.",
       result.session
     );
     return;
@@ -2743,10 +2734,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
       session.paragraphs,
       session.draftVersion,
       plan,
-      [
-        ...glossary.entries.map((entry) => entry.canonical),
-        ...conversationReferences
-      ]
+      [...glossary.entries.map((entry) => entry.canonical), ...conversationReferences]
     );
     if (!executed.ok) {
       const candidates = createEditCandidateContext(request, session, plan);
@@ -2902,8 +2890,7 @@ async function handleEditConfirmation(request, context, activeRequest) {
       operationId: proposal.operationId,
       ...proposal.resultingParagraphIds ? { paragraphIdOrder: proposal.resultingParagraphIds } : {}
     });
-    if (!mutation.applied)
-      return { error: "stale-version", session: mutation.session };
+    if (!mutation.applied) return { error: "stale-version", session: mutation.session };
     let glossary = await loadGlossary(context.userId);
     const learned = [];
     for (const candidate of proposal.learningCandidates) {
@@ -2927,13 +2914,7 @@ async function handleEditConfirmation(request, context, activeRequest) {
   if (activeRequest.cancelled) return;
   if ("error" in result) {
     const message = result.error === "stale-version" ? `The draft advanced to version ${result.session.draftVersion} before approval. The stale proposal was discarded.` : result.error === "chat-mismatch" ? "The active chat changed before approval. Nothing was edited." : "The edit proposal no longer matched the current draft. Nothing was edited.";
-    sendDraftError(
-      request,
-      context,
-      "EDIT_PROPOSAL_EXPIRED",
-      message,
-      result.session
-    );
+    sendDraftError(request, context, "EDIT_PROPOSAL_EXPIRED", message, result.session);
     return;
   }
   send(
@@ -3235,9 +3216,7 @@ function editMayNeedGrammarRepair(beforeText, proposedText, operations) {
     return /(?:^|[.!?\u2026]["'\u2019\u201d]?\s*)$/u.test(before) || /^\s*[.!?\u2026]/u.test(after) || /[.!?\u2026]/u.test(operation.beforeText + operation.afterText);
   }))
     return true;
-  return /\b(?:a\s+[aeiou]|an\s+[bcdfghjklmnpqrstvwxyz])\p{L}*\b|([,.;:!?])\1/u.test(
-    proposedText
-  );
+  return /\b(?:a\s+[aeiou]|an\s+[bcdfghjklmnpqrstvwxyz])\p{L}*\b|([,.;:!?])\1/u.test(proposedText);
 }
 function boundedGrammarProtectedTerms(values) {
   const bounded = [];
@@ -3465,8 +3444,7 @@ function normalizeSentenceOperation(instructionTranscript, plan) {
 function parseSentencePosition(instructionTranscript) {
   if (/\b(?:second[- ]to[- ]last|penultimate)\s+sentence\b/iu.test(instructionTranscript))
     return { sentenceFromEnd: 2 };
-  if (/\b(?:last|final)\s+sentence\b/iu.test(instructionTranscript))
-    return { sentenceFromEnd: 1 };
+  if (/\b(?:last|final)\s+sentence\b/iu.test(instructionTranscript)) return { sentenceFromEnd: 1 };
   const match = instructionTranscript.match(
     /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th|seventh|7th|eighth|8th|ninth|9th|tenth|10th)\s+sentence\b/iu
   );
@@ -3663,7 +3641,8 @@ function reconcileEditLearningCandidateCasing(candidates, operations, afterText)
     );
     const appliedSpellings = /* @__PURE__ */ new Set();
     for (const operation of operations) {
-      for (const match of operation.afterText.matchAll(candidatePattern)) appliedSpellings.add(match[0]);
+      for (const match of operation.afterText.matchAll(candidatePattern))
+        appliedSpellings.add(match[0]);
     }
     if (appliedSpellings.size === 1) {
       const canonical = [...appliedSpellings][0];

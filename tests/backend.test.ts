@@ -616,6 +616,61 @@ test('appends a reviewed recording onto a concurrently changed same-chat draft',
   )
 })
 
+test('reviews a recording against the latest same-chat draft when its starting version is stale', async () => {
+  const userId = 'stale-start-recording-user'
+  const chatId = 'stale-start-recording-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Original draft.')
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.mutate.request',
+      requestId: 'stale-start-newer-draft',
+      operationId: 'stale-start-newer-draft-operation',
+      chatId,
+      expectedVersion: 1,
+      editGroupId: 'stale-start-newer-draft-group',
+      cleanText: 'Updated from another device.',
+    },
+    userId,
+  )
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'stale-start-recording-segment', 1, 'recorded concurrently.'),
+    userId,
+  )
+
+  const proposalResponse = responses.at(-1)?.payload
+  assert.equal(proposalResponse?.type, 'transcript.normalization.response')
+  if (proposalResponse?.type !== 'transcript.normalization.response') return
+  assert.equal(proposalResponse.outcome, 'review')
+  assert.equal(proposalResponse.proposal.expectedVersion, 2)
+  assert.equal(proposalResponse.proposal.candidateText, 'Recorded concurrently.')
+  assert.ok(
+    proposalResponse.proposal.reasons.includes('normalized against newer same-chat draft'),
+  )
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.confirm.request',
+      requestId: 'stale-start-recording-confirm',
+      operationId: proposalResponse.proposal.operationId,
+      chatId,
+      expectedVersion: proposalResponse.proposal.expectedVersion,
+    },
+    userId,
+  )
+
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'transcript.normalization.response')
+  if (committed?.type === 'transcript.normalization.response') {
+    assert.equal(committed.outcome, 'committed')
+    assert.equal(committed.snapshot?.cleanText, 'Updated from another device. Recorded concurrently.')
+  }
+})
+
 test('requires review even when a transcript needs no normalization', async () => {
   const userId = 'unchanged-review-user'
   const chatId = 'unchanged-review-chat'

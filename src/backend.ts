@@ -208,7 +208,7 @@ async function handleTranscriptNormalization(
     if (!spindle.permissions.has('chats') || !spindle.permissions.has('generation')) {
       return { kind: 'error' as const, error: 'permission' as const, session }
     }
-    if (session.draftVersion !== request.expectedVersion) return { kind: 'stale' as const, session }
+    const normalizedAgainstNewerDraft = session.draftVersion !== request.expectedVersion
 
     const [settings, glossary, messages] = await Promise.all([
       loadSettings(context.userId),
@@ -233,6 +233,7 @@ async function handleTranscriptNormalization(
     let candidateText = deterministic.text
     let contextualModelUsed = false
     const reasons = [...deterministic.reasons]
+    if (normalizedAgainstNewerDraft) reasons.push('normalized against newer same-chat draft')
     const ambiguities = [...deterministic.ambiguities]
     const learningCandidates = [...deterministic.learningCandidates]
     if (settings.contextualNormalizationEnabled) {
@@ -323,7 +324,7 @@ async function handleTranscriptNormalization(
     const proposal: NormalizationProposal = {
       operationId: request.operationId,
       chatId: request.chatId,
-      expectedVersion: request.expectedVersion,
+      expectedVersion: session.draftVersion,
       rawTranscript: request.rawTranscript,
       candidateText,
       reasons: [...new Set(reasons)],
@@ -347,16 +348,6 @@ async function handleTranscriptNormalization(
       context,
       'PERMISSION_DENIED',
       'Chat and generation access are required for bounded transcript normalization.',
-      result.session,
-    )
-    return
-  }
-  if (result.kind === 'stale') {
-    sendDraftError(
-      request,
-      context,
-      'NORMALIZATION_FAILED',
-      'The draft changed before normalization completed. Record again after it finishes saving.',
       result.session,
     )
     return

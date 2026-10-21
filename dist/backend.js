@@ -2349,6 +2349,11 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
   let text = input.replace(/(\bopen quote\b[.,;:!?…—–-]*)[ \t]*["“”]/gi, "$1").replace(/["“”][ \t]*(\bclose quote\b)/gi, "$1").replace(/(\bopen single quote\b[.,;:!?…—–-]*)[ \t]*['‘’]/gi, "$1").replace(/['‘’][ \t]*(\bclose single quote\b)/gi, "$1");
   const replaceGuardedAliasPair = (beginPhrase, endPhrase, opening, closing, reason) => {
     if (hasLiteralQuoteContext) return;
+    const recoveredClosing = recoverMistranscribedClosingAlias(text, beginPhrase, endPhrase);
+    if (recoveredClosing !== null) {
+      text = recoveredClosing;
+      reasons.push("fuzzy spoken command recovery");
+    }
     const beginPattern = new RegExp(`\\b${beginPhrase}\\b([.,;:!?\u2026\u2014\u2013-]*)`, "giu");
     const endPattern = new RegExp(`\\b${endPhrase}\\b([.,;:!?\u2026\u2014\u2013-]*)`, "giu");
     const tokenPattern = new RegExp(`\\b(${beginPhrase}|${endPhrase})\\b`, "giu");
@@ -2358,10 +2363,7 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
       (token, index) => index % 2 === 0 ? token[1]?.toLocaleLowerCase() !== beginPhrase : token[1]?.toLocaleLowerCase() !== endPhrase
     ))
       return;
-    if (/\b(?:begin|end)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
-      text
-    ))
-      return;
+    if (hasNaturalAliasUsage(text)) return;
     for (let index = 0; index < tokens.length; index += 2) {
       const contentStart = (tokens[index].index ?? 0) + tokens[index][0].length;
       const contentEnd = tokens[index + 1].index ?? contentStart;
@@ -2372,11 +2374,14 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
       reasons.push(reason);
       return `${generatedOpeningMarker}${opening}`;
     });
-    text = text.replace(endPattern, (_whole, attachedPunctuation, offset) => {
-      marks.push(closing);
-      reasons.push(reason);
-      return `${closing}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`;
-    });
+    text = text.replace(
+      endPattern,
+      (_whole, attachedPunctuation, offset) => {
+        marks.push(closing);
+        reasons.push(reason);
+        return `${closing}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`;
+      }
+    );
   };
   replaceGuardedAliasPair("begin speech", "end speech", "\u201C", "\u201D", "quote");
   replaceGuardedAliasPair("begin single", "end single", "\u2018", "\u2019", "single quote");
@@ -2412,6 +2417,27 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
   text = formatGeneratedQuotationOpenings(text, generatedOpeningMarker);
   return { text, marks, reasons };
 }
+function hasNaturalAliasUsage(text) {
+  return /\b(?:begin|end)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
+    text
+  );
+}
+function recoverMistranscribedClosingAlias(text, beginPhrase, endPhrase) {
+  if (hasNaturalAliasUsage(text)) return null;
+  const beginCount = text.match(new RegExp(`\\b${beginPhrase}\\b`, "giu"))?.length ?? 0;
+  const endCount = text.match(new RegExp(`\\b${endPhrase}\\b`, "giu"))?.length ?? 0;
+  if (beginCount !== 1 || endCount !== 0) return null;
+  const kind = endPhrase.slice(endPhrase.indexOf(" ") + 1);
+  const closingAliasPattern = new RegExp(
+    `\\b(and)\\s+(${kind})\\b([.,;:!?\u2026\u2014\u2013-]*)(?=\\s*(?:(?:period|full stop)\\b\\s*)?$)`,
+    "iu"
+  );
+  if (!closingAliasPattern.test(text)) return null;
+  return text.replace(closingAliasPattern, (match, conjunction) => {
+    const replacement = conjunction === "AND" ? "END" : conjunction[0] === "A" ? "End" : "end";
+    return `${replacement}${match.slice(conjunction.length)}`;
+  });
+}
 function stripProviderRenderedQuotesBesidePairedCommands(input, reason) {
   const phrase = reason === "quote" ? "(?<!single\\s)(?:quote|quotation)" : "single\\s+(?:quote|quotation)";
   const quoteClass = reason === "quote" ? '["\u201C\u201D]' : "['\u2018\u2019]";
@@ -2420,11 +2446,14 @@ function stripProviderRenderedQuotesBesidePairedCommands(input, reason) {
     "gi"
   );
   let occurrence = 0;
-  return input.replace(pattern, (_whole, before, command, after) => {
-    const isOpening = occurrence % 2 === 0;
-    occurrence += 1;
-    return isOpening ? `${before ?? ""}${command}` : `${command}${after ?? ""}`;
-  });
+  return input.replace(
+    pattern,
+    (_whole, before, command, after) => {
+      const isOpening = occurrence % 2 === 0;
+      occurrence += 1;
+      return isOpening ? `${before ?? ""}${command}` : `${command}${after ?? ""}`;
+    }
+  );
 }
 function punctuationAfterSpokenCommand(source, commandOffset, commandReason, attachedPunctuation) {
   const isClosingDelimiter = commandReason === "quote" || commandReason === "single quote" || commandReason === "close parenthesis" || commandReason === "close bracket";

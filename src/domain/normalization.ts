@@ -381,6 +381,11 @@ function replaceSpokenQuotationCommands(
     reason: 'quote' | 'single quote',
   ) => {
     if (hasLiteralQuoteContext) return
+    const recoveredClosing = recoverMistranscribedClosingAlias(text, beginPhrase, endPhrase)
+    if (recoveredClosing !== null) {
+      text = recoveredClosing
+      reasons.push('fuzzy spoken command recovery')
+    }
     const beginPattern = new RegExp(`\\b${beginPhrase}\\b([.,;:!?…—–-]*)`, 'giu')
     const endPattern = new RegExp(`\\b${endPhrase}\\b([.,;:!?…—–-]*)`, 'giu')
     const tokenPattern = new RegExp(`\\b(${beginPhrase}|${endPhrase})\\b`, 'giu')
@@ -394,12 +399,7 @@ function replaceSpokenQuotationCommands(
       )
     )
       return
-    if (
-      /\b(?:begin|end)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
-        text,
-      )
-    )
-      return
+    if (hasNaturalAliasUsage(text)) return
     for (let index = 0; index < tokens.length; index += 2) {
       const contentStart = (tokens[index]!.index ?? 0) + tokens[index]![0].length
       const contentEnd = tokens[index + 1]!.index ?? contentStart
@@ -410,11 +410,14 @@ function replaceSpokenQuotationCommands(
       reasons.push(reason)
       return `${generatedOpeningMarker}${opening}`
     })
-    text = text.replace(endPattern, (_whole: string, attachedPunctuation: string, offset: number) => {
-      marks.push(closing)
-      reasons.push(reason)
-      return `${closing}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`
-    })
+    text = text.replace(
+      endPattern,
+      (_whole: string, attachedPunctuation: string, offset: number) => {
+        marks.push(closing)
+        reasons.push(reason)
+        return `${closing}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`
+      },
+    )
   }
 
   replaceGuardedAliasPair('begin speech', 'end speech', '“', '”', 'quote')
@@ -463,25 +466,59 @@ function replaceSpokenQuotationCommands(
   return { text, marks, reasons }
 }
 
+function hasNaturalAliasUsage(text: string): boolean {
+  return /\b(?:begin|end)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
+    text,
+  )
+}
+
+/**
+ * Speech-to-text often hears a closing “end speech” as “and speech”. When the
+ * transcript contains exactly one unmatched opening alias and ends on that
+ * misheard closing phrase, restore the closing alias so the guarded pair can
+ * run. Natural “and speech” prose and natural alias usage stay untouched.
+ */
+function recoverMistranscribedClosingAlias(
+  text: string,
+  beginPhrase: string,
+  endPhrase: string,
+): string | null {
+  if (hasNaturalAliasUsage(text)) return null
+  const beginCount = text.match(new RegExp(`\\b${beginPhrase}\\b`, 'giu'))?.length ?? 0
+  const endCount = text.match(new RegExp(`\\b${endPhrase}\\b`, 'giu'))?.length ?? 0
+  if (beginCount !== 1 || endCount !== 0) return null
+  const kind = endPhrase.slice(endPhrase.indexOf(' ') + 1)
+  const closingAliasPattern = new RegExp(
+    `\\b(and)\\s+(${kind})\\b([.,;:!?…—–-]*)(?=\\s*(?:(?:period|full stop)\\b\\s*)?$)`,
+    'iu',
+  )
+  if (!closingAliasPattern.test(text)) return null
+  return text.replace(closingAliasPattern, (match: string, conjunction: string) => {
+    const replacement = conjunction === 'AND' ? 'END' : conjunction[0] === 'A' ? 'End' : 'end'
+    return `${replacement}${match.slice(conjunction.length)}`
+  })
+}
+
 function stripProviderRenderedQuotesBesidePairedCommands(
   input: string,
   reason: 'quote' | 'single quote',
 ): string {
   const phrase =
-    reason === 'quote'
-      ? '(?<!single\\s)(?:quote|quotation)'
-      : 'single\\s+(?:quote|quotation)'
+    reason === 'quote' ? '(?<!single\\s)(?:quote|quotation)' : 'single\\s+(?:quote|quotation)'
   const quoteClass = reason === 'quote' ? '["“”]' : "['‘’]"
   const pattern = new RegExp(
     `(${quoteClass}[ \\t]*)?(\\b${phrase}\\b[.,;:!?…—–-]*)([ \\t]*${quoteClass})?`,
     'gi',
   )
   let occurrence = 0
-  return input.replace(pattern, (_whole, before: string | undefined, command: string, after: string | undefined) => {
-    const isOpening = occurrence % 2 === 0
-    occurrence += 1
-    return isOpening ? `${before ?? ''}${command}` : `${command}${after ?? ''}`
-  })
+  return input.replace(
+    pattern,
+    (_whole, before: string | undefined, command: string, after: string | undefined) => {
+      const isOpening = occurrence % 2 === 0
+      occurrence += 1
+      return isOpening ? `${before ?? ''}${command}` : `${command}${after ?? ''}`
+    },
+  )
 }
 
 function punctuationAfterSpokenCommand(
@@ -548,9 +585,7 @@ function replaceExplicitSpelling(
       if (letters.length < 3) return whole
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : undefined
       const canonical =
-        matchingCue && !casing
-          ? matchingCue
-          : applySpellingCasing(matchingCue ?? letters, casing)
+        matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? letters, casing)
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`
     },
@@ -571,9 +606,7 @@ function replaceExplicitSpelling(
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : undefined
       if (!/[A-Z]{2,}/.test(spoken) || (!casing && !matchingCue)) return whole
       const canonical =
-        matchingCue && !casing
-          ? matchingCue
-          : applySpellingCasing(matchingCue ?? spoken, casing)
+        matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? spoken, casing)
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`
     },
@@ -619,8 +652,8 @@ function normalizeApostrophesInsideExplicitSpelling(value: string): string {
 function cueMatchesLetters(cue: string | undefined, letters: string): cue is string {
   return Boolean(
     cue &&
-      cue.replace(/[-'\u2019]/g, '').toLowerCase() ===
-        letters.replace(/[-'\u2019]/g, '').toLowerCase(),
+    cue.replace(/[-'\u2019]/g, '').toLowerCase() ===
+      letters.replace(/[-'\u2019]/g, '').toLowerCase(),
   )
 }
 

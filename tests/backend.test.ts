@@ -1067,6 +1067,33 @@ test('contextually recovers a standout spoken command without prior chat or draf
   assert.match(systemPrompt, /commandDecisions/)
 })
 
+test('recovers a mistranscribed closing speech alias in the normalization proposal', async () => {
+  const userId = 'fuzzy-speech-alias-user'
+  const chatId = 'fuzzy-speech-alias-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'fuzzy-speech-alias-segment',
+      1,
+      'Begin speech. No. I do not play Wonderful. I play jazz, though. So, I guess you can name your price and speech.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type !== 'transcript.normalization.response') return
+  assert.equal(
+    response.proposal.candidateText,
+    '“No. I do not play Wonderful. I play jazz, though. So, I guess you can name your price”.',
+  )
+  assert.ok(response.proposal.reasons.includes('fuzzy spoken command recovery'))
+})
+
 test('rejects contextual command decisions that do not quote the raw transcript', async () => {
   const userId = 'invented-command-user'
   const chatId = 'invented-command-chat'

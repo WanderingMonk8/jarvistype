@@ -575,6 +575,98 @@ test('keeps exact-text insertions inline and adds only missing boundary spacing'
   )
   assert.equal(afterSentence.ok && afterSentence.afterText, 'Hello. Quietly Goodbye.')
 
+  const afterPhraseAtSentenceEnd = executeEditPlan(
+    'She answered, “So, yeah.”',
+    [{ id: 'quoted', ordinal: 1, lineIndex: 0, text: 'She answered, “So, yeah.”' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert after a phrase immediately before sentence punctuation',
+      operations: [
+        {
+          id: 'after-terminal-phrase',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, exactText: 'So, yeah' },
+          text: 'are you clocking out soon?',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    afterPhraseAtSentenceEnd.ok && afterPhraseAtSentenceEnd.afterText,
+    'She answered, “So, yeah.” Are you clocking out soon?',
+  )
+
+  const literalPhraseAfterTarget = executeEditPlan(
+    'She answered, “So, yeah.”',
+    [{ id: 'literal-phrase', ordinal: 1, lineIndex: 0, text: 'She answered, “So, yeah.”' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert a phrase literally after its target',
+      operations: [
+        {
+          id: 'literal-after-target',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, exactText: 'So, yeah' },
+          text: 'for now',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    literalPhraseAfterTarget.ok && literalPhraseAfterTarget.afterText,
+    'She answered, “So, yeah for now.”',
+  )
+
+  const punctuationOnlyAfterPhrase = executeEditPlan(
+    'This is very good.',
+    [{ id: 'punctuation', ordinal: 1, lineIndex: 0, text: 'This is very good.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'retain the exact attachment point for punctuation-only insertions',
+      operations: [
+        {
+          id: 'closing-quote',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, exactText: 'This is very good' },
+          text: '”',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    punctuationOnlyAfterPhrase.ok && punctuationOnlyAfterPhrase.afterText,
+    'This is very good”.',
+  )
+
+  const appendAfterQuotedSentence = executeEditPlan(
+    'She answered, “So, yeah.”',
+    [{ id: 'append-quoted', ordinal: 1, lineIndex: 0, text: 'She answered, “So, yeah.”' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'append after the complete sentence ending',
+      operations: [
+        {
+          id: 'append-after-terminal',
+          type: 'append',
+          target: { paragraphOrdinal: 1 },
+          text: 'are you clocking out soon?',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    appendAfterQuotedSentence.ok && appendAfterQuotedSentence.afterText,
+    'She answered, “So, yeah.” Are you clocking out soon?',
+  )
+
   for (const target of ['Ready?', 'Stop!', 'Wait…', 'She said "go."']) {
     const afterTerminalMark = executeEditPlan(
       target,

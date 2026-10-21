@@ -921,6 +921,7 @@ ${formattedParagraph}`,
       paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset2(cleanText, start)
     };
   }
+  const insertAfterPoint = operation.type === "insert_after" ? advancePastAdjacentSentenceEnding(cleanText, end, range.end, insertionText) : end;
   const replacement = operation.type === "replace" ? alignReplacementInitialCasing(
     cleanText,
     start,
@@ -929,10 +930,17 @@ ${formattedParagraph}`,
     protectedCasingTerms
   ) : operation.type === "delete" ? "" : operation.type === "insert_after" ? addBoundarySpacing(
     cleanText,
-    end,
-    capitalizeReplacementAtSentenceOpening(cleanText, end, insertionText)
+    insertAfterPoint,
+    capitalizeReplacementAtSentenceOpening(
+      cleanText,
+      insertAfterPoint,
+      insertionText
+    )
   ) : applyCase(cleanText.slice(start, end), operation.caseMode);
-  if (operation.type === "insert_after") start = end;
+  if (operation.type === "insert_after") {
+    start = insertAfterPoint;
+    end = insertAfterPoint;
+  }
   return {
     operation,
     start,
@@ -940,6 +948,11 @@ ${formattedParagraph}`,
     replacement,
     paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset2(cleanText, start)
   };
+}
+function advancePastAdjacentSentenceEnding(text, point, limit, insertion) {
+  if (!/(?:\.{3}|[.!?\u2026])[\u201d\u2019"')\]]*\s*$/u.test(insertion)) return point;
+  const ending = text.slice(point, limit).match(/^(?:\.{3}|[.!?\u2026])[\u201d\u2019"')\]]*(?=\s|$)/u)?.[0];
+  return ending ? point + ending.length : point;
 }
 function isStructuralOperation(operation) {
   return operation.type === "delete" && !hasInlineSelector(operation.target) && operation.target.scope !== "draft" && (operation.target.paragraphId !== void 0 || operation.target.paragraphOrdinal !== void 0) || operation.type === "split" || operation.type === "join_next" || (operation.type === "move_before" || operation.type === "move_after") && !isInlineMoveOperation(operation);

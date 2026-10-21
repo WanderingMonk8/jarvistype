@@ -55,6 +55,10 @@ export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   'close single quote',
   'single quote',
   'single quotation',
+  'begin speech',
+  'end speech',
+  'begin single',
+  'end single',
 ] as const
 
 const PUNCTUATION: Array<[RegExp, string, string]> = [
@@ -80,7 +84,7 @@ const PUNCTUATION: Array<[RegExp, string, string]> = [
 ]
 
 const SPOKEN_PUNCTUATION_TERM_SOURCE =
-  'open single quote|close single quote|open quote|close quote|single quotation|single quote|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe'
+  'open single quote|close single quote|open quote|close quote|single quotation|single quote|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe'
 
 const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
@@ -148,7 +152,9 @@ export function normalizeDeterministically(
   const quotation = replaceSpokenQuotationCommands(
     text,
     protectedLiterals.some((literal) =>
-      /\b(?:single\s+)?(?:quote|quotation)\b/iu.test(literal),
+      /\b(?:(?:single\s+)?(?:quote|quotation)|begin\s+(?:speech|single)|end\s+(?:speech|single))\b/iu.test(
+        literal,
+      ),
     ),
   )
   text = quotation.text
@@ -366,6 +372,53 @@ function replaceSpokenQuotationCommands(
     .replace(/["“”][ \t]*(\bclose quote\b)/gi, '$1')
     .replace(/(\bopen single quote\b[.,;:!?…—–-]*)[ \t]*['‘’]/gi, '$1')
     .replace(/['‘’][ \t]*(\bclose single quote\b)/gi, '$1')
+
+  const replaceGuardedAliasPair = (
+    beginPhrase: string,
+    endPhrase: string,
+    opening: string,
+    closing: string,
+    reason: 'quote' | 'single quote',
+  ) => {
+    if (hasLiteralQuoteContext) return
+    const beginPattern = new RegExp(`\\b${beginPhrase}\\b([.,;:!?…—–-]*)`, 'giu')
+    const endPattern = new RegExp(`\\b${endPhrase}\\b([.,;:!?…—–-]*)`, 'giu')
+    const tokenPattern = new RegExp(`\\b(${beginPhrase}|${endPhrase})\\b`, 'giu')
+    const tokens = [...text.matchAll(tokenPattern)]
+    if (!tokens.length || tokens.length % 2 !== 0) return
+    if (
+      tokens.some((token, index) =>
+        index % 2 === 0
+          ? token[1]?.toLocaleLowerCase() !== beginPhrase
+          : token[1]?.toLocaleLowerCase() !== endPhrase,
+      )
+    )
+      return
+    if (
+      /\b(?:begin|end)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
+        text,
+      )
+    )
+      return
+    for (let index = 0; index < tokens.length; index += 2) {
+      const contentStart = (tokens[index]!.index ?? 0) + tokens[index]![0].length
+      const contentEnd = tokens[index + 1]!.index ?? contentStart
+      if (!/[\p{L}\p{N}]/u.test(text.slice(contentStart, contentEnd))) return
+    }
+    text = text.replace(beginPattern, () => {
+      marks.push(opening)
+      reasons.push(reason)
+      return `${generatedOpeningMarker}${opening}`
+    })
+    text = text.replace(endPattern, (_whole: string, attachedPunctuation: string, offset: number) => {
+      marks.push(closing)
+      reasons.push(reason)
+      return `${closing}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`
+    })
+  }
+
+  replaceGuardedAliasPair('begin speech', 'end speech', '“', '”', 'quote')
+  replaceGuardedAliasPair('begin single', 'end single', '‘', '’', 'single quote')
 
   const replaceFixed = (pattern: RegExp, mark: string, reason: string, opening = false) => {
     text = text.replace(pattern, (_whole: string, attachedPunctuation: string, offset: number) => {

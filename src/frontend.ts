@@ -68,7 +68,7 @@ export const COMMAND_GROUPS = [
       ['Record Edit', 'Record Edit, then describe a change to the existing draft.'],
       [
         'Spoken punctuation',
-        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “quote” or “quotation” at both ends of a quotation, “single quote” or “single quotation” at both ends of a single quotation, “new line,” or “new paragraph.”',
+        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “quote” or “quotation” at both ends of a quotation, or “begin speech” and “end speech.” For single quotations, use “single quote” or “single quotation” at both ends, or “begin single” and “end single.” You can also say “new line” or “new paragraph.”',
       ],
       [
         'Literal punctuation word',
@@ -2255,6 +2255,8 @@ function joinTranscriptUpdates(finalSegments: string[], interimText: string): st
 
 function detectQuotationBoundaryHint(input: string): 'double' | 'single' | null {
   const trimmed = input.trim()
+  if (/^begin\s+single\b[\s\S]*\bend\s+single[.,;:!?]*$/iu.test(trimmed)) return 'single'
+  if (/^begin\s+speech\b[\s\S]*\bend\s+speech[.,;:!?]*$/iu.test(trimmed)) return 'double'
   const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu
   const doubleClosing = /\b(?:close\s+)?(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu
   const singleOpening = /^(?:open\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?\b/iu

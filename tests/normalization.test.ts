@@ -215,6 +215,30 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
   assert.deepEqual([...authoritative.authoritativePunctuationMarks].sort(), [',', '?'])
 })
 
+test('supports guarded speech quotation aliases without consuming natural usage', () => {
+  assert.equal(
+    normalizeDeterministically('begin speech hello there end speech period', []).text,
+    '“Hello there”.',
+  )
+  assert.equal(
+    normalizeDeterministically('begin single a private thought end single period', []).text,
+    '‘A private thought’.',
+  )
+  assert.equal(
+    normalizeDeterministically('We begin speech therapy today and end speech therapy next week.', [])
+      .text,
+    'We begin speech therapy today and end speech therapy next week.',
+  )
+  assert.equal(
+    normalizeDeterministically('A lone begin speech remains literal.', []).text,
+    'A lone begin speech remains literal.',
+  )
+  assert.equal(
+    normalizeDeterministically('Say the phrase begin speech and the phrase end speech.', []).text,
+    'Say begin speech and end speech.',
+  )
+})
+
 test('formats voice-generated quotation openings without changing intentional leading punctuation', () => {
   assert.equal(
     normalizeDeterministically('quote, and I am not going anywhere quote.', []).text,

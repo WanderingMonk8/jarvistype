@@ -1876,7 +1876,11 @@ var SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   "open single quote",
   "close single quote",
   "single quote",
-  "single quotation"
+  "single quotation",
+  "begin speech",
+  "end speech",
+  "begin single",
+  "end single"
 ];
 var PUNCTUATION = [
   [/\bnew paragraph\b([.,;:!?…—–-]*)/gi, "\n\n", "new paragraph"],
@@ -1899,7 +1903,7 @@ var PUNCTUATION = [
   [/\bdash\b([.,;:!?…—–-]*)/gi, "\u2014", "em dash"],
   [/\bapostrophe\b([.,;:!?…—–-]*)/gi, "\u2019", "apostrophe"]
 ];
-var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
+var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
 var LITERAL_PUNCTUATION_CONTEXTS = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
   /\btime\s+period\b/gi,
@@ -1960,7 +1964,9 @@ function normalizeDeterministically(raw, glossary, options = {}) {
   const quotation = replaceSpokenQuotationCommands(
     text,
     protectedLiterals.some(
-      (literal) => /\b(?:single\s+)?(?:quote|quotation)\b/iu.test(literal)
+      (literal) => /\b(?:(?:single\s+)?(?:quote|quotation)|begin\s+(?:speech|single)|end\s+(?:speech|single))\b/iu.test(
+        literal
+      )
     )
   );
   text = quotation.text;
@@ -2131,6 +2137,39 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
   const reasons = [];
   const generatedOpeningMarker = "\uE002";
   let text = input.replace(/(\bopen quote\b[.,;:!?…—–-]*)[ \t]*["“”]/gi, "$1").replace(/["“”][ \t]*(\bclose quote\b)/gi, "$1").replace(/(\bopen single quote\b[.,;:!?…—–-]*)[ \t]*['‘’]/gi, "$1").replace(/['‘’][ \t]*(\bclose single quote\b)/gi, "$1");
+  const replaceGuardedAliasPair = (beginPhrase, endPhrase, opening, closing, reason) => {
+    if (hasLiteralQuoteContext) return;
+    const beginPattern = new RegExp(`\\b${beginPhrase}\\b([.,;:!?\u2026\u2014\u2013-]*)`, "giu");
+    const endPattern = new RegExp(`\\b${endPhrase}\\b([.,;:!?\u2026\u2014\u2013-]*)`, "giu");
+    const tokenPattern = new RegExp(`\\b(${beginPhrase}|${endPhrase})\\b`, "giu");
+    const tokens = [...text.matchAll(tokenPattern)];
+    if (!tokens.length || tokens.length % 2 !== 0) return;
+    if (tokens.some(
+      (token, index) => index % 2 === 0 ? token[1]?.toLocaleLowerCase() !== beginPhrase : token[1]?.toLocaleLowerCase() !== endPhrase
+    ))
+      return;
+    if (/\b(?:begin|end)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
+      text
+    ))
+      return;
+    for (let index = 0; index < tokens.length; index += 2) {
+      const contentStart = (tokens[index].index ?? 0) + tokens[index][0].length;
+      const contentEnd = tokens[index + 1].index ?? contentStart;
+      if (!/[\p{L}\p{N}]/u.test(text.slice(contentStart, contentEnd))) return;
+    }
+    text = text.replace(beginPattern, () => {
+      marks.push(opening);
+      reasons.push(reason);
+      return `${generatedOpeningMarker}${opening}`;
+    });
+    text = text.replace(endPattern, (_whole, attachedPunctuation, offset) => {
+      marks.push(closing);
+      reasons.push(reason);
+      return `${closing}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`;
+    });
+  };
+  replaceGuardedAliasPair("begin speech", "end speech", "\u201C", "\u201D", "quote");
+  replaceGuardedAliasPair("begin single", "end single", "\u2018", "\u2019", "single quote");
   const replaceFixed = (pattern, mark, reason, opening = false) => {
     text = text.replace(pattern, (_whole, attachedPunctuation, offset) => {
       marks.push(mark);

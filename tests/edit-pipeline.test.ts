@@ -122,10 +122,9 @@ test('deletes a whole paragraph together with its adjacent separator', () => {
     operations: [{ id: 'delete-first', type: 'delete', target: { paragraphOrdinal: 1 } }],
   })
   assert.equal(firstDeleted.ok && firstDeleted.afterText, 'Second paragraph here.')
-  assert.deepEqual(
-    firstDeleted.ok && firstDeleted.resultingParagraphIds,
-    [session.paragraphs[1]!.id],
-  )
+  assert.deepEqual(firstDeleted.ok && firstDeleted.resultingParagraphIds, [
+    session.paragraphs[1]!.id,
+  ])
 
   const lastDeleted = executeEditPlan(session.cleanText, session.paragraphs, 1, {
     schemaVersion: 2,
@@ -468,7 +467,10 @@ test('keeps exact-text insertions inline and adds only missing boundary spacing'
       ],
     },
   )
-  assert.equal(beforeSentenceOpening.ok && beforeSentenceOpening.afterText, 'Perhaps today we leave.')
+  assert.equal(
+    beforeSentenceOpening.ok && beforeSentenceOpening.afterText,
+    'Perhaps today we leave.',
+  )
 
   const beforeProperNoun = executeEditPlan(
     'New York waits.',
@@ -772,24 +774,19 @@ test('sentence deletion consumes adjacent terminal punctuation for short targets
     ['Perhaps… Continue.', 'Perhaps', 'Continue.'],
     ['Wait... Continue.', 'Wait', 'Continue.'],
   ] as const) {
-    const result = executeEditPlan(
-      text,
-      [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }],
-      1,
-      {
-        schemaVersion: 2,
-        draftVersion: 1,
-        explanation: 'delete a short sentence',
-        operations: [
-          {
-            id: 'delete-short-sentence',
-            type: 'delete',
-            target: { paragraphOrdinal: 1, exactText: target },
-            includeTrailingPunctuation: true,
-          },
-        ],
-      },
-    )
+    const result = executeEditPlan(text, [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete a short sentence',
+      operations: [
+        {
+          id: 'delete-short-sentence',
+          type: 'delete',
+          target: { paragraphOrdinal: 1, exactText: target },
+          includeTrailingPunctuation: true,
+        },
+      ],
+    })
     assert.equal(result.ok && result.afterText, expected)
   }
 
@@ -1463,4 +1460,56 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
     ],
   })
   assert.deepEqual(ambiguous, { ok: false, reason: 'fuzzy text target is ambiguous' })
+})
+
+test('ignores punctuation for unique text targets and uses it only to resolve lexical ties', () => {
+  const unique = executeEditPlan('She answered, “So, yeah.”', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'match a uniquely worded target without requiring spoken punctuation',
+    operations: [
+      {
+        id: 'punctuation-insensitive-unique',
+        type: 'insert_after',
+        target: { exactText: 'so yeah' },
+        text: 'Are you clocking out soon?',
+      },
+    ],
+  })
+  assert.equal(
+    unique.ok && unique.afterText,
+    'She answered, “So, yeah.” Are you clocking out soon?',
+  )
+
+  const tieBroken = executeEditPlan('Wait here. Wait, here.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'use internal punctuation only to distinguish otherwise equal targets',
+    operations: [
+      {
+        id: 'punctuation-tiebreaker',
+        type: 'replace',
+        target: { exactText: 'wait, here' },
+        text: 'stay',
+      },
+    ],
+  })
+  assert.equal(tieBroken.ok && tieBroken.afterText, 'Wait here. Stay.')
+
+  const ambiguous = executeEditPlan('Wait here. Wait here.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'do not guess when wording and punctuation are both identical',
+    operations: [
+      {
+        id: 'punctuation-still-ambiguous',
+        type: 'delete',
+        target: { exactText: 'wait here' },
+      },
+    ],
+  })
+  assert.deepEqual(ambiguous, {
+    ok: false,
+    reason: 'punctuation-insensitive text target is ambiguous',
+  })
 })

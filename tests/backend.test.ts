@@ -647,9 +647,7 @@ test('reviews a recording against the latest same-chat draft when its starting v
   assert.equal(proposalResponse.outcome, 'review')
   assert.equal(proposalResponse.proposal.expectedVersion, 2)
   assert.equal(proposalResponse.proposal.candidateText, 'Recorded concurrently.')
-  assert.ok(
-    proposalResponse.proposal.reasons.includes('normalized against newer same-chat draft'),
-  )
+  assert.ok(proposalResponse.proposal.reasons.includes('normalized against newer same-chat draft'))
 
   await dispatch(
     {
@@ -667,7 +665,10 @@ test('reviews a recording against the latest same-chat draft when its starting v
   assert.equal(committed?.type, 'transcript.normalization.response')
   if (committed?.type === 'transcript.normalization.response') {
     assert.equal(committed.outcome, 'committed')
-    assert.equal(committed.snapshot?.cleanText, 'Updated from another device. Recorded concurrently.')
+    assert.equal(
+      committed.snapshot?.cleanText,
+      'Updated from another device. Recorded concurrently.',
+    )
   }
 })
 
@@ -1314,7 +1315,10 @@ test('recovers paired boundary quotations observed only in the streaming transcr
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'transcript.normalization.response')
   if (response?.type === 'transcript.normalization.response') {
-    assert.equal(response.proposal.rawTranscript, 'No offense, but you do look like you have had a long day.')
+    assert.equal(
+      response.proposal.rawTranscript,
+      'No offense, but you do look like you have had a long day.',
+    )
     assert.equal(
       response.proposal.candidateText,
       '“No offense, but you do look like you have had a long day.”',
@@ -2200,7 +2204,10 @@ test('replaces one exact word deterministically when the edit model returns no p
   const proposal = responses.at(-1)?.payload
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
-  assert.equal(proposal.proposal.afterText, 'He leaned closer. “The engine needs repair,” she needs you.')
+  assert.equal(
+    proposal.proposal.afterText,
+    'He leaned closer. “The engine needs repair,” she needs you.',
+  )
   assert.deepEqual(proposal.proposal.plan.operations[0]?.target, { exactText: 'muttered' })
   assert.equal(proposal.proposal.plan.operations[0]?.text, 'needs you')
   assert.equal(
@@ -2211,6 +2218,36 @@ test('replaces one exact word deterministically when the edit model returns no p
     ),
     false,
   )
+})
+
+test('inserts deterministically after a sentence label with punctuation-insensitive targeting', async () => {
+  const userId = 'deterministic-inline-insertion-user'
+  const chatId = 'deterministic-inline-insertion-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She answered, “So, yeah.”')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = null
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'deterministic-inline-insertion-interpret',
+      operationId: 'deterministic-inline-insertion-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Insert after the sentence so yeah, with Are you clocking out soon?',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'She answered, “So, yeah.” Are you clocking out soon?')
+  assert.deepEqual(proposal.proposal.plan.operations[0]?.target, { exactText: 'so yeah' })
+  assert.equal(proposal.proposal.plan.operations[0]?.text, 'Are you clocking out soon?')
 })
 
 test('removes an unquoted phrase label from deterministic replacement text', async () => {
@@ -2230,7 +2267,8 @@ test('removes an unquoted phrase label from deterministic replacement text', asy
       operationId: 'deterministic-phrase-label-operation',
       chatId,
       expectedVersion: 1,
-      instructionTranscript: 'Replace the phrase My voice mutters with the phrase My voice needs you.',
+      instructionTranscript:
+        'Replace the phrase My voice mutters with the phrase My voice needs you.',
     },
     userId,
   )
@@ -2964,9 +3002,10 @@ test('applies and discloses an enabled conservative post-edit grammar repair', a
   const grammarInput = JSON.parse(grammarRequest.messages?.at(-1)?.content ?? '{}') as {
     segments?: Array<{ text?: string }>
   }
-  assert.deepEqual(grammarInput.segments?.map((segment) => segment.text), [
-    'Earlier two. This is a accessible entrance. Later one.',
-  ])
+  assert.deepEqual(
+    grammarInput.segments?.map((segment) => segment.text),
+    ['Earlier two. This is a accessible entrance. Later one.'],
+  )
 
   await dispatch(
     {

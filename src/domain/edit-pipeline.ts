@@ -510,13 +510,7 @@ function resolveOperation(
     )
     const displacedOpening =
       isSentenceOpeningAt(cleanText, start) && /\p{L}/u.test(formattedInsertion)
-        ? lowercaseOrdinarySentenceOpening(
-            cleanText,
-            start,
-            cleanText,
-            start,
-            protectedCasingTerms,
-          )
+        ? lowercaseOrdinarySentenceOpening(cleanText, start, cleanText, start, protectedCasingTerms)
         : null
     return {
       operation,
@@ -532,26 +526,16 @@ function resolveOperation(
       : end
   const replacement =
     operation.type === 'replace'
-      ? alignReplacementInitialCasing(
-          cleanText,
-          start,
-          end,
-          insertionText,
-          protectedCasingTerms,
-        )
+      ? alignReplacementInitialCasing(cleanText, start, end, insertionText, protectedCasingTerms)
       : operation.type === 'delete'
         ? ''
         : operation.type === 'insert_after'
-            ? addBoundarySpacing(
-                cleanText,
-                insertAfterPoint,
-                capitalizeReplacementAtSentenceOpening(
-                  cleanText,
-                  insertAfterPoint,
-                  insertionText,
-                ),
-              )
-            : applyCase(cleanText.slice(start, end), operation.caseMode!)
+          ? addBoundarySpacing(
+              cleanText,
+              insertAfterPoint,
+              capitalizeReplacementAtSentenceOpening(cleanText, insertAfterPoint, insertionText),
+            )
+          : applyCase(cleanText.slice(start, end), operation.caseMode!)
   if (operation.type === 'insert_after') {
     start = insertAfterPoint
     end = insertAfterPoint
@@ -1076,14 +1060,7 @@ function lowercaseOrdinarySentenceOpening(
   if (!match) return null
   const prefix = match[1]!
   const word = match[2]!
-  if (
-    looksLikeProperNoun(
-      evidenceText,
-      evidenceStart + prefix.length,
-      word,
-      protectedCasingTerms,
-    )
-  )
+  if (looksLikeProperNoun(evidenceText, evidenceStart + prefix.length, word, protectedCasingTerms))
     return null
   const loweredWord = `${word.charAt(0).toLocaleLowerCase()}${word.slice(1)}`
   return { end: start + match[0].length, text: `${prefix}${loweredWord}` }
@@ -1109,10 +1086,7 @@ function looksLikeProperNoun(
   if (/^[ \t]+\p{Lu}\p{Ll}+/u.test(following)) return true
 
   const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const occurrencePattern = new RegExp(
-    `(?<![\\p{L}\\p{N}])${escapedWord}(?![\\p{L}\\p{N}])`,
-    'gu',
-  )
+  const occurrencePattern = new RegExp(`(?<![\\p{L}\\p{N}])${escapedWord}(?![\\p{L}\\p{N}])`, 'gu')
   for (const occurrence of text.matchAll(occurrencePattern)) {
     const occurrenceStart = occurrence.index
     if (occurrenceStart === wordStart) continue
@@ -1289,11 +1263,70 @@ function findExactOrFuzzyMatch(
   if (exactMatches.length === 1)
     return { start: exactMatches[0]!, end: exactMatches[0]! + search.length }
 
+  const lexicalMatch = findPunctuationInsensitiveMatch(text, search, start, end)
+  if (typeof lexicalMatch !== 'string') return lexicalMatch
+  if (lexicalMatch.includes('ambiguous')) return lexicalMatch
+
   const approximate = findApproximateMatch(text, search, start, end)
   if (typeof approximate !== 'string') return approximate
   return approximate.includes('ambiguous')
     ? 'fuzzy text target is ambiguous'
     : 'text target was not found'
+}
+
+function findPunctuationInsensitiveMatch(
+  text: string,
+  search: string,
+  start: number,
+  end: number,
+): { start: number; end: number } | string {
+  const wanted = tokenizeWithOffsets(search, 0, search.length)
+  if (!wanted.length) return 'punctuation-insensitive text target was not found'
+  const available = tokenizeCachedDraftRange(text, start, end)
+  if (available.length < wanted.length) return 'punctuation-insensitive text target was not found'
+
+  const wantedValues = wanted.map(({ value }) => stripTokenPunctuation(value))
+  const candidates: Array<{ start: number; end: number; punctuation: string }> = []
+  for (let index = 0; index <= available.length - wanted.length; index += 1) {
+    const window = available.slice(index, index + wanted.length)
+    if (
+      !window.every(
+        (token, tokenIndex) => stripTokenPunctuation(token.value) === wantedValues[tokenIndex],
+      )
+    )
+      continue
+    candidates.push({
+      start: window[0]!.start,
+      end: window.at(-1)!.end,
+      punctuation: internalPunctuationSignature(text, window[0]!.start, window.at(-1)!.end),
+    })
+  }
+  if (candidates.length === 1) return candidates[0]!
+  if (!candidates.length) return 'punctuation-insensitive text target was not found'
+
+  const wantedPunctuation = internalPunctuationSignature(
+    search,
+    wanted[0]!.start,
+    wanted.at(-1)!.end,
+  )
+  const punctuationMatches = candidates.filter(
+    (candidate) => candidate.punctuation === wantedPunctuation,
+  )
+  return punctuationMatches.length === 1
+    ? punctuationMatches[0]!
+    : 'punctuation-insensitive text target is ambiguous'
+}
+
+function stripTokenPunctuation(value: string): string {
+  return value.replace(/[^\p{L}\p{N}]/gu, '')
+}
+
+function internalPunctuationSignature(text: string, start: number, end: number): string {
+  return text
+    .slice(start, end)
+    .replace(/[\p{L}\p{N}\s]/gu, '')
+    .replace(/[\u2018\u2019]/gu, "'")
+    .replace(/[\u201c\u201d]/gu, '"')
 }
 
 function findApproximateMatch(
@@ -1403,10 +1436,7 @@ function findApproximateMatch(
   )
   let best: (typeof candidates)[number] | undefined
   for (const candidate of evaluationOrder) {
-    if (
-      best?.score !== undefined &&
-      candidate.scores.maxScoreUpperBound < best.score - 0.12
-    )
+    if (best?.score !== undefined && candidate.scores.maxScoreUpperBound < best.score - 0.12)
       continue
     if (candidate.scores.score === undefined) {
       const phoneticScore = stringSimilarity(wantedPhonetic, candidate.scores.phonetic)
@@ -1490,11 +1520,7 @@ function tokenizeCachedDraftRange(text: string, start: number, end: number): Fuz
   return tokens.filter((token) => token.start >= start && token.end <= end)
 }
 
-function tokenizeWithOffsets(
-  text: string,
-  start: number,
-  end: number,
-): FuzzyToken[] {
+function tokenizeWithOffsets(text: string, start: number, end: number): FuzzyToken[] {
   const tokens: FuzzyToken[] = []
   const segment = text.slice(start, end)
   for (const match of segment.matchAll(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)) {

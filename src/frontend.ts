@@ -81,7 +81,10 @@ export const COMMAND_GROUPS = [
     title: 'Change text',
     examples: [
       ['Replace', 'Replace “pending” with “approved” in paragraph 2.'],
-      ['Delete', 'Delete the second sentence in paragraph 1.'],
+      [
+        'Delete',
+        'Say “delete,” “remove,” or “take off,” followed by the target—for example, “Take off the second sentence in paragraph 1.”',
+      ],
       ['Insert before', 'Insert “Urgent:” before the first sentence.'],
       [
         'Insert after',

@@ -1521,7 +1521,49 @@ test('deletes the first sentence when identical text also appears last', async (
   assert.equal(proposal.proposal.afterText, 'Okay, you are really cutting deep here. Quotation.')
 })
 
-test('deletes identical first and last sentences in one compound instruction', async () => {
+test('treats take off as a positional sentence deletion command', async () => {
+  const userId = 'take-off-sentence-user'
+  const chatId = 'take-off-sentence-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Quotation. Keep this sentence. Quotation.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Take off the first sentence.',
+    operations: [
+      {
+        id: 'take-off-first-sentence',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'Quotation.' },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'take-off-sentence-interpret',
+      operationId: 'take-off-sentence-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Take off the first sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.deepEqual(proposal.proposal.plan.operations[0]?.target, {
+    paragraphOrdinal: 1,
+    sentenceOrdinal: 1,
+  })
+  assert.equal(proposal.proposal.afterText, 'Keep this sentence. Quotation.')
+})
+
+test('takes off identical first and last sentences in one compound instruction', async () => {
   const userId = 'compound-duplicate-sentence-user'
   const chatId = 'compound-duplicate-sentence-chat'
   activeChatId = chatId
@@ -1536,7 +1578,7 @@ test('deletes identical first and last sentences in one compound instruction', a
       operationId: 'compound-duplicate-sentence-operation',
       chatId,
       expectedVersion: 1,
-      instructionTranscript: 'Delete the first and last sentences.',
+      instructionTranscript: 'Take off the first and last sentences.',
     },
     userId,
   )

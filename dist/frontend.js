@@ -411,7 +411,10 @@ var COMMAND_GROUPS = [
     title: "Change text",
     examples: [
       ["Replace", "Replace \u201Cpending\u201D with \u201Capproved\u201D in paragraph 2."],
-      ["Delete", "Delete the second sentence in paragraph 1."],
+      [
+        "Delete",
+        "Say \u201Cdelete,\u201D \u201Cremove,\u201D or \u201Ctake off,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
+      ],
       ["Insert before", "Insert \u201CUrgent:\u201D before the first sentence."],
       [
         "Insert after",

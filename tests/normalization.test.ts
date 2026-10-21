@@ -39,6 +39,22 @@ test('capitalizes ordinary message and paragraph openings without changing estab
   )
 })
 
+test('restores a missing sentence boundary after an opening My God interjection', () => {
+  const result = normalizeDeterministically(
+    'quotation My God Three mouths working on me period quotation',
+    [],
+  )
+
+  assert.equal(result.text, '“My God. Three mouths working on me.”')
+  assert.ok(result.reasons.includes('missing sentence boundary'))
+  assert.ok(result.authoritativePunctuationMarks.includes('.'))
+
+  assert.equal(
+    normalizeDeterministically('She described My God Apollo as a marble statue.', []).text,
+    'She described My God Apollo as a marble statue.',
+  )
+})
+
 test('does not append a bare terminal command after provider terminal punctuation', () => {
   assert.equal(normalizeDeterministically('Is this working? period', []).text, 'Is this working?')
   assert.equal(normalizeDeterministically('Really! full stop.', []).text, 'Really!')
@@ -105,7 +121,7 @@ test('preserves explicitly literal punctuation words', () => {
 
 test('preserves punctuation vocabulary in ordinary noun and verb contexts', () => {
   const natural =
-    'The semicolon is optional. An exclamation mark followed. A question mark appeared. The ellipsis means omission. The open parenthesis is unmatched. The close bracket is missing. A new line of products launched. The new paragraph discusses history. The Oxford comma was debated. The possessive apostrophe is required. Please quote the source and quote from the report. A difficult period ended.'
+    'The semicolon is optional. An exclamation mark followed. A question mark appeared. The ellipsis means omission. The open parenthesis is unmatched. The close bracket is missing. A new line of products launched. The new paragraph discusses history. The Oxford comma was debated. The possessive apostrophe is required. Please quote the source and quote from the report. The quotation from the book was memorable. A single quotation is also discussed. A difficult period ended.'
   assert.equal(normalizeDeterministically(natural, []).text, natural)
   assert.equal(
     normalizeDeterministically('A lone quote remains literal.', []).text,
@@ -114,6 +130,10 @@ test('preserves punctuation vocabulary in ordinary noun and verb contexts', () =
   assert.equal(
     normalizeDeterministically('Quote one, quote two, and quote three.', []).text,
     'Quote one, quote two, and quote three.',
+  )
+  assert.equal(
+    normalizeDeterministically('A lone quotation remains literal.', []).text,
+    'A lone quotation remains literal.',
   )
 })
 
@@ -145,6 +165,18 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
     'Alpha (beta)\ngamma [delta]',
   )
   assert.equal(
+    normalizeDeterministically('Alpha begin bracket beta end bracket.', []).text,
+    'Alpha <beta>.',
+  )
+  assert.equal(
+    normalizeDeterministically('Alpha command begin bracket beta command end bracket', []).text,
+    'Alpha <beta>',
+  )
+  assert.equal(
+    normalizeDeterministically('The begin bracket play starts today period', []).text,
+    'The begin bracket play starts today.',
+  )
+  assert.equal(
     normalizeDeterministically('Alpha punctuation quote beta punctuation single quote', []).text,
     'Alpha” beta’',
   )
@@ -161,6 +193,15 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
     'Mark it ‘Provisional’.',
   )
   assert.equal(
+    normalizeDeterministically('She said quotation proceed carefully quotation period', []).text,
+    'She said “Proceed carefully”.',
+  )
+  assert.equal(
+    normalizeDeterministically('Mark it single quotation provisional single quotation period', [])
+      .text,
+    'Mark it ‘Provisional’.',
+  )
+  assert.equal(
     normalizeDeterministically('The quote from the book was memorable period', []).text,
     'The quote from the book was memorable.',
   )
@@ -168,8 +209,78 @@ test('supports expanded punctuation commands and explicit fallbacks', () => {
     normalizeDeterministically('Write the word quote and literal single quote period', []).text,
     'Write quote and single quote.',
   )
+  assert.equal(
+    normalizeDeterministically('Write the word quotation and literal single quotation period', [])
+      .text,
+    'Write quotation and single quotation.',
+  )
+  assert.equal(
+    normalizeDeterministically('Alpha punctuation quotation beta punctuation single quotation', [])
+      .text,
+    'Alpha” beta’',
+  )
   const authoritative = normalizeDeterministically('Alpha comma beta question mark', [])
   assert.deepEqual([...authoritative.authoritativePunctuationMarks].sort(), [',', '?'])
+})
+
+test('supports guarded speech quotation aliases without consuming natural usage', () => {
+  assert.equal(
+    normalizeDeterministically('begin speech hello there end speech period', []).text,
+    '“Hello there”.',
+  )
+  assert.equal(
+    normalizeDeterministically('begin single a private thought end single period', []).text,
+    '‘A private thought’.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'We begin speech therapy today and end speech therapy next week.',
+      [],
+    ).text,
+    'We begin speech therapy today and end speech therapy next week.',
+  )
+  assert.equal(
+    normalizeDeterministically('A lone begin speech remains literal.', []).text,
+    'A lone begin speech remains literal.',
+  )
+  assert.equal(
+    normalizeDeterministically('Say the phrase begin speech and the phrase end speech.', []).text,
+    'Say begin speech and end speech.',
+  )
+})
+
+test('recovers a closing end speech alias mistranscribed as and speech', () => {
+  const repaired = normalizeDeterministically(
+    'Begin speech. Hello there. Name your price and speech.',
+    [],
+  )
+  assert.equal(repaired.text, '“Hello there. Name your price”.')
+  assert.ok(repaired.reasons.includes('fuzzy spoken command recovery'))
+
+  assert.equal(
+    normalizeDeterministically('begin speech hello there and speech period', []).text,
+    '“Hello there”.',
+  )
+  assert.equal(
+    normalizeDeterministically('begin single a private thought and single period', []).text,
+    '‘A private thought’.',
+  )
+  assert.equal(
+    normalizeDeterministically('Begin speech. Hello there. Name your price and speech period', [])
+      .text,
+    '“Hello there. Name your price”.',
+  )
+})
+
+test('leaves and speech literal without an unmatched opening alias', () => {
+  const literal = [
+    'I made a toast and speech.',
+    'We begin speech therapy today and speech practice tomorrow.',
+    'Begin speech. The phrase price and speech costs money.',
+  ]
+  for (const text of literal) {
+    assert.equal(normalizeDeterministically(text, []).text, text)
+  }
 })
 
 test('formats voice-generated quotation openings without changing intentional leading punctuation', () => {
@@ -196,6 +307,51 @@ test('drops a provider period attached to a closing quote command after terminal
   assert.equal(normalizeDeterministically('quote Good morning. quote.', []).text, '“Good morning.”')
   assert.equal(normalizeDeterministically('open quote Really? close quote.', []).text, '“Really?”')
   assert.equal(normalizeDeterministically('quote Good morning quote.', []).text, '“Good morning”.')
+  assert.equal(
+    normalizeDeterministically('quote You knew my coffee order, quote. I repeat her words.', [])
+      .text,
+    '“You knew my coffee order,” I repeat her words.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'quote You knew my coffee order comma quote. I repeat her words.',
+      [],
+    ).text,
+    '“You knew my coffee order,” I repeat her words.',
+  )
+})
+
+test('does not duplicate provider-rendered quotation marks beside spoken quote commands', () => {
+  assert.equal(
+    normalizeDeterministically(
+      'I listen to her confession. Quote, "You knew my coffee order." Quote, I repeat her words. Quote, “So I guess we are even.” Quote.',
+      [],
+    ).text,
+    'I listen to her confession. “You knew my coffee order.” I repeat her words. “So I guess we are even.”',
+  )
+  assert.equal(
+    normalizeDeterministically('She said single quote, ‘Hello.’ single quote.', []).text,
+    'She said ‘Hello.’',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'I listen. Quote, "You knew my coffee order," Quote. I repeat her words.',
+      [],
+    ).text,
+    'I listen. “You knew my coffee order,” I repeat her words.',
+  )
+  assert.equal(
+    normalizeDeterministically('She preserved "literal straight quotes" without commands.', [])
+      .text,
+    'She preserved "literal straight quotes" without commands.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'I listen. Quotation, “You knew my coffee order.” Quotation, and respond.',
+      [],
+    ).text,
+    'I listen. “You knew my coffee order.” and respond.',
+  )
 })
 
 test('prunes provider punctuation attached to every spoken command family', () => {
@@ -247,6 +403,26 @@ test('recovers a standalone phonetic new-paragraph command without changing natu
 })
 
 test('collapses explicit spelling, obeys casing, and creates a learning candidate', () => {
+  const defaultCasing = normalizeDeterministically('Use C-O-O-L-E-Y period', [])
+  assert.equal(defaultCasing.text, 'Use cooley.')
+  assert.deepEqual(defaultCasing.learningCandidates, [
+    { canonical: 'cooley', spokenVariant: 'C-O-O-L-E-Y' },
+  ])
+  assert.deepEqual(defaultCasing.ambiguities, [])
+  assert.equal(
+    normalizeDeterministically('Use capitalized C-O-O-L-E-Y period', []).text,
+    'Use Cooley.',
+  )
+  assert.equal(
+    normalizeDeterministically('Use uppercase C-O-O-L-E-Y period', []).text,
+    'Use COOLEY.',
+  )
+  assert.equal(
+    normalizeDeterministically('Use lowercase C-O-O-L-E-Y period', []).text,
+    'Use cooley.',
+  )
+  assert.equal(normalizeDeterministically('Use C-O-O-L-E-Y, Cooley period', []).text, 'Use Cooley.')
+
   const result = normalizeDeterministically('Write capitalized C-A-E-S-A-R Caesar period', [])
   assert.equal(result.text, 'Write Caesar.')
   assert.deepEqual(result.learningCandidates, [
@@ -259,6 +435,14 @@ test('collapses explicit spelling, obeys casing, and creates a learning candidat
   assert.equal(
     normalizeDeterministically('Write capitalized P-I-P dash B-O-Y Pip-Boy period', []).text,
     'Write Pip-Boy.',
+  )
+  assert.equal(
+    normalizeDeterministically('Use capitalized K-A-T-apostrophe-S period', []).text,
+    'Use Kat’s.',
+  )
+  assert.equal(
+    normalizeDeterministically('Use capitalized O-apostrophe-C-O-N-N-O-R period', []).text,
+    'Use O’Connor.',
   )
 })
 

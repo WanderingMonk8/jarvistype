@@ -45,6 +45,8 @@ export interface EditTarget {
   punctuation?: PunctuationTarget
   occurrence?: number
   occurrenceFromEnd?: number
+  sentenceOrdinal?: number
+  sentenceFromEnd?: number
   relativePosition?: 'before' | 'after'
   relativeToText?: string
 }
@@ -111,18 +113,36 @@ export function parseEditPlan(value: unknown): EditPlan | null {
   }
 }
 
+export interface EditExecutionOptions {
+  /**
+   * Diagnostic switch used by the isolation tests: skip per-operation casing,
+   * boundary spacing, and separator trimming so the raw patch can be compared
+   * against the universal deterministic cleanup.
+   */
+  skipOperationFormatting?: boolean
+}
+
 export function executeEditPlan(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
   currentVersion: number,
   plan: EditPlan,
+  protectedCasingTerms: readonly string[] = [],
+  options: EditExecutionOptions = {},
 ): EditPipelineResult {
+  const formatText = options.skipOperationFormatting !== true
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
   const inlineMoves = plan.operations.filter(isInlineMoveOperation)
   if (inlineMoves.length) {
     if (inlineMoves.length !== plan.operations.length || inlineMoves.length > 1)
       return { ok: false, reason: 'an inline move must be the only operation in its edit plan' }
-    return executeInlineMove(cleanText, paragraphs, inlineMoves[0]!)
+    return executeInlineMove(
+      cleanText,
+      paragraphs,
+      inlineMoves[0]!,
+      protectedCasingTerms,
+      formatText,
+    )
   }
   const structural = plan.operations.filter(isStructuralOperation)
   if (structural.length) {
@@ -132,7 +152,13 @@ export function executeEditPlan(
   }
   const patches: Patch[] = []
   for (const operation of plan.operations) {
-    const patch = resolveOperation(cleanText, paragraphs, operation)
+    const patch = resolveOperation(
+      cleanText,
+      paragraphs,
+      operation,
+      protectedCasingTerms,
+      formatText,
+    )
     if (typeof patch === 'string') return { ok: false, reason: patch }
     patches.push(patch)
   }
@@ -222,13 +248,15 @@ function parseOperation(value: unknown): EditOperation | null {
     if (destination !== undefined) return null
     if (
       includeTrailingPunctuation !== undefined &&
-      (type !== 'delete' || includeTrailingPunctuation !== true)
+      (type === 'join_next' || includeTrailingPunctuation !== true)
     )
       return null
     if (
       type === 'join_next' &&
       (target.exactText !== undefined ||
         target.approximateText !== undefined ||
+        target.sentenceOrdinal !== undefined ||
+        target.sentenceFromEnd !== undefined ||
         target.scope !== undefined)
     )
       return null
@@ -269,6 +297,8 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     'punctuation',
     'occurrence',
     'occurrenceFromEnd',
+    'sentenceOrdinal',
+    'sentenceFromEnd',
     'relativePosition',
     'relativeToText',
   ])
@@ -326,6 +356,15 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     target.occurrenceFromEnd = value.occurrenceFromEnd
   }
   if (target.occurrence !== undefined && target.occurrenceFromEnd !== undefined) return null
+  if (value.sentenceOrdinal !== undefined) {
+    if (!isPositiveInteger(value.sentenceOrdinal) || value.sentenceOrdinal > 10_000) return null
+    target.sentenceOrdinal = value.sentenceOrdinal
+  }
+  if (value.sentenceFromEnd !== undefined) {
+    if (!isPositiveInteger(value.sentenceFromEnd) || value.sentenceFromEnd > 10_000) return null
+    target.sentenceFromEnd = value.sentenceFromEnd
+  }
+  if (target.sentenceOrdinal !== undefined && target.sentenceFromEnd !== undefined) return null
   if (value.relativePosition !== undefined) {
     if (value.relativePosition !== 'before' && value.relativePosition !== 'after') return null
     target.relativePosition = value.relativePosition
@@ -357,6 +396,18 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
       hasRelativeText)
   )
     return null
+  if (
+    (target.sentenceOrdinal !== undefined || target.sentenceFromEnd !== undefined) &&
+    (target.exactText !== undefined ||
+      target.approximateText !== undefined ||
+      target.punctuation !== undefined ||
+      target.scope !== undefined ||
+      target.occurrence !== undefined ||
+      target.occurrenceFromEnd !== undefined ||
+      hasRelativePosition ||
+      hasRelativeText)
+  )
+    return null
   return Object.keys(target).length ? target : null
 }
 
@@ -364,6 +415,8 @@ function resolveOperation(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
   operation: EditOperation,
+  protectedCasingTerms: readonly string[],
+  formatText: boolean,
 ): Patch | string {
   const paragraphMatches = paragraphs.filter(
     (paragraph) =>
@@ -386,23 +439,29 @@ function resolveOperation(
   if (operation.type === 'append' || operation.type === 'prepend') {
     if (!paragraph) return `${operation.type} requires one paragraph target`
     const point = operation.type === 'append' ? range.end : range.start
-    const insertionText = capitalizeReplacementAtSentenceOpening(
-      cleanText,
-      point,
-      operation.text ?? '',
-    )
+    const insertionText = formatText
+      ? capitalizeReplacementAtSentenceOpening(cleanText, point, operation.text ?? '')
+      : (operation.text ?? '')
     return {
       operation,
       start: point,
       end: point,
-      replacement: addBoundarySpacing(cleanText, point, insertionText),
+      replacement: formatText ? addBoundarySpacing(cleanText, point, insertionText) : insertionText,
       paragraphOrdinal: paragraph.ordinal,
     }
   }
 
   let start = range.start
   let end = range.end
-  if (operation.target.punctuation !== undefined) {
+  if (
+    operation.target.sentenceOrdinal !== undefined ||
+    operation.target.sentenceFromEnd !== undefined
+  ) {
+    const match = resolveSentenceTarget(cleanText, range.start, range.end, operation.target)
+    if (typeof match === 'string') return match
+    start = match.start
+    end = match.end
+  } else if (operation.target.punctuation !== undefined) {
     const match = resolvePunctuationTarget(cleanText, range.start, range.end, operation.target)
     if (typeof match === 'string') return match
     start = match.start
@@ -440,51 +499,73 @@ function resolveOperation(
     const insertedParagraph = (operation.text ?? '').trim()
     if (!insertedParagraph) return 'paragraph insertion text is empty'
     const point = operation.type === 'insert_before' ? range.start : range.end
-    const capitalizedParagraph = capitalizeReplacementAtSentenceOpening(
-      cleanText,
-      point,
-      insertedParagraph,
-    )
+    const formattedParagraph = formatText
+      ? capitalizeReplacementAtSentenceOpening(cleanText, point, insertedParagraph)
+      : insertedParagraph
     return {
       operation,
       start: point,
       end: point,
       replacement:
         operation.type === 'insert_before'
-          ? `${capitalizedParagraph}\n\n`
-          : `\n\n${capitalizedParagraph}`,
+          ? `${formattedParagraph}\n\n`
+          : `\n\n${formattedParagraph}`,
       paragraphOrdinal: paragraph.ordinal,
     }
   }
   if (operation.type === 'delete') {
     if (operation.includeTrailingPunctuation)
       end = extendThroughTerminalPunctuation(cleanText, end, range.end)
-    const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
-    const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
-    if (hasSeparatorBefore && (hasSeparatorAfter || end === range.end)) start -= 1
-    else if (hasSeparatorAfter && start === range.start) end += 1
+    if (formatText) {
+      const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
+      const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
+      if (hasSeparatorBefore && (hasSeparatorAfter || end === range.end)) start -= 1
+      else if (hasSeparatorAfter && start === range.start) end += 1
+    }
   }
   const insertionText = operation.text ?? ''
+  if (operation.type === 'insert_before') {
+    const formattedInsertion = formatText
+      ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
+      : insertionText
+    const displacedOpening =
+      formatText && isSentenceOpeningAt(cleanText, start) && /\p{L}/u.test(formattedInsertion)
+        ? lowercaseOrdinarySentenceOpening(cleanText, start, cleanText, start, protectedCasingTerms)
+        : null
+    return {
+      operation,
+      start,
+      end: displacedOpening?.end ?? start,
+      replacement: formatText
+        ? `${addBoundarySpacing(cleanText, start, formattedInsertion)}${displacedOpening?.text ?? ''}`
+        : formattedInsertion,
+      paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset(cleanText, start),
+    }
+  }
+  const insertAfterPoint =
+    formatText && operation.type === 'insert_after'
+      ? advancePastAdjacentSentenceEnding(cleanText, end, range.end, insertionText)
+      : end
   const replacement =
     operation.type === 'replace'
-      ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
+      ? formatText
+        ? alignReplacementInitialCasing(cleanText, start, end, insertionText, protectedCasingTerms)
+        : insertionText
       : operation.type === 'delete'
         ? ''
-        : operation.type === 'insert_before'
-          ? addBoundarySpacing(
-              cleanText,
-              start,
-              capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText),
-            )
-          : operation.type === 'insert_after'
+        : operation.type === 'insert_after'
+          ? formatText
             ? addBoundarySpacing(
                 cleanText,
-                end,
-                capitalizeReplacementAtSentenceOpening(cleanText, end, insertionText),
+                insertAfterPoint,
+                capitalizeReplacementAtSentenceOpening(cleanText, insertAfterPoint, insertionText),
               )
-            : applyCase(cleanText.slice(start, end), operation.caseMode!)
-  if (operation.type === 'insert_before') end = start
-  else if (operation.type === 'insert_after') start = end
+            : insertionText
+          : applyCase(cleanText.slice(start, end), operation.caseMode!)
+  if (operation.type === 'insert_after') {
+    start = insertAfterPoint
+    end = insertAfterPoint
+  }
   return {
     operation,
     start,
@@ -494,8 +575,23 @@ function resolveOperation(
   }
 }
 
+function advancePastAdjacentSentenceEnding(
+  text: string,
+  point: number,
+  limit: number,
+  insertion: string,
+): number {
+  // Phrase insertions remain literal. Only a complete inserted sentence moves
+  // beyond terminal punctuation that belongs to the preceding sentence.
+  if (!/(?:\.{3}|[.!?\u2026])[\u201d\u2019"')\]]*\s*$/u.test(insertion)) return point
+  const ending = text
+    .slice(point, limit)
+    .match(/^(?:\.{3}|[.!?\u2026])[\u201d\u2019"')\]]*(?=\s|$)/u)?.[0]
+  return ending ? point + ending.length : point
+}
+
 type StructuralEditOperation = EditOperation & {
-  type: 'split' | 'join_next' | 'move_before' | 'move_after'
+  type: 'delete' | 'split' | 'join_next' | 'move_before' | 'move_after'
 }
 
 type InlineMoveOperation = EditOperation & {
@@ -511,6 +607,11 @@ interface StructuralParagraph {
 
 function isStructuralOperation(operation: EditOperation): operation is StructuralEditOperation {
   return (
+    (operation.type === 'delete' &&
+      !hasInlineSelector(operation.target) &&
+      operation.target.scope !== 'draft' &&
+      (operation.target.paragraphId !== undefined ||
+        operation.target.paragraphOrdinal !== undefined)) ||
     operation.type === 'split' ||
     operation.type === 'join_next' ||
     ((operation.type === 'move_before' || operation.type === 'move_after') &&
@@ -531,7 +632,9 @@ function hasInlineSelector(target: EditTarget): boolean {
   return (
     target.exactText !== undefined ||
     target.approximateText !== undefined ||
-    target.punctuation !== undefined
+    target.punctuation !== undefined ||
+    target.sentenceOrdinal !== undefined ||
+    target.sentenceFromEnd !== undefined
   )
 }
 
@@ -547,6 +650,8 @@ function executeInlineMove(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
   operation: InlineMoveOperation,
+  protectedCasingTerms: readonly string[],
+  formatText: boolean,
 ): EditPipelineResult {
   const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'move source')
   if (typeof source === 'string') return { ok: false, reason: source }
@@ -572,20 +677,43 @@ function executeInlineMove(
     removalEnd < source.scopeEnd && /[ \t]/.test(cleanText[removalEnd] ?? '')
   const endsBeforeClosingPunctuation = /[,.;:!?)}\]”’]/.test(cleanText[removalEnd] ?? '')
   if (
+    formatText &&
     hasSeparatorBefore &&
     (hasSeparatorAfter || removalEnd === source.scopeEnd || endsBeforeClosingPunctuation)
   )
     removalStart -= 1
-  else if (hasSeparatorAfter && removalStart === source.scopeStart) removalEnd += 1
+  else if (formatText && hasSeparatorAfter && removalStart === source.scopeStart) removalEnd += 1
 
-  const withoutSource = `${cleanText.slice(0, removalStart)}${cleanText.slice(removalEnd)}`
+  let withoutSource = `${cleanText.slice(0, removalStart)}${cleanText.slice(removalEnd)}`
+  if (formatText && isSentenceOpeningAt(cleanText, source.start))
+    withoutSource = capitalizeExistingSentenceOpening(withoutSource, removalStart)
   const originalInsertionPoint =
     operation.type === 'move_before' ? destination.start : destination.end
   const insertionPoint =
     originalInsertionPoint > removalStart
       ? originalInsertionPoint - (removalEnd - removalStart)
       : originalInsertionPoint
-  const insertion = addBoundarySpacing(withoutSource, insertionPoint, movedText)
+  const formattedMovedText = formatText
+    ? capitalizeReplacementAtSentenceOpening(withoutSource, insertionPoint, movedText)
+    : movedText
+  const displacedOpening =
+    formatText &&
+    operation.type === 'move_before' &&
+    isSentenceOpeningAt(withoutSource, insertionPoint) &&
+    /\p{L}/u.test(formattedMovedText)
+      ? lowercaseOrdinarySentenceOpening(
+          withoutSource,
+          insertionPoint,
+          cleanText,
+          destination.start,
+          protectedCasingTerms,
+        )
+      : null
+  if (displacedOpening)
+    withoutSource = `${withoutSource.slice(0, insertionPoint)}${displacedOpening.text}${withoutSource.slice(displacedOpening.end)}`
+  const insertion = formatText
+    ? addBoundarySpacing(withoutSource, insertionPoint, formattedMovedText)
+    : formattedMovedText
   const afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
@@ -600,7 +728,7 @@ function executeInlineMove(
         startOffset: source.start,
         endOffset: sourceEnd,
         beforeText: movedText,
-        afterText: movedText,
+        afterText: formattedMovedText,
         paragraphOrdinal: source.paragraphOrdinal,
       },
     ],
@@ -613,6 +741,65 @@ function executeInlineMove(
 function extendThroughTerminalPunctuation(text: string, end: number, limit: number): number {
   const punctuation = text.slice(end, limit).match(/^(?:\.{3}|[.!?…])/u)?.[0]
   return punctuation ? end + punctuation.length : end
+}
+
+function extendThroughSentenceEnd(text: string, end: number): number {
+  if (/[.!?…][”’"')\]]*$/u.test(text.slice(0, end))) return end
+  const remainder = text.slice(end)
+  const terminal = /(?:\.{3}|[.!?…])[”’"')\]]*(?=\s|$)/u.exec(remainder)
+  return terminal ? end + (terminal.index ?? 0) + terminal[0].length : end
+}
+
+function resolveSentenceTarget(
+  text: string,
+  rangeStart: number,
+  rangeEnd: number,
+  target: EditTarget,
+): { start: number; end: number } | string {
+  const sentences = findSentenceRanges(text, rangeStart, rangeEnd)
+  const index =
+    target.sentenceOrdinal !== undefined
+      ? target.sentenceOrdinal - 1
+      : sentences.length - (target.sentenceFromEnd ?? 0)
+  return sentences[index] ?? 'sentence position was not found'
+}
+
+function findSentenceRanges(
+  text: string,
+  rangeStart: number,
+  rangeEnd: number,
+): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = []
+  let cursor = rangeStart
+  while (cursor < rangeEnd) {
+    while (cursor < rangeEnd && /\s/u.test(text[cursor] ?? '')) cursor += 1
+    if (cursor >= rangeEnd) break
+    const start = cursor
+    const remainder = text.slice(cursor, rangeEnd)
+    const terminal = findSentenceTerminal(remainder, 0)
+    if (!terminal) {
+      const trailingWhitespace = text.slice(start, rangeEnd).match(/\s*$/u)?.[0].length ?? 0
+      ranges.push({ start, end: rangeEnd - trailingWhitespace })
+      break
+    }
+    const end = cursor + (terminal.index ?? 0) + terminal[0].length
+    ranges.push({ start, end })
+    cursor = end
+  }
+  return ranges
+}
+
+function findSentenceTerminal(remainder: string, from: number): RegExpExecArray | null {
+  const pattern = /(?:\.{3}|[.!?…])([”’"')\]]*)(?=\s|$)/gu
+  pattern.lastIndex = from
+  let terminal: RegExpExecArray | null
+  while ((terminal = pattern.exec(remainder))) {
+    const closers = terminal[1] ?? ''
+    if (closers && /^\s+\p{Ll}/u.test(remainder.slice((terminal.index ?? 0) + terminal[0].length)))
+      continue
+    return terminal
+  }
+  return null
 }
 
 function resolveTextTarget(
@@ -638,7 +825,12 @@ function resolveTextTarget(
 
   let start: number
   let end: number
-  if (target.punctuation !== undefined) {
+  if (target.sentenceOrdinal !== undefined || target.sentenceFromEnd !== undefined) {
+    const match = resolveSentenceTarget(cleanText, range.start, range.end, target)
+    if (typeof match === 'string') return `${label}: ${match}`
+    start = match.start
+    end = match.end
+  } else if (target.punctuation !== undefined) {
     const match = resolvePunctuationTarget(cleanText, range.start, range.end, target)
     if (typeof match === 'string') return `${label}: ${match}`
     start = match.start
@@ -656,7 +848,7 @@ function resolveTextTarget(
     start = match.start
     end = match.end
   } else {
-    return `${label} requires exact, approximate, or punctuation text`
+    return `${label} requires exact, approximate, sentence, or punctuation text`
   }
 
   return {
@@ -794,12 +986,14 @@ function addBoundarySpacing(text: string, point: number, insertion: string): str
   let result = insertion
   const left = text[point - 1] ?? ''
   const right = text[point] ?? ''
+  const leftIsClosingAsciiQuote =
+    (left === '"' || left === "'") && /[.?!\u2026]/u.test(text[point - 2] ?? '')
   if (/[ \t]/.test(left)) result = result.replace(/^[ \t]+/u, '')
   if (/[ \t]/.test(right)) result = result.replace(/[ \t]+$/u, '')
   if (
     left &&
     !/\s/.test(left) &&
-    !/[([{“‘"']/.test(left) &&
+    (!/[([{“‘"']/.test(left) || leftIsClosingAsciiQuote) &&
     !/^\s/.test(result) &&
     !/^[,.;:!?)}\]”’"']/.test(result)
   )
@@ -835,6 +1029,126 @@ function capitalizeReplacementAtSentenceOpening(
   )
 }
 
+function alignReplacementInitialCasing(
+  text: string,
+  start: number,
+  end: number,
+  replacement: string,
+  protectedCasingTerms: readonly string[],
+): string {
+  if (isSentenceOpeningAt(text, start))
+    return capitalizeReplacementAtSentenceOpening(text, start, replacement)
+
+  const replacedOpening = text
+    .slice(start, end)
+    .match(/^[ \t]*[\u201c\u2018"'([{]*[ \t]*(\p{L})/u)?.[1]
+  if (!replacedOpening || !/\p{Ll}/u.test(replacedOpening)) return replacement
+
+  const evidenceText = `${replacement}\n\n${text}`
+  const lowered = lowercaseOrdinarySentenceOpening(
+    replacement,
+    0,
+    evidenceText,
+    0,
+    protectedCasingTerms,
+  )
+  return lowered ? `${lowered.text}${replacement.slice(lowered.end)}` : replacement
+}
+
+function isSentenceOpeningAt(text: string, point: number): boolean {
+  const before = text.slice(0, point)
+  return /(?:^|\n{2,}|[.?!\u2026][\u201d\u2019"']?(?:[ \t]+|$))[ \t]*[\u201c\u2018"'([{]*[ \t]*$/u.test(
+    before,
+  )
+}
+
+interface LowercasedSentenceOpening {
+  end: number
+  text: string
+}
+
+const CALENDAR_PROPER_NOUNS = new Set([
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+])
+
+function lowercaseOrdinarySentenceOpening(
+  text: string,
+  start: number,
+  evidenceText: string,
+  evidenceStart: number,
+  protectedCasingTerms: readonly string[],
+): LowercasedSentenceOpening | null {
+  const match = text
+    .slice(start)
+    .match(/^([ \t]*[\u201c\u2018"'([{]*[ \t]*)(\p{Lu}[\p{L}\p{M}'\u2019-]*)/u)
+  if (!match) return null
+  const prefix = match[1]!
+  const word = match[2]!
+  if (looksLikeProperNoun(evidenceText, evidenceStart + prefix.length, word, protectedCasingTerms))
+    return null
+  const loweredWord = `${word.charAt(0).toLocaleLowerCase()}${word.slice(1)}`
+  return { end: start + match[0].length, text: `${prefix}${loweredWord}` }
+}
+
+function looksLikeProperNoun(
+  text: string,
+  wordStart: number,
+  word: string,
+  protectedCasingTerms: readonly string[],
+): boolean {
+  if (/\p{Lu}/u.test(word.slice(1))) return true
+  if (CALENDAR_PROPER_NOUNS.has(word)) return true
+  if (
+    protectedCasingTerms.some((term) => {
+      const termWords: string[] = term.match(/[\p{L}\p{M}'\u2019-]+/gu) ?? []
+      return termWords.includes(word)
+    })
+  )
+    return true
+
+  const following = text.slice(wordStart + word.length)
+  if (/^[ \t]+\p{Lu}\p{Ll}+/u.test(following)) return true
+
+  const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const occurrencePattern = new RegExp(`(?<![\\p{L}\\p{N}])${escapedWord}(?![\\p{L}\\p{N}])`, 'gu')
+  for (const occurrence of text.matchAll(occurrencePattern)) {
+    const occurrenceStart = occurrence.index
+    if (occurrenceStart === wordStart) continue
+    if (!isSentenceOpeningAt(text, occurrenceStart)) return true
+  }
+  return false
+}
+
+function capitalizeExistingSentenceOpening(text: string, start: number): string {
+  const suffix = text.slice(start)
+  const capitalized = suffix.replace(
+    /^([ \t]*[\u201c\u2018"'([{]*[ \t]*)([\p{Ll}][\p{L}\p{M}'\u2019-]*)/u,
+    (whole, prefix: string, word: string) => {
+      if (/\p{Lu}/u.test(word.slice(1))) return whole
+      return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`
+    },
+  )
+  return `${text.slice(0, start)}${capitalized}`
+}
+
 function executeStructuralPlan(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
@@ -858,16 +1172,37 @@ function executeStructuralPlan(
       : { start: 0, end: cleanText.length }
     let afterText = sourceResult.text
 
-    if (operation.type === 'split') {
-      const anchor = operation.target.exactText
-      if (!anchor) return { ok: false, reason: 'split requires an exact anchor' }
-      const matches = findAll(sourceResult.text, anchor, 0, sourceResult.text.length)
-      if (matches.length !== 1)
-        return {
-          ok: false,
-          reason: matches.length ? 'split anchor is ambiguous' : 'split anchor was not found',
-        }
-      const splitAt = matches[0]! + anchor.length
+    if (operation.type === 'delete') {
+      working.splice(sourceIndex, 1)
+      afterText = ''
+    } else if (operation.type === 'split') {
+      let splitAt: number
+      if (
+        operation.target.sentenceOrdinal !== undefined ||
+        operation.target.sentenceFromEnd !== undefined
+      ) {
+        const sentence = resolveSentenceTarget(
+          sourceResult.text,
+          0,
+          sourceResult.text.length,
+          operation.target,
+        )
+        if (typeof sentence === 'string') return { ok: false, reason: sentence }
+        splitAt = sentence.end
+      } else {
+        const anchor = operation.target.exactText
+        if (!anchor) return { ok: false, reason: 'split requires an exact or sentence anchor' }
+        const matches = findAll(sourceResult.text, anchor, 0, sourceResult.text.length)
+        if (matches.length !== 1)
+          return {
+            ok: false,
+            reason: matches.length ? 'split anchor is ambiguous' : 'split anchor was not found',
+          }
+        const anchorEnd = matches[0]! + anchor.length
+        splitAt = operation.includeTrailingPunctuation
+          ? extendThroughSentenceEnd(sourceResult.text, anchorEnd)
+          : anchorEnd
+      }
       const left = sourceResult.text.slice(0, splitAt).trimEnd()
       const right = sourceResult.text.slice(splitAt).trimStart()
       if (!left || !right) return { ok: false, reason: 'split would create an empty paragraph' }
@@ -970,11 +1305,70 @@ function findExactOrFuzzyMatch(
   if (exactMatches.length === 1)
     return { start: exactMatches[0]!, end: exactMatches[0]! + search.length }
 
+  const lexicalMatch = findPunctuationInsensitiveMatch(text, search, start, end)
+  if (typeof lexicalMatch !== 'string') return lexicalMatch
+  if (lexicalMatch.includes('ambiguous')) return lexicalMatch
+
   const approximate = findApproximateMatch(text, search, start, end)
   if (typeof approximate !== 'string') return approximate
   return approximate.includes('ambiguous')
     ? 'fuzzy text target is ambiguous'
     : 'text target was not found'
+}
+
+function findPunctuationInsensitiveMatch(
+  text: string,
+  search: string,
+  start: number,
+  end: number,
+): { start: number; end: number } | string {
+  const wanted = tokenizeWithOffsets(search, 0, search.length)
+  if (!wanted.length) return 'punctuation-insensitive text target was not found'
+  const available = tokenizeCachedDraftRange(text, start, end)
+  if (available.length < wanted.length) return 'punctuation-insensitive text target was not found'
+
+  const wantedValues = wanted.map(({ value }) => stripTokenPunctuation(value))
+  const candidates: Array<{ start: number; end: number; punctuation: string }> = []
+  for (let index = 0; index <= available.length - wanted.length; index += 1) {
+    const window = available.slice(index, index + wanted.length)
+    if (
+      !window.every(
+        (token, tokenIndex) => stripTokenPunctuation(token.value) === wantedValues[tokenIndex],
+      )
+    )
+      continue
+    candidates.push({
+      start: window[0]!.start,
+      end: window.at(-1)!.end,
+      punctuation: internalPunctuationSignature(text, window[0]!.start, window.at(-1)!.end),
+    })
+  }
+  if (candidates.length === 1) return candidates[0]!
+  if (!candidates.length) return 'punctuation-insensitive text target was not found'
+
+  const wantedPunctuation = internalPunctuationSignature(
+    search,
+    wanted[0]!.start,
+    wanted.at(-1)!.end,
+  )
+  const punctuationMatches = candidates.filter(
+    (candidate) => candidate.punctuation === wantedPunctuation,
+  )
+  return punctuationMatches.length === 1
+    ? punctuationMatches[0]!
+    : 'punctuation-insensitive text target is ambiguous'
+}
+
+function stripTokenPunctuation(value: string): string {
+  return value.replace(/[^\p{L}\p{N}]/gu, '')
+}
+
+function internalPunctuationSignature(text: string, start: number, end: number): string {
+  return text
+    .slice(start, end)
+    .replace(/[\p{L}\p{N}\s]/gu, '')
+    .replace(/[\u2018\u2019]/gu, "'")
+    .replace(/[\u201c\u201d]/gu, '"')
 }
 
 function findApproximateMatch(
@@ -985,80 +1379,191 @@ function findApproximateMatch(
 ): { start: number; end: number } | string {
   const wanted = tokenizeWithOffsets(search, 0, search.length)
   if (!wanted.length) return 'approximate text target was not found'
-  const available = tokenizeWithOffsets(text, start, end)
+  const available = tokenizeCachedDraftRange(text, start, end)
   if (!available.length) return 'approximate text target was not found'
   const wantedText = wanted.map(({ value }) => value).join(' ')
   const wantedCompact = wantedText.replace(/\s+/gu, '')
   const wantedPhonetic = phoneticKey(wantedCompact)
+  const availableValues = available.map(({ value }) => value)
+  const availableText = availableValues.join(' ')
+  const availableCompact = availableValues.join('')
+  const spacedOffsets = new Uint32Array(available.length + 1)
+  const compactOffsets = new Uint32Array(available.length + 1)
+  for (let index = 0; index < available.length; index += 1) {
+    spacedOffsets[index + 1] =
+      spacedOffsets[index]! + availableValues[index]!.length + (index === 0 ? 0 : 1)
+    compactOffsets[index + 1] = compactOffsets[index]! + availableValues[index]!.length
+  }
+  const scoreCache = new Map<
+    string,
+    {
+      compactScore: number
+      text: string
+      phonetic: string
+      maxScoreUpperBound: number
+      score?: number
+      phoneticFallback?: boolean
+    }
+  >()
   const candidates: Array<{
     start: number
     end: number
-    score: number
+    order: number
+    score?: number
+    scores: {
+      compactScore: number
+      text: string
+      phonetic: string
+      maxScoreUpperBound: number
+      score?: number
+      phoneticFallback?: boolean
+    }
     boundaryFallback: boolean
     shortWordFallback: boolean
     phoneticFallback: boolean
   }> = []
   const addCandidates = (length: number) => {
     for (let index = 0; index <= available.length - length; index += 1) {
-      const window = available.slice(index, index + length)
-      const candidateText = window.map(({ value }) => value).join(' ')
-      const candidateCompact = candidateText.replace(/\s+/gu, '')
-      const compactScore = stringSimilarity(wantedCompact, candidateCompact)
-      const candidatePhonetic = phoneticKey(candidateCompact)
-      const phoneticScore = stringSimilarity(wantedPhonetic, candidatePhonetic)
-      candidates.push({
-        start: window[0]!.start,
-        end: window.at(-1)!.end,
-        score: Math.max(
-          stringSimilarity(wantedText, candidateText),
+      const windowEnd = index + length
+      const spacedStart = spacedOffsets[index]! + (index === 0 ? 0 : 1)
+      const spacedEnd = spacedOffsets[windowEnd]!
+      const candidateText = availableText.slice(spacedStart, spacedEnd)
+      const candidateCompact = availableCompact.slice(
+        compactOffsets[index]!,
+        compactOffsets[windowEnd]!,
+      )
+      let scores = scoreCache.get(candidateText)
+      if (!scores) {
+        const compactScore = stringSimilarity(wantedCompact, candidateCompact)
+        const candidatePhonetic = phoneticKey(candidateCompact)
+        scores = {
           compactScore,
-          phoneticScore * 0.75 + compactScore * 0.25,
-        ),
+          text: candidateText,
+          phonetic: candidatePhonetic,
+          maxScoreUpperBound: Math.max(
+            compactScore,
+            maximumSimilarityForLengths(wantedText.length, candidateText.length),
+            maximumSimilarityForLengths(wantedPhonetic.length, candidatePhonetic.length) * 0.75 +
+              compactScore * 0.25,
+          ),
+        }
+        scoreCache.set(candidateText, scores)
+      }
+      candidates.push({
+        start: available[index]!.start,
+        end: available[windowEnd - 1]!.end,
+        order: candidates.length,
+        scores,
         boundaryFallback:
           length !== wanted.length &&
           Math.min(wantedCompact.length, candidateCompact.length) >= 5 &&
           Math.abs(wantedCompact.length - candidateCompact.length) <= 2 &&
-          compactScore >= 2 / 3,
+          scores.compactScore >= 2 / 3,
         shortWordFallback:
           wanted.length === 1 &&
           length === 1 &&
           Math.min(wantedCompact.length, candidateCompact.length) >= 4 &&
           Math.abs(wantedCompact.length - candidateCompact.length) <= 1 &&
-          compactScore >= 0.75,
-        phoneticFallback:
-          Math.min(wantedPhonetic.length, candidatePhonetic.length) >= 4 &&
-          wantedPhonetic.charAt(0) === candidatePhonetic.charAt(0) &&
-          compactScore >= 0.5 &&
-          phoneticScore >= 0.8,
+          scores.compactScore >= 0.75,
+        phoneticFallback: false,
       })
     }
   }
   addCandidates(wanted.length)
   if (wanted.length > 1) addCandidates(wanted.length - 1)
   addCandidates(wanted.length + 1)
-  candidates.sort((left, right) => right.score - left.score)
-  const best = candidates[0]
+  const evaluationOrder = [...candidates].sort(
+    (left, right) =>
+      right.scores.compactScore - left.scores.compactScore || left.order - right.order,
+  )
+  let best: (typeof candidates)[number] | undefined
+  for (const candidate of evaluationOrder) {
+    if (best?.score !== undefined && candidate.scores.maxScoreUpperBound < best.score - 0.12)
+      continue
+    if (candidate.scores.score === undefined) {
+      const phoneticScore = stringSimilarity(wantedPhonetic, candidate.scores.phonetic)
+      const textScore =
+        wantedText === wantedCompact &&
+        candidate.scores.text === candidate.scores.text.replace(/\s+/gu, '')
+          ? candidate.scores.compactScore
+          : stringSimilarity(wantedText, candidate.scores.text)
+      candidate.scores.score = Math.max(
+        textScore,
+        candidate.scores.compactScore,
+        phoneticScore * 0.75 + candidate.scores.compactScore * 0.25,
+      )
+      candidate.scores.phoneticFallback =
+        Math.min(wantedPhonetic.length, candidate.scores.phonetic.length) >= 4 &&
+        wantedPhonetic.charAt(0) === candidate.scores.phonetic.charAt(0) &&
+        candidate.scores.compactScore >= 0.5 &&
+        phoneticScore >= 0.8
+    }
+    candidate.score = candidate.scores.score
+    candidate.phoneticFallback = candidate.scores.phoneticFallback ?? false
+    if (
+      candidate.score !== undefined &&
+      (!best ||
+        best.score === undefined ||
+        candidate.score > best.score ||
+        (candidate.score === best.score && candidate.order < best.order))
+    )
+      best = candidate
+  }
   if (
     !best ||
+    best.score === undefined ||
     (best.score < 0.78 &&
       !best.boundaryFallback &&
       !best.shortWordFallback &&
       !best.phoneticFallback)
   )
     return 'approximate text target was not found'
-  const runnerUp = candidates.find(
-    (candidate) => candidate.end <= best.start || candidate.start >= best.end,
-  )
-  if (runnerUp && best.score - runnerUp.score < 0.12) return 'approximate text target is ambiguous'
+  let runnerUp: (typeof candidates)[number] | undefined
+  for (const candidate of candidates) {
+    if (
+      candidate.score !== undefined &&
+      (candidate.end <= best.start || candidate.start >= best.end) &&
+      (!runnerUp || runnerUp.score === undefined || candidate.score > runnerUp.score)
+    )
+      runnerUp = candidate
+  }
+  if (runnerUp?.score !== undefined && best.score - runnerUp.score < 0.12)
+    return 'approximate text target is ambiguous'
   return { start: best.start, end: best.end }
 }
 
-function tokenizeWithOffsets(
-  text: string,
-  start: number,
-  end: number,
-): Array<{ value: string; start: number; end: number }> {
-  const tokens: Array<{ value: string; start: number; end: number }> = []
+function maximumSimilarityForLengths(leftLength: number, rightLength: number): number {
+  return 1 - Math.abs(leftLength - rightLength) / Math.max(leftLength, rightLength, 1)
+}
+
+interface FuzzyToken {
+  value: string
+  start: number
+  end: number
+}
+
+const MAX_FUZZY_TOKEN_CACHE_ENTRIES = 8
+const fuzzyTokenCache = new Map<string, FuzzyToken[]>()
+
+function tokenizeCachedDraftRange(text: string, start: number, end: number): FuzzyToken[] {
+  let tokens = fuzzyTokenCache.get(text)
+  if (tokens) {
+    fuzzyTokenCache.delete(text)
+    fuzzyTokenCache.set(text, tokens)
+  } else {
+    tokens = tokenizeWithOffsets(text, 0, text.length)
+    fuzzyTokenCache.set(text, tokens)
+    if (fuzzyTokenCache.size > MAX_FUZZY_TOKEN_CACHE_ENTRIES) {
+      const oldest = fuzzyTokenCache.keys().next().value
+      if (oldest !== undefined) fuzzyTokenCache.delete(oldest)
+    }
+  }
+  if (start === 0 && end === text.length) return tokens
+  return tokens.filter((token) => token.start >= start && token.end <= end)
+}
+
+function tokenizeWithOffsets(text: string, start: number, end: number): FuzzyToken[] {
+  const tokens: FuzzyToken[] = []
   const segment = text.slice(start, end)
   for (const match of segment.matchAll(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)) {
     const offset = start + (match.index ?? 0)
@@ -1072,22 +1577,27 @@ function tokenizeWithOffsets(
 }
 
 function stringSimilarity(left: string, right: string): number {
-  const rows = left.length + 1
-  const columns = right.length + 1
-  const previous = Array.from({ length: columns }, (_, index) => index)
-  for (let row = 1; row < rows; row += 1) {
-    const current = new Array<number>(columns)
-    current[0] = row
-    for (let column = 1; column < columns; column += 1) {
-      current[column] = Math.min(
-        current[column - 1]! + 1,
-        previous[column]! + 1,
-        previous[column - 1]! + (left[row - 1] === right[column - 1] ? 0 : 1),
+  if (left === right) return 1
+  if (!left.length || !right.length) return 0
+  let rows = left
+  let columns = right
+  if (columns.length > rows.length) [rows, columns] = [columns, rows]
+  const distances = new Uint32Array(columns.length + 1)
+  for (let column = 0; column <= columns.length; column += 1) distances[column] = column
+  for (let row = 1; row <= rows.length; row += 1) {
+    let diagonal = distances[0]!
+    distances[0] = row
+    for (let column = 1; column <= columns.length; column += 1) {
+      const above = distances[column]!
+      distances[column] = Math.min(
+        distances[column - 1]! + 1,
+        above + 1,
+        diagonal + (rows[row - 1] === columns[column - 1] ? 0 : 1),
       )
+      diagonal = above
     }
-    for (let column = 0; column < columns; column += 1) previous[column] = current[column]!
   }
-  return 1 - previous[columns - 1]! / Math.max(left.length, right.length, 1)
+  return 1 - distances[columns.length]! / Math.max(left.length, right.length, 1)
 }
 
 function phoneticKey(value: string): string {

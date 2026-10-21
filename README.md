@@ -11,6 +11,7 @@ JarvisType is a [Lumiverse](https://lumiverse.chat/) extension for composing cha
 - Build one message progressively across multiple recordings.
 - Review and accept or reject every **Record Message** transcription before it can enter the current draft.
 - Interpret separate **Record Edit** recordings as editing instructions.
+- Always apply local spacing, casing, and punctuation cleanup to edited sentences, with an optional conservative, reviewable provider grammar repair.
 - Number paragraphs for precise spoken references.
 - Show the current message and the latest diff after every change.
 - Support undo and repeated editing before submission.
@@ -78,7 +79,7 @@ The draft editor will assign display-only numbers to non-empty paragraphs. This 
 
 JarvisType uses semantic natural-language interpretation as the primary command interface, so users do not need to memorize stock phrases. The editing audio is first preserved as an instruction transcript. A language model then converts the flexible wording into an allowlisted, structured operation; it never edits the draft directly.
 
-Message dictation uses guarded deterministic cues only. Ordinary punctuation terminology such as “the semicolon is optional” or “a question mark appeared” remains literal. Every punctuation and layout term can be forced literal with wording such as “the word period” or “the phrase new paragraph,” and can be forced as a command with wording such as “insert period,” “punctuation colon,” or “command new line.” Bare `quote` and `single quote` require a complete pair; unmatched occurrences remain words.
+Message dictation uses guarded deterministic cues only. Ordinary punctuation terminology such as “the semicolon is optional” or “a question mark appeared” remains literal. Every punctuation and layout term can be forced literal with wording such as “the word period” or “the phrase new paragraph,” and can be forced as a command with wording such as “insert period,” “punctuation colon,” or “command new line.” Bare `quote`/`quotation` and `single quote`/`single quotation` require a complete pair; unmatched occurrences remain words.
 
 A deterministic resolver validates the target and draft version, and a deterministic patch engine applies the operation and produces the diff. Ambiguous changes require confirmation, and applied changes remain undoable. A small stock-phrase recognizer may accelerate simple commands such as "undo" or "delete paragraph three," but it must emit the same operation schema and pass through the same validation and patch pipeline.
 

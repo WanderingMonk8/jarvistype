@@ -23,6 +23,9 @@ let generationReturnsRawTranscript = false
 let generationNormalizedText: string | null = null
 let generationCommandDecisions: unknown[] = []
 let editPlanResponse: unknown = null
+let grammarRepairResponse: unknown = null
+let grammarRepairHangs = false
+let grammarRepairSignal: AbortSignal | undefined
 let chatMessages: Array<{
   role: 'system' | 'user' | 'assistant'
   content: unknown
@@ -95,6 +98,7 @@ const spindleMock = {
       connection_id?: string
       parameters?: Record<string, unknown>
       messages?: Array<{ content: string }>
+      signal?: AbortSignal
     }) => {
       generationRequests.push(request)
       const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as {
@@ -104,6 +108,22 @@ const spindleMock = {
       }
       if (input.task === 'Interpret this edit instruction against the numbered draft.')
         return Promise.resolve({ content: JSON.stringify(editPlanResponse) })
+      if (input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.') {
+        if (!grammarRepairHangs)
+          return Promise.resolve({ content: JSON.stringify(grammarRepairResponse) })
+        grammarRepairSignal = request.signal
+        return new Promise((_resolve, reject) => {
+          request.signal?.addEventListener(
+            'abort',
+            () => {
+              const error = new Error('aborted')
+              error.name = 'AbortError'
+              reject(error)
+            },
+            { once: true },
+          )
+        })
+      }
       return Promise.resolve({
         content: JSON.stringify({
           normalizedText: generationReturnsRawTranscript
@@ -142,6 +162,9 @@ test.beforeEach(() => {
   generationNormalizedText = null
   generationCommandDecisions = []
   editPlanResponse = null
+  grammarRepairResponse = null
+  grammarRepairHangs = false
+  grammarRepairSignal = undefined
   chatMessages = []
 })
 
@@ -256,6 +279,7 @@ test('lists safe normalization connections and dispatches with selected connecti
       settings: {
         contextMessageCount: 5,
         contextualNormalizationEnabled: true,
+        grammarRepairMode: 'off',
         normalizationConnectionId: normalizationConnection.id,
         normalizationModelOverride: 'custom-text-model',
       },
@@ -381,6 +405,34 @@ test('recovers a unique recent-chat name with a stable prefix and mistranscribed
     )
     assert.ok(response.proposal.reasons.includes('recent conversation spelling: Willie → Willum'))
   }
+})
+
+test('recovers a short possessive character name from recent chat', async () => {
+  const userId = 'recent-short-possessive-name-user'
+  const chatId = 'recent-short-possessive-name-chat'
+  activeChatId = chatId
+  chatMessages = [
+    {
+      role: 'assistant',
+      content: 'Kat’s patience finally ran out, and Kat stepped away from the table.',
+    },
+  ]
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'recent-short-possessive-name-segment',
+      0,
+      "Cat's hands tightened around the cup.",
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type !== 'transcript.normalization.response') return
+  assert.equal(response.proposal.candidateText, "Kat's hands tightened around the cup.")
+  assert.ok(response.proposal.reasons.includes('recent conversation spelling: Cat → Kat'))
 })
 
 test('blocks sending when the active chat does not own the draft', async () => {
@@ -522,6 +574,120 @@ test('commits recording segments once, in order, and undoes only the latest segm
     assert.equal(undoResponse.snapshot.cleanText, 'Typed First')
     assert.equal(undoResponse.snapshot.recordingSegments.length, 1)
     assert.equal(undoResponse.snapshot.canUndoRecording, true)
+  }
+})
+
+test('appends a reviewed recording onto a concurrently changed same-chat draft', async () => {
+  const userId = 'concurrent-recording-user'
+  const chatId = 'concurrent-recording-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First device text.')
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'concurrent-recording-segment', 1, 'Recorded on mobile.'),
+    userId,
+  )
+  const proposalResponse = responses.at(-1)?.payload
+  assert.equal(proposalResponse?.type, 'transcript.normalization.response')
+  if (proposalResponse?.type !== 'transcript.normalization.response') return
+  assert.equal(proposalResponse.outcome, 'review')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.mutate.request',
+      requestId: 'concurrent-desktop-mutation',
+      operationId: 'concurrent-desktop-operation',
+      chatId,
+      expectedVersion: 1,
+      editGroupId: 'concurrent-desktop-group',
+      cleanText: 'First device text. Updated on desktop.',
+    },
+    userId,
+  )
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.confirm.request',
+      requestId: 'concurrent-recording-confirm',
+      operationId: proposalResponse.proposal.operationId,
+      chatId,
+      expectedVersion: proposalResponse.proposal.expectedVersion,
+    },
+    userId,
+  )
+
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'transcript.normalization.response')
+  if (committed?.type !== 'transcript.normalization.response') return
+  assert.equal(committed.outcome, 'committed')
+  assert.equal(
+    committed.snapshot?.cleanText,
+    'First device text. Updated on desktop. Recorded on mobile.',
+  )
+  assert.equal(committed.snapshot?.draftVersion, 3)
+  assert.ok(
+    committed.snapshot?.recordingSegments
+      .at(-1)
+      ?.normalization.reasons.includes('appended after concurrent draft change'),
+  )
+})
+
+test('reviews a recording against the latest same-chat draft when its starting version is stale', async () => {
+  const userId = 'stale-start-recording-user'
+  const chatId = 'stale-start-recording-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Original draft.')
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.mutate.request',
+      requestId: 'stale-start-newer-draft',
+      operationId: 'stale-start-newer-draft-operation',
+      chatId,
+      expectedVersion: 1,
+      editGroupId: 'stale-start-newer-draft-group',
+      cleanText: 'Updated from another device.',
+    },
+    userId,
+  )
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'stale-start-recording-segment', 1, 'recorded concurrently.'),
+    userId,
+  )
+
+  const proposalResponse = responses.at(-1)?.payload
+  assert.equal(proposalResponse?.type, 'transcript.normalization.response')
+  if (proposalResponse?.type !== 'transcript.normalization.response') return
+  assert.equal(proposalResponse.outcome, 'review')
+  assert.equal(proposalResponse.proposal.expectedVersion, 2)
+  assert.equal(proposalResponse.proposal.candidateText, 'Recorded concurrently.')
+  assert.ok(proposalResponse.proposal.reasons.includes('normalized against newer same-chat draft'))
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'transcript.confirm.request',
+      requestId: 'stale-start-recording-confirm',
+      operationId: proposalResponse.proposal.operationId,
+      chatId,
+      expectedVersion: proposalResponse.proposal.expectedVersion,
+    },
+    userId,
+  )
+
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'transcript.normalization.response')
+  if (committed?.type === 'transcript.normalization.response') {
+    assert.equal(committed.outcome, 'committed')
+    assert.equal(
+      committed.snapshot?.cleanText,
+      'Updated from another device. Recorded concurrently.',
+    )
   }
 })
 
@@ -810,6 +976,28 @@ test('requires review before committing explicit spelling and learns only after 
   }
 })
 
+test('uses normal casing for unmodified explicit spelling', async () => {
+  const userId = 'default-spelling-casing-user'
+  const chatId = 'default-spelling-casing-chat'
+  activeChatId = chatId
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'default-spelling-casing-segment', 0, 'Use C-O-O-L-E-Y period'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type !== 'transcript.normalization.response') return
+  assert.equal(response.outcome, 'review')
+  assert.equal(response.proposal.candidateText, 'Use cooley.')
+  assert.deepEqual(response.proposal.learningCandidates, [
+    { canonical: 'cooley', spokenVariant: 'C-O-O-L-E-Y' },
+  ])
+  assert.deepEqual(response.proposal.ambiguities, [])
+})
+
 test('re-applies deterministic commands when contextual output returns the raw provider text', async () => {
   const userId = 'provider-punctuation-user'
   const chatId = 'provider-punctuation-chat'
@@ -877,6 +1065,33 @@ test('contextually recovers a standout spoken command without prior chat or draf
   const systemPrompt = generationRequests[0]?.messages?.[0]?.content ?? ''
   assert.match(systemPrompt, /natural noun, verb, descriptive/)
   assert.match(systemPrompt, /commandDecisions/)
+})
+
+test('recovers a mistranscribed closing speech alias in the normalization proposal', async () => {
+  const userId = 'fuzzy-speech-alias-user'
+  const chatId = 'fuzzy-speech-alias-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'fuzzy-speech-alias-segment',
+      1,
+      'Begin speech. No. I do not play Wonderful. I play jazz, though. So, I guess you can name your price and speech.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type !== 'transcript.normalization.response') return
+  assert.equal(
+    response.proposal.candidateText,
+    '“No. I do not play Wonderful. I play jazz, though. So, I guess you can name your price”.',
+  )
+  assert.ok(response.proposal.reasons.includes('fuzzy spoken command recovery'))
 })
 
 test('rejects contextual command decisions that do not quote the raw transcript', async () => {
@@ -1007,6 +1222,100 @@ test('does not let contextual normalization discard commanded quotation marks', 
   }
 })
 
+test('does not let contextual normalization duplicate speech quotation marks', async () => {
+  const userId = 'duplicated-speech-quotes-user'
+  const chatId = 'duplicated-speech-quotes-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationRequests.length = 0
+  generationNormalizedText =
+    '““Yeah, no offense, but you do look like you have had a long day. Everything all right?”'
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'duplicated-speech-quotes-segment',
+      1,
+      'Begin speech. Yeah, no offense, but you do look like you have had a long day. Everything all right? End speech.',
+      'double',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(
+      response.proposal.candidateText,
+      '“Yeah, no offense, but you do look like you have had a long day. Everything all right?”',
+    )
+    assert.equal(response.proposal.contextualModelUsed, false)
+    assert.ok(response.proposal.reasons.includes('deterministic quotation fast path'))
+    assert.equal(response.proposal.reasons.includes('streamed quotation command recovery'), false)
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('does not let contextual normalization duplicate single quotation marks', async () => {
+  const userId = 'duplicated-single-quotes-user'
+  const chatId = 'duplicated-single-quotes-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationRequests.length = 0
+  generationNormalizedText = '‘‘A private thought.’'
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'duplicated-single-quotes-segment',
+      1,
+      'Begin single. A private thought. End single.',
+      'single',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.outcome, 'review')
+    assert.equal(response.proposal.candidateText, '‘A private thought.’')
+    assert.equal(response.proposal.contextualModelUsed, false)
+    assert.ok(response.proposal.reasons.includes('deterministic quotation fast path'))
+    assert.equal(response.proposal.reasons.includes('streamed quotation command recovery'), false)
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('rejects mixed-style duplicate quotes from contextual normalization', async () => {
+  const userId = 'mixed-duplicate-quotes-user'
+  const chatId = 'mixed-duplicate-quotes-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationNormalizedText = 'She said \u201c"Proceed carefully\u201d.'
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'mixed-duplicate-quotes-segment',
+      1,
+      'She said quote proceed carefully quote period',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.candidateText, 'She said \u201cProceed carefully\u201d.')
+    assert.equal(response.proposal.contextualModelUsed, false)
+  }
+})
+
 test('formats an opening produced by a spoken quote command', async () => {
   const userId = 'formatted-commanded-quotes-user'
   const chatId = 'formatted-commanded-quotes-chat'
@@ -1030,6 +1339,37 @@ test('formats an opening produced by a spoken quote command', async () => {
     assert.equal(response.outcome, 'review')
     assert.equal(response.proposal.candidateText, '“And I am not going anywhere”.')
     assert.equal(response.proposal.contextualModelUsed, false)
+  }
+})
+
+test('recovers paired boundary quotations observed only in the streaming transcript', async () => {
+  const userId = 'streamed-boundary-quotes-user'
+  const chatId = 'streamed-boundary-quotes-chat'
+  activeChatId = chatId
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'streamed-boundary-quotes-segment',
+      0,
+      'No offense, but you do look like you have had a long day.',
+      'double',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(
+      response.proposal.rawTranscript,
+      'No offense, but you do look like you have had a long day.',
+    )
+    assert.equal(
+      response.proposal.candidateText,
+      '“No offense, but you do look like you have had a long day.”',
+    )
+    assert.ok(response.proposal.reasons.includes('streamed quotation command recovery'))
   }
 })
 
@@ -1263,6 +1603,464 @@ test('keeps spoken edit instructions out of the draft until the structured propo
   }
 })
 
+test('extends a sentence-targeted paragraph break through terminal punctuation', async () => {
+  const userId = 'sentence-split-user'
+  const chatId = 'sentence-split-chat'
+  activeChatId = chatId
+  const original =
+    'Opening sentence. The brief eruption of discussion seemed to die down once more, and the general passivity returned to campus. Friday arrived.'
+  await seedDraft(userId, chatId, original)
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Split after the requested sentence.',
+    operations: [
+      {
+        id: 'split-discussion-sentence',
+        type: 'split',
+        target: {
+          paragraphOrdinal: 1,
+          exactText: 'The brief eruption of discussion seemed to die down once more,',
+        },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-split-interpret',
+      operationId: 'sentence-split-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Break the paragraph after the sentence about the brief eruption of discussion.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.plan.operations[0]?.includeTrailingPunctuation, true)
+  assert.equal(
+    proposal.proposal.afterText,
+    'Opening sentence. The brief eruption of discussion seemed to die down once more, and the general passivity returned to campus.\n\nFriday arrived.',
+  )
+})
+
+test('deletes the first sentence when identical text also appears last', async () => {
+  const userId = 'duplicate-sentence-user'
+  const chatId = 'duplicate-sentence-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Quotation. Okay, you are really cutting deep here. Quotation.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the first sentence.',
+    operations: [
+      {
+        id: 'delete-duplicate-first-sentence',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'Quotation.' },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'duplicate-sentence-interpret',
+      operationId: 'duplicate-sentence-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the first sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.deepEqual(proposal.proposal.plan.operations[0]?.target, {
+    sentenceOrdinal: 1,
+  })
+  assert.equal(proposal.proposal.afterText, 'Okay, you are really cutting deep here. Quotation.')
+})
+
+test('treats take off as a positional sentence deletion command', async () => {
+  const userId = 'take-off-sentence-user'
+  const chatId = 'take-off-sentence-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Quotation. Keep this sentence. Quotation.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Take off the first sentence.',
+    operations: [
+      {
+        id: 'take-off-first-sentence',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'Quotation.' },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'take-off-sentence-interpret',
+      operationId: 'take-off-sentence-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Take off the first sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.deepEqual(proposal.proposal.plan.operations[0]?.target, {
+    sentenceOrdinal: 1,
+  })
+  assert.equal(proposal.proposal.afterText, 'Keep this sentence. Quotation.')
+})
+
+test('takes off identical first and last sentences in one compound instruction', async () => {
+  const userId = 'compound-duplicate-sentence-user'
+  const chatId = 'compound-duplicate-sentence-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Quotation. Okay, you are really cutting deep here. Quotation.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'compound-duplicate-sentence-interpret',
+      operationId: 'compound-duplicate-sentence-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Take off the first and last sentences.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.deepEqual(
+    proposal.proposal.plan.operations.map((operation) => operation.target),
+    [{ sentenceOrdinal: 1 }, { sentenceFromEnd: 1 }],
+  )
+  assert.equal(proposal.proposal.afterText, 'Okay, you are really cutting deep here.')
+  assert.equal(
+    generationRequests.some(
+      (request) =>
+        JSON.parse(request.messages?.at(-1)?.content ?? '{}').task ===
+        'Interpret this edit instruction against the numbered draft.',
+    ),
+    false,
+  )
+})
+
+test('deletes one positional sentence without a provider interpretation', async () => {
+  const userId = 'single-sentence-deletion-user'
+  const chatId = 'single-sentence-deletion-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Second sentence. And speech.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'single-sentence-deletion-interpret',
+      operationId: 'single-sentence-deletion-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the last sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.deepEqual(
+    proposal.proposal.plan.operations.map((operation) => operation.target),
+    [{ sentenceFromEnd: 1 }],
+  )
+  assert.equal(proposal.proposal.afterText, 'First sentence. Second sentence.')
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
+test('inserts quotation marks around an exact sentence target', async () => {
+  const userId = 'exact-sentence-quotation-user'
+  const chatId = 'exact-sentence-quotation-chat'
+  activeChatId = chatId
+  const draft =
+    '“Yeah, Round Midnight is a special tune. I play it, like you said, in all kinds of moods.” I pick up the paper cup and gulp down the coffee in one courageous move. Let out a long breath, the grimace returning fully. All right, this is some special coffee. Well, anyway, yeah, your whole discography.'
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases = [
+    [
+      'Insert quotes before the sentence, All right, this is some special coffee.',
+      draft.replace(
+        'All right, this is some special coffee.',
+        '“All right, this is some special coffee.',
+      ),
+    ],
+    [
+      'Insert a quotation mark after the sentence, All right, this is some special coffee.',
+      draft.replace(
+        'All right, this is some special coffee.',
+        'All right, this is some special coffee.”',
+      ),
+    ],
+    [
+      'Put quotation marks around the sentence, All right, this is some special coffee.',
+      draft.replace(
+        'All right, this is some special coffee.',
+        '“All right, this is some special coffee.”',
+      ),
+    ],
+  ] as const
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `exact-sentence-quotation-interpret-${index}`,
+        operationId: `exact-sentence-quotation-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type === 'edit.proposal.response') {
+      assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('deletes positional sentences across every alias and paragraph scope', async () => {
+  const userId = 'sentence-deletion-alias-user'
+  const chatId = 'sentence-deletion-alias-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First one. First two.\n\nSecond one. Second two. Second three.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases = [
+    [
+      'In paragraph 2, delete the first sentence.',
+      'First one. First two.\n\nSecond two. Second three.',
+    ],
+    [
+      'Remove the second sentence in paragraph 2.',
+      'First one. First two.\n\nSecond one. Second three.',
+    ],
+    [
+      'Take off the final sentence of paragraph 2.',
+      'First one. First two.\n\nSecond one. Second two.',
+    ],
+    ['Erase the last sentence.', 'First one. First two.\n\nSecond one. Second two.'],
+    ['Cut the first sentence.', 'First two.\n\nSecond one. Second two. Second three.'],
+    [
+      'Delete the penultimate sentence in paragraph 2.',
+      'First one. First two.\n\nSecond one. Second three.',
+    ],
+  ] as const
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `sentence-deletion-alias-interpret-${index}`,
+        operationId: `sentence-deletion-alias-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type === 'edit.proposal.response') {
+      assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('deletes positional paragraphs without a provider interpretation', async () => {
+  const userId = 'paragraph-deletion-position-user'
+  const chatId = 'paragraph-deletion-position-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First.\n\nSecond.\n\nThird.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases = [
+    ['Delete the last paragraph.', 'First.\n\nSecond.'],
+    ['Remove paragraph 2.', 'First.\n\nThird.'],
+    ['Take off the penultimate paragraph.', 'First.\n\nThird.'],
+    ['Erase the first paragraph.', 'Second.\n\nThird.'],
+  ] as const
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `paragraph-deletion-position-interpret-${index}`,
+        operationId: `paragraph-deletion-position-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type === 'edit.proposal.response') {
+      assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('reviews and commits whole-paragraph deletion without leaving separator whitespace', async () => {
+  const userId = 'delete-paragraph-user'
+  const chatId = 'delete-paragraph-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the first paragraph.',
+    operations: [{ id: 'delete-first-paragraph', type: 'delete', target: { paragraphOrdinal: 1 } }],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'delete-paragraph-interpret',
+      operationId: 'delete-paragraph-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the first paragraph.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Second paragraph.')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'delete-paragraph-confirm',
+      operationId: 'delete-paragraph-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type !== 'edit.proposal.response') return
+  assert.equal(committed.outcome, 'committed')
+  assert.equal(committed.snapshot?.cleanText, 'Second paragraph.')
+  assert.equal(committed.snapshot?.paragraphs.length, 1)
+})
+
+test('returns the authoritative snapshot when an edit proposal version becomes stale', async () => {
+  const userId = 'stale-edit-proposal-user'
+  const chatId = 'stale-edit-proposal-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the first paragraph.',
+    operations: [{ id: 'stale-delete-first', type: 'delete', target: { paragraphOrdinal: 1 } }],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'stale-edit-interpret',
+      operationId: 'stale-edit-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the first paragraph.',
+    },
+    userId,
+  )
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.mutate.request',
+      requestId: 'stale-edit-manual-mutation',
+      operationId: 'stale-edit-manual-operation',
+      chatId,
+      expectedVersion: 1,
+      editGroupId: 'stale-edit-manual-group',
+      cleanText: 'First paragraph revised.\n\nSecond paragraph.',
+    },
+    userId,
+  )
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'stale-edit-confirm',
+      operationId: 'stale-edit-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+
+  const expired = responses.at(-1)?.payload
+  assert.equal(expired?.type, 'app.error')
+  if (expired?.type !== 'app.error') return
+  assert.equal(expired.code, 'EDIT_PROPOSAL_EXPIRED')
+  assert.match(expired.message, /advanced to version 2/)
+  assert.equal(expired.snapshot?.draftVersion, 2)
+  assert.equal(expired.snapshot?.cleanText, 'First paragraph revised.\n\nSecond paragraph.')
+})
+
 test('reviews and commits a word move through the structured edit pipeline', async () => {
   const userId = 'inline-move-user'
   const chatId = 'inline-move-chat'
@@ -1363,7 +2161,7 @@ test('reviews and commits a punctuation target resolved relative to a phrase', a
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.outcome, 'review')
-  assert.equal(proposal.proposal.afterText, 'She said “this is very good!, and smiled.')
+  assert.equal(proposal.proposal.afterText, 'She said “this is very good! and smiled.')
 
   await dispatch(
     {
@@ -1380,7 +2178,7 @@ test('reviews and commits a punctuation target resolved relative to a phrase', a
   assert.equal(committed?.type, 'edit.proposal.response')
   if (committed?.type === 'edit.proposal.response') {
     assert.equal(committed.outcome, 'committed')
-    assert.equal(committed.snapshot?.cleanText, 'She said “this is very good!, and smiled.')
+    assert.equal(committed.snapshot?.cleanText, 'She said “this is very good! and smiled.')
   }
 })
 
@@ -1470,7 +2268,7 @@ test('removes terminal punctuation when a short sentence is deleted', async () =
   assert.equal(proposal.proposal.plan.operations[0]?.includeTrailingPunctuation, true)
 })
 
-test('moves terminal punctuation with an explicitly targeted short sentence', async () => {
+test('relocates terminal punctuation with an explicitly targeted short sentence', async () => {
   const userId = 'short-sentence-move-user'
   const chatId = 'short-sentence-move-chat'
   activeChatId = chatId
@@ -1498,7 +2296,7 @@ test('moves terminal punctuation with an explicitly targeted short sentence', as
       operationId: 'short-sentence-move-operation',
       chatId,
       expectedVersion: 1,
-      instructionTranscript: 'Move the sentence Enough after the sentence Later.',
+      instructionTranscript: 'Relocate the sentence Enough after the sentence Later.',
     },
     userId,
   )
@@ -1557,12 +2355,7 @@ test('uses chat references for newly dictated edit text without changing the dra
   assert.equal(proposal.proposal.plan.operations[0]?.target.exactText, 'Willie')
   assert.equal(proposal.proposal.plan.operations[0]?.text, 'Willum')
 
-  const prompt = JSON.parse(generationRequests.at(-1)?.messages?.at(-1)?.content ?? '{}') as Record<
-    string,
-    unknown
-  >
-  assert.ok(Array.isArray(prompt.conversationReferences))
-  assert.ok(prompt.conversationReferences.includes('Willum'))
+  assert.equal(generationRequests.length, 0)
 })
 
 test('keeps explicit edit spelling authoritative over a similar chat reference', async () => {
@@ -1612,6 +2405,135 @@ test('keeps explicit edit spelling authoritative over a similar chat reference',
   }
 })
 
+test('replaces one exact word deterministically when the edit model returns no plan', async () => {
+  const userId = 'deterministic-simple-replacement-user'
+  const chatId = 'deterministic-simple-replacement-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'He leaned closer. “The engine needs repair,” she muttered.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = null
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'deterministic-simple-replacement-interpret',
+      operationId: 'deterministic-simple-replacement-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace muttered with needs you.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'He leaned closer. “The engine needs repair,” she needs you.',
+  )
+  assert.deepEqual(proposal.proposal.plan.operations[0]?.target, { exactText: 'muttered' })
+  assert.equal(proposal.proposal.plan.operations[0]?.text, 'needs you')
+  assert.equal(
+    generationRequests.some(
+      (request) =>
+        JSON.parse(request.messages?.at(-1)?.content ?? '{}').task ===
+        'Interpret this edit instruction against the numbered draft.',
+    ),
+    false,
+  )
+})
+
+test('inserts deterministically after a sentence label with punctuation-insensitive targeting', async () => {
+  const userId = 'deterministic-inline-insertion-user'
+  const chatId = 'deterministic-inline-insertion-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She answered, “So, yeah.”')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = null
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'deterministic-inline-insertion-interpret',
+      operationId: 'deterministic-inline-insertion-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Insert after the sentence so yeah, with Are you clocking out soon?',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'She answered, “So, yeah.” Are you clocking out soon?')
+  assert.deepEqual(proposal.proposal.plan.operations[0]?.target, { exactText: 'so yeah' })
+  assert.equal(proposal.proposal.plan.operations[0]?.text, 'Are you clocking out soon?')
+})
+
+test('removes an unquoted phrase label from deterministic replacement text', async () => {
+  const userId = 'deterministic-phrase-label-user'
+  const chatId = 'deterministic-phrase-label-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She pauses, then my voice mutters.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = null
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'deterministic-phrase-label-interpret',
+      operationId: 'deterministic-phrase-label-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Replace the phrase My voice mutters with the phrase My voice needs you.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'She pauses, then my voice needs you.')
+  assert.equal(proposal.proposal.plan.operations[0]?.text, 'My voice needs you')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('preserves a phrase label when it is inside quoted replacement text', async () => {
+  const userId = 'deterministic-literal-phrase-label-user'
+  const chatId = 'deterministic-literal-phrase-label-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Use placeholder here.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'deterministic-literal-phrase-label-interpret',
+      operationId: 'deterministic-literal-phrase-label-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace placeholder with “the phrase needs you”.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'Use the phrase needs you here.')
+  }
+})
+
 test('falls back to one fuzzy draft target when the provider compounds a split phrase', async () => {
   const userId = 'fuzzy-target-user'
   const chatId = 'fuzzy-target-chat'
@@ -1658,6 +2580,81 @@ test('falls back to one fuzzy draft target when the provider compounds a split p
     )
     assert.equal(proposal.proposal.operations[0]?.beforeText, 'Mao let')
   }
+})
+
+test('replaces a positional sentence without a provider interpretation', async () => {
+  const userId = 'sentence-replacement-user'
+  const chatId = 'sentence-replacement-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'First sentence. Second sentence. So, I guess you can name your price and speech.',
+  )
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-replacement-interpret',
+      operationId: 'sentence-replacement-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Replace the last sentence with, so I guess you can name your price now.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'First sentence. Second sentence. So I guess you can name your price now.',
+  )
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
+test('replaces a positional sentence scoped to a paragraph', async () => {
+  const userId = 'scoped-sentence-replacement-user'
+  const chatId = 'scoped-sentence-replacement-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'First paragraph. Still first.\n\nSecond paragraph. Last one here.',
+  )
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'scoped-sentence-replacement-interpret',
+      operationId: 'scoped-sentence-replacement-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'In paragraph 2, replace the first sentence with Hello there.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'First paragraph. Still first.\n\nHello there. Last one here.',
+  )
 })
 
 test('keeps beginning and end insertions inside the targeted paragraph', async () => {
@@ -1710,6 +2707,209 @@ test('keeps beginning and end insertions inside the targeted paragraph', async (
   }
 })
 
+test('puts one pair of quotations around a numbered paragraph instead of each sentence', async () => {
+  const userId = 'deterministic-paragraph-quotation-user'
+  const chatId = 'deterministic-paragraph-quotation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Second sentence. Third sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'deterministic-paragraph-quotation-interpret',
+      operationId: 'deterministic-paragraph-quotation-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotations around the paragraph 1.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, '“First sentence. Second sentence. Third sentence.”')
+    assert.deepEqual(
+      response.proposal.plan.operations.map((operation) => operation.type),
+      ['prepend', 'append'],
+    )
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('supports every alias and word order of the paragraph quotation command', async () => {
+  const userId = 'paragraph-quotation-alias-user'
+  const chatId = 'paragraph-quotation-alias-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph text.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const instructions = [
+    'Put quotations around the first paragraph.',
+    'Put quotation marks around the first paragraph.',
+    'Put quote marks around the first paragraph.',
+    'Put quotes around the first paragraph.',
+    'Place quotations around the first paragraph.',
+    'Add quotes to the first paragraph.',
+    'Surround the first paragraph with quotes.',
+    'Wrap the first paragraph in quotation marks.',
+    'Put the first paragraph in quotes.',
+    'Quote the first paragraph.',
+    'Put quote marks on the first paragraph.',
+    'Put quotation marks before and after the first paragraph.',
+    'Put quotation marks at the beginning and end of the first paragraph.',
+  ]
+  for (const [index, instructionTranscript] of instructions.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `paragraph-quotation-alias-interpret-${index}`,
+        operationId: `paragraph-quotation-alias-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instructionTranscript)
+    if (response?.type === 'edit.proposal.response') {
+      assert.equal(response.proposal.afterText, '“First paragraph text.”', instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('supports single-style paragraph quotations', async () => {
+  const userId = 'paragraph-quotation-single-user'
+  const chatId = 'paragraph-quotation-single-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph text.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'paragraph-quotation-single-interpret',
+      operationId: 'paragraph-quotation-single-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put single quotation marks around the first paragraph.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, '‘First paragraph text.’')
+  }
+})
+
+test('supports last and penultimate paragraph quotation positions', async () => {
+  const userId = 'paragraph-quotation-position-user'
+  const chatId = 'paragraph-quotation-position-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'paragraph-quotation-last-interpret',
+      operationId: 'paragraph-quotation-last-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotes around the last paragraph.',
+    },
+    userId,
+  )
+  const last = responses.at(-1)?.payload
+  assert.equal(last?.type, 'edit.proposal.response')
+  if (last?.type === 'edit.proposal.response') {
+    assert.equal(
+      last.proposal.afterText,
+      'First paragraph.\n\nSecond paragraph.\n\n“Third paragraph.”',
+    )
+  }
+
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'paragraph-quotation-penultimate-interpret',
+      operationId: 'paragraph-quotation-penultimate-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotes around the penultimate paragraph.',
+    },
+    userId,
+  )
+  const penultimate = responses.at(-1)?.payload
+  assert.equal(penultimate?.type, 'edit.proposal.response')
+  if (penultimate?.type === 'edit.proposal.response') {
+    assert.equal(
+      penultimate.proposal.afterText,
+      'First paragraph.\n\n“Second paragraph.”\n\nThird paragraph.',
+    )
+  }
+})
+
+test('capitalizes append and insert-after text only after sentence-ending targets', async () => {
+  const userId = 'after-insertion-casing-user'
+  const chatId = 'after-insertion-casing-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First.\n\nSecond. End.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Preserve dictated casing in after-position insertions.',
+    operations: [
+      {
+        id: 'append-lowercase',
+        type: 'append',
+        target: { paragraphOrdinal: 1 },
+        text: 'continued',
+      },
+      {
+        id: 'insert-after-lowercase',
+        type: 'insert_after',
+        target: { paragraphOrdinal: 2, exactText: 'Second.' },
+        text: 'quietly',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'after-insertion-casing-interpret',
+      operationId: 'after-insertion-casing-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Append continued to paragraph 1 and insert quietly after Second in paragraph 2.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.afterText, 'First. Continued\n\nSecond. Quietly End.')
+})
+
 test('offers explicit choices for paragraph-resolvable ambiguity without mutating the draft', async () => {
   const userId = 'unsafe-edit-user'
   const chatId = 'unsafe-edit-chat'
@@ -1736,11 +2936,7 @@ test('offers explicit choices for paragraph-resolvable ambiguity without mutatin
     },
     userId,
   )
-  const interpretationPrompt = generationRequests.at(-1)?.messages?.[0]?.content ?? ''
-  assert.match(
-    interpretationPrompt,
-    /application will present those occurrences as explicit choices/,
-  )
+  assert.equal(generationRequests.length, 0)
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'edit.candidates.response')
   if (response?.type !== 'edit.candidates.response') return
@@ -1769,7 +2965,7 @@ test('offers explicit choices for paragraph-resolvable ambiguity without mutatin
   }
 })
 
-test('interprets an explicit new-paragraph command deterministically', async () => {
+test('interprets an explicit add-new-paragraph synonym deterministically', async () => {
   const userId = 'paragraph-insert-user'
   const chatId = 'paragraph-insert-chat'
   activeChatId = chatId
@@ -1785,7 +2981,7 @@ test('interprets an explicit new-paragraph command deterministically', async () 
       chatId,
       expectedVersion: 1,
       instructionTranscript:
-        'Insert a new paragraph after paragraph 2 that says, The route has been approved.',
+        'Add a new paragraph after paragraph 2 that says, The route has been approved.',
     },
     userId,
   )
@@ -1984,6 +3180,893 @@ test('uses authoritative explicit spelling instead of inserting the spelling cue
     assert.deepEqual(proposal.proposal.learningCandidates, [
       { canonical: 'Caelora', spokenVariant: 'C-A-E-L-O-R-A' },
     ])
+  }
+})
+
+test('restores explicit casing after the edit interpreter collapses spelled letters', async () => {
+  const userId = 'collapsed-edit-spelling-casing-user'
+  const chatId = 'collapsed-edit-spelling-casing-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'I arrive Safeway on the cooley and begin browsing.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Apply the explicitly requested casing.',
+    operations: [
+      {
+        id: 'capitalize-cooley',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'cooley' },
+        text: 'COOLEY',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'collapsed-edit-spelling-casing-interpret',
+      operationId: 'collapsed-edit-spelling-casing-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace cooley with capitalized C-O-O-L-E-Y.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'I arrive Safeway on the Cooley and begin browsing.')
+  assert.equal(proposal.proposal.plan.operations[0]?.text, 'Cooley')
+  assert.deepEqual(proposal.proposal.learningCandidates, [
+    { canonical: 'Cooley', spokenVariant: 'C-O-O-L-E-Y' },
+  ])
+})
+
+test('keeps apostrophe-s lowercase in capitalized explicit spelling during editing', async () => {
+  const userId = 'possessive-edit-spelling-user'
+  const chatId = 'possessive-edit-spelling-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Judy’s hair tightens around cats.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Apply the explicitly spelled possessive.',
+    operations: [
+      {
+        id: 'spell-kats',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'cats' },
+        text: "Kat'S",
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'possessive-edit-spelling-interpret',
+      operationId: 'possessive-edit-spelling-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace cats with capitalized K-A-T-apostrophe-S.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Judy’s hair tightens around Kat’s.')
+  assert.deepEqual(proposal.proposal.learningCandidates, [
+    { canonical: 'Kat’s', spokenVariant: 'K-A-T’S' },
+  ])
+})
+
+test('uses normal casing for unmodified explicit spelling in edit input', async () => {
+  const userId = 'default-edit-spelling-casing-user'
+  const chatId = 'default-edit-spelling-casing-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'The project codename is Kalora.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Apply the explicit spelling.',
+    operations: [
+      {
+        id: 'spell-cooley',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'Kalora' },
+        text: 'COOLEY',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'default-edit-spelling-casing-interpret',
+      operationId: 'default-edit-spelling-casing-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'In paragraph 1, replace Kalora with C-O-O-L-E-Y.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'The project codename is cooley.')
+  assert.deepEqual(proposal.proposal.learningCandidates, [
+    { canonical: 'cooley', spokenVariant: 'C-O-O-L-E-Y' },
+  ])
+})
+
+test('preserves sentence casing when replacing an opening phrase', async () => {
+  const userId = 'replacement-target-casing-user'
+  const chatId = 'replacement-target-casing-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Opening phrase continues into the draft.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace the opening phrase.',
+    operations: [
+      {
+        id: 'replace-opening-phrase',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'Opening phrase' },
+        text: 'replacement words',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'replacement-target-casing-interpret',
+      operationId: 'replacement-target-casing-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace Opening phrase with replacement words.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
+})
+
+test('applies and discloses an enabled conservative post-edit grammar repair', async () => {
+  const userId = 'grammar-repair-user'
+  const chatId = 'grammar-repair-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'grammar-repair-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'always',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(
+    userId,
+    chatId,
+    'Earlier one. Earlier two. This is a narrow entrance. Later one. Later two.',
+  )
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace narrow with unusual.',
+    operations: [
+      {
+        id: 'replace-adjective',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'narrow' },
+        text: 'unusual',
+      },
+    ],
+  }
+  grammarRepairResponse = {
+    edits: [
+      {
+        segmentId: 'paragraph-1-segment-1',
+        find: 'a unusual',
+        replace: 'an unusual',
+        reason: 'Changed “a” to “an” before “unusual”.',
+      },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'grammar-repair-interpret',
+      operationId: 'grammar-repair-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace narrow with unusual.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'Earlier one. Earlier two. This is an unusual entrance. Later one. Later two.',
+  )
+  assert.deepEqual(proposal.proposal.grammarRepairChanges, [
+    'Changed “a” to “an” before “unusual”.',
+  ])
+  const grammarRequest = generationRequests.find((request) => {
+    const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+    return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+  })
+  assert.ok(grammarRequest)
+  const grammarInput = JSON.parse(grammarRequest.messages?.at(-1)?.content ?? '{}') as {
+    segments?: Array<{ text?: string }>
+  }
+  assert.deepEqual(
+    grammarInput.segments?.map((segment) => segment.text),
+    ['Earlier two. This is a unusual entrance. Later one.'],
+  )
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'grammar-repair-confirm',
+      operationId: 'grammar-repair-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type !== 'edit.proposal.response') return
+  assert.equal(committed.outcome, 'committed')
+  assert.equal(
+    committed.snapshot?.cleanText,
+    'Earlier one. Earlier two. This is an unusual entrance. Later one. Later two.',
+  )
+})
+
+test('falls back to the deterministic edit when grammar repair overreaches', async () => {
+  const userId = 'unsafe-grammar-repair-user'
+  const chatId = 'unsafe-grammar-repair-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'unsafe-grammar-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'always',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'This is a narrow entrance.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace narrow with accessible.',
+    operations: [
+      {
+        id: 'replace-adjective-unsafely',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'narrow' },
+        text: 'accessible',
+      },
+    ],
+  }
+  grammarRepairResponse = {
+    edits: [
+      {
+        segmentId: 'paragraph-1-segment-1',
+        find: 'This is an accessible entrance.',
+        replace: 'A magnificent marble gateway welcomed every traveler into the transformed city.',
+        reason: 'Rewrote the paragraph.',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'unsafe-grammar-interpret',
+      operationId: 'unsafe-grammar-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace narrow with accessible.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'This is an accessible entrance.')
+  assert.equal(proposal.proposal.grammarRepairChanges, undefined)
+})
+
+test('skips a routine mid-sentence grammar call in when-needed mode', async () => {
+  const userId = 'conditional-grammar-repair-user'
+  const chatId = 'conditional-grammar-repair-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'conditional-grammar-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'when_needed',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'This is a narrow entrance.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace narrow with wide.',
+    operations: [
+      {
+        id: 'replace-routine-adjective',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'narrow' },
+        text: 'wide',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'conditional-grammar-interpret',
+      operationId: 'conditional-grammar-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace narrow with wide.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'This is a wide entrance.')
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+    }).length,
+    0,
+  )
+})
+
+test('repairs a deterministic article artifact without a provider call', async () => {
+  const userId = 'deterministic-grammar-repair-user'
+  const chatId = 'deterministic-grammar-repair-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'deterministic-grammar-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'when_needed',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'This is a narrow entrance.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace narrow with accessible.',
+    operations: [
+      {
+        id: 'replace-article-trigger',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'narrow' },
+        text: 'accessible',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'deterministic-grammar-interpret',
+      operationId: 'deterministic-grammar-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace narrow with accessible.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'This is an accessible entrance.')
+  assert.equal(proposal.proposal.grammarRepairChanges, undefined)
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+    }).length,
+    0,
+  )
+})
+
+test('does not treat a domain period as a sentence boundary during cleanup', async () => {
+  const userId = 'domain-sentence-boundary-user'
+  const chatId = 'domain-sentence-boundary-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Visit example.com for details.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'domain-sentence-boundary-interpret',
+      operationId: 'domain-sentence-boundary-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace details with info.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Visit example.com for info.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('rejects a provider casing change to a domain', async () => {
+  const userId = 'grammar-domain-user'
+  const chatId = 'grammar-domain-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'grammar-domain-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'always',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'Visit example.com for details.')
+  responses.length = 0
+  generationRequests.length = 0
+  grammarRepairResponse = {
+    edits: [
+      {
+        segmentId: 'paragraph-1-segment-1',
+        find: 'example.com',
+        replace: 'example.Com',
+        reason: 'Capitalized the domain.',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'grammar-domain-interpret',
+      operationId: 'grammar-domain-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace details with info.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Visit example.com for info.')
+  assert.equal(proposal.proposal.grammarRepairChanges, undefined)
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+    }).length,
+    1,
+  )
+})
+
+test('aborts an in-flight grammar request when the operation is cancelled', async () => {
+  const userId = 'cancelled-grammar-repair-user'
+  const chatId = 'cancelled-grammar-repair-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'cancelled-grammar-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'always',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'This is a unusual entrance.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace unusual with uncommon.',
+    operations: [
+      {
+        id: 'replace-grammar-hang',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'unusual' },
+        text: 'uncommon',
+      },
+    ],
+  }
+  grammarRepairHangs = true
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'cancelled-grammar-interpret',
+      operationId: 'cancelled-grammar-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace unusual with uncommon.',
+    },
+    userId,
+  )
+
+  assert.ok(grammarRepairSignal)
+  assert.equal(grammarRepairSignal.aborted, false)
+  assert.equal(
+    responses.some((response) => response.payload.type === 'edit.proposal.response'),
+    false,
+  )
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'app.operation.cancel',
+      requestId: 'cancelled-grammar-cancel',
+      targetRequestId: 'cancelled-grammar-interpret',
+    },
+    userId,
+  )
+  await settleAsyncWork()
+
+  assert.equal(grammarRepairSignal.aborted, true)
+  assert.equal(
+    responses.some(
+      (response) =>
+        response.payload.type === 'edit.proposal.response' || response.payload.type === 'app.error',
+    ),
+    false,
+  )
+})
+
+test('cleans local grammar after an edit even when provider repair is off', async () => {
+  const userId = 'universal-cleanup-off-user'
+  const chatId = 'universal-cleanup-off-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier. This is a wide entrance.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'universal-cleanup-off-interpret',
+      operationId: 'universal-cleanup-off-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace wide with accessible.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Earlier. This is an accessible entrance.')
+  assert.equal(proposal.proposal.grammarRepairChanges, undefined)
+  assert.equal(generationRequests.length, 0)
+})
+
+test('fixes errant punctuation and sentence casing left by an edit', async () => {
+  const userId = 'universal-cleanup-punctuation-user'
+  const chatId = 'universal-cleanup-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Second sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Leave errant punctuation and casing for local cleanup.',
+    operations: [
+      {
+        id: 'leave-errant-punctuation',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'Second sentence.' },
+        text: 'second sentence.,',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'universal-cleanup-punctuation-interpret',
+      operationId: 'universal-cleanup-punctuation-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace Second sentence with second sentence.,',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'First sentence. Second sentence.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('does not clean sentences outside the edited sentence', async () => {
+  const userId = 'universal-cleanup-scope-user'
+  const chatId = 'universal-cleanup-scope-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'this one stays lower. This is a wide entrance.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'universal-cleanup-scope-interpret',
+      operationId: 'universal-cleanup-scope-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace wide with accessible.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'this one stays lower. This is an accessible entrance.')
+})
+
+test('does not undo an explicit case command with sentence capitalization', async () => {
+  const userId = 'universal-cleanup-case-user'
+  const chatId = 'universal-cleanup-case-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Second sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Lowercase the paragraph.',
+    operations: [
+      {
+        id: 'lowercase-paragraph',
+        type: 'case',
+        caseMode: 'lowercase',
+        target: { paragraphOrdinal: 1 },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'universal-cleanup-case-interpret',
+      operationId: 'universal-cleanup-case-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Lowercase paragraph 1.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'first sentence. second sentence.')
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+    }).length,
+    0,
+  )
+})
+
+test('replaces with a qualified as in reference without a provider interpretation', async () => {
+  const userId = 'qualified-reference-replacement-user'
+  const chatId = 'qualified-reference-replacement-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, "So, I guess you can name your price. I'm in debt to you now.")
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'qualified-reference-replacement-interpret',
+      operationId: 'qualified-reference-replacement-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Replace in debt with indebted, as in, you are indebted and therefore owe people money.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    "So, I guess you can name your price. I'm indebted to you now.",
+  )
+  assert.equal(proposal.proposal.operations[0]?.text, 'indebted')
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
+test('inserts a quotation mark at a sentence position without a provider interpretation', async () => {
+  const userId = 'sentence-quotation-user'
+  const chatId = 'sentence-quotation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Last sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-quotation-interpret',
+      operationId: 'sentence-quotation-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Insert a quotation mark after the last sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'First sentence. Last sentence.”')
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
+test('inserts opening marks and paired quotation marks at sentence positions', async () => {
+  const userId = 'sentence-quotation-shapes-user'
+  const chatId = 'sentence-quotation-shapes-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Last sentence.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-quotation-before-interpret',
+      operationId: 'sentence-quotation-before-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Insert an opening quotation mark before the first sentence.',
+    },
+    userId,
+  )
+  const before = responses.at(-1)?.payload
+  assert.equal(before?.type, 'edit.proposal.response')
+  if (before?.type === 'edit.proposal.response') {
+    assert.equal(before.proposal.afterText, '“First sentence. Last sentence.')
+  }
+
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-quotation-around-interpret',
+      operationId: 'sentence-quotation-around-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotation marks around the last sentence.',
+    },
+    userId,
+  )
+  const around = responses.at(-1)?.payload
+  assert.equal(around?.type, 'edit.proposal.response')
+  if (around?.type === 'edit.proposal.response') {
+    assert.equal(around.proposal.afterText, 'First sentence. “Last sentence.”')
   }
 })
 
@@ -2272,11 +4355,278 @@ function sendRequest(chatId: string, operationId: string) {
   }
 }
 
+test('cleaner end-to-end matrix', async () => {
+  interface CleanerCase {
+    name: string
+    draft: string
+    instruction: string
+    expected: string
+    plan?: unknown
+    glossary?: { canonical: string; variants: string[]; hint: string }
+  }
+
+  const cases: CleanerCase[] = [
+    {
+      name: 'article agreement',
+      draft: 'Earlier one. This is a wide entrance.',
+      instruction: 'Replace wide with accessible.',
+      expected: 'Earlier one. This is an accessible entrance.',
+    },
+    {
+      name: 'sentence capitalization',
+      draft: 'She waited. the room was quiet.',
+      instruction: 'Replace quiet with silent.',
+      expected: 'She waited. The room was silent.',
+    },
+    {
+      name: 'repeated word',
+      draft: 'The the draft is ready.',
+      instruction: 'Replace ready with final.',
+      expected: 'The draft is final.',
+    },
+    {
+      name: 'repeated spaces',
+      draft: 'This is a very  wide entrance.',
+      instruction: 'Replace entrance with doorway.',
+      expected: 'This is a very wide doorway.',
+    },
+    {
+      name: 'missing space after a comma',
+      draft: "This is fine,isn't it?",
+      instruction: 'Replace fine with good.',
+      expected: "This is good, isn't it?",
+    },
+    {
+      name: 'spaces inside quotation marks',
+      draft: 'He said “ hello ”.',
+      instruction: 'Replace said with whispered.',
+      expected: 'He whispered “hello”.',
+    },
+    {
+      name: 'spaces inside parentheses',
+      draft: 'A ( note ) here.',
+      instruction: 'Replace here with there.',
+      expected: 'A (note) there.',
+    },
+    {
+      name: 'capitalized article at a sentence opening',
+      draft: 'A apple fell.',
+      instruction: 'Replace fell with dropped.',
+      expected: 'An apple dropped.',
+    },
+    {
+      name: 'errant punctuation after a sentence ending',
+      draft: 'This is fine.',
+      instruction: 'Replace fine. with good.,',
+      expected: 'This is good.',
+    },
+    {
+      name: 'errant question mark punctuation',
+      draft: 'This is fine.',
+      instruction: 'Replace fine. with “good.?”',
+      expected: 'This is good?',
+    },
+    {
+      name: 'repeated period',
+      draft: 'This is fine.',
+      instruction: 'Replace fine. with “good..”',
+      expected: 'This is good.',
+    },
+    {
+      name: 'separator run before a sentence ending',
+      draft: 'This is fine.',
+      instruction: 'Replace fine. with good;;.',
+      expected: 'This is good.',
+      plan: {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'Leave separators for local cleanup.',
+        operations: [
+          {
+            id: 'separator-run',
+            type: 'replace',
+            target: { paragraphOrdinal: 1, exactText: 'fine.' },
+            text: 'good;;.',
+          },
+        ],
+      },
+    },
+    {
+      name: 'period before an exclamation mark',
+      draft: 'This is fine.',
+      instruction: 'Replace fine. with “good.!”',
+      expected: 'This is good!',
+    },
+    {
+      name: 'abbreviation guard',
+      draft: 'Mr.Smith arrived. He waited.',
+      instruction: 'Replace arrived with came.',
+      expected: 'Mr.Smith came. He waited.',
+    },
+    {
+      name: 'domain guard',
+      draft: 'Visit example.com for details.',
+      instruction: 'Replace details with info.',
+      expected: 'Visit example.com for info.',
+    },
+    {
+      name: 'url guard',
+      draft: 'Open https://example.com/?a=b now.',
+      instruction: 'Replace now with today.',
+      expected: 'Open https://example.com/?a=b today.',
+    },
+    {
+      name: 'email and dotted identifier guard',
+      draft: 'user@example.com is here.',
+      instruction: 'Replace here with present.',
+      expected: 'user@example.com is present.',
+    },
+    {
+      name: 'speech tag guard',
+      draft: 'He said “Stop!” and left.',
+      instruction: 'Replace left with stayed.',
+      expected: 'He said “Stop!” and stayed.',
+    },
+    {
+      name: 'quoted text casing guard',
+      draft: 'He said “this is fine.” and left.',
+      instruction: 'Replace left with stayed.',
+      expected: 'He said “this is fine.” and stayed.',
+    },
+    {
+      name: 'unaffected sentence scope',
+      draft: 'this one stays lower. This is a wide entrance.',
+      instruction: 'Replace wide with accessible.',
+      expected: 'this one stays lower. This is an accessible entrance.',
+    },
+    {
+      name: 'explicit lowercase command',
+      draft: 'First sentence. Second sentence.',
+      instruction: 'Lowercase paragraph 1.',
+      expected: 'first sentence. second sentence.',
+      plan: {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'Lowercase the paragraph.',
+        operations: [
+          {
+            id: 'lowercase-paragraph',
+            type: 'case',
+            caseMode: 'lowercase',
+            target: { paragraphOrdinal: 1 },
+          },
+        ],
+      },
+    },
+    {
+      name: 'protected glossary term',
+      draft: 'ebay is here.',
+      instruction: 'Replace here with present.',
+      expected: 'ebay is present.',
+      glossary: { canonical: 'eBay', variants: [], hint: '' },
+    },
+    {
+      name: 'sentence replacement payload',
+      draft: 'First sentence. Second sentence. So, I guess you can name your price and speech.',
+      instruction: 'Replace the last sentence with, so I guess you can name your price now.',
+      expected: 'First sentence. Second sentence. So I guess you can name your price now.',
+    },
+    {
+      name: 'positional sentence deletion',
+      draft: 'First sentence. Second sentence. And speech.',
+      instruction: 'Delete the last sentence.',
+      expected: 'First sentence. Second sentence.',
+    },
+    {
+      name: 'per-command insertion spacing',
+      draft: 'First sentence. Second sentence.',
+      instruction: 'Insert before the sentence Second with New',
+      expected: 'First sentence. New second sentence.',
+    },
+    {
+      name: 'per-command replacement casing',
+      draft: 'She said my answer was ready.',
+      instruction: 'Replace my answer with My response.',
+      expected: 'She said my response was ready.',
+    },
+    {
+      name: 'per-command append spacing',
+      draft: 'A list',
+      instruction: 'Append of items to paragraph 1.',
+      expected: 'A list of items',
+      plan: {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'Append the dictated words.',
+        operations: [
+          {
+            id: 'append-words',
+            type: 'append',
+            target: { paragraphOrdinal: 1 },
+            text: 'of items',
+          },
+        ],
+      },
+    },
+  ]
+
+  for (const [index, testCase] of cases.entries()) {
+    const userId = `cleaner-e2e-user-${index}`
+    const chatId = `cleaner-e2e-chat-${index}`
+    activeChatId = chatId
+    responses.length = 0
+    generationRequests.length = 0
+    editPlanResponse = testCase.plan ?? null
+    grammarRepairResponse = null
+
+    if (testCase.glossary) {
+      await dispatch(
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          type: 'glossary.upsert.request',
+          requestId: `cleaner-e2e-glossary-${index}`,
+          ...testCase.glossary,
+        },
+        userId,
+      )
+    }
+
+    await seedDraft(userId, chatId, testCase.draft)
+    responses.length = 0
+    generationRequests.length = 0
+
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `cleaner-e2e-interpret-${index}`,
+        operationId: `cleaner-e2e-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript: testCase.instruction,
+      },
+      userId,
+    )
+
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', testCase.name)
+    if (proposal?.type !== 'edit.proposal.response') continue
+    assert.equal(proposal.proposal.afterText, testCase.expected, testCase.name)
+
+    const grammarRequests = generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+    })
+    assert.equal(grammarRequests.length, 0, `${testCase.name}: expected no provider grammar pass`)
+  }
+})
+
 function recordingAppendRequest(
   chatId: string,
   operationId: string,
   expectedVersion: number,
   rawTranscript: string,
+  quotationBoundaryHint?: 'double' | 'single',
 ) {
   return {
     protocolVersion: PROTOCOL_VERSION,
@@ -2286,6 +4636,7 @@ function recordingAppendRequest(
     chatId,
     expectedVersion,
     rawTranscript,
+    ...(quotationBoundaryHint ? { quotationBoundaryHint } : {}),
   }
 }
 

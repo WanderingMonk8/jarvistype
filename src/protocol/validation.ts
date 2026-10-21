@@ -72,7 +72,10 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       isIdentifier(value.operationId) &&
       isIdentifier(value.chatId) &&
       isNonNegativeInteger(value.expectedVersion) &&
-      isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS)
+      isBoundedString(value.rawTranscript, 1, MAX_DRAFT_CHARACTERS) &&
+      (value.quotationBoundaryHint === undefined ||
+        value.quotationBoundaryHint === 'double' ||
+        value.quotationBoundaryHint === 'single')
     )
   }
   if (value.type === 'transcript.confirm.request' || value.type === 'edit.confirm.request') {
@@ -332,6 +335,9 @@ function isPhaseFourSettings(value: unknown): boolean {
     isNonNegativeInteger(value.contextMessageCount) &&
     value.contextMessageCount <= 20 &&
     typeof value.contextualNormalizationEnabled === 'boolean' &&
+    (value.grammarRepairMode === 'off' ||
+      value.grammarRepairMode === 'when_needed' ||
+      value.grammarRepairMode === 'always') &&
     (value.normalizationConnectionId === null || isIdentifier(value.normalizationConnectionId)) &&
     typeof value.normalizationModelOverride === 'string' &&
     value.normalizationModelOverride.length <= 200
@@ -383,6 +389,9 @@ function isEditProposal(value: unknown): boolean {
     isIdentifier(value.operationId) &&
     isIdentifier(value.chatId) &&
     isNonNegativeInteger(value.expectedVersion) &&
+    (value.grammarRepairChanges === undefined ||
+      (Array.isArray(value.grammarRepairChanges) &&
+        value.grammarRepairChanges.every((change) => isBoundedString(change, 1, 500)))) &&
     isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) &&
     parseEditPlan(value.plan) !== null &&
     Array.isArray(value.operations) &&

@@ -109,9 +109,9 @@ function parseOperation(value) {
   } else if (type === "delete" || type === "split" || type === "join_next") {
     if (text !== void 0 || caseMode !== void 0) return null;
     if (destination !== void 0) return null;
-    if (includeTrailingPunctuation !== void 0 && (type !== "delete" || includeTrailingPunctuation !== true))
+    if (includeTrailingPunctuation !== void 0 && (type === "join_next" || includeTrailingPunctuation !== true))
       return null;
-    if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
+    if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0 || target.scope !== void 0))
       return null;
   } else if (type === "move_before" || type === "move_after") {
     if (text !== void 0 || caseMode !== void 0 || !destination) return null;
@@ -143,6 +143,8 @@ function parseTarget(value) {
     "punctuation",
     "occurrence",
     "occurrenceFromEnd",
+    "sentenceOrdinal",
+    "sentenceFromEnd",
     "relativePosition",
     "relativeToText"
   ]);
@@ -186,6 +188,15 @@ function parseTarget(value) {
     target.occurrenceFromEnd = value.occurrenceFromEnd;
   }
   if (target.occurrence !== void 0 && target.occurrenceFromEnd !== void 0) return null;
+  if (value.sentenceOrdinal !== void 0) {
+    if (!isPositiveInteger(value.sentenceOrdinal) || value.sentenceOrdinal > 1e4) return null;
+    target.sentenceOrdinal = value.sentenceOrdinal;
+  }
+  if (value.sentenceFromEnd !== void 0) {
+    if (!isPositiveInteger(value.sentenceFromEnd) || value.sentenceFromEnd > 1e4) return null;
+    target.sentenceFromEnd = value.sentenceFromEnd;
+  }
+  if (target.sentenceOrdinal !== void 0 && target.sentenceFromEnd !== void 0) return null;
   if (value.relativePosition !== void 0) {
     if (value.relativePosition !== "before" && value.relativePosition !== "after") return null;
     target.relativePosition = value.relativePosition;
@@ -202,10 +213,12 @@ function parseTarget(value) {
     return null;
   if (target.punctuation === void 0 && (target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
     return null;
+  if ((target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0) && (target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.scope !== void 0 || target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
+    return null;
   return Object.keys(target).length ? target : null;
 }
 function hasInlineSelector(target) {
-  return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0;
+  return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0;
 }
 function isPunctuationTarget(value) {
   return value === "period" || value === "comma" || value === "colon" || value === "semicolon" || value === "question_mark" || value === "exclamation_mark" || value === "ellipsis" || value === "quote" || value === "single_quote" || value === "apostrophe" || value === "hyphen" || value === "en_dash" || value === "em_dash" || value === "open_parenthesis" || value === "close_parenthesis" || value === "open_bracket" || value === "close_bracket";
@@ -306,7 +319,7 @@ function isPermissionSnapshot(value) {
   return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function isPhaseFourSettings(value) {
-  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200;
+  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200;
 }
 function isNormalizationConnectionOption(value) {
   return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
@@ -317,7 +330,7 @@ function isNormalizationProposal(value) {
   ) && isNonNegativeInteger2(value.contextMessageCount) && isNonNegativeInteger2(value.contextCharacterCount) && typeof value.contextTruncated === "boolean" && typeof value.contextualModelUsed === "boolean";
 }
 function isEditProposal(value) {
-  return isRecord2(value) && isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger2(value.expectedVersion) && isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) && parseEditPlan(value.plan) !== null && Array.isArray(value.operations) && value.operations.length > 0 && value.operations.every(
+  return isRecord2(value) && isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger2(value.expectedVersion) && (value.grammarRepairChanges === void 0 || Array.isArray(value.grammarRepairChanges) && value.grammarRepairChanges.every((change) => isBoundedString(change, 1, 500))) && isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) && parseEditPlan(value.plan) !== null && Array.isArray(value.operations) && value.operations.length > 0 && value.operations.every(
     (operation) => isRecord2(operation) && isIdentifier2(operation.id) && typeof operation.type === "string" && isNonNegativeInteger2(operation.startOffset) && isNonNegativeInteger2(operation.endOffset) && typeof operation.beforeText === "string" && typeof operation.afterText === "string" && isPositiveInteger2(operation.paragraphOrdinal)
   ) && typeof value.beforeText === "string" && value.beforeText.length <= MAX_DRAFT_CHARACTERS && typeof value.afterText === "string" && value.afterText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.affectedParagraphOrdinals) && value.affectedParagraphOrdinals.every(isPositiveInteger2) && typeof value.explanation === "string" && value.explanation.length <= 1e3 && Array.isArray(value.learningCandidates) && value.learningCandidates.every(
     (candidate) => isRecord2(candidate) && isBoundedString(candidate.canonical, 1, 200) && typeof candidate.spokenVariant === "string" && candidate.spokenVariant.length <= 500
@@ -385,7 +398,7 @@ var COMMAND_GROUPS = [
       ["Record Edit", "Record Edit, then describe a change to the existing draft."],
       [
         "Spoken punctuation",
-        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen parenthesis\u201D or \u201Copen paren,\u201D \u201Cclose parenthesis\u201D or \u201Cclose paren,\u201D \u201Copen bracket,\u201D \u201Cclose bracket,\u201D \u201Cquote\u201D at both ends of a quotation, \u201Csingle quote\u201D at both ends of a single quotation, \u201Cnew line,\u201D or \u201Cnew paragraph.\u201D"
+        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen parenthesis\u201D or \u201Copen paren,\u201D \u201Cclose parenthesis\u201D or \u201Cclose paren,\u201D \u201Copen bracket,\u201D \u201Cclose bracket,\u201D \u201Cbegin bracket\u201D and \u201Cend bracket\u201D for angle brackets, \u201Cquote\u201D or \u201Cquotation\u201D at both ends of a quotation, or \u201Cbegin speech\u201D and \u201Cend speech.\u201D For single quotations, use \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D You can also say \u201Cnew line\u201D or \u201Cnew paragraph.\u201D"
       ],
       [
         "Literal punctuation word",
@@ -397,16 +410,28 @@ var COMMAND_GROUPS = [
   {
     title: "Change text",
     examples: [
-      ["Replace", "Replace \u201Cpending\u201D with \u201Capproved\u201D in paragraph 2."],
-      ["Delete", "Delete the second sentence in paragraph 1."],
-      ["Insert before", "Insert \u201CUrgent:\u201D before the first sentence."],
+      [
+        "Replace",
+        "Replace, change, swap, or substitute a target\u2014for example, \u201CChange \u2018pending\u2019 to \u2018approved\u2019 in paragraph 2.\u201D"
+      ],
+      [
+        "Delete",
+        "Say \u201Cdelete,\u201D \u201Cremove,\u201D \u201Ctake off,\u201D \u201Ctake out,\u201D \u201Cerase,\u201D or \u201Ccut,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
+      ],
+      ["Insert before", "Insert, add, place, or put \u201CUrgent:\u201D before the first sentence."],
       [
         "Insert after",
-        "Insert a new paragraph after paragraph 2 that says \u201CThe route is approved.\u201D"
+        "Insert, add, place, or put a new paragraph after paragraph 2 that says \u201CThe route is approved.\u201D"
       ],
-      ["Append", "Append \u201CPlease confirm attendance.\u201D to paragraph 1."],
-      ["Prepend", "Prepend \u201CUrgent:\u201D to paragraph 1."],
-      ["Move", "Move \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
+      [
+        "Append",
+        "Append, add to the end, place at the end, put at the end, or tack onto the end of paragraph 1."
+      ],
+      [
+        "Prepend",
+        "Prepend, add to the beginning, place at the start, or put at the beginning of paragraph 1."
+      ],
+      ["Move", "Move, relocate, or shift \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
       [
         "Fuzzy target fallback",
         "If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as \u201Cmouthlet\u201D for \u201CMao let.\u201D"
@@ -420,8 +445,8 @@ var COMMAND_GROUPS = [
   {
     title: "Structure and order",
     examples: [
-      ["Split", "Split paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
-      ["Join", "Join paragraph 1 with the following paragraph."],
+      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
+      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph."],
       ["Move before", "Move paragraph 3 before paragraph 1."],
       ["Move after", "Move paragraph 1 after paragraph 2."]
     ]
@@ -429,9 +454,9 @@ var COMMAND_GROUPS = [
   {
     title: "Capitalization and spelling",
     examples: [
-      ["Uppercase", "Change the entire draft to uppercase."],
-      ["Lowercase", "Change paragraph 2 to lowercase."],
-      ["Capitalize", "Capitalize \u201CProject Atlas\u201D in paragraph 1."],
+      ["Uppercase", "Uppercase the draft, or make the entire draft all caps."],
+      ["Lowercase", "Lowercase paragraph 2, or make paragraph 2 lowercase."],
+      ["Capitalize", "Capitalize \u201CProject Atlas,\u201D or capitalize its first letter."],
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
       [
         "As in reference",
@@ -608,6 +633,10 @@ function setup(ctx) {
   const rejectEditButton = requireElement(tab.root, "[data-edit-reject]");
   const contextCountInput = requireElement(tab.root, "[data-context-count]");
   const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
+  const grammarRepairSelect = requireElement(
+    tab.root,
+    "[data-grammar-repair-mode]"
+  );
   const saveSettingsButton = requireElement(tab.root, "[data-settings-save]");
   const normalizationConnectionSelect = requireElement(
     tab.root,
@@ -692,6 +721,7 @@ function setup(ctx) {
     settings: {
       contextMessageCount: 5,
       contextualNormalizationEnabled: true,
+      grammarRepairMode: "off",
       normalizationConnectionId: null,
       normalizationModelOverride: ""
     },
@@ -822,12 +852,17 @@ function setup(ctx) {
     const editProposal = state.pendingEditProposal;
     editProposalPanel.hidden = !editProposal;
     editProposalInstruction.textContent = editProposal?.instructionTranscript ?? "";
-    editProposalOperations.textContent = editProposal ? editProposal.operations.map(
-      (operation) => `${operation.type} \xB7 paragraph ${operation.paragraphOrdinal}${describeEditDestination(operation.destination)} \xB7 ${operation.beforeText || "\u2205"} \u2192 ${operation.afterText || "\u2205"}`
-    ).join("\n") : "";
+    editProposalOperations.textContent = editProposal ? [
+      ...editProposal.operations.map(
+        (operation) => `${operation.type} \xB7 paragraph ${operation.paragraphOrdinal}${describeEditDestination(operation.destination)} \xB7 ${operation.beforeText || "\u2205"} \u2192 ${operation.afterText || "\u2205"}`
+      ),
+      ...(editProposal.grammarRepairChanges ?? []).map(
+        (change) => `grammar repair \xB7 ${change}`
+      )
+    ].join("\n") : "";
     editProposalBefore.textContent = editProposal?.beforeText ?? "";
     editProposalAfter.textContent = editProposal?.afterText ?? "";
-    acceptEditButton.disabled = !editProposal || state.automatedBusy;
+    acceptEditButton.disabled = !editProposal || state.automatedBusy || state.saving || desiredText !== state.snapshot?.cleanText || editProposal.expectedVersion !== state.snapshot?.draftVersion;
     rejectEditButton.disabled = !editProposal || state.automatedBusy;
     const editCandidates = state.pendingEditCandidates;
     editCandidatesPanel.hidden = !editCandidates;
@@ -844,6 +879,7 @@ function setup(ctx) {
     cancelEditCandidatesButton.disabled = !editCandidates || state.automatedBusy;
     contextCountInput.value = String(state.settings.contextMessageCount);
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
+    grammarRepairSelect.value = state.settings.grammarRepairMode;
     renderConnectionOptions(
       normalizationConnectionSelect,
       state.normalizationConnections,
@@ -1081,6 +1117,12 @@ function setup(ctx) {
   };
   const handleEditorInput = () => {
     desiredText = editor.value;
+    if (state.pendingEditProposal || state.pendingEditCandidates) {
+      state.pendingEditProposal = null;
+      state.pendingEditCandidates = null;
+      state.voicePhase = "error";
+      state.voiceMessage = "The draft was changed manually. The pending edit proposal was discarded.";
+    }
     if (state.snapshot) saveDraftBackup(state.snapshot.chatId, desiredText);
     beginEditGroup();
     state.statusMessage = "Saving the private draft\u2026";
@@ -1152,6 +1194,10 @@ function setup(ctx) {
     recordingTimer = null;
     recordingDeadline = null;
   };
+  const clearRecordingDeadline = () => {
+    if (recordingDeadline) clearTimeout(recordingDeadline);
+    recordingDeadline = null;
+  };
   const cancelActiveRecording = (message) => {
     const recording = activeRecording;
     if (!recording) return;
@@ -1163,7 +1209,7 @@ function setup(ctx) {
     state.voiceMessage = message;
     render();
   };
-  const commitRecordingTranscript = async (rawTranscript, operationId) => {
+  const commitRecordingTranscript = async (rawTranscript, operationId, quotationBoundaryHint) => {
     const snapshot = state.snapshot;
     const requestTransitionId = chatTransitionId;
     if (!snapshot || ctx.getActiveChat().chatId !== snapshot.chatId) {
@@ -1179,7 +1225,8 @@ function setup(ctx) {
       operationId,
       chatId: snapshot.chatId,
       expectedVersion: snapshot.draftVersion,
-      rawTranscript
+      rawTranscript,
+      ...quotationBoundaryHint ? { quotationBoundaryHint } : {}
     });
     if (!alive) return;
     if (requestTransitionId !== chatTransitionId || state.activeChatId !== snapshot.chatId || state.snapshot?.chatId !== snapshot.chatId) {
@@ -1254,8 +1301,17 @@ function setup(ctx) {
     render();
   };
   const acceptEditProposal = async () => {
+    flushParagraphPreview();
+    await drainMutations();
     const proposal = state.pendingEditProposal;
     if (!proposal || state.automatedBusy) return;
+    if (!state.snapshot || desiredText !== state.snapshot.cleanText || proposal.chatId !== state.snapshot.chatId || proposal.expectedVersion !== state.snapshot.draftVersion) {
+      state.pendingEditProposal = null;
+      state.voicePhase = "error";
+      state.voiceMessage = "The draft changed after this proposal was created. The stale proposal was discarded.";
+      render();
+      return;
+    }
     state.automatedBusy = true;
     state.voiceMessage = "Applying the approved edit atomically\u2026";
     render();
@@ -1280,6 +1336,10 @@ function setup(ctx) {
         state.phaseFourMessage = `Learned ${learnedNames} from the approved edit spelling. The glossary change is undoable.`;
       }
     } else {
+      if (outcome.status === "resolved" && outcome.value.type === "app.error") {
+        if (outcome.value.snapshot) applySnapshot(outcome.value.snapshot, true);
+        state.pendingEditProposal = null;
+      }
       state.voicePhase = "error";
       state.voiceMessage = outcome.status === "resolved" && outcome.value.type === "app.error" ? outcome.value.message : "Edit confirmation timed out. The draft was not changed.";
     }
@@ -1375,6 +1435,11 @@ function setup(ctx) {
       20,
       Math.max(0, Number.parseInt(contextCountInput.value, 10) || 0)
     );
+    const grammarRepairMode = grammarRepairSelect.value === "always" ? "always" : grammarRepairSelect.value === "when_needed" ? "when_needed" : "off";
+    state.settings.contextMessageCount = contextMessageCount;
+    state.settings.contextualNormalizationEnabled = contextualToggle.checked;
+    state.settings.grammarRepairMode = grammarRepairMode;
+    state.settings.normalizationModelOverride = normalizationModelPicker.getValue().trim();
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: "phase4.settings.update.request",
@@ -1382,8 +1447,9 @@ function setup(ctx) {
       settings: {
         contextMessageCount,
         contextualNormalizationEnabled: contextualToggle.checked,
+        grammarRepairMode,
         normalizationConnectionId: state.settings.normalizationConnectionId,
-        normalizationModelOverride: normalizationModelPicker.getValue().trim()
+        normalizationModelOverride: state.settings.normalizationModelOverride
       }
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
@@ -1470,7 +1536,7 @@ function setup(ctx) {
     const recording = activeRecording;
     if (!recording || recording.runId !== runId) return;
     activeRecording = null;
-    clearRecordingTimers();
+    clearRecordingDeadline();
     state.voiceElapsedMs = Math.max(0, Date.now() - recordingStartedAt);
     state.voiceProvisionalText = "";
     state.voiceFinalText = transcript.text;
@@ -1478,15 +1544,27 @@ function setup(ctx) {
     if (transcript.text.trim().length === 0) {
       state.voicePhase = "error";
       state.voiceMessage = "No usable speech was recognized. Nothing was appended.";
+      clearRecordingTimers();
       render();
       return;
     }
     state.voicePhase = "committing";
     state.voiceMessage = recording.mode === "edit" ? "Transcription complete. Interpreting the edit as structured operations\u2026" : "Transcription complete. Applying bounded context, punctuation, spelling, and glossary rules\u2026";
     render();
-    if (recording.mode === "edit")
-      await interpretEditTranscript(transcript.text, recording.operationId);
-    else await commitRecordingTranscript(transcript.text, recording.operationId);
+    try {
+      if (recording.mode === "edit")
+        await interpretEditTranscript(transcript.text, recording.operationId);
+      else
+        await commitRecordingTranscript(
+          transcript.text,
+          recording.operationId,
+          recording.quotationBoundaryHint ?? void 0
+        );
+    } finally {
+      state.voiceElapsedMs = Math.max(0, Date.now() - recordingStartedAt);
+      clearRecordingTimers();
+      if (alive) render();
+    }
   };
   const failRecording = (runId, error) => {
     if (activeRecording?.runId !== runId) return;
@@ -1539,7 +1617,9 @@ function setup(ctx) {
           } else {
             current.interimText = result.text;
           }
-          state.voiceProvisionalText = joinTranscriptUpdates(finalSegments, current.interimText);
+          const streamedTranscript = joinTranscriptUpdates(finalSegments, current.interimText);
+          current.quotationBoundaryHint = detectQuotationBoundaryHint(streamedTranscript) ?? current.quotationBoundaryHint;
+          state.voiceProvisionalText = streamedTranscript;
           render();
         }
       });
@@ -1549,17 +1629,19 @@ function setup(ctx) {
         session,
         finalSegments,
         interimText: "",
+        quotationBoundaryHint: null,
         mode
       };
-      recordingStartedAt = Date.now();
+      const startedAt = Date.now();
+      recordingStartedAt = startedAt;
       state.voicePhase = "starting";
       state.voiceElapsedMs = 0;
       state.voiceProvider = session.provider;
       state.voiceProvisionalText = "";
       state.voiceMessage = mode === "edit" ? "Starting edit-instruction capture\u2026" : "Starting microphone capture\u2026";
       recordingTimer = setInterval(() => {
-        if (!activeRecording || activeRecording.runId !== runId) return;
-        state.voiceElapsedMs = Date.now() - recordingStartedAt;
+        if (recordingStartedAt !== startedAt) return;
+        state.voiceElapsedMs = Date.now() - startedAt;
         render();
       }, 250);
       recordingDeadline = setTimeout(() => {
@@ -1652,7 +1734,7 @@ function setup(ctx) {
     if (missing.length === 0) return true;
     try {
       const granted = await ctx.permissions.request(missing, {
-        reason: "Verify the owning chat, add the confirmed draft as one user message, and start the normal Lumiverse response."
+        reason: "Verify the owning chat, add the draft as one user message, and start the normal Lumiverse response."
       });
       state.permissions = sanitizeGrantedPermissions(granted);
       return required.every((permission) => granted.includes(permission));
@@ -1665,6 +1747,8 @@ function setup(ctx) {
     if (sendFlowActive || !state.snapshot) return;
     flushParagraphPreview();
     sendFlowActive = true;
+    state.sending = true;
+    state.statusMessage = "Preparing the draft to send\u2026";
     render();
     try {
       await drainMutations();
@@ -1680,18 +1764,7 @@ function setup(ctx) {
         return;
       }
       if (!await requestSendPermissions()) return;
-      const confirmation = await ctx.ui.showConfirm({
-        title: "Confirm and send draft?",
-        message: "JarvisType will add exactly the clean draft text to this chat and start the normal Lumiverse response.",
-        variant: "success",
-        confirmLabel: "Confirm & Send"
-      });
-      if (!confirmation.confirmed) {
-        state.statusMessage = "Send cancelled. The draft remains private.";
-        return;
-      }
-      state.sending = true;
-      state.statusMessage = "Sending the confirmed clean draft\u2026";
+      state.statusMessage = "Sending the clean draft\u2026";
       render();
       const operationId = createRequestId("send-operation");
       const outcome = await performRequest(
@@ -1705,7 +1778,6 @@ function setup(ctx) {
         },
         true
       );
-      state.sending = false;
       if (!alive) return;
       if (outcome.status === "resolved" && outcome.value.type === "draft.send.response") {
         applySnapshot(outcome.value.snapshot, true);
@@ -1816,6 +1888,9 @@ function setup(ctx) {
   };
   const handleCancelEditCandidatesClick = () => cancelEditCandidateSelection();
   const handleSaveSettingsClick = () => void saveSettings();
+  const handleGrammarRepairModeChange = () => {
+    state.settings.grammarRepairMode = grammarRepairSelect.value === "always" ? "always" : grammarRepairSelect.value === "when_needed" ? "when_needed" : "off";
+  };
   const handleNormalizationConnectionChange = () => {
     state.settings.normalizationConnectionId = normalizationConnectionSelect.value || null;
     state.settings.normalizationModelOverride = "";
@@ -1919,6 +1994,7 @@ function setup(ctx) {
   editCandidatesList.addEventListener("click", handleEditCandidateClick);
   cancelEditCandidatesButton.addEventListener("click", handleCancelEditCandidatesClick);
   saveSettingsButton.addEventListener("click", handleSaveSettingsClick);
+  grammarRepairSelect.addEventListener("change", handleGrammarRepairModeChange);
   normalizationConnectionSelect.addEventListener("change", handleNormalizationConnectionChange);
   glossarySaveButton.addEventListener("click", handleSaveGlossaryClick);
   glossaryCancelButton.addEventListener("click", handleCancelGlossaryClick);
@@ -1978,6 +2054,7 @@ function setup(ctx) {
     editCandidatesList.removeEventListener("click", handleEditCandidateClick);
     cancelEditCandidatesButton.removeEventListener("click", handleCancelEditCandidatesClick);
     saveSettingsButton.removeEventListener("click", handleSaveSettingsClick);
+    grammarRepairSelect.removeEventListener("change", handleGrammarRepairModeChange);
     normalizationConnectionSelect.removeEventListener("change", handleNormalizationConnectionChange);
     glossarySaveButton.removeEventListener("click", handleSaveGlossaryClick);
     glossaryCancelButton.removeEventListener("click", handleCancelGlossaryClick);
@@ -2112,6 +2189,22 @@ function renderHistory(list, snapshot) {
 }
 function joinTranscriptUpdates(finalSegments, interimText) {
   return [...finalSegments, interimText].filter(Boolean).join(" ").trim();
+}
+function detectQuotationBoundaryHint(input) {
+  const trimmed = input.trim();
+  if (/^begin\s+single\b[\s\S]*\bend\s+single[.,;:!?]*$/iu.test(trimmed)) return "single";
+  if (/^begin\s+speech\b[\s\S]*\bend\s+speech[.,;:!?]*$/iu.test(trimmed)) return "double";
+  const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu;
+  const doubleClosing = /\b(?:close\s+)?(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu;
+  const singleOpening = /^(?:open\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?\b/iu;
+  const singleClosing = /\b(?:close\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu;
+  const singleCount = trimmed.match(/\b(?:open\s+|close\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?\b/giu)?.length ?? 0;
+  const doubleCount = trimmed.match(/\b(?:open\s+|close\s+)?(?<!single\s)(?:quote|quotation)(?:\s+marks?)?\b/giu)?.length ?? 0;
+  if (singleCount >= 2 && singleOpening.test(trimmed) && singleClosing.test(trimmed))
+    return "single";
+  if (doubleCount >= 2 && doubleOpening.test(trimmed) && doubleClosing.test(trimmed))
+    return "double";
+  return null;
 }
 function formatDuration(durationMs) {
   const totalSeconds = Math.max(0, Math.floor(durationMs / 1e3));
@@ -2426,10 +2519,11 @@ function shellMarkup() {
         <div class="jt-form-grid">
           <label>Messages scanned for references (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
+          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
-        <div class="jt-actions"><button type="button" data-settings-save>Save context settings</button></div>
+        <div class="jt-actions"><button type="button" data-settings-save>Save settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings\u2026</p>
 
         <h4>Personal glossary</h4>

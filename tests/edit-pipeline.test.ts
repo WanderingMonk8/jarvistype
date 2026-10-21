@@ -36,6 +36,21 @@ test('accepts a closed supported schema and rejects unknown or oversized operati
       ],
     }),
   )
+  assert.ok(
+    parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete a sentence by position',
+      operations: [
+        {
+          id: 'sentence-one',
+          type: 'delete',
+          target: { paragraphOrdinal: 1, sentenceOrdinal: 1 },
+          includeTrailingPunctuation: true,
+        },
+      ],
+    }),
+  )
   assert.equal(
     parseEditPlan({
       schemaVersion: 2,
@@ -55,6 +70,21 @@ test('accepts a closed supported schema and rejects unknown or oversized operati
           id: 'one',
           type: 'delete',
           target: { punctuation: 'period', occurrence: 2, occurrenceFromEnd: 1 },
+        },
+      ],
+    }),
+    null,
+  )
+  assert.equal(
+    parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'conflicting sentence selectors',
+      operations: [
+        {
+          id: 'one',
+          type: 'delete',
+          target: { sentenceOrdinal: 1, sentenceFromEnd: 1 },
         },
       ],
     }),
@@ -83,6 +113,28 @@ test('resolves a unique paragraph-scoped replacement deterministically', () => {
   assert.equal(first.ok && first.afterText, 'First hiking sentence.\n\nSecond paragraph here.')
 })
 
+test('deletes a whole paragraph together with its adjacent separator', () => {
+  const session = fixture()
+  const firstDeleted = executeEditPlan(session.cleanText, session.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the first paragraph',
+    operations: [{ id: 'delete-first', type: 'delete', target: { paragraphOrdinal: 1 } }],
+  })
+  assert.equal(firstDeleted.ok && firstDeleted.afterText, 'Second paragraph here.')
+  assert.deepEqual(firstDeleted.ok && firstDeleted.resultingParagraphIds, [
+    session.paragraphs[1]!.id,
+  ])
+
+  const lastDeleted = executeEditPlan(session.cleanText, session.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the last paragraph',
+    operations: [{ id: 'delete-last', type: 'delete', target: { paragraphOrdinal: 2 } }],
+  })
+  assert.equal(lastDeleted.ok && lastDeleted.afterText, 'First mountain sentence.')
+})
+
 test('capitalizes replacement text only when it begins a sentence', () => {
   const opening = executeEditPlan('Keyboard recording test.', [], 1, {
     schemaVersion: 2,
@@ -104,6 +156,45 @@ test('capitalizes replacement text only when it begins a sentence', () => {
   })
   assert.equal(middle.ok && middle.afterText, 'A accessible recording test.')
 
+  const providerCapitalizedMiddle = executeEditPlan('She said my answer was ready.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'match the lowercase target opening in the middle of a sentence',
+    operations: [
+      {
+        id: 'provider-capitalized-middle',
+        type: 'replace',
+        target: { exactText: 'my answer' },
+        text: 'My response',
+      },
+    ],
+  })
+  assert.equal(
+    providerCapitalizedMiddle.ok && providerCapitalizedMiddle.afterText,
+    'She said my response was ready.',
+  )
+
+  const protectedMiddle = executeEditPlan(
+    'She greeted the new arrival.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'preserve a protected proper noun in the middle of a sentence',
+      operations: [
+        {
+          id: 'protected-middle',
+          type: 'replace',
+          target: { exactText: 'the new arrival' },
+          text: 'Alice Morgan',
+        },
+      ],
+    },
+    ['Alice Morgan'],
+  )
+  assert.equal(protectedMiddle.ok && protectedMiddle.afterText, 'She greeted Alice Morgan.')
+
   const establishedCase = executeEditPlan('Keyboard recording test.', [], 1, {
     schemaVersion: 2,
     draftVersion: 1,
@@ -113,6 +204,51 @@ test('capitalizes replacement text only when it begins a sentence', () => {
     ],
   })
   assert.equal(establishedCase.ok && establishedCase.afterText, 'eBay recording test.')
+
+  const sentenceCase = executeEditPlan('Opening phrase continues.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'preserve sentence case across a phrase',
+    operations: [
+      {
+        id: 'sentence-case',
+        type: 'replace',
+        target: { exactText: 'Opening phrase' },
+        text: 'replacement words',
+      },
+    ],
+  })
+  assert.equal(sentenceCase.ok && sentenceCase.afterText, 'Replacement words continues.')
+
+  const titleCase = executeEditPlan('Proper Name arrived.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'do not infer title case from the target phrase',
+    operations: [
+      {
+        id: 'title-case',
+        type: 'replace',
+        target: { exactText: 'Proper Name' },
+        text: 'new person',
+      },
+    ],
+  })
+  assert.equal(titleCase.ok && titleCase.afterText, 'New person arrived.')
+
+  const uppercase = executeEditPlan('The LOUD WORDS remain.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'do not infer uppercase from the target phrase',
+    operations: [
+      {
+        id: 'uppercase',
+        type: 'replace',
+        target: { exactText: 'LOUD WORDS' },
+        text: 'quiet phrase',
+      },
+    ],
+  })
+  assert.equal(uppercase.ok && uppercase.afterText, 'The quiet phrase remain.')
 })
 
 test('rejects missing, duplicate, stale, and overlapping targets atomically', () => {
@@ -219,7 +355,7 @@ test('adds deterministic paragraph boundaries for paragraph-targeted insertions'
         id: 'after-paragraph',
         type: 'insert_after',
         target: { paragraphOrdinal: 1 },
-        text: 'Inserted paragraph.',
+        text: 'inserted paragraph.',
       },
     ],
   })
@@ -244,6 +380,32 @@ test('adds deterministic paragraph boundaries for paragraph-targeted insertions'
   assert.equal(
     before.ok && before.afterText,
     'Opening paragraph.\n\nFirst mountain sentence.\n\nSecond paragraph here.',
+  )
+
+  const afterFragment = executeEditPlan(
+    'unfinished fragment\n\nSecond paragraph.',
+    [
+      { id: 'fragment', ordinal: 1, lineIndex: 0, text: 'unfinished fragment' },
+      { id: 'second', ordinal: 2, lineIndex: 2, text: 'Second paragraph.' },
+    ],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert after a non-terminal paragraph',
+      operations: [
+        {
+          id: 'after-fragment',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1 },
+          text: 'inserted paragraph.',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    afterFragment.ok && afterFragment.afterText,
+    'unfinished fragment\n\ninserted paragraph.\n\nSecond paragraph.',
   )
 })
 
@@ -287,6 +449,96 @@ test('keeps exact-text insertions inline and adds only missing boundary spacing'
   )
   assert.equal(before.ok && before.afterText, 'I will fill the bucket.')
 
+  const beforeSentenceOpening = executeEditPlan(
+    'Today we leave.',
+    [{ id: 'opening', ordinal: 1, lineIndex: 0, text: 'Today we leave.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert before the sentence opening',
+      operations: [
+        {
+          id: 'before-opening',
+          type: 'insert_before',
+          target: { paragraphOrdinal: 1, exactText: 'Today' },
+          text: 'perhaps',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    beforeSentenceOpening.ok && beforeSentenceOpening.afterText,
+    'Perhaps today we leave.',
+  )
+
+  const beforeProperNoun = executeEditPlan(
+    'New York waits.',
+    [{ id: 'proper-name', ordinal: 1, lineIndex: 0, text: 'New York waits.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert before a proper noun at the sentence opening',
+      operations: [
+        {
+          id: 'before-proper-name',
+          type: 'insert_before',
+          target: { paragraphOrdinal: 1, exactText: 'New York' },
+          text: 'perhaps',
+        },
+      ],
+    },
+  )
+  assert.equal(beforeProperNoun.ok && beforeProperNoun.afterText, 'Perhaps New York waits.')
+
+  const beforeKnownName = executeEditPlan(
+    'Cooley waits.',
+    [{ id: 'known-name', ordinal: 1, lineIndex: 0, text: 'Cooley waits.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert before a known one-word name',
+      operations: [
+        {
+          id: 'before-known-name',
+          type: 'insert_before',
+          target: { paragraphOrdinal: 1, exactText: 'Cooley' },
+          text: 'perhaps',
+        },
+      ],
+    },
+    ['Cooley'],
+  )
+  assert.equal(beforeKnownName.ok && beforeKnownName.afterText, 'Perhaps Cooley waits.')
+
+  for (const calendarWord of ['Monday', 'January']) {
+    const text = `${calendarWord} works for us.`
+    const beforeCalendarTerm = executeEditPlan(
+      text,
+      [{ id: 'calendar-term', ordinal: 1, lineIndex: 0, text }],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'insert before a calendar proper noun',
+        operations: [
+          {
+            id: `before-${calendarWord}`,
+            type: 'insert_before',
+            target: { paragraphOrdinal: 1, exactText: calendarWord },
+            text: 'perhaps',
+          },
+        ],
+      },
+    )
+    assert.equal(
+      beforeCalendarTerm.ok && beforeCalendarTerm.afterText,
+      `Perhaps ${calendarWord} works for us.`,
+    )
+  }
+
   const alreadySpaced = executeEditPlan(session.cleanText, session.paragraphs, 1, {
     schemaVersion: 2,
     draftVersion: 1,
@@ -304,6 +556,140 @@ test('keeps exact-text insertions inline and adds only missing boundary spacing'
     alreadySpaced.ok && alreadySpaced.afterText,
     'First difficult mountain sentence.\n\nSecond paragraph here.',
   )
+
+  const afterSentence = executeEditPlan(
+    'Hello. Goodbye.',
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text: 'Hello. Goodbye.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'preserve dictated casing after a sentence',
+      operations: [
+        {
+          id: 'inline-after-sentence',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, exactText: 'Hello.' },
+          text: 'quietly',
+        },
+      ],
+    },
+  )
+  assert.equal(afterSentence.ok && afterSentence.afterText, 'Hello. Quietly Goodbye.')
+
+  const afterPhraseAtSentenceEnd = executeEditPlan(
+    'She answered, “So, yeah.”',
+    [{ id: 'quoted', ordinal: 1, lineIndex: 0, text: 'She answered, “So, yeah.”' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert after a phrase immediately before sentence punctuation',
+      operations: [
+        {
+          id: 'after-terminal-phrase',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, exactText: 'So, yeah' },
+          text: 'are you clocking out soon?',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    afterPhraseAtSentenceEnd.ok && afterPhraseAtSentenceEnd.afterText,
+    'She answered, “So, yeah.” Are you clocking out soon?',
+  )
+
+  const literalPhraseAfterTarget = executeEditPlan(
+    'She answered, “So, yeah.”',
+    [{ id: 'literal-phrase', ordinal: 1, lineIndex: 0, text: 'She answered, “So, yeah.”' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'insert a phrase literally after its target',
+      operations: [
+        {
+          id: 'literal-after-target',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, exactText: 'So, yeah' },
+          text: 'for now',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    literalPhraseAfterTarget.ok && literalPhraseAfterTarget.afterText,
+    'She answered, “So, yeah for now.”',
+  )
+
+  const punctuationOnlyAfterPhrase = executeEditPlan(
+    'This is very good.',
+    [{ id: 'punctuation', ordinal: 1, lineIndex: 0, text: 'This is very good.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'retain the exact attachment point for punctuation-only insertions',
+      operations: [
+        {
+          id: 'closing-quote',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, exactText: 'This is very good' },
+          text: '”',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    punctuationOnlyAfterPhrase.ok && punctuationOnlyAfterPhrase.afterText,
+    'This is very good”.',
+  )
+
+  const appendAfterQuotedSentence = executeEditPlan(
+    'She answered, “So, yeah.”',
+    [{ id: 'append-quoted', ordinal: 1, lineIndex: 0, text: 'She answered, “So, yeah.”' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'append after the complete sentence ending',
+      operations: [
+        {
+          id: 'append-after-terminal',
+          type: 'append',
+          target: { paragraphOrdinal: 1 },
+          text: 'are you clocking out soon?',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    appendAfterQuotedSentence.ok && appendAfterQuotedSentence.afterText,
+    'She answered, “So, yeah.” Are you clocking out soon?',
+  )
+
+  for (const target of ['Ready?', 'Stop!', 'Wait…', 'She said "go."']) {
+    const afterTerminalMark = executeEditPlan(
+      target,
+      [{ id: 'terminal', ordinal: 1, lineIndex: 0, text: target }],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'capitalize after terminal punctuation',
+        operations: [
+          {
+            id: 'after-terminal-mark',
+            type: 'insert_after',
+            target: { paragraphOrdinal: 1, exactText: target },
+            text: 'continue',
+          },
+        ],
+      },
+    )
+    assert.equal(afterTerminalMark.ok && afterTerminalMark.afterText, `${target} Continue`)
+  }
 })
 
 test('attaches inserted quotation marks directly to an exact sentence target', () => {
@@ -388,24 +774,19 @@ test('sentence deletion consumes adjacent terminal punctuation for short targets
     ['Perhaps… Continue.', 'Perhaps', 'Continue.'],
     ['Wait... Continue.', 'Wait', 'Continue.'],
   ] as const) {
-    const result = executeEditPlan(
-      text,
-      [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }],
-      1,
-      {
-        schemaVersion: 2,
-        draftVersion: 1,
-        explanation: 'delete a short sentence',
-        operations: [
-          {
-            id: 'delete-short-sentence',
-            type: 'delete',
-            target: { paragraphOrdinal: 1, exactText: target },
-            includeTrailingPunctuation: true,
-          },
-        ],
-      },
-    )
+    const result = executeEditPlan(text, [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete a short sentence',
+      operations: [
+        {
+          id: 'delete-short-sentence',
+          type: 'delete',
+          target: { paragraphOrdinal: 1, exactText: target },
+          includeTrailingPunctuation: true,
+        },
+      ],
+    })
     assert.equal(result.ok && result.afterText, expected)
   }
 
@@ -458,6 +839,69 @@ test('splits and joins paragraphs with controlled whitespace', () => {
     operations: [{ id: 'join-one', type: 'join_next', target: { paragraphOrdinal: 1 } }],
   })
   assert.equal(join.ok && join.afterText, 'First sentence. Second sentence. Closing paragraph.')
+})
+
+test('splits a sentence target after its terminal punctuation rather than an internal comma', () => {
+  const text =
+    'Opening sentence. The brief eruption of discussion seemed to die down once more, and the general passivity returned to campus. Friday arrived.'
+  const seeded = applyManualEdit(createDraftSession('sentence-split-chat'), text, {
+    expectedVersion: 0,
+    editGroupId: 'seed-sentence-split',
+  }).session
+  const split = executeEditPlan(seeded.cleanText, seeded.paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'split after the sentence about the discussion',
+    operations: [
+      {
+        id: 'split-sentence-at-terminal',
+        type: 'split',
+        target: {
+          paragraphOrdinal: 1,
+          exactText: 'The brief eruption of discussion seemed to die down once more,',
+        },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
+  assert.equal(
+    split.ok && split.afterText,
+    'Opening sentence. The brief eruption of discussion seemed to die down once more, and the general passivity returned to campus.\n\nFriday arrived.',
+  )
+})
+
+test('targets identical sentences by their ordinal position', () => {
+  const text = 'Quotation. The middle sentence remains. Quotation.'
+  const paragraphs = [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }]
+  const first = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the first sentence',
+    operations: [
+      {
+        id: 'delete-first-identical-sentence',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, sentenceOrdinal: 1 },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
+  assert.equal(first.ok && first.afterText, 'The middle sentence remains. Quotation.')
+
+  const last = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the last sentence',
+    operations: [
+      {
+        id: 'delete-last-identical-sentence',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, sentenceFromEnd: 1 },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
+  assert.equal(last.ok && last.afterText, 'Quotation. The middle sentence remains.')
 })
 
 test('moves paragraphs by captured identity and supports full-draft casing', () => {
@@ -547,6 +991,92 @@ test('moves an exact word or phrase before or after another text target', () => 
     movedAcrossParagraphs.ok && movedAcrossParagraphs.affectedParagraphOrdinals,
     [1, 2],
   )
+
+  const sentenceTransition = applyManualEdit(
+    createDraftSession('sentence-transition-move-chat'),
+    'Quietly we leave. Tomorrow we rest.',
+    { expectedVersion: 0, editGroupId: 'seed-sentence-transition' },
+  ).session
+  const movedToSentenceOpening = executeEditPlan(
+    sentenceTransition.cleanText,
+    sentenceTransition.paragraphs,
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'move the opening word before the next sentence',
+      operations: [
+        {
+          id: 'move-to-opening',
+          type: 'move_before',
+          target: { exactText: 'Quietly' },
+          destination: { exactText: 'Tomorrow' },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    movedToSentenceOpening.ok && movedToSentenceOpening.afterText,
+    'We leave. Quietly tomorrow we rest.',
+  )
+
+  const properNounTransition = applyManualEdit(
+    createDraftSession('proper-name-move-chat'),
+    'We leave soon. New York waits.',
+    { expectedVersion: 0, editGroupId: 'seed-proper-name-transition' },
+  ).session
+  const movedBeforeProperNoun = executeEditPlan(
+    properNounTransition.cleanText,
+    properNounTransition.paragraphs,
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'move a word before a proper noun at a sentence opening',
+      operations: [
+        {
+          id: 'move-before-proper-name',
+          type: 'move_before',
+          target: { exactText: 'soon' },
+          destination: { exactText: 'New York' },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    movedBeforeProperNoun.ok && movedBeforeProperNoun.afterText,
+    'We leave. Soon New York waits.',
+  )
+
+  for (const calendarWord of ['Tuesday', 'March']) {
+    const calendarTransition = applyManualEdit(
+      createDraftSession(`calendar-${calendarWord}-move-chat`),
+      `We leave soon. ${calendarWord} works for us.`,
+      { expectedVersion: 0, editGroupId: `seed-calendar-${calendarWord}` },
+    ).session
+    const movedBeforeCalendarTerm = executeEditPlan(
+      calendarTransition.cleanText,
+      calendarTransition.paragraphs,
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'move a word before a calendar proper noun',
+        operations: [
+          {
+            id: `move-before-${calendarWord}`,
+            type: 'move_before',
+            target: { exactText: 'soon' },
+            destination: { exactText: calendarWord },
+          },
+        ],
+      },
+    )
+    assert.equal(
+      movedBeforeCalendarTerm.ok && movedBeforeCalendarTerm.afterText,
+      `We leave. Soon ${calendarWord} works for us.`,
+    )
+  }
 
   assert.ok(
     parseEditPlan({
@@ -930,4 +1460,56 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
     ],
   })
   assert.deepEqual(ambiguous, { ok: false, reason: 'fuzzy text target is ambiguous' })
+})
+
+test('ignores punctuation for unique text targets and uses it only to resolve lexical ties', () => {
+  const unique = executeEditPlan('She answered, “So, yeah.”', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'match a uniquely worded target without requiring spoken punctuation',
+    operations: [
+      {
+        id: 'punctuation-insensitive-unique',
+        type: 'insert_after',
+        target: { exactText: 'so yeah' },
+        text: 'Are you clocking out soon?',
+      },
+    ],
+  })
+  assert.equal(
+    unique.ok && unique.afterText,
+    'She answered, “So, yeah.” Are you clocking out soon?',
+  )
+
+  const tieBroken = executeEditPlan('Wait here. Wait, here.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'use internal punctuation only to distinguish otherwise equal targets',
+    operations: [
+      {
+        id: 'punctuation-tiebreaker',
+        type: 'replace',
+        target: { exactText: 'wait, here' },
+        text: 'stay',
+      },
+    ],
+  })
+  assert.equal(tieBroken.ok && tieBroken.afterText, 'Wait here. Stay.')
+
+  const ambiguous = executeEditPlan('Wait here. Wait here.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'do not guess when wording and punctuation are both identical',
+    operations: [
+      {
+        id: 'punctuation-still-ambiguous',
+        type: 'delete',
+        target: { exactText: 'wait here' },
+      },
+    ],
+  })
+  assert.deepEqual(ambiguous, {
+    ok: false,
+    reason: 'punctuation-insensitive text target is ambiguous',
+  })
 })

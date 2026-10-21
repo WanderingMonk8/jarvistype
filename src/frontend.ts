@@ -68,7 +68,7 @@ export const COMMAND_GROUPS = [
       ['Record Edit', 'Record Edit, then describe a change to the existing draft.'],
       [
         'Spoken punctuation',
-        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “quote” at both ends of a quotation, “single quote” at both ends of a single quotation, “new line,” or “new paragraph.”',
+        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “begin bracket” and “end bracket” for angle brackets, “quote” or “quotation” at both ends of a quotation, or “begin speech” and “end speech.” For single quotations, use “single quote” or “single quotation” at both ends, or “begin single” and “end single.” You can also say “new line” or “new paragraph.”',
       ],
       [
         'Literal punctuation word',
@@ -80,16 +80,28 @@ export const COMMAND_GROUPS = [
   {
     title: 'Change text',
     examples: [
-      ['Replace', 'Replace “pending” with “approved” in paragraph 2.'],
-      ['Delete', 'Delete the second sentence in paragraph 1.'],
-      ['Insert before', 'Insert “Urgent:” before the first sentence.'],
+      [
+        'Replace',
+        'Replace, change, swap, or substitute a target—for example, “Change ‘pending’ to ‘approved’ in paragraph 2.”',
+      ],
+      [
+        'Delete',
+        'Say “delete,” “remove,” “take off,” “take out,” “erase,” or “cut,” followed by the target—for example, “Take off the second sentence in paragraph 1.”',
+      ],
+      ['Insert before', 'Insert, add, place, or put “Urgent:” before the first sentence.'],
       [
         'Insert after',
-        'Insert a new paragraph after paragraph 2 that says “The route is approved.”',
+        'Insert, add, place, or put a new paragraph after paragraph 2 that says “The route is approved.”',
       ],
-      ['Append', 'Append “Please confirm attendance.” to paragraph 1.'],
-      ['Prepend', 'Prepend “Urgent:” to paragraph 1.'],
-      ['Move', 'Move “approved” before “pending” in paragraph 1.'],
+      [
+        'Append',
+        'Append, add to the end, place at the end, put at the end, or tack onto the end of paragraph 1.',
+      ],
+      [
+        'Prepend',
+        'Prepend, add to the beginning, place at the start, or put at the beginning of paragraph 1.',
+      ],
+      ['Move', 'Move, relocate, or shift “approved” before “pending” in paragraph 1.'],
       [
         'Fuzzy target fallback',
         'If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as “mouthlet” for “Mao let.”',
@@ -103,8 +115,8 @@ export const COMMAND_GROUPS = [
   {
     title: 'Structure and order',
     examples: [
-      ['Split', 'Split paragraph 1 after “The launch checklist is ready.”'],
-      ['Join', 'Join paragraph 1 with the following paragraph.'],
+      ['Split', 'Split, break, or divide paragraph 1 after “The launch checklist is ready.”'],
+      ['Join', 'Join, merge, or combine paragraph 1 with the following paragraph.'],
       ['Move before', 'Move paragraph 3 before paragraph 1.'],
       ['Move after', 'Move paragraph 1 after paragraph 2.'],
     ],
@@ -112,9 +124,9 @@ export const COMMAND_GROUPS = [
   {
     title: 'Capitalization and spelling',
     examples: [
-      ['Uppercase', 'Change the entire draft to uppercase.'],
-      ['Lowercase', 'Change paragraph 2 to lowercase.'],
-      ['Capitalize', 'Capitalize “Project Atlas” in paragraph 1.'],
+      ['Uppercase', 'Uppercase the draft, or make the entire draft all caps.'],
+      ['Lowercase', 'Lowercase paragraph 2, or make paragraph 2 lowercase.'],
+      ['Capitalize', 'Capitalize “Project Atlas,” or capitalize its first letter.'],
       ['Spelled form', 'Replace Kalora with capitalized C-A-E-L-O-R-A.'],
       [
         'As in reference',
@@ -156,6 +168,7 @@ interface ActiveRecording {
   session: SpindleSTTSession
   finalSegments: string[]
   interimText: string
+  quotationBoundaryHint: 'double' | 'single' | null
   mode: 'message' | 'edit'
 }
 
@@ -341,6 +354,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const rejectEditButton = requireElement<HTMLButtonElement>(tab.root, '[data-edit-reject]')
   const contextCountInput = requireElement<HTMLInputElement>(tab.root, '[data-context-count]')
   const contextualToggle = requireElement<HTMLInputElement>(tab.root, '[data-context-enabled]')
+  const grammarRepairSelect = requireElement<HTMLSelectElement>(
+    tab.root,
+    '[data-grammar-repair-mode]',
+  )
   const saveSettingsButton = requireElement<HTMLButtonElement>(tab.root, '[data-settings-save]')
   const normalizationConnectionSelect = requireElement<HTMLSelectElement>(
     tab.root,
@@ -429,6 +446,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     settings: {
       contextMessageCount: 5,
       contextualNormalizationEnabled: true,
+      grammarRepairMode: 'off',
       normalizationConnectionId: null,
       normalizationModelOverride: '',
     },
@@ -655,16 +673,24 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     editProposalPanel.hidden = !editProposal
     editProposalInstruction.textContent = editProposal?.instructionTranscript ?? ''
     editProposalOperations.textContent = editProposal
-      ? editProposal.operations
-          .map(
+      ? [
+          ...editProposal.operations.map(
             (operation) =>
               `${operation.type} · paragraph ${operation.paragraphOrdinal}${describeEditDestination(operation.destination)} · ${operation.beforeText || '∅'} → ${operation.afterText || '∅'}`,
-          )
-          .join('\n')
+          ),
+          ...(editProposal.grammarRepairChanges ?? []).map(
+            (change) => `grammar repair · ${change}`,
+          ),
+        ].join('\n')
       : ''
     editProposalBefore.textContent = editProposal?.beforeText ?? ''
     editProposalAfter.textContent = editProposal?.afterText ?? ''
-    acceptEditButton.disabled = !editProposal || state.automatedBusy
+    acceptEditButton.disabled =
+      !editProposal ||
+      state.automatedBusy ||
+      state.saving ||
+      desiredText !== state.snapshot?.cleanText ||
+      editProposal.expectedVersion !== state.snapshot?.draftVersion
     rejectEditButton.disabled = !editProposal || state.automatedBusy
     const editCandidates = state.pendingEditCandidates
     editCandidatesPanel.hidden = !editCandidates
@@ -681,6 +707,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     cancelEditCandidatesButton.disabled = !editCandidates || state.automatedBusy
     contextCountInput.value = String(state.settings.contextMessageCount)
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
+    grammarRepairSelect.value = state.settings.grammarRepairMode
     renderConnectionOptions(
       normalizationConnectionSelect,
       state.normalizationConnections,
@@ -961,6 +988,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const handleEditorInput = () => {
     desiredText = editor.value
+    if (state.pendingEditProposal || state.pendingEditCandidates) {
+      state.pendingEditProposal = null
+      state.pendingEditCandidates = null
+      state.voicePhase = 'error'
+      state.voiceMessage =
+        'The draft was changed manually. The pending edit proposal was discarded.'
+    }
     if (state.snapshot) saveDraftBackup(state.snapshot.chatId, desiredText)
     beginEditGroup()
     state.statusMessage = 'Saving the private draft…'
@@ -1040,6 +1074,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     recordingDeadline = null
   }
 
+  const clearRecordingDeadline = () => {
+    if (recordingDeadline) clearTimeout(recordingDeadline)
+    recordingDeadline = null
+  }
+
   const cancelActiveRecording = (message: string) => {
     const recording = activeRecording
     if (!recording) return
@@ -1055,6 +1094,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const commitRecordingTranscript = async (
     rawTranscript: string,
     operationId: string,
+    quotationBoundaryHint?: 'double' | 'single',
   ): Promise<void> => {
     const snapshot = state.snapshot
     const requestTransitionId = chatTransitionId
@@ -1074,6 +1114,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       chatId: snapshot.chatId,
       expectedVersion: snapshot.draftVersion,
       rawTranscript,
+      ...(quotationBoundaryHint ? { quotationBoundaryHint } : {}),
     })
     if (!alive) return
     if (
@@ -1172,8 +1213,23 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
 
   const acceptEditProposal = async () => {
+    flushParagraphPreview()
+    await drainMutations()
     const proposal = state.pendingEditProposal
     if (!proposal || state.automatedBusy) return
+    if (
+      !state.snapshot ||
+      desiredText !== state.snapshot.cleanText ||
+      proposal.chatId !== state.snapshot.chatId ||
+      proposal.expectedVersion !== state.snapshot.draftVersion
+    ) {
+      state.pendingEditProposal = null
+      state.voicePhase = 'error'
+      state.voiceMessage =
+        'The draft changed after this proposal was created. The stale proposal was discarded.'
+      render()
+      return
+    }
     state.automatedBusy = true
     state.voiceMessage = 'Applying the approved edit atomically…'
     render()
@@ -1204,6 +1260,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         state.phaseFourMessage = `Learned ${learnedNames} from the approved edit spelling. The glossary change is undoable.`
       }
     } else {
+      if (outcome.status === 'resolved' && outcome.value.type === 'app.error') {
+        if (outcome.value.snapshot) applySnapshot(outcome.value.snapshot, true)
+        state.pendingEditProposal = null
+      }
       state.voicePhase = 'error'
       state.voiceMessage =
         outcome.status === 'resolved' && outcome.value.type === 'app.error'
@@ -1323,6 +1383,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       20,
       Math.max(0, Number.parseInt(contextCountInput.value, 10) || 0),
     )
+    const grammarRepairMode =
+      grammarRepairSelect.value === 'always'
+        ? 'always'
+        : grammarRepairSelect.value === 'when_needed'
+          ? 'when_needed'
+          : 'off'
+    state.settings.contextMessageCount = contextMessageCount
+    state.settings.contextualNormalizationEnabled = contextualToggle.checked
+    state.settings.grammarRepairMode = grammarRepairMode
+    state.settings.normalizationModelOverride = normalizationModelPicker.getValue().trim()
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: 'phase4.settings.update.request',
@@ -1330,8 +1400,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       settings: {
         contextMessageCount,
         contextualNormalizationEnabled: contextualToggle.checked,
+        grammarRepairMode,
         normalizationConnectionId: state.settings.normalizationConnectionId,
-        normalizationModelOverride: normalizationModelPicker.getValue().trim(),
+        normalizationModelOverride: state.settings.normalizationModelOverride,
       },
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
@@ -1429,7 +1500,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const recording = activeRecording
     if (!recording || recording.runId !== runId) return
     activeRecording = null
-    clearRecordingTimers()
+    clearRecordingDeadline()
     state.voiceElapsedMs = Math.max(0, Date.now() - recordingStartedAt)
     state.voiceProvisionalText = ''
     state.voiceFinalText = transcript.text
@@ -1437,6 +1508,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (transcript.text.trim().length === 0) {
       state.voicePhase = 'error'
       state.voiceMessage = 'No usable speech was recognized. Nothing was appended.'
+      clearRecordingTimers()
       render()
       return
     }
@@ -1446,9 +1518,20 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         ? 'Transcription complete. Interpreting the edit as structured operations…'
         : 'Transcription complete. Applying bounded context, punctuation, spelling, and glossary rules…'
     render()
-    if (recording.mode === 'edit')
-      await interpretEditTranscript(transcript.text, recording.operationId)
-    else await commitRecordingTranscript(transcript.text, recording.operationId)
+    try {
+      if (recording.mode === 'edit')
+        await interpretEditTranscript(transcript.text, recording.operationId)
+      else
+        await commitRecordingTranscript(
+          transcript.text,
+          recording.operationId,
+          recording.quotationBoundaryHint ?? undefined,
+        )
+    } finally {
+      state.voiceElapsedMs = Math.max(0, Date.now() - recordingStartedAt)
+      clearRecordingTimers()
+      if (alive) render()
+    }
   }
 
   const failRecording = (runId: string, error: unknown) => {
@@ -1505,7 +1588,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           } else {
             current.interimText = result.text
           }
-          state.voiceProvisionalText = joinTranscriptUpdates(finalSegments, current.interimText)
+          const streamedTranscript = joinTranscriptUpdates(finalSegments, current.interimText)
+          current.quotationBoundaryHint =
+            detectQuotationBoundaryHint(streamedTranscript) ?? current.quotationBoundaryHint
+          state.voiceProvisionalText = streamedTranscript
           render()
         },
       })
@@ -1515,9 +1601,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         session,
         finalSegments,
         interimText: '',
+        quotationBoundaryHint: null,
         mode,
       }
-      recordingStartedAt = Date.now()
+      const startedAt = Date.now()
+      recordingStartedAt = startedAt
       state.voicePhase = 'starting'
       state.voiceElapsedMs = 0
       state.voiceProvider = session.provider
@@ -1525,8 +1613,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.voiceMessage =
         mode === 'edit' ? 'Starting edit-instruction capture…' : 'Starting microphone capture…'
       recordingTimer = setInterval(() => {
-        if (!activeRecording || activeRecording.runId !== runId) return
-        state.voiceElapsedMs = Date.now() - recordingStartedAt
+        if (recordingStartedAt !== startedAt) return
+        state.voiceElapsedMs = Date.now() - startedAt
         render()
       }, 250)
       recordingDeadline = setTimeout(() => {
@@ -1641,7 +1729,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     try {
       const granted = await ctx.permissions.request(missing, {
         reason:
-          'Verify the owning chat, add the confirmed draft as one user message, and start the normal Lumiverse response.',
+          'Verify the owning chat, add the draft as one user message, and start the normal Lumiverse response.',
       })
       state.permissions = sanitizeGrantedPermissions(granted)
       return required.every((permission) => granted.includes(permission))
@@ -1656,6 +1744,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (sendFlowActive || !state.snapshot) return
     flushParagraphPreview()
     sendFlowActive = true
+    state.sending = true
+    state.statusMessage = 'Preparing the draft to send…'
     render()
     try {
       await drainMutations()
@@ -1676,20 +1766,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       }
       if (!(await requestSendPermissions())) return
 
-      const confirmation = await ctx.ui.showConfirm({
-        title: 'Confirm and send draft?',
-        message:
-          'JarvisType will add exactly the clean draft text to this chat and start the normal Lumiverse response.',
-        variant: 'success',
-        confirmLabel: 'Confirm & Send',
-      })
-      if (!confirmation.confirmed) {
-        state.statusMessage = 'Send cancelled. The draft remains private.'
-        return
-      }
-
-      state.sending = true
-      state.statusMessage = 'Sending the confirmed clean draft…'
+      state.statusMessage = 'Sending the clean draft…'
       render()
       const operationId = createRequestId('send-operation')
       const outcome = await performRequest(
@@ -1703,7 +1780,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         },
         true,
       )
-      state.sending = false
       if (!alive) return
       if (outcome.status === 'resolved' && outcome.value.type === 'draft.send.response') {
         applySnapshot(outcome.value.snapshot, true)
@@ -1830,6 +1906,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
   const handleCancelEditCandidatesClick = () => cancelEditCandidateSelection()
   const handleSaveSettingsClick = () => void saveSettings()
+  const handleGrammarRepairModeChange = () => {
+    state.settings.grammarRepairMode =
+      grammarRepairSelect.value === 'always'
+        ? 'always'
+        : grammarRepairSelect.value === 'when_needed'
+          ? 'when_needed'
+          : 'off'
+  }
   const handleNormalizationConnectionChange = () => {
     state.settings.normalizationConnectionId = normalizationConnectionSelect.value || null
     state.settings.normalizationModelOverride = ''
@@ -1958,6 +2042,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   editCandidatesList.addEventListener('click', handleEditCandidateClick)
   cancelEditCandidatesButton.addEventListener('click', handleCancelEditCandidatesClick)
   saveSettingsButton.addEventListener('click', handleSaveSettingsClick)
+  grammarRepairSelect.addEventListener('change', handleGrammarRepairModeChange)
   normalizationConnectionSelect.addEventListener('change', handleNormalizationConnectionChange)
   glossarySaveButton.addEventListener('click', handleSaveGlossaryClick)
   glossaryCancelButton.addEventListener('click', handleCancelGlossaryClick)
@@ -2019,6 +2104,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     editCandidatesList.removeEventListener('click', handleEditCandidateClick)
     cancelEditCandidatesButton.removeEventListener('click', handleCancelEditCandidatesClick)
     saveSettingsButton.removeEventListener('click', handleSaveSettingsClick)
+    grammarRepairSelect.removeEventListener('change', handleGrammarRepairModeChange)
     normalizationConnectionSelect.removeEventListener('change', handleNormalizationConnectionChange)
     glossarySaveButton.removeEventListener('click', handleSaveGlossaryClick)
     glossaryCancelButton.removeEventListener('click', handleCancelGlossaryClick)
@@ -2193,6 +2279,27 @@ function renderHistory(list: HTMLOListElement, snapshot: DraftSnapshot | null): 
 
 function joinTranscriptUpdates(finalSegments: string[], interimText: string): string {
   return [...finalSegments, interimText].filter(Boolean).join(' ').trim()
+}
+
+function detectQuotationBoundaryHint(input: string): 'double' | 'single' | null {
+  const trimmed = input.trim()
+  if (/^begin\s+single\b[\s\S]*\bend\s+single[.,;:!?]*$/iu.test(trimmed)) return 'single'
+  if (/^begin\s+speech\b[\s\S]*\bend\s+speech[.,;:!?]*$/iu.test(trimmed)) return 'double'
+  const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu
+  const doubleClosing = /\b(?:close\s+)?(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu
+  const singleOpening = /^(?:open\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?\b/iu
+  const singleClosing = /\b(?:close\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu
+  const singleCount =
+    trimmed.match(/\b(?:open\s+|close\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?\b/giu)
+      ?.length ?? 0
+  const doubleCount =
+    trimmed.match(/\b(?:open\s+|close\s+)?(?<!single\s)(?:quote|quotation)(?:\s+marks?)?\b/giu)
+      ?.length ?? 0
+  if (singleCount >= 2 && singleOpening.test(trimmed) && singleClosing.test(trimmed))
+    return 'single'
+  if (doubleCount >= 2 && doubleOpening.test(trimmed) && doubleClosing.test(trimmed))
+    return 'double'
+  return null
 }
 
 function formatDuration(durationMs: number): string {
@@ -2521,10 +2628,11 @@ function shellMarkup(): string {
         <div class="jt-form-grid">
           <label>Messages scanned for references (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
+          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
-        <div class="jt-actions"><button type="button" data-settings-save>Save context settings</button></div>
+        <div class="jt-actions"><button type="button" data-settings-save>Save settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings…</p>
 
         <h4>Personal glossary</h4>

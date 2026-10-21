@@ -3253,7 +3253,9 @@ function parseDeterministicCompoundSentenceDeletion(instructionTranscript, draft
 }
 var GRAMMAR_REPAIR_TIMEOUT_MS = 3e3;
 var MAX_GRAMMAR_SEGMENT_CHARACTERS = 3e3;
+var POST_EDIT_GRAMMAR_REPAIR_ENABLED = false;
 async function maybeRepairEditGrammar(beforeText, proposedText, operations, affectedParagraphOrdinals, settings, glossary, conversationReferences, userId) {
+  if (!POST_EDIT_GRAMMAR_REPAIR_ENABLED) return { text: proposedText, changes: [] };
   if (settings.grammarRepairMode === "off") return { text: proposedText, changes: [] };
   if (!operations.some((operation) => /\p{L}/u.test(operation.beforeText + operation.afterText)))
     return { text: proposedText, changes: [] };
@@ -4116,7 +4118,7 @@ async function handleSettingsUpdate(request, context, activeRequest) {
   const settings = {
     contextMessageCount: clampContextMessageCount(request.settings.contextMessageCount),
     contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled,
-    grammarRepairMode: request.settings.grammarRepairMode,
+    grammarRepairMode: "off",
     normalizationConnectionId: request.settings.normalizationConnectionId,
     normalizationModelOverride: request.settings.normalizationModelOverride.trim()
   };
@@ -4553,7 +4555,7 @@ async function loadSettings(userId) {
   const settings = isRecord5(raw) && typeof raw.contextualNormalizationEnabled === "boolean" ? {
     contextMessageCount: clampContextMessageCount(raw.contextMessageCount),
     contextualNormalizationEnabled: raw.contextualNormalizationEnabled,
-    grammarRepairMode: raw.grammarRepairMode === "when_needed" || raw.grammarRepairMode === "always" ? raw.grammarRepairMode : "off",
+    grammarRepairMode: "off",
     normalizationConnectionId: typeof raw.normalizationConnectionId === "string" && raw.normalizationConnectionId.length > 0 ? raw.normalizationConnectionId.slice(0, 256) : null,
     normalizationModelOverride: typeof raw.normalizationModelOverride === "string" ? raw.normalizationModelOverride.trim().slice(0, 200) : ""
   } : { ...DEFAULT_SETTINGS };

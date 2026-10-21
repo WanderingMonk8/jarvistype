@@ -2882,7 +2882,7 @@ test('preserves sentence casing when replacing an opening phrase', async () => {
   assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
 })
 
-test('applies and discloses an enabled conservative post-edit grammar repair', async () => {
+test('coerces the disabled post-edit grammar option to off and skips its model call', async () => {
   const userId = 'grammar-repair-user'
   const chatId = 'grammar-repair-chat'
   activeChatId = chatId
@@ -2901,12 +2901,18 @@ test('applies and discloses an enabled conservative post-edit grammar repair', a
     },
     userId,
   )
+  const settingsResponse = responses.at(-1)?.payload
+  assert.equal(settingsResponse?.type, 'phase4.state.response')
+  if (settingsResponse?.type === 'phase4.state.response') {
+    assert.equal(settingsResponse.settings.grammarRepairMode, 'off')
+  }
   await seedDraft(
     userId,
     chatId,
     'Earlier one. Earlier two. This is a narrow entrance. Later one. Later two.',
   )
   responses.length = 0
+  generationRequests.length = 0
   editPlanResponse = {
     schemaVersion: 2,
     draftVersion: 1,
@@ -2920,16 +2926,6 @@ test('applies and discloses an enabled conservative post-edit grammar repair', a
       },
     ],
   }
-  grammarRepairResponse = {
-    segments: [
-      {
-        id: 'paragraph-1-segment-1',
-        text: 'Earlier two. This is an accessible entrance. Later one.',
-      },
-    ],
-    changes: ['Changed “a” to “an” before “accessible”.'],
-  }
-
   await dispatch(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -2948,22 +2944,14 @@ test('applies and discloses an enabled conservative post-edit grammar repair', a
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(
     proposal.proposal.afterText,
-    'Earlier one. Earlier two. This is an accessible entrance. Later one. Later two.',
+    'Earlier one. Earlier two. This is a accessible entrance. Later one. Later two.',
   )
-  assert.deepEqual(proposal.proposal.grammarRepairChanges, [
-    'Changed “a” to “an” before “accessible”.',
-  ])
+  assert.equal(proposal.proposal.grammarRepairChanges, undefined)
   const grammarRequest = generationRequests.find((request) => {
     const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
     return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
   })
-  assert.ok(grammarRequest)
-  const grammarInput = JSON.parse(grammarRequest.messages?.at(-1)?.content ?? '{}') as {
-    segments?: Array<{ text?: string }>
-  }
-  assert.deepEqual(grammarInput.segments?.map((segment) => segment.text), [
-    'Earlier two. This is a accessible entrance. Later one.',
-  ])
+  assert.equal(grammarRequest, undefined)
 
   await dispatch(
     {
@@ -2982,7 +2970,7 @@ test('applies and discloses an enabled conservative post-edit grammar repair', a
   assert.equal(committed.outcome, 'committed')
   assert.equal(
     committed.snapshot?.cleanText,
-    'Earlier one. Earlier two. This is an accessible entrance. Later one. Later two.',
+    'Earlier one. Earlier two. This is a accessible entrance. Later one. Later two.',
   )
 })
 

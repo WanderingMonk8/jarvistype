@@ -290,9 +290,11 @@ The user is not required to dictate a complete message in one session.
 
 **FR-EDIT-025:** Instructions that add text or punctuation at the beginning or end of an existing paragraph shall remain within that paragraph through `prepend` or `append`. Paragraph-scoped `insert before` and `insert after` shall be reserved for instructions that explicitly create a separate new paragraph.
 
-**FR-EDIT-026:** The drawer shall provide an optional post-edit grammar-repair setting with `Off`, `When needed`, and `Always` modes. This non-routine setting shall not add controls or visual clutter to the floating composition surface. Existing and new installations shall default to `Off` unless the user explicitly selects another mode.
+**Deferred:** The optional LLM post-edit grammar repair (FR-EDIT-026 through FR-EDIT-029) is disabled and has no user-facing controls because its latency currently outweighs its benefit.
 
-**FR-EDIT-027:** Post-edit grammar repair shall run only after structured operations and deterministic edit rules have produced a valid proposed draft. It shall receive only affected paragraphs, their immediate neighboring paragraphs as read-only context, and bounded protected terminology; it shall not receive the full draft or unrestricted chat history.
+**FR-EDIT-026:** When re-enabled, the drawer shall provide an optional post-edit grammar-repair setting with `Off`, `When needed`, and `Always` modes. This non-routine setting shall not add controls or visual clutter to the floating composition surface. Existing and new installations shall default to `Off` unless the user explicitly selects another mode.
+
+**FR-EDIT-027:** When re-enabled, post-edit grammar repair shall run only after structured operations and deterministic edit rules have produced a valid proposed draft. It shall receive only affected paragraphs, their immediate neighboring paragraphs as read-only context, and bounded protected terminology; it shall not receive the full draft or unrestricted chat history.
 
 **FR-EDIT-028:** Grammar repair shall be restricted to clear grammatical artifacts caused by the edit. It shall preserve meaning, style, quoted text, paragraph boundaries, glossary terms, proper nouns, explicit spelling, and explicit casing. Model output shall be schema-validated, scope-validated, and bounded for textual divergence. Failure, timeout, malformed output, or excessive change shall fall back to the deterministic proposal without blocking review.
 

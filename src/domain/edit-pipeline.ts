@@ -776,7 +776,7 @@ function findSentenceRanges(
     if (cursor >= rangeEnd) break
     const start = cursor
     const remainder = text.slice(cursor, rangeEnd)
-    const terminal = /(?:\.{3}|[.!?…])[”’"')\]]*(?=\s|$)/u.exec(remainder)
+    const terminal = findSentenceTerminal(remainder, 0)
     if (!terminal) {
       const trailingWhitespace = text.slice(start, rangeEnd).match(/\s*$/u)?.[0].length ?? 0
       ranges.push({ start, end: rangeEnd - trailingWhitespace })
@@ -787,6 +787,19 @@ function findSentenceRanges(
     cursor = end
   }
   return ranges
+}
+
+function findSentenceTerminal(remainder: string, from: number): RegExpExecArray | null {
+  const pattern = /(?:\.{3}|[.!?…])([”’"')\]]*)(?=\s|$)/gu
+  pattern.lastIndex = from
+  let terminal: RegExpExecArray | null
+  while ((terminal = pattern.exec(remainder))) {
+    const closers = terminal[1] ?? ''
+    if (closers && /^\s+\p{Ll}/u.test(remainder.slice((terminal.index ?? 0) + terminal[0].length)))
+      continue
+    return terminal
+  }
+  return null
 }
 
 function resolveTextTarget(

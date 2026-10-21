@@ -4355,6 +4355,266 @@ function sendRequest(chatId: string, operationId: string) {
   }
 }
 
+test('cleaner end-to-end matrix', async () => {
+  interface CleanerCase {
+    name: string
+    draft: string
+    instruction: string
+    expected: string
+    plan?: unknown
+    glossary?: { canonical: string; variants: string[]; hint: string }
+  }
+
+  const cases: CleanerCase[] = [
+    {
+      name: 'article agreement',
+      draft: 'Earlier one. This is a wide entrance.',
+      instruction: 'Replace wide with accessible.',
+      expected: 'Earlier one. This is an accessible entrance.',
+    },
+    {
+      name: 'sentence capitalization',
+      draft: 'She waited. the room was quiet.',
+      instruction: 'Replace quiet with silent.',
+      expected: 'She waited. The room was silent.',
+    },
+    {
+      name: 'repeated word',
+      draft: 'The the draft is ready.',
+      instruction: 'Replace ready with final.',
+      expected: 'The draft is final.',
+    },
+    {
+      name: 'repeated spaces',
+      draft: 'This is a very  wide entrance.',
+      instruction: 'Replace entrance with doorway.',
+      expected: 'This is a very wide doorway.',
+    },
+    {
+      name: 'missing space after a comma',
+      draft: "This is fine,isn't it?",
+      instruction: 'Replace fine with good.',
+      expected: "This is good, isn't it?",
+    },
+    {
+      name: 'spaces inside quotation marks',
+      draft: 'He said “ hello ”.',
+      instruction: 'Replace said with whispered.',
+      expected: 'He whispered “hello”.',
+    },
+    {
+      name: 'spaces inside parentheses',
+      draft: 'A ( note ) here.',
+      instruction: 'Replace here with there.',
+      expected: 'A (note) there.',
+    },
+    {
+      name: 'capitalized article at a sentence opening',
+      draft: 'A apple fell.',
+      instruction: 'Replace fell with dropped.',
+      expected: 'An apple dropped.',
+    },
+    {
+      name: 'errant punctuation after a sentence ending',
+      draft: 'This is fine.',
+      instruction: 'Replace fine. with good.,',
+      expected: 'This is good.',
+    },
+    {
+      name: 'errant question mark punctuation',
+      draft: 'This is fine.',
+      instruction: 'Replace fine. with “good.?”',
+      expected: 'This is good?',
+    },
+    {
+      name: 'repeated period',
+      draft: 'This is fine.',
+      instruction: 'Replace fine. with “good..”',
+      expected: 'This is good.',
+    },
+    {
+      name: 'separator run before a sentence ending',
+      draft: 'This is fine.',
+      instruction: 'Replace fine. with good;;.',
+      expected: 'This is good.',
+      plan: {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'Leave separators for local cleanup.',
+        operations: [
+          {
+            id: 'separator-run',
+            type: 'replace',
+            target: { paragraphOrdinal: 1, exactText: 'fine.' },
+            text: 'good;;.',
+          },
+        ],
+      },
+    },
+    {
+      name: 'period before an exclamation mark',
+      draft: 'This is fine.',
+      instruction: 'Replace fine. with “good.!”',
+      expected: 'This is good!',
+    },
+    {
+      name: 'abbreviation guard',
+      draft: 'Mr.Smith arrived. He waited.',
+      instruction: 'Replace arrived with came.',
+      expected: 'Mr.Smith came. He waited.',
+    },
+    {
+      name: 'domain guard',
+      draft: 'Visit example.com for details.',
+      instruction: 'Replace details with info.',
+      expected: 'Visit example.com for info.',
+    },
+    {
+      name: 'url guard',
+      draft: 'Open https://example.com/?a=b now.',
+      instruction: 'Replace now with today.',
+      expected: 'Open https://example.com/?a=b today.',
+    },
+    {
+      name: 'speech tag guard',
+      draft: 'He said “Stop!” and left.',
+      instruction: 'Replace left with stayed.',
+      expected: 'He said “Stop!” and stayed.',
+    },
+    {
+      name: 'quoted text casing guard',
+      draft: 'He said “this is fine.” and left.',
+      instruction: 'Replace left with stayed.',
+      expected: 'He said “this is fine.” and stayed.',
+    },
+    {
+      name: 'unaffected sentence scope',
+      draft: 'this one stays lower. This is a wide entrance.',
+      instruction: 'Replace wide with accessible.',
+      expected: 'this one stays lower. This is an accessible entrance.',
+    },
+    {
+      name: 'explicit lowercase command',
+      draft: 'First sentence. Second sentence.',
+      instruction: 'Lowercase paragraph 1.',
+      expected: 'first sentence. second sentence.',
+      plan: {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'Lowercase the paragraph.',
+        operations: [
+          {
+            id: 'lowercase-paragraph',
+            type: 'case',
+            caseMode: 'lowercase',
+            target: { paragraphOrdinal: 1 },
+          },
+        ],
+      },
+    },
+    {
+      name: 'protected glossary term',
+      draft: 'ebay is here.',
+      instruction: 'Replace here with present.',
+      expected: 'ebay is present.',
+      glossary: { canonical: 'eBay', variants: [], hint: '' },
+    },
+    {
+      name: 'sentence replacement payload',
+      draft: 'First sentence. Second sentence. So, I guess you can name your price and speech.',
+      instruction: 'Replace the last sentence with, so I guess you can name your price now.',
+      expected: 'First sentence. Second sentence. So I guess you can name your price now.',
+    },
+    {
+      name: 'positional sentence deletion',
+      draft: 'First sentence. Second sentence. And speech.',
+      instruction: 'Delete the last sentence.',
+      expected: 'First sentence. Second sentence.',
+    },
+    {
+      name: 'per-command insertion spacing',
+      draft: 'First sentence. Second sentence.',
+      instruction: 'Insert before the sentence Second with New',
+      expected: 'First sentence. New second sentence.',
+    },
+    {
+      name: 'per-command replacement casing',
+      draft: 'She said my answer was ready.',
+      instruction: 'Replace my answer with My response.',
+      expected: 'She said my response was ready.',
+    },
+    {
+      name: 'per-command append spacing',
+      draft: 'A list',
+      instruction: 'Append of items to paragraph 1.',
+      expected: 'A list of items',
+      plan: {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'Append the dictated words.',
+        operations: [
+          {
+            id: 'append-words',
+            type: 'append',
+            target: { paragraphOrdinal: 1 },
+            text: 'of items',
+          },
+        ],
+      },
+    },
+  ]
+
+  for (const [index, testCase] of cases.entries()) {
+    const userId = `cleaner-e2e-user-${index}`
+    const chatId = `cleaner-e2e-chat-${index}`
+    activeChatId = chatId
+    responses.length = 0
+    generationRequests.length = 0
+    editPlanResponse = testCase.plan ?? null
+    grammarRepairResponse = null
+
+    if (testCase.glossary) {
+      await dispatch(
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          type: 'glossary.upsert.request',
+          requestId: `cleaner-e2e-glossary-${index}`,
+          ...testCase.glossary,
+        },
+        userId,
+      )
+    }
+
+    await seedDraft(userId, chatId, testCase.draft)
+    responses.length = 0
+    generationRequests.length = 0
+
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `cleaner-e2e-interpret-${index}`,
+        operationId: `cleaner-e2e-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript: testCase.instruction,
+      },
+      userId,
+    )
+
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', testCase.name)
+    if (proposal?.type !== 'edit.proposal.response') continue
+    assert.equal(proposal.proposal.afterText, testCase.expected, testCase.name)
+
+    const grammarRequests = generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+    })
+    assert.equal(grammarRequests.length, 0, `${testCase.name}: expected no provider grammar pass`)
+  }
+})
+
 function recordingAppendRequest(
   chatId: string,
   operationId: string,

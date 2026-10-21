@@ -1584,9 +1584,12 @@ function grammarEditSegment(
 
 function sentenceRanges(text: string): Array<{ start: number; end: number }> {
   const sentences: Array<{ start: number; end: number }> = []
-  const terminalPattern = /(?:\.{3}|[.!?\u2026])[\u201d\u2019"')\]]*(?=\s|$)/gu
+  const terminalPattern = /(?:\.{3}|[.!?\u2026])([\u201d\u2019"')\]]*)(?=\s|$)/gu
   let cursor = 0
   for (const terminal of text.matchAll(terminalPattern)) {
+    const closers = terminal[1] ?? ''
+    if (closers && /^\s+\p{Ll}/u.test(text.slice((terminal.index ?? 0) + terminal[0].length)))
+      continue
     let start = cursor
     while (start < text.length && /\s/u.test(text[start]!)) start += 1
     const end = (terminal.index ?? 0) + terminal[0].length

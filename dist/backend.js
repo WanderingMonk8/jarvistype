@@ -1033,7 +1033,7 @@ function findSentenceRanges(text, rangeStart, rangeEnd) {
     if (cursor >= rangeEnd) break;
     const start = cursor;
     const remainder = text.slice(cursor, rangeEnd);
-    const terminal = /(?:\.{3}|[.!?…])[”’"')\]]*(?=\s|$)/u.exec(remainder);
+    const terminal = findSentenceTerminal(remainder, 0);
     if (!terminal) {
       const trailingWhitespace = text.slice(start, rangeEnd).match(/\s*$/u)?.[0].length ?? 0;
       ranges.push({ start, end: rangeEnd - trailingWhitespace });
@@ -1044,6 +1044,18 @@ function findSentenceRanges(text, rangeStart, rangeEnd) {
     cursor = end;
   }
   return ranges;
+}
+function findSentenceTerminal(remainder, from) {
+  const pattern = /(?:\.{3}|[.!?…])([”’"')\]]*)(?=\s|$)/gu;
+  pattern.lastIndex = from;
+  let terminal;
+  while (terminal = pattern.exec(remainder)) {
+    const closers = terminal[1] ?? "";
+    if (closers && /^\s+\p{Ll}/u.test(remainder.slice((terminal.index ?? 0) + terminal[0].length)))
+      continue;
+    return terminal;
+  }
+  return null;
 }
 function resolveTextTarget(cleanText, paragraphs, target, label) {
   const paragraphMatches = paragraphs.filter(
@@ -3991,9 +4003,12 @@ function grammarEditSegment(paragraph, beforeParagraph, index) {
 }
 function sentenceRanges(text) {
   const sentences = [];
-  const terminalPattern = /(?:\.{3}|[.!?\u2026])[\u201d\u2019"')\]]*(?=\s|$)/gu;
+  const terminalPattern = /(?:\.{3}|[.!?\u2026])([\u201d\u2019"')\]]*)(?=\s|$)/gu;
   let cursor = 0;
   for (const terminal of text.matchAll(terminalPattern)) {
+    const closers = terminal[1] ?? "";
+    if (closers && /^\s+\p{Ll}/u.test(text.slice((terminal.index ?? 0) + terminal[0].length)))
+      continue;
     let start = cursor;
     while (start < text.length && /\s/u.test(text[start])) start += 1;
     const end = (terminal.index ?? 0) + terminal[0].length;

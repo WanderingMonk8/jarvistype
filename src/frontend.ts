@@ -1383,6 +1383,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       20,
       Math.max(0, Number.parseInt(contextCountInput.value, 10) || 0),
     )
+    const grammarRepairMode =
+      grammarRepairSelect.value === 'always'
+        ? 'always'
+        : grammarRepairSelect.value === 'when_needed'
+          ? 'when_needed'
+          : 'off'
+    state.settings.contextMessageCount = contextMessageCount
+    state.settings.contextualNormalizationEnabled = contextualToggle.checked
+    state.settings.grammarRepairMode = grammarRepairMode
+    state.settings.normalizationModelOverride = normalizationModelPicker.getValue().trim()
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: 'phase4.settings.update.request',
@@ -1390,14 +1400,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       settings: {
         contextMessageCount,
         contextualNormalizationEnabled: contextualToggle.checked,
-        grammarRepairMode:
-          grammarRepairSelect.value === 'always'
-            ? 'always'
-            : grammarRepairSelect.value === 'when_needed'
-              ? 'when_needed'
-              : 'off',
+        grammarRepairMode,
         normalizationConnectionId: state.settings.normalizationConnectionId,
-        normalizationModelOverride: normalizationModelPicker.getValue().trim(),
+        normalizationModelOverride: state.settings.normalizationModelOverride,
       },
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
@@ -1901,6 +1906,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
   const handleCancelEditCandidatesClick = () => cancelEditCandidateSelection()
   const handleSaveSettingsClick = () => void saveSettings()
+  const handleGrammarRepairModeChange = () => {
+    state.settings.grammarRepairMode =
+      grammarRepairSelect.value === 'always'
+        ? 'always'
+        : grammarRepairSelect.value === 'when_needed'
+          ? 'when_needed'
+          : 'off'
+  }
   const handleNormalizationConnectionChange = () => {
     state.settings.normalizationConnectionId = normalizationConnectionSelect.value || null
     state.settings.normalizationModelOverride = ''
@@ -2029,6 +2042,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   editCandidatesList.addEventListener('click', handleEditCandidateClick)
   cancelEditCandidatesButton.addEventListener('click', handleCancelEditCandidatesClick)
   saveSettingsButton.addEventListener('click', handleSaveSettingsClick)
+  grammarRepairSelect.addEventListener('change', handleGrammarRepairModeChange)
   normalizationConnectionSelect.addEventListener('change', handleNormalizationConnectionChange)
   glossarySaveButton.addEventListener('click', handleSaveGlossaryClick)
   glossaryCancelButton.addEventListener('click', handleCancelGlossaryClick)
@@ -2090,6 +2104,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     editCandidatesList.removeEventListener('click', handleEditCandidateClick)
     cancelEditCandidatesButton.removeEventListener('click', handleCancelEditCandidatesClick)
     saveSettingsButton.removeEventListener('click', handleSaveSettingsClick)
+    grammarRepairSelect.removeEventListener('change', handleGrammarRepairModeChange)
     normalizationConnectionSelect.removeEventListener('change', handleNormalizationConnectionChange)
     glossarySaveButton.removeEventListener('click', handleSaveGlossaryClick)
     glossaryCancelButton.removeEventListener('click', handleCancelGlossaryClick)

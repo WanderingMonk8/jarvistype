@@ -1978,7 +1978,7 @@ async function normalizeWithContext(
         {
           role: 'user',
           content: JSON.stringify({
-            task: 'Normalize the transcript candidate and resolve only high-confidence spoken punctuation or layout commands from the raw transcript.',
+            task: 'Normalize likely recognition errors, punctuation, casing, and explicit spelling in the transcript candidate, and resolve only high-confidence spoken punctuation or layout commands from the raw transcript. Restore a missing sentence boundary when provider capitalization and the local sentence context make that boundary clear.',
             rawTranscript,
             candidate: deterministicCandidate,
             supportedSpokenCommands: SPOKEN_PUNCTUATION_COMMAND_PHRASES,

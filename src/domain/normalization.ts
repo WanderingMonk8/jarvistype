@@ -155,6 +155,12 @@ export function normalizeDeterministically(
   if (quotation.marks.length) reasons.push(...quotation.reasons)
   authoritativePunctuationMarks.push(...quotation.marks)
 
+  const restoredSentenceBoundaries = restoreHighConfidenceSentenceBoundaries(text)
+  if (restoredSentenceBoundaries.count) reasons.push('missing sentence boundary')
+  for (let index = 0; index < restoredSentenceBoundaries.count; index += 1)
+    authoritativePunctuationMarks.push('.')
+  text = restoredSentenceBoundaries.text
+
   for (const [pattern, replacement, reason] of PUNCTUATION) {
     const count = text.match(pattern)?.length ?? 0
     const next = text.replace(
@@ -205,6 +211,18 @@ export function normalizeDeterministically(
     authoritativePunctuationLiterals: [...new Set(protectedLiterals)],
     authoritativePunctuationMarks,
   }
+}
+
+function restoreHighConfidenceSentenceBoundaries(input: string): { text: string; count: number } {
+  let count = 0
+  const text = input.replace(
+    /(^|[.!?\u2026][\u201d\u2019"']?(?:[ \t]+)|[\u201c\u2018"'([{][ \t]*)(My God)([ \t]+)(?=[\p{Lu}][\p{Ll}\p{M}'\u2019-]*\b)/gu,
+    (_whole, boundary: string, interjection: string, spacing: string) => {
+      count += 1
+      return `${boundary}${interjection}.${spacing}`
+    },
+  )
+  return { text, count }
 }
 
 function capitalizeMessageOpenings(

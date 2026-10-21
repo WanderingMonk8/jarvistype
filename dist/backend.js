@@ -1966,6 +1966,11 @@ function normalizeDeterministically(raw, glossary, options = {}) {
   text = quotation.text;
   if (quotation.marks.length) reasons.push(...quotation.reasons);
   authoritativePunctuationMarks.push(...quotation.marks);
+  const restoredSentenceBoundaries = restoreHighConfidenceSentenceBoundaries(text);
+  if (restoredSentenceBoundaries.count) reasons.push("missing sentence boundary");
+  for (let index = 0; index < restoredSentenceBoundaries.count; index += 1)
+    authoritativePunctuationMarks.push(".");
+  text = restoredSentenceBoundaries.text;
   for (const [pattern, replacement, reason] of PUNCTUATION) {
     const count = text.match(pattern)?.length ?? 0;
     const next = text.replace(
@@ -2010,6 +2015,17 @@ function normalizeDeterministically(raw, glossary, options = {}) {
     authoritativePunctuationLiterals: [...new Set(protectedLiterals)],
     authoritativePunctuationMarks
   };
+}
+function restoreHighConfidenceSentenceBoundaries(input) {
+  let count = 0;
+  const text = input.replace(
+    /(^|[.!?\u2026][\u201d\u2019"']?(?:[ \t]+)|[\u201c\u2018"'([{][ \t]*)(My God)([ \t]+)(?=[\p{Lu}][\p{Ll}\p{M}'\u2019-]*\b)/gu,
+    (_whole, boundary, interjection, spacing) => {
+      count += 1;
+      return `${boundary}${interjection}.${spacing}`;
+    }
+  );
+  return { text, count };
 }
 function capitalizeMessageOpenings(input, protectedTerms, capitalizeInitialOpening) {
   const protectedWords = new Set(
@@ -3838,7 +3854,7 @@ async function normalizeWithContext(rawTranscript, deterministicCandidate, messa
         {
           role: "user",
           content: JSON.stringify({
-            task: "Normalize the transcript candidate and resolve only high-confidence spoken punctuation or layout commands from the raw transcript.",
+            task: "Normalize likely recognition errors, punctuation, casing, and explicit spelling in the transcript candidate, and resolve only high-confidence spoken punctuation or layout commands from the raw transcript. Restore a missing sentence boundary when provider capitalization and the local sentence context make that boundary clear.",
             rawTranscript,
             candidate: deterministicCandidate,
             supportedSpokenCommands: SPOKEN_PUNCTUATION_COMMAND_PHRASES,

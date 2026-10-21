@@ -39,6 +39,22 @@ test('capitalizes ordinary message and paragraph openings without changing estab
   )
 })
 
+test('restores a missing sentence boundary after an opening My God interjection', () => {
+  const result = normalizeDeterministically(
+    'quotation My God Three mouths working on me period quotation',
+    [],
+  )
+
+  assert.equal(result.text, '“My God. Three mouths working on me.”')
+  assert.ok(result.reasons.includes('missing sentence boundary'))
+  assert.ok(result.authoritativePunctuationMarks.includes('.'))
+
+  assert.equal(
+    normalizeDeterministically('She described My God Apollo as a marble statue.', []).text,
+    'She described My God Apollo as a marble statue.',
+  )
+})
+
 test('does not append a bare terminal command after provider terminal punctuation', () => {
   assert.equal(normalizeDeterministically('Is this working? period', []).text, 'Is this working?')
   assert.equal(normalizeDeterministically('Really! full stop.', []).text, 'Really!')

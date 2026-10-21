@@ -3460,6 +3460,85 @@ test('replaces with a qualified as in reference without a provider interpretatio
   )
 })
 
+test('inserts a quotation mark at a sentence position without a provider interpretation', async () => {
+  const userId = 'sentence-quotation-user'
+  const chatId = 'sentence-quotation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Last sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-quotation-interpret',
+      operationId: 'sentence-quotation-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Insert a quotation mark after the last sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'First sentence. Last sentence.”')
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
+test('inserts opening marks and paired quotation marks at sentence positions', async () => {
+  const userId = 'sentence-quotation-shapes-user'
+  const chatId = 'sentence-quotation-shapes-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Last sentence.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-quotation-before-interpret',
+      operationId: 'sentence-quotation-before-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Insert an opening quotation mark before the first sentence.',
+    },
+    userId,
+  )
+  const before = responses.at(-1)?.payload
+  assert.equal(before?.type, 'edit.proposal.response')
+  if (before?.type === 'edit.proposal.response') {
+    assert.equal(before.proposal.afterText, '“First sentence. Last sentence.')
+  }
+
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-quotation-around-interpret',
+      operationId: 'sentence-quotation-around-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotation marks around the last sentence.',
+    },
+    userId,
+  )
+  const around = responses.at(-1)?.payload
+  assert.equal(around?.type, 'edit.proposal.response')
+  if (around?.type === 'edit.proposal.response') {
+    assert.equal(around.proposal.afterText, 'First sentence. “Last sentence.”')
+  }
+})
+
 test('keeps a one-time explanatory reference out of replacement text and glossary learning', async () => {
   const userId = 'reference-edit-user'
   const chatId = 'reference-edit-chat'

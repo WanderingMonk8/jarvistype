@@ -4279,6 +4279,48 @@ test('replaces with a qualified as in reference without a provider interpretatio
   )
 })
 
+test('matches an expanded contraction in a referenced edit target', async () => {
+  const userId = 'contraction-reference-user'
+  const chatId = 'contraction-reference-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    "I set the groceries down on the kitchen counter, and before turning on the light, we're viewing an apartment that is modest but well-kept, neat and clean, perhaps far too clean and neat for a man that she is used to.",
+  )
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'contraction-reference-interpret',
+      operationId: 'contraction-reference-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Replace the phrase We are viewing an apartment with reviewing an apartment, as in reviewing outfits.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'I set the groceries down on the kitchen counter, and before turning on the light, reviewing an apartment that is modest but well-kept, neat and clean, perhaps far too clean and neat for a man that she is used to.',
+  )
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
 test('inserts a quotation mark at a sentence position without a provider interpretation', async () => {
   const userId = 'sentence-quotation-user'
   const chatId = 'sentence-quotation-chat'
@@ -4687,8 +4729,8 @@ test('collects a copiable backend timing log when debug logging is enabled', asy
     {
       protocolVersion: PROTOCOL_VERSION,
       type: 'edit.interpret.request',
-      requestId: 'debug-log-edit',
-      operationId: 'debug-log-operation',
+      requestId: 'debug-log-first-edit',
+      operationId: 'debug-log-first-operation',
       chatId,
       expectedVersion: 1,
       instructionTranscript: 'Replace wide with accessible.',
@@ -4710,6 +4752,7 @@ test('collects a copiable backend timing log when debug logging is enabled', asy
   const text = response.entries.join('\n')
   assert.ok(text.includes('# JarvisType debug timing log'))
   assert.match(text, /\[request\] start type=edit\.interpret\.request/u)
+  assert.match(text, /request=debug-log-first-edit/u)
   assert.match(text, /\[edit\] start/u)
   assert.match(text, /\[edit\.interpret\]/u)
   assert.match(text, /\[edit\.execute\]/u)
@@ -4718,6 +4761,36 @@ test('collects a copiable backend timing log when debug logging is enabled', asy
   assert.match(text, /\+\d+\.\dms/u)
   assert.equal(text.includes('entrance'), false)
   assert.equal(text.includes('accessible'), false)
+
+  // A new user action starts a fresh log.
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'debug-log-second-edit',
+      operationId: 'debug-log-second-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace entrance with doorway.',
+    },
+    userId,
+  )
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: 'debug-log-read-second',
+    },
+    userId,
+  )
+  const secondResponse = responses.at(-1)?.payload
+  assert.equal(secondResponse?.type, 'debug.log.response')
+  if (secondResponse?.type === 'debug.log.response') {
+    const secondText = secondResponse.entries.join('\n')
+    assert.match(secondText, /request=debug-log-second-edit/u)
+    assert.equal(secondText.includes('debug-log-first-edit'), false)
+  }
 
   await dispatch(
     {

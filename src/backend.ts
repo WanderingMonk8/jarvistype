@@ -108,6 +108,13 @@ const conversationReferenceCache = new Map<string, { signature: string; referenc
 const MAX_COMPLETED_SENDS = 100
 const MAX_CONVERSATION_REFERENCE_CACHES = 100
 const MAX_GLOSSARY_PROMPT_CHARACTERS = 8_000
+const DEBUG_NEW_ACTION_REQUEST_TYPES = new Set<FrontendRequest['type']>([
+  'transcript.normalize.request',
+  'edit.interpret.request',
+  'draft.send.request',
+  'draft.recording.undo.request',
+  'phase4.load.request',
+])
 const DEFAULT_SETTINGS: PhaseFourSettings = {
   contextMessageCount: DEFAULT_CONTEXT_MESSAGE_COUNT,
   contextualNormalizationEnabled: true,
@@ -161,6 +168,7 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
   }
   const cachedSettings = settingsCache.get(context.userId)
   if (cachedSettings) setDebugEnabled(context.userId, cachedSettings.debugLoggingEnabled === true)
+  if (DEBUG_NEW_ACTION_REQUEST_TYPES.has(request.type)) clearDebugEntries(context.userId)
   const requestStartedAt = performance.now()
   recordDebug(
     context.userId,
@@ -2329,7 +2337,6 @@ function parseDeterministicQualifiedAsInReplacement(
   session: PersistedDraftSession,
 ): EditPlan | null {
   if (/[\r\n;]/u.test(instructionTranscript)) return null
-  if (!hasQualifiedAsInReference(instructionTranscript)) return null
   const referenceIndex = instructionTranscript.search(/\bas\s+in\b/iu)
   if (referenceIndex < 1) return null
   const reference = instructionTranscript.slice(referenceIndex)
@@ -2354,7 +2361,54 @@ function parseDeterministicQualifiedAsInReplacement(
     operation.target.exactText === undefined
   )
     return null
+  if (!replacementHasQualifiedReference(operation.text, reference)) return null
   return plan
+}
+
+function replacementHasQualifiedReference(replacement: string, reference: string): boolean {
+  const stopWords = new Set([
+    'the',
+    'a',
+    'an',
+    'and',
+    'or',
+    'but',
+    'of',
+    'to',
+    'in',
+    'on',
+    'at',
+    'for',
+    'with',
+    'from',
+    'by',
+    'is',
+    'are',
+    'was',
+    'were',
+    'be',
+    'been',
+    'it',
+    'this',
+    'that',
+    'you',
+    'we',
+    'they',
+    'he',
+    'she',
+    'my',
+    'your',
+    'our',
+    'their',
+    'as',
+  ])
+  const words = replacement.match(/[\p{L}\p{N}][\p{L}\p{N}'\u2019-]*/gu) ?? []
+  return words.some(
+    (word) =>
+      word.length >= 3 &&
+      !stopWords.has(word.toLocaleLowerCase()) &&
+      hasRepeatedOrInflectedReference(word, reference),
+  )
 }
 
 function parseDeterministicQuotationRange(

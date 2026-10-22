@@ -1516,18 +1516,83 @@ function findExactOrFuzzyMatch(text, search, start, end, occurrence) {
   if (typeof approximate !== "string") return approximate;
   return approximate.includes("ambiguous") ? "fuzzy text target is ambiguous" : "text target was not found";
 }
+var CONTRACTIONS = {
+  "i'm": ["i", "am"],
+  "i've": ["i", "have"],
+  "i'll": ["i", "will"],
+  "i'd": ["i", "would"],
+  "you're": ["you", "are"],
+  "you've": ["you", "have"],
+  "you'll": ["you", "will"],
+  "you'd": ["you", "would"],
+  "he's": ["he", "is"],
+  "she's": ["she", "is"],
+  "it's": ["it", "is"],
+  "we're": ["we", "are"],
+  "we've": ["we", "have"],
+  "we'll": ["we", "will"],
+  "we'd": ["we", "would"],
+  "they're": ["they", "are"],
+  "they've": ["they", "have"],
+  "they'll": ["they", "will"],
+  "they'd": ["they", "would"],
+  "that's": ["that", "is"],
+  "there's": ["there", "is"],
+  "what's": ["what", "is"],
+  "who's": ["who", "is"],
+  "where's": ["where", "is"],
+  "how's": ["how", "is"],
+  "isn't": ["is", "not"],
+  "aren't": ["are", "not"],
+  "wasn't": ["was", "not"],
+  "weren't": ["were", "not"],
+  "don't": ["do", "not"],
+  "doesn't": ["does", "not"],
+  "didn't": ["did", "not"],
+  "can't": ["can", "not"],
+  cannot: ["can", "not"],
+  "couldn't": ["could", "not"],
+  "won't": ["will", "not"],
+  "wouldn't": ["would", "not"],
+  "shouldn't": ["should", "not"],
+  "mustn't": ["must", "not"],
+  "haven't": ["have", "not"],
+  "hasn't": ["has", "not"],
+  "hadn't": ["had", "not"]
+};
+function expandToken(value) {
+  const normalized = value.toLocaleLowerCase().replace(/\u2019/gu, "'");
+  const parts = CONTRACTIONS[normalized];
+  return parts ? [...parts] : [stripTokenPunctuation(value)];
+}
+function expandTokens(tokens) {
+  const expanded = [];
+  for (const token of tokens) {
+    const parts = expandToken(token.value);
+    for (const [partIndex, value] of parts.entries()) {
+      expanded.push({
+        value,
+        start: token.start,
+        end: token.end,
+        partIndex,
+        partCount: parts.length
+      });
+    }
+  }
+  return expanded;
+}
 function findPunctuationInsensitiveMatch(text, search, start, end) {
   const wanted = tokenizeWithOffsets(search, 0, search.length);
   if (!wanted.length) return "punctuation-insensitive text target was not found";
   const available = tokenizeCachedDraftRange(text, start, end);
-  if (available.length < wanted.length) return "punctuation-insensitive text target was not found";
-  const wantedValues = wanted.map(({ value }) => stripTokenPunctuation(value));
+  const wantedExpanded = expandTokens(wanted);
+  const availableExpanded = expandTokens(available);
+  if (availableExpanded.length < wantedExpanded.length)
+    return "punctuation-insensitive text target was not found";
   const candidates = [];
-  for (let index = 0; index <= available.length - wanted.length; index += 1) {
-    const window = available.slice(index, index + wanted.length);
-    if (!window.every(
-      (token, tokenIndex) => stripTokenPunctuation(token.value) === wantedValues[tokenIndex]
-    ))
+  for (let index = 0; index <= availableExpanded.length - wantedExpanded.length; index += 1) {
+    const window = availableExpanded.slice(index, index + wantedExpanded.length);
+    if (window[0].partIndex !== 0 || window.at(-1).partIndex !== window.at(-1).partCount - 1 || !window.every((token, tokenIndex) => token.value === wantedExpanded[tokenIndex].value))
       continue;
     candidates.push({
       start: window[0].start,
@@ -1551,7 +1616,7 @@ function stripTokenPunctuation(value) {
   return value.replace(/[^\p{L}\p{N}]/gu, "");
 }
 function internalPunctuationSignature(text, start, end) {
-  return text.slice(start, end).replace(/[\p{L}\p{N}\s]/gu, "").replace(/[\u2018\u2019]/gu, "'").replace(/[\u201c\u201d]/gu, '"');
+  return text.slice(start, end).replace(/[\p{L}\p{N}\s]/gu, "").replace(/[\u2018\u2019]/gu, "").replace(/[\u201c\u201d]/gu, '"');
 }
 function findApproximateMatch(text, search, start, end) {
   const wanted = tokenizeWithOffsets(search, 0, search.length);
@@ -2907,6 +2972,13 @@ var conversationReferenceCache = /* @__PURE__ */ new Map();
 var MAX_COMPLETED_SENDS = 100;
 var MAX_CONVERSATION_REFERENCE_CACHES = 100;
 var MAX_GLOSSARY_PROMPT_CHARACTERS = 8e3;
+var DEBUG_NEW_ACTION_REQUEST_TYPES = /* @__PURE__ */ new Set([
+  "transcript.normalize.request",
+  "edit.interpret.request",
+  "draft.send.request",
+  "draft.recording.undo.request",
+  "phase4.load.request"
+]);
 var DEFAULT_SETTINGS = {
   contextMessageCount: DEFAULT_CONTEXT_MESSAGE_COUNT,
   contextualNormalizationEnabled: true,
@@ -2956,6 +3028,7 @@ async function handleRequest(request, context) {
   };
   const cachedSettings = settingsCache.get(context.userId);
   if (cachedSettings) setDebugEnabled(context.userId, cachedSettings.debugLoggingEnabled === true);
+  if (DEBUG_NEW_ACTION_REQUEST_TYPES.has(request.type)) clearDebugEntries(context.userId);
   const requestStartedAt = performance.now();
   recordDebug(
     context.userId,
@@ -4688,7 +4761,6 @@ function parseDeterministicSentenceReplacement(instructionTranscript, session) {
 }
 function parseDeterministicQualifiedAsInReplacement(instructionTranscript, session) {
   if (/[\r\n;]/u.test(instructionTranscript)) return null;
-  if (!hasQualifiedAsInReference(instructionTranscript)) return null;
   const referenceIndex = instructionTranscript.search(/\bas\s+in\b/iu);
   if (referenceIndex < 1) return null;
   const reference = instructionTranscript.slice(referenceIndex);
@@ -4703,7 +4775,50 @@ function parseDeterministicQualifiedAsInReplacement(instructionTranscript, sessi
   const operation = plan.operations[0];
   if (!operation || typeof operation.text !== "string" || /\bas\s+in\b/iu.test(operation.text) || operation.target.exactText === void 0)
     return null;
+  if (!replacementHasQualifiedReference(operation.text, reference)) return null;
   return plan;
+}
+function replacementHasQualifiedReference(replacement, reference) {
+  const stopWords = /* @__PURE__ */ new Set([
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "of",
+    "to",
+    "in",
+    "on",
+    "at",
+    "for",
+    "with",
+    "from",
+    "by",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "it",
+    "this",
+    "that",
+    "you",
+    "we",
+    "they",
+    "he",
+    "she",
+    "my",
+    "your",
+    "our",
+    "their",
+    "as"
+  ]);
+  const words = replacement.match(/[\p{L}\p{N}][\p{L}\p{N}'\u2019-]*/gu) ?? [];
+  return words.some(
+    (word) => word.length >= 3 && !stopWords.has(word.toLocaleLowerCase()) && hasRepeatedOrInflectedReference(word, reference)
+  );
 }
 function parseDeterministicQuotationRange(instructionTranscript, session) {
   if (/[\r\n;]/u.test(instructionTranscript)) return null;

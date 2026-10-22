@@ -1381,6 +1381,82 @@ function findExactOrFuzzyMatch(
     : 'text target was not found'
 }
 
+const CONTRACTIONS: Readonly<Record<string, readonly string[]>> = {
+  "i'm": ['i', 'am'],
+  "i've": ['i', 'have'],
+  "i'll": ['i', 'will'],
+  "i'd": ['i', 'would'],
+  "you're": ['you', 'are'],
+  "you've": ['you', 'have'],
+  "you'll": ['you', 'will'],
+  "you'd": ['you', 'would'],
+  "he's": ['he', 'is'],
+  "she's": ['she', 'is'],
+  "it's": ['it', 'is'],
+  "we're": ['we', 'are'],
+  "we've": ['we', 'have'],
+  "we'll": ['we', 'will'],
+  "we'd": ['we', 'would'],
+  "they're": ['they', 'are'],
+  "they've": ['they', 'have'],
+  "they'll": ['they', 'will'],
+  "they'd": ['they', 'would'],
+  "that's": ['that', 'is'],
+  "there's": ['there', 'is'],
+  "what's": ['what', 'is'],
+  "who's": ['who', 'is'],
+  "where's": ['where', 'is'],
+  "how's": ['how', 'is'],
+  "isn't": ['is', 'not'],
+  "aren't": ['are', 'not'],
+  "wasn't": ['was', 'not'],
+  "weren't": ['were', 'not'],
+  "don't": ['do', 'not'],
+  "doesn't": ['does', 'not'],
+  "didn't": ['did', 'not'],
+  "can't": ['can', 'not'],
+  cannot: ['can', 'not'],
+  "couldn't": ['could', 'not'],
+  "won't": ['will', 'not'],
+  "wouldn't": ['would', 'not'],
+  "shouldn't": ['should', 'not'],
+  "mustn't": ['must', 'not'],
+  "haven't": ['have', 'not'],
+  "hasn't": ['has', 'not'],
+  "hadn't": ['had', 'not'],
+}
+
+interface ExpandedToken {
+  value: string
+  start: number
+  end: number
+  partIndex: number
+  partCount: number
+}
+
+function expandToken(value: string): string[] {
+  const normalized = value.toLocaleLowerCase().replace(/\u2019/gu, "'")
+  const parts = CONTRACTIONS[normalized]
+  return parts ? [...parts] : [stripTokenPunctuation(value)]
+}
+
+function expandTokens(tokens: readonly FuzzyToken[]): ExpandedToken[] {
+  const expanded: ExpandedToken[] = []
+  for (const token of tokens) {
+    const parts = expandToken(token.value)
+    for (const [partIndex, value] of parts.entries()) {
+      expanded.push({
+        value,
+        start: token.start,
+        end: token.end,
+        partIndex,
+        partCount: parts.length,
+      })
+    }
+  }
+  return expanded
+}
+
 function findPunctuationInsensitiveMatch(
   text: string,
   search: string,
@@ -1390,16 +1466,18 @@ function findPunctuationInsensitiveMatch(
   const wanted = tokenizeWithOffsets(search, 0, search.length)
   if (!wanted.length) return 'punctuation-insensitive text target was not found'
   const available = tokenizeCachedDraftRange(text, start, end)
-  if (available.length < wanted.length) return 'punctuation-insensitive text target was not found'
+  const wantedExpanded = expandTokens(wanted)
+  const availableExpanded = expandTokens(available)
+  if (availableExpanded.length < wantedExpanded.length)
+    return 'punctuation-insensitive text target was not found'
 
-  const wantedValues = wanted.map(({ value }) => stripTokenPunctuation(value))
   const candidates: Array<{ start: number; end: number; punctuation: string }> = []
-  for (let index = 0; index <= available.length - wanted.length; index += 1) {
-    const window = available.slice(index, index + wanted.length)
+  for (let index = 0; index <= availableExpanded.length - wantedExpanded.length; index += 1) {
+    const window = availableExpanded.slice(index, index + wantedExpanded.length)
     if (
-      !window.every(
-        (token, tokenIndex) => stripTokenPunctuation(token.value) === wantedValues[tokenIndex],
-      )
+      window[0]!.partIndex !== 0 ||
+      window.at(-1)!.partIndex !== window.at(-1)!.partCount - 1 ||
+      !window.every((token, tokenIndex) => token.value === wantedExpanded[tokenIndex]!.value)
     )
       continue
     candidates.push({
@@ -1432,7 +1510,7 @@ function internalPunctuationSignature(text: string, start: number, end: number):
   return text
     .slice(start, end)
     .replace(/[\p{L}\p{N}\s]/gu, '')
-    .replace(/[\u2018\u2019]/gu, "'")
+    .replace(/[\u2018\u2019]/gu, '')
     .replace(/[\u201c\u201d]/gu, '"')
 }
 

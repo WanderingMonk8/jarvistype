@@ -2601,7 +2601,7 @@ function shellMarkup() {
         <details class="jt-proposal__details">
           <summary>Debug timing log</summary>
           <label><span><input type="checkbox" data-debug-enabled> Enable debug timing log</span></label>
-          <p class="jt-shell__notice">Records backend timings and request metadata only. It never records draft text, transcripts, prompts, or provider output. Enable it, save settings, reproduce the action, then Refresh and Copy.</p>
+          <p class="jt-shell__notice">Records backend timings and request metadata only. It never records draft text, transcripts, prompts, or provider output. The log starts fresh for each new recording, edit, send, recording undo, or settings load, and follow-up steps append to the same action. Enable it, save settings, reproduce the action, then Refresh and Copy.</p>
           <div class="jt-actions">
             <button type="button" data-debug-refresh>Refresh log</button>
             <button type="button" data-debug-copy>Copy log</button>

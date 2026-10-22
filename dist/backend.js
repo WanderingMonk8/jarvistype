@@ -4872,8 +4872,12 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   const match = rangeMatch ?? beforeAfterMatch ?? afterBeforeMatch;
   if (!match) return null;
   const style = (match[1] ?? "").toLocaleLowerCase();
-  const firstTarget = unwrapEditArgument(stripUnquotedEditArgumentLabel((match[2] ?? "").trim()));
-  const secondTarget = unwrapEditArgument(stripUnquotedEditArgumentLabel((match[3] ?? "").trim()));
+  const firstTarget = unwrapEditArgument(
+    stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[2] ?? "").trim()))
+  );
+  const secondTarget = unwrapEditArgument(
+    stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[3] ?? "").trim()))
+  );
   if (!firstTarget || !secondTarget) return null;
   const reverse = Boolean(afterBeforeMatch);
   const spokenStart = reverse ? secondTarget : firstTarget;
@@ -4881,10 +4885,12 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   const startText = adoptUnambiguousDraftCasing(session, spokenStart, void 0);
   const endText = adoptUnambiguousDraftCasing(session, spokenEnd, void 0);
   const startIndex = session.cleanText.indexOf(startText);
-  const endIndex = session.cleanText.indexOf(endText);
+  const endIndex = session.cleanText.lastIndexOf(endText);
   if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) return null;
   const endTerminal = session.cleanText.slice(endIndex + endText.length).match(/^(?:\.{3}|[.!?\u2026])["'\u201d\u2019)\]]*/u)?.[0];
   const effectiveEndText = endTerminal ? `${endText}${endTerminal}` : endText;
+  const startOccurrence = countExactOccurrences(session.cleanText.slice(0, startIndex), startText) + 1;
+  const endOccurrence = countExactOccurrences(session.cleanText.slice(0, endIndex), effectiveEndText) + 1;
   const [opening, closing] = style === "single" ? ["\u2018", "\u2019"] : ["\u201C", "\u201D"];
   const plan = parseEditPlan({
     schemaVersion: 2,
@@ -4894,13 +4900,13 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
       {
         id: "deterministic-open-quotation-range",
         type: "insert_before",
-        target: { exactText: startText },
+        target: { exactText: startText, occurrence: startOccurrence },
         text: opening
       },
       {
         id: "deterministic-close-quotation-range",
         type: "insert_after",
-        target: { exactText: effectiveEndText },
+        target: { exactText: effectiveEndText, occurrence: endOccurrence },
         text: closing
       }
     ]
@@ -5038,6 +5044,9 @@ function parseDeterministicSimpleReplacement(instructionTranscript, session) {
       }
     ]
   });
+}
+function stripQuotationRangeLabel(value) {
+  return value.replace(/^(?:the\s+)?(?:sentence|phrase|words?|text)\s*[:,]?\s+/iu, "");
 }
 function stripUnquotedEditArgumentLabel(value) {
   const trimmed = value.trim();

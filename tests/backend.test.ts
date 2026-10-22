@@ -1849,6 +1849,41 @@ test('puts quotation marks around a spoken text range without a provider call', 
   assert.equal(generationRequests.length, 0)
 })
 
+test('quotes a range ending at a repeated phrase inside the paragraph', async () => {
+  const userId = 'quotation-range-repeated-end-user'
+  const chatId = 'quotation-range-repeated-end-chat'
+  activeChatId = chatId
+  const draft =
+    "I set the grocery bags on the counter, and I'm already moving. I go to the cabinet to take out some plates that have been unused for some time, and take another bowl from it, and begin mixing the flour for pancakes. As I work, I carefully narrate the process. The batter begins to take shape as I mix in more ingredients such as eggs, sugar, and milk. It becomes a viscous and fluffy mix, and gradually becomes doughy. Yes, the syrup, I got the good kind. You see, most of the syrup you get from the store aren't real syrup. This is from Canada, real syrup."
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'quotation-range-repeated-end-interpret',
+      operationId: 'quotation-range-repeated-end-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'put quotations from the sentence, Yes, the syrup to real syrup.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  const expected = draft.replace(
+    'Yes, the syrup, I got the good kind.',
+    '“Yes, the syrup, I got the good kind.',
+  )
+  assert.equal(proposal.proposal.afterText, `${expected}”`)
+  assert.equal(proposal.proposal.afterText.endsWith('\n”'), false)
+  assert.equal(generationRequests.length, 0)
+})
+
 test('supports single style and before-after quotation ranges', async () => {
   const userId = 'quotation-range-single-user'
   const chatId = 'quotation-range-single-chat'

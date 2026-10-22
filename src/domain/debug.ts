@@ -11,11 +11,22 @@ const MAX_CATEGORY_CHARACTERS = 40
 
 const entriesByUser = new Map<string, DebugEntry[]>()
 const enabledUsers = new Set<string>()
+const activeCaptureUsers = new Map<string, number>()
 const startedAt = performance.now()
 
 export function setDebugEnabled(userId: string, enabled: boolean): void {
   if (enabled) enabledUsers.add(userId)
   else enabledUsers.delete(userId)
+}
+
+export function beginDebugCapture(userId: string): void {
+  activeCaptureUsers.set(userId, (activeCaptureUsers.get(userId) ?? 0) + 1)
+}
+
+export function endDebugCapture(userId: string): void {
+  const active = activeCaptureUsers.get(userId) ?? 0
+  if (active <= 1) activeCaptureUsers.delete(userId)
+  else activeCaptureUsers.set(userId, active - 1)
 }
 
 export function isDebugEnabled(userId: string): boolean {
@@ -28,7 +39,7 @@ export function isDebugEnabled(userId: string): boolean {
  * transcripts, prompts, or provider output.
  */
 export function recordDebug(userId: string, category: string, message: string): void {
-  if (!enabledUsers.has(userId)) return
+  if (!enabledUsers.has(userId) || !activeCaptureUsers.has(userId)) return
   const entries = entriesByUser.get(userId) ?? []
   entries.push({
     at: new Date().toISOString(),

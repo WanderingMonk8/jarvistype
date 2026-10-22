@@ -602,13 +602,22 @@ var MAX_MESSAGE_CHARACTERS = 500;
 var MAX_CATEGORY_CHARACTERS = 40;
 var entriesByUser = /* @__PURE__ */ new Map();
 var enabledUsers = /* @__PURE__ */ new Set();
+var activeCaptureUsers = /* @__PURE__ */ new Map();
 var startedAt = performance.now();
 function setDebugEnabled(userId, enabled) {
   if (enabled) enabledUsers.add(userId);
   else enabledUsers.delete(userId);
 }
+function beginDebugCapture(userId) {
+  activeCaptureUsers.set(userId, (activeCaptureUsers.get(userId) ?? 0) + 1);
+}
+function endDebugCapture(userId) {
+  const active = activeCaptureUsers.get(userId) ?? 0;
+  if (active <= 1) activeCaptureUsers.delete(userId);
+  else activeCaptureUsers.set(userId, active - 1);
+}
 function recordDebug(userId, category, message) {
-  if (!enabledUsers.has(userId)) return;
+  if (!enabledUsers.has(userId) || !activeCaptureUsers.has(userId)) return;
   const entries = entriesByUser.get(userId) ?? [];
   entries.push({
     at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -2977,7 +2986,19 @@ var DEBUG_NEW_ACTION_REQUEST_TYPES = /* @__PURE__ */ new Set([
   "edit.interpret.request",
   "draft.send.request",
   "draft.recording.undo.request",
-  "phase4.load.request"
+  "draft.undo.request",
+  "draft.redo.request"
+]);
+var DEBUG_LOGGED_REQUEST_TYPES = /* @__PURE__ */ new Set([
+  "transcript.normalize.request",
+  "transcript.confirm.request",
+  "edit.interpret.request",
+  "edit.confirm.request",
+  "edit.candidate.select.request",
+  "draft.send.request",
+  "draft.recording.undo.request",
+  "draft.undo.request",
+  "draft.redo.request"
 ]);
 var DEFAULT_SETTINGS = {
   contextMessageCount: DEFAULT_CONTEXT_MESSAGE_COUNT,
@@ -3029,12 +3050,15 @@ async function handleRequest(request, context) {
   const cachedSettings = settingsCache.get(context.userId);
   if (cachedSettings) setDebugEnabled(context.userId, cachedSettings.debugLoggingEnabled === true);
   if (DEBUG_NEW_ACTION_REQUEST_TYPES.has(request.type)) clearDebugEntries(context.userId);
+  const logRequest = DEBUG_LOGGED_REQUEST_TYPES.has(request.type);
+  if (logRequest) beginDebugCapture(context.userId);
   const requestStartedAt = performance.now();
-  recordDebug(
-    context.userId,
-    "request",
-    `start type=${request.type} request=${request.requestId}${"operationId" in request ? ` operation=${request.operationId}` : ""}${"chatId" in request ? ` chat=${request.chatId}` : ""}`
-  );
+  if (logRequest)
+    recordDebug(
+      context.userId,
+      "request",
+      `start type=${request.type} request=${request.requestId}${"operationId" in request ? ` operation=${request.operationId}` : ""}${"chatId" in request ? ` chat=${request.chatId}` : ""}`
+    );
   activeRequests.set(request.requestId, activeRequest);
   try {
     if (request.type === "app.health.request") {
@@ -3092,11 +3116,14 @@ async function handleRequest(request, context) {
       context
     );
   } finally {
-    recordDebug(
-      context.userId,
-      "request",
-      `end type=${request.type} request=${request.requestId} total=${debugDuration(requestStartedAt)}`
-    );
+    if (logRequest) {
+      recordDebug(
+        context.userId,
+        "request",
+        `end type=${request.type} request=${request.requestId} total=${debugDuration(requestStartedAt)}`
+      );
+      endDebugCapture(context.userId);
+    }
     activeRequests.delete(request.requestId);
   }
 }

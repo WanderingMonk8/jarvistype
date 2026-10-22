@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  beginDebugCapture,
   clearDebugEntries,
   debugDuration,
+  endDebugCapture,
   formatDebugEntries,
   isDebugEnabled,
   recordDebug,
@@ -25,9 +27,11 @@ test('records nothing while debug logging is disabled', () => {
 test('records timestamped entries and formats them for copying', () => {
   const userId = 'debug-enabled-user'
   setDebugEnabled(userId, true)
+  beginDebugCapture(userId)
   const startedAt = performance.now()
   recordDebug(userId, 'request', 'start type=edit.interpret.request')
   recordDebug(userId, 'test', `duration=${debugDuration(startedAt)}`)
+  endDebugCapture(userId)
   const lines = formatDebugEntries(userId)
   const text = lines.join('\n')
   assert.ok(text.includes('# JarvisType debug timing log'))
@@ -44,8 +48,12 @@ test('keeps debug logs isolated by user and supports clearing', () => {
   const secondUser = 'debug-isolation-second'
   setDebugEnabled(firstUser, true)
   setDebugEnabled(secondUser, true)
+  beginDebugCapture(firstUser)
+  beginDebugCapture(secondUser)
   recordDebug(firstUser, 'request', 'start type=first')
   recordDebug(secondUser, 'request', 'start type=second')
+  endDebugCapture(firstUser)
+  endDebugCapture(secondUser)
   assert.ok(formatDebugEntries(firstUser).join('\n').includes('type=first'))
   assert.equal(formatDebugEntries(firstUser).join('\n').includes('type=second'), false)
   clearDebugEntries(firstUser)

@@ -15,8 +15,10 @@ import {
   type PersistedDraftSession,
 } from './domain/draft-session'
 import {
+  beginDebugCapture,
   clearDebugEntries,
   debugDuration,
+  endDebugCapture,
   formatDebugEntries,
   recordDebug,
   setDebugEnabled,
@@ -113,7 +115,19 @@ const DEBUG_NEW_ACTION_REQUEST_TYPES = new Set<FrontendRequest['type']>([
   'edit.interpret.request',
   'draft.send.request',
   'draft.recording.undo.request',
-  'phase4.load.request',
+  'draft.undo.request',
+  'draft.redo.request',
+])
+const DEBUG_LOGGED_REQUEST_TYPES = new Set<FrontendRequest['type']>([
+  'transcript.normalize.request',
+  'transcript.confirm.request',
+  'edit.interpret.request',
+  'edit.confirm.request',
+  'edit.candidate.select.request',
+  'draft.send.request',
+  'draft.recording.undo.request',
+  'draft.undo.request',
+  'draft.redo.request',
 ])
 const DEFAULT_SETTINGS: PhaseFourSettings = {
   contextMessageCount: DEFAULT_CONTEXT_MESSAGE_COUNT,
@@ -169,12 +183,15 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
   const cachedSettings = settingsCache.get(context.userId)
   if (cachedSettings) setDebugEnabled(context.userId, cachedSettings.debugLoggingEnabled === true)
   if (DEBUG_NEW_ACTION_REQUEST_TYPES.has(request.type)) clearDebugEntries(context.userId)
+  const logRequest = DEBUG_LOGGED_REQUEST_TYPES.has(request.type)
+  if (logRequest) beginDebugCapture(context.userId)
   const requestStartedAt = performance.now()
-  recordDebug(
-    context.userId,
-    'request',
-    `start type=${request.type} request=${request.requestId}${'operationId' in request ? ` operation=${request.operationId}` : ''}${'chatId' in request ? ` chat=${request.chatId}` : ''}`,
-  )
+  if (logRequest)
+    recordDebug(
+      context.userId,
+      'request',
+      `start type=${request.type} request=${request.requestId}${'operationId' in request ? ` operation=${request.operationId}` : ''}${'chatId' in request ? ` chat=${request.chatId}` : ''}`,
+    )
   activeRequests.set(request.requestId, activeRequest)
   try {
     if (request.type === 'app.health.request') {
@@ -232,11 +249,14 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
       context,
     )
   } finally {
-    recordDebug(
-      context.userId,
-      'request',
-      `end type=${request.type} request=${request.requestId} total=${debugDuration(requestStartedAt)}`,
-    )
+    if (logRequest) {
+      recordDebug(
+        context.userId,
+        'request',
+        `end type=${request.type} request=${request.requestId} total=${debugDuration(requestStartedAt)}`,
+      )
+      endDebugCapture(context.userId)
+    }
     activeRequests.delete(request.requestId)
   }
 }

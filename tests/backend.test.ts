@@ -4762,6 +4762,33 @@ test('collects a copiable backend timing log when debug logging is enabled', asy
   assert.equal(text.includes('entrance'), false)
   assert.equal(text.includes('accessible'), false)
 
+  // Drawing the drawer must not reset the log or add its own settings work.
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.load.request',
+      requestId: 'debug-log-drawer-load',
+    },
+    userId,
+  )
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: 'debug-log-read-after-drawer',
+    },
+    userId,
+  )
+  const afterDrawer = responses.at(-1)?.payload
+  assert.equal(afterDrawer?.type, 'debug.log.response')
+  if (afterDrawer?.type === 'debug.log.response') {
+    const afterDrawerText = afterDrawer.entries.join('\n')
+    assert.match(afterDrawerText, /request=debug-log-first-edit/u)
+    assert.equal(afterDrawerText.includes('phase4.load'), false)
+    assert.equal(afterDrawerText.includes('connections.list'), false)
+  }
+
   // A new user action starts a fresh log.
   await dispatch(
     {

@@ -3342,7 +3342,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
     if (!executed.ok) {
       const candidates = createEditCandidateContext(request, session, plan);
       if (candidates) {
-        rememberEditCandidateContext(context.userId, request.operationId, candidates);
+        await rememberEditCandidateContext(context.userId, request.operationId, candidates);
         return { candidateSet: candidates.candidateSet };
       }
       return { error: "target", detail: executed.reason, session };
@@ -3557,9 +3557,17 @@ async function handleEditConfirmation(request, context, activeRequest) {
 }
 async function handleEditCandidateSelection(request, context, activeRequest) {
   const key = proposalKey(context.userId, request.operationId);
-  const candidateContext = editCandidateContexts.get(key);
+  let candidateContext = editCandidateContexts.get(key);
+  const storedContext = await loadStoredEditCandidateContext(context.userId, request.chatId);
+  if (storedContext?.candidateSet.operationId === request.operationId) {
+    candidateContext = storedContext;
+    editCandidateContexts.set(key, storedContext);
+  }
   const plan = candidateContext?.plans.get(request.candidateId);
   if (!candidateContext || !plan || candidateContext.candidateSet.chatId !== request.chatId || candidateContext.candidateSet.expectedVersion !== request.expectedVersion) {
+    spindle.log.warn(
+      `JarvisType edit candidate selection expired (memory=${Boolean(candidateContext)}, stored=${Boolean(storedContext)}, plan=${Boolean(plan)}).`
+    );
     send(
       {
         protocolVersion: PROTOCOL_VERSION,
@@ -3632,7 +3640,6 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
       ...executed.resultingParagraphIds ? { resultingParagraphIds: executed.resultingParagraphIds } : {}
     };
     rememberEditProposal(context.userId, proposal);
-    editCandidateContexts.delete(key);
     return { proposal };
   });
   if (activeRequest.cancelled) return;
@@ -5582,13 +5589,52 @@ function rememberEditProposal(userId, proposal) {
     editProposals.delete(oldest);
   }
 }
-function rememberEditCandidateContext(userId, operationId, candidateContext) {
+async function rememberEditCandidateContext(userId, operationId, candidateContext) {
   editCandidateContexts.set(proposalKey(userId, operationId), candidateContext);
   while (editCandidateContexts.size > 100) {
     const oldest = editCandidateContexts.keys().next().value;
     if (typeof oldest !== "string") break;
     editCandidateContexts.delete(oldest);
   }
+  try {
+    await spindle.userStorage.setJson(
+      editCandidatesPath(candidateContext.candidateSet.chatId),
+      {
+        candidateSet: candidateContext.candidateSet,
+        plans: [...candidateContext.plans.entries()]
+      },
+      { userId }
+    );
+  } catch (error) {
+    logSafeFailure("warn", "EDIT_CANDIDATE_PERSIST", error);
+  }
+}
+async function loadStoredEditCandidateContext(userId, chatId) {
+  try {
+    const stored = await spindle.userStorage.getJson(editCandidatesPath(chatId), {
+      fallback: null,
+      userId
+    });
+    if (!isRecord5(stored) || !isRecord5(stored.candidateSet) || !Array.isArray(stored.plans))
+      return null;
+    const candidateSet = stored.candidateSet;
+    if (typeof candidateSet.operationId !== "string" || typeof candidateSet.chatId !== "string" || !Number.isSafeInteger(candidateSet.expectedVersion) || typeof candidateSet.instructionTranscript !== "string" || !Array.isArray(candidateSet.candidates))
+      return null;
+    const plans = /* @__PURE__ */ new Map();
+    for (const entry of stored.plans) {
+      if (!Array.isArray(entry) || typeof entry[0] !== "string" || !isRecord5(entry[1])) continue;
+      const plan = parseEditPlan(entry[1]);
+      if (plan) plans.set(entry[0], plan);
+    }
+    if (!plans.size) return null;
+    return { candidateSet, plans };
+  } catch (error) {
+    logSafeFailure("warn", "EDIT_CANDIDATE_LOAD", error);
+    return null;
+  }
+}
+function editCandidatesPath(chatId) {
+  return `edit-candidates-${encodeURIComponent(chatId)}.json`;
 }
 function proposalKey(userId, operationId) {
   return `${userId}:${operationId}`;

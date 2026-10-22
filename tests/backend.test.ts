@@ -3077,6 +3077,7 @@ test('offers choices for multiple fuzzy sentence targets in one paragraph', asyn
     response.candidateSet.candidates[1]?.preview,
   )
   assert.equal(response.candidateSet.candidates[0]?.exactText, 'End speech')
+  assert.equal(stored.has(`${userId}:edit-candidates-${encodeURIComponent(chatId)}.json`), true)
 
   await dispatch(
     {
@@ -3098,6 +3099,26 @@ test('offers choices for multiple fuzzy sentence targets in one paragraph', asyn
     proposal.proposal.afterText,
     "Well, someone's got to do the planning around here. End speech. I load the groceries. Begin speech. All right, dear. Emphasis on fun.",
   )
+
+  // Selecting again must still work: the candidate context is persisted and is
+  // not discarded when the first proposal is prepared.
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.candidate.select.request',
+      requestId: 'fuzzy-candidate-select-retry',
+      operationId: 'fuzzy-candidate-operation',
+      chatId,
+      expectedVersion: 1,
+      candidateId: response.candidateSet.candidates[1]!.id,
+    },
+    userId,
+  )
+  const retried = responses.at(-1)?.payload
+  assert.equal(retried?.type, 'edit.proposal.response')
+  if (retried?.type === 'edit.proposal.response') {
+    assert.equal(retried.proposal.afterText, proposal.proposal.afterText)
+  }
 })
 
 test('interprets an explicit add-new-paragraph synonym deterministically', async () => {

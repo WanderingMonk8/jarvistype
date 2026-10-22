@@ -679,7 +679,7 @@ async function handleEditInterpretation(
     if (!executed.ok) {
       const candidates = createEditCandidateContext(request, session, plan)
       if (candidates) {
-        rememberEditCandidateContext(context.userId, request.operationId, candidates)
+        await rememberEditCandidateContext(context.userId, request.operationId, candidates)
         return { candidateSet: candidates.candidateSet }
       }
       return { error: 'target' as const, detail: executed.reason, session }
@@ -942,7 +942,12 @@ async function handleEditCandidateSelection(
   activeRequest: ActiveRequest,
 ): Promise<void> {
   const key = proposalKey(context.userId, request.operationId)
-  const candidateContext = editCandidateContexts.get(key)
+  let candidateContext = editCandidateContexts.get(key)
+  const storedContext = await loadStoredEditCandidateContext(context.userId, request.chatId)
+  if (storedContext?.candidateSet.operationId === request.operationId) {
+    candidateContext = storedContext
+    editCandidateContexts.set(key, storedContext)
+  }
   const plan = candidateContext?.plans.get(request.candidateId)
   if (
     !candidateContext ||
@@ -950,6 +955,9 @@ async function handleEditCandidateSelection(
     candidateContext.candidateSet.chatId !== request.chatId ||
     candidateContext.candidateSet.expectedVersion !== request.expectedVersion
   ) {
+    spindle.log.warn(
+      `JarvisType edit candidate selection expired (memory=${Boolean(candidateContext)}, stored=${Boolean(storedContext)}, plan=${Boolean(plan)}).`,
+    )
     send(
       {
         protocolVersion: PROTOCOL_VERSION,
@@ -1029,7 +1037,6 @@ async function handleEditCandidateSelection(
         : {}),
     }
     rememberEditProposal(context.userId, proposal)
-    editCandidateContexts.delete(key)
     return { proposal }
   })
   if (activeRequest.cancelled) return
@@ -3625,17 +3632,72 @@ function rememberEditProposal(userId: string, proposal: EditProposal): void {
   }
 }
 
-function rememberEditCandidateContext(
+interface StoredEditCandidateContext {
+  candidateSet: EditCandidateSet
+  plans: Array<[string, EditPlan]>
+}
+
+async function rememberEditCandidateContext(
   userId: string,
   operationId: string,
   candidateContext: { candidateSet: EditCandidateSet; plans: Map<string, EditPlan> },
-): void {
+): Promise<void> {
   editCandidateContexts.set(proposalKey(userId, operationId), candidateContext)
   while (editCandidateContexts.size > 100) {
     const oldest = editCandidateContexts.keys().next().value
     if (typeof oldest !== 'string') break
     editCandidateContexts.delete(oldest)
   }
+  try {
+    await spindle.userStorage.setJson(
+      editCandidatesPath(candidateContext.candidateSet.chatId),
+      {
+        candidateSet: candidateContext.candidateSet,
+        plans: [...candidateContext.plans.entries()],
+      } satisfies StoredEditCandidateContext,
+      { userId },
+    )
+  } catch (error) {
+    logSafeFailure('warn', 'EDIT_CANDIDATE_PERSIST', error)
+  }
+}
+
+async function loadStoredEditCandidateContext(
+  userId: string,
+  chatId: string,
+): Promise<{ candidateSet: EditCandidateSet; plans: Map<string, EditPlan> } | null> {
+  try {
+    const stored = await spindle.userStorage.getJson<unknown>(editCandidatesPath(chatId), {
+      fallback: null,
+      userId,
+    })
+    if (!isRecord(stored) || !isRecord(stored.candidateSet) || !Array.isArray(stored.plans))
+      return null
+    const candidateSet = stored.candidateSet
+    if (
+      typeof candidateSet.operationId !== 'string' ||
+      typeof candidateSet.chatId !== 'string' ||
+      !Number.isSafeInteger(candidateSet.expectedVersion) ||
+      typeof candidateSet.instructionTranscript !== 'string' ||
+      !Array.isArray(candidateSet.candidates)
+    )
+      return null
+    const plans = new Map<string, EditPlan>()
+    for (const entry of stored.plans) {
+      if (!Array.isArray(entry) || typeof entry[0] !== 'string' || !isRecord(entry[1])) continue
+      const plan = parseEditPlan(entry[1])
+      if (plan) plans.set(entry[0], plan)
+    }
+    if (!plans.size) return null
+    return { candidateSet: candidateSet as unknown as EditCandidateSet, plans }
+  } catch (error) {
+    logSafeFailure('warn', 'EDIT_CANDIDATE_LOAD', error)
+    return null
+  }
+}
+
+function editCandidatesPath(chatId: string): string {
+  return `edit-candidates-${encodeURIComponent(chatId)}.json`
 }
 
 function proposalKey(userId: string, operationId: string): string {

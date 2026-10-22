@@ -1286,15 +1286,23 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.automatedBusy = true
     state.voiceMessage = 'Resolving the selected target…'
     render()
-    const outcome = await performRequest({
+    const buildRequest = (requestId: string) => ({
       protocolVersion: PROTOCOL_VERSION,
-      type: 'edit.candidate.select.request',
-      requestId: createRequestId('edit-candidate-select'),
+      type: 'edit.candidate.select.request' as const,
+      requestId,
       operationId: candidateSet.operationId,
       chatId: candidateSet.chatId,
       expectedVersion: candidateSet.expectedVersion,
       candidateId,
     })
+    let outcome = await performRequest(buildRequest(createRequestId('edit-candidate-select')))
+    if (outcome.status === 'timed-out' && alive) {
+      // The backend retains the candidate context, so one retry can recover a
+      // request that was dropped before it reached the handler.
+      state.voiceMessage = 'Target selection is taking longer than expected. Retrying once…'
+      render()
+      outcome = await performRequest(buildRequest(createRequestId('edit-candidate-select-retry')))
+    }
     state.automatedBusy = false
     if (!alive) return
     if (outcome.status === 'resolved' && outcome.value.type === 'edit.proposal.response') {

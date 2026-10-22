@@ -211,7 +211,9 @@ function parseTarget(value) {
   if (hasRelativePosition !== hasRelativeText) return null;
   if (target.punctuation !== void 0 && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
     return null;
-  if (target.punctuation === void 0 && (target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
+  if (target.punctuation === void 0 && (target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
+    return null;
+  if (target.punctuation === void 0 && target.occurrence !== void 0 && target.exactText === void 0)
     return null;
   if ((target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0) && (target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.scope !== void 0 || target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
     return null;
@@ -1357,15 +1359,21 @@ function setup(ctx) {
     state.automatedBusy = true;
     state.voiceMessage = "Resolving the selected target\u2026";
     render();
-    const outcome = await performRequest({
+    const buildRequest = (requestId) => ({
       protocolVersion: PROTOCOL_VERSION,
       type: "edit.candidate.select.request",
-      requestId: createRequestId("edit-candidate-select"),
+      requestId,
       operationId: candidateSet.operationId,
       chatId: candidateSet.chatId,
       expectedVersion: candidateSet.expectedVersion,
       candidateId
     });
+    let outcome = await performRequest(buildRequest(createRequestId("edit-candidate-select")));
+    if (outcome.status === "timed-out" && alive) {
+      state.voiceMessage = "Target selection is taking longer than expected. Retrying once\u2026";
+      render();
+      outcome = await performRequest(buildRequest(createRequestId("edit-candidate-select-retry")));
+    }
     state.automatedBusy = false;
     if (!alive) return;
     if (outcome.status === "resolved" && outcome.value.type === "edit.proposal.response") {

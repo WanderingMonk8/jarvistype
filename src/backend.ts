@@ -977,76 +977,49 @@ async function handleEditCandidateSelection(
     )
     return
   }
-  const result = await withDraftLock(context.userId, request.chatId, async () => {
-    const session = await loadDraft(context.userId, request.chatId)
-    const activeChat = await spindle.chats.getActive(context.userId)
-    if (
-      !activeChat ||
-      activeChat.id !== request.chatId ||
-      session.draftVersion !== request.expectedVersion ||
-      activeRequest.cancelled
-    )
-      return { error: true as const, session }
-    const [glossary, settings] = await Promise.all([
-      loadGlossary(context.userId),
-      loadSettings(context.userId),
-    ])
-    const spelling = normalizeDeterministically(
-      candidateContext.candidateSet.instructionTranscript,
-      glossary.entries,
-    )
-    spindle.log.info('JarvisType edit candidate selection executing.')
-    const executed = executeEditPlan(
-      session.cleanText,
-      session.paragraphs,
-      session.draftVersion,
-      plan,
-      [
-        ...glossary.entries.map((entry) => entry.canonical),
-        ...spelling.learningCandidates.map((candidate) => candidate.canonical),
-        ...qualifiedAsInProtectedTerms(candidateContext.candidateSet.instructionTranscript),
-      ],
-    )
-    if (!executed.ok) return { error: true as const, session }
-    const grammarRepair = await maybeRepairEditGrammar(
-      session.cleanText,
-      executed.afterText,
-      executed.operations,
-      executed.affectedParagraphOrdinals,
-      settings,
-      glossary,
-      [],
-      context.userId,
-      activeRequest.abort.signal,
-      CANDIDATE_GRAMMAR_TIMEOUT_MS,
-    )
-    if (activeRequest.cancelled) return { error: true as const, session }
-    const proposal: EditProposal = {
-      operationId: request.operationId,
-      chatId: request.chatId,
-      expectedVersion: request.expectedVersion,
-      instructionTranscript: candidateContext.candidateSet.instructionTranscript,
-      plan,
-      operations: executed.operations,
-      beforeText: session.cleanText,
-      afterText: grammarRepair.text,
-      affectedParagraphOrdinals: executed.affectedParagraphOrdinals,
-      explanation: plan.explanation,
-      learningCandidates: reconcileEditLearningCandidateCasing(
-        spelling.learningCandidates,
-        executed.operations,
-        grammarRepair.text,
-      ),
-      ...(grammarRepair.changes.length ? { grammarRepairChanges: grammarRepair.changes } : {}),
-      ...(executed.resultingParagraphIds
-        ? { resultingParagraphIds: executed.resultingParagraphIds }
-        : {}),
+  const session = await loadDraft(context.userId, request.chatId)
+  const activeChat = await spindle.chats.getActive(context.userId)
+  if (
+    !activeChat ||
+    activeChat.id !== request.chatId ||
+    session.draftVersion !== request.expectedVersion ||
+    activeRequest.cancelled
+  ) {
+    if (!activeRequest.cancelled) {
+      spindle.log.warn(
+        `JarvisType edit candidate selection failed after ${Math.round(performance.now() - startedAt)} ms.`,
+      )
+      sendDraftError(
+        request,
+        context,
+        'EDIT_PROPOSAL_EXPIRED',
+        'The draft or active chat changed before target selection. Nothing was edited.',
+        session,
+      )
     }
-    rememberEditProposal(context.userId, proposal)
-    return { proposal }
-  })
-  if (activeRequest.cancelled) return
-  if ('error' in result) {
+    return
+  }
+  const [glossary, settings] = await Promise.all([
+    loadGlossary(context.userId),
+    loadSettings(context.userId),
+  ])
+  const spelling = normalizeDeterministically(
+    candidateContext.candidateSet.instructionTranscript,
+    glossary.entries,
+  )
+  spindle.log.info('JarvisType edit candidate selection executing.')
+  const executed = executeEditPlan(
+    session.cleanText,
+    session.paragraphs,
+    session.draftVersion,
+    plan,
+    [
+      ...glossary.entries.map((entry) => entry.canonical),
+      ...spelling.learningCandidates.map((candidate) => candidate.canonical),
+      ...qualifiedAsInProtectedTerms(candidateContext.candidateSet.instructionTranscript),
+    ],
+  )
+  if (!executed.ok) {
     spindle.log.warn(
       `JarvisType edit candidate selection failed after ${Math.round(performance.now() - startedAt)} ms.`,
     )
@@ -1054,11 +1027,46 @@ async function handleEditCandidateSelection(
       request,
       context,
       'EDIT_PROPOSAL_EXPIRED',
-      'The draft or active chat changed before target selection. Nothing was edited.',
-      result.session!,
+      'The selected target could not be resolved against the current draft. Nothing was edited.',
+      session,
     )
     return
   }
+  const grammarRepair = await maybeRepairEditGrammar(
+    session.cleanText,
+    executed.afterText,
+    executed.operations,
+    executed.affectedParagraphOrdinals,
+    settings,
+    glossary,
+    [],
+    context.userId,
+    activeRequest.abort.signal,
+    CANDIDATE_GRAMMAR_TIMEOUT_MS,
+  )
+  if (activeRequest.cancelled) return
+  const proposal: EditProposal = {
+    operationId: request.operationId,
+    chatId: request.chatId,
+    expectedVersion: request.expectedVersion,
+    instructionTranscript: candidateContext.candidateSet.instructionTranscript,
+    plan,
+    operations: executed.operations,
+    beforeText: session.cleanText,
+    afterText: grammarRepair.text,
+    affectedParagraphOrdinals: executed.affectedParagraphOrdinals,
+    explanation: plan.explanation,
+    learningCandidates: reconcileEditLearningCandidateCasing(
+      spelling.learningCandidates,
+      executed.operations,
+      grammarRepair.text,
+    ),
+    ...(grammarRepair.changes.length ? { grammarRepairChanges: grammarRepair.changes } : {}),
+    ...(executed.resultingParagraphIds
+      ? { resultingParagraphIds: executed.resultingParagraphIds }
+      : {}),
+  }
+  rememberEditProposal(context.userId, proposal)
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -1066,7 +1074,7 @@ async function handleEditCandidateSelection(
       requestId: request.requestId,
       ok: true,
       outcome: 'review',
-      proposal: result.proposal,
+      proposal,
     },
     context,
   )

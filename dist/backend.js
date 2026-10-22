@@ -725,6 +725,8 @@ function executeEditPlan(cleanText, paragraphs, currentVersion, plan, protectedC
   }
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: "edited draft is too large" };
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
   if (afterText === cleanText) return { ok: false, reason: "edit would not change the draft" };
   return {
     ok: true,
@@ -1053,6 +1055,8 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
   const afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`;
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: "edited draft is too large" };
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
   if (afterText === cleanText) return { ok: false, reason: "edit would not change the draft" };
   return {
     ok: true,
@@ -1472,6 +1476,8 @@ ${right}`;
   const afterText = working.map((paragraph) => paragraph.text).join("\n\n");
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: "edited draft is too large" };
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
   if (afterText === cleanText) return { ok: false, reason: "edit would not change the draft" };
   return {
     ok: true,
@@ -1497,6 +1503,17 @@ function paragraphRange(text, paragraph) {
   let start = 0;
   for (let index = 0; index < paragraph.lineIndex; index += 1) start += lines[index].length + 1;
   return { start, end: start + lines[paragraph.lineIndex].length };
+}
+var QUOTATION_OUTSIDE_PARAGRAPH_REASON = "quotation mark would fall outside the paragraph";
+function countFloatingQuotationMarks(text) {
+  let count = 0;
+  for (const match of text.matchAll(/[“”‘’"]/gu)) {
+    const index = match.index;
+    const before = text[index - 1] ?? "";
+    const after = text[index + 1] ?? "";
+    if (!/\S/u.test(before) && !/\S/u.test(after)) count += 1;
+  }
+  return count;
 }
 function findAll(text, search, start, end) {
   const matches = [];
@@ -4872,30 +4889,52 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   const match = rangeMatch ?? beforeAfterMatch ?? afterBeforeMatch;
   if (!match) return null;
   const style = (match[1] ?? "").toLocaleLowerCase();
-  const firstTarget = unwrapEditArgument(
-    stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[2] ?? "").trim()))
+  const firstTarget = cleanQuotationRangeTarget(
+    unwrapEditArgument(
+      stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[2] ?? "").trim()))
+    )
   );
-  const secondTarget = unwrapEditArgument(
-    stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[3] ?? "").trim()))
+  const secondTarget = cleanQuotationRangeTarget(
+    unwrapEditArgument(
+      stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[3] ?? "").trim()))
+    )
   );
   if (!firstTarget || !secondTarget) return null;
   const reverse = Boolean(afterBeforeMatch);
   const spokenStart = reverse ? secondTarget : firstTarget;
   const spokenEnd = reverse ? firstTarget : secondTarget;
+  const sentencePosition = isSentencePositionTarget(spokenEnd) ? parseSentencePosition(spokenEnd) : null;
   const startText = adoptUnambiguousDraftCasing(session, spokenStart, void 0);
-  const endText = adoptUnambiguousDraftCasing(session, spokenEnd, void 0);
   const startIndex = session.cleanText.indexOf(startText);
-  const endIndex = session.cleanText.lastIndexOf(endText);
-  if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) return null;
-  const endTerminal = session.cleanText.slice(endIndex + endText.length).match(/^(?:\.{3}|[.!?\u2026])["'\u201d\u2019)\]]*/u)?.[0];
-  const effectiveEndText = endTerminal ? `${endText}${endTerminal}` : endText;
+  if (startIndex < 0) return null;
   const startOccurrence = countExactOccurrences(session.cleanText.slice(0, startIndex), startText) + 1;
-  const endOccurrence = countExactOccurrences(session.cleanText.slice(0, endIndex), effectiveEndText) + 1;
   const [opening, closing] = style === "single" ? ["\u2018", "\u2019"] : ["\u201C", "\u201D"];
+  let closeOperation;
+  if (sentencePosition) {
+    closeOperation = {
+      id: "deterministic-close-quotation-range",
+      type: "insert_after",
+      target: sentencePosition,
+      text: closing
+    };
+  } else {
+    const endText = adoptUnambiguousDraftCasing(session, spokenEnd, void 0);
+    const endIndex = session.cleanText.lastIndexOf(endText);
+    if (endIndex < startIndex) return null;
+    const endTerminal = session.cleanText.slice(endIndex + endText.length).match(/^(?:\.{3}|[.!?\u2026])["'\u201d\u2019)\]]*/u)?.[0];
+    const effectiveEndText = endTerminal ? `${endText}${endTerminal}` : endText;
+    const endOccurrence = countExactOccurrences(session.cleanText.slice(0, endIndex), effectiveEndText) + 1;
+    closeOperation = {
+      id: "deterministic-close-quotation-range",
+      type: "insert_after",
+      target: { exactText: effectiveEndText, occurrence: endOccurrence },
+      text: closing
+    };
+  }
   const plan = parseEditPlan({
     schemaVersion: 2,
     draftVersion: session.draftVersion,
-    explanation: `Put quotation marks from \u201C${startText}\u201D through \u201C${effectiveEndText}\u201D.`,
+    explanation: sentencePosition ? `Put quotation marks from \u201C${startText}\u201D through the ${spokenEnd}.` : `Put quotation marks from \u201C${startText}\u201D through \u201C${spokenEnd}\u201D.`,
     operations: [
       {
         id: "deterministic-open-quotation-range",
@@ -4903,12 +4942,7 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
         target: { exactText: startText, occurrence: startOccurrence },
         text: opening
       },
-      {
-        id: "deterministic-close-quotation-range",
-        type: "insert_after",
-        target: { exactText: effectiveEndText, occurrence: endOccurrence },
-        text: closing
-      }
+      closeOperation
     ]
   });
   if (!plan) return null;
@@ -5047,6 +5081,14 @@ function parseDeterministicSimpleReplacement(instructionTranscript, session) {
 }
 function stripQuotationRangeLabel(value) {
   return value.replace(/^(?:the\s+)?(?:sentence|phrase|words?|text)\s*[:,]?\s+/iu, "");
+}
+function cleanQuotationRangeTarget(value) {
+  return value.replace(/[\s,;:.!?]+$/u, "").trim();
+}
+function isSentencePositionTarget(value) {
+  return /^(?:(?:the|this|that)\s+)?(?:(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final|penultimate|second[- ]to[- ]last|\d+(?:st|nd|rd|th)?)\s+)?sentences?$/iu.test(
+    value.trim()
+  );
 }
 function stripUnquotedEditArgumentLabel(value) {
   const trimmed = value.trim();

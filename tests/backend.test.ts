@@ -1902,8 +1902,7 @@ test('quotes a range ending at a positional last sentence inside the paragraph',
       operationId: 'quotation-range-last-sentence-operation',
       chatId,
       expectedVersion: 1,
-      instructionTranscript:
-        'put quotations from the sentence, Yes, the syrup, to the last sentence.',
+      instructionTranscript: 'Put quotations from the phrase Yes, the syrup to the last sentence.',
     },
     userId,
   )
@@ -3642,6 +3641,61 @@ test('preserves sentence casing when replacing an opening phrase', async () => {
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
+})
+
+test('keeps grammar repairs from moving a quotation mark outside the paragraph', async () => {
+  const userId = 'quotation-grammar-bound-user'
+  const chatId = 'quotation-grammar-bound-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'quotation-grammar-bound-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'always',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  const draft =
+    'I mix the batter. Yes, the syrup, I got the good kind. This is from Canada, real syrup.'
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  grammarRepairResponse = {
+    edits: [
+      {
+        segmentId: 'paragraph-1-segment-1',
+        find: 'real syrup.',
+        replace: 'real syrup.\n\n”',
+        reason: 'Moved closing quotation mark.',
+      },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'quotation-grammar-bound-interpret',
+      operationId: 'quotation-grammar-bound-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotations from the phrase Yes, the syrup to the last sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'I mix the batter. “Yes, the syrup, I got the good kind. This is from Canada, real syrup.”',
+  )
 })
 
 test('applies and discloses an enabled conservative post-edit grammar repair', async () => {

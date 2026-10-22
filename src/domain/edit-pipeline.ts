@@ -390,10 +390,13 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     return null
   if (
     target.punctuation === undefined &&
-    (target.occurrence !== undefined ||
-      target.occurrenceFromEnd !== undefined ||
-      hasRelativePosition ||
-      hasRelativeText)
+    (target.occurrenceFromEnd !== undefined || hasRelativePosition || hasRelativeText)
+  )
+    return null
+  if (
+    target.punctuation === undefined &&
+    target.occurrence !== undefined &&
+    target.exactText === undefined
   )
     return null
   if (
@@ -472,6 +475,7 @@ function resolveOperation(
       operation.target.exactText,
       range.start,
       range.end,
+      operation.target.occurrence,
     )
     if (typeof match === 'string') return match
     start = match.start
@@ -802,6 +806,54 @@ function findSentenceTerminal(remainder: string, from: number): RegExpExecArray 
   return null
 }
 
+export interface TextTargetMatch {
+  start: number
+  end: number
+  paragraphOrdinal: number
+}
+
+/**
+ * Lists every plausible location for a text target so the caller can offer
+ * explicit choices. Exact matches take precedence; otherwise the same guarded
+ * fuzzy matcher is applied sentence by sentence, which keeps multiple
+ * occurrences inside one paragraph distinct.
+ */
+export function findTextTargetMatches(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  search: string,
+  scope: { paragraphId?: string; paragraphOrdinal?: number } = {},
+): TextTargetMatch[] {
+  const scoped = paragraphs.filter(
+    (paragraph) =>
+      (scope.paragraphId === undefined || paragraph.id === scope.paragraphId) &&
+      (scope.paragraphOrdinal === undefined || paragraph.ordinal === scope.paragraphOrdinal),
+  )
+  if (!scoped.length) return []
+  const matches: TextTargetMatch[] = []
+  for (const paragraph of scoped) {
+    const range = paragraphRange(cleanText, paragraph)
+    for (const start of findAll(cleanText, search, range.start, range.end))
+      matches.push({ start, end: start + search.length, paragraphOrdinal: paragraph.ordinal })
+  }
+  if (matches.length) return matches
+  for (const paragraph of scoped) {
+    const range = paragraphRange(cleanText, paragraph)
+    for (const sentence of findSentenceRanges(cleanText, range.start, range.end)) {
+      const match = findExactOrFuzzyMatch(cleanText, search, sentence.start, sentence.end)
+      if (typeof match === 'string') continue
+      matches.push({
+        start: match.start,
+        end: match.end,
+        paragraphOrdinal: paragraph.ordinal,
+      })
+    }
+  }
+  const unique = new Map<string, TextTargetMatch>()
+  for (const match of matches) unique.set(`${match.start}:${match.end}`, match)
+  return [...unique.values()].sort((left, right) => left.start - right.start)
+}
+
 function resolveTextTarget(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
@@ -836,7 +888,13 @@ function resolveTextTarget(
     start = match.start
     end = match.end
   } else if (target.exactText !== undefined) {
-    const match = findExactOrFuzzyMatch(cleanText, target.exactText, range.start, range.end)
+    const match = findExactOrFuzzyMatch(
+      cleanText,
+      target.exactText,
+      range.start,
+      range.end,
+      target.occurrence,
+    )
     if (match === 'text target is ambiguous') return `${label} is ambiguous`
     if (match === 'text target was not found') return `${label} was not found`
     if (typeof match === 'string') return `${label}: ${match}`
@@ -1299,8 +1357,15 @@ function findExactOrFuzzyMatch(
   search: string,
   start: number,
   end: number,
+  occurrence?: number,
 ): { start: number; end: number } | string {
   const exactMatches = findAll(text, search, start, end)
+  if (occurrence !== undefined) {
+    const match = exactMatches[occurrence - 1]
+    return match === undefined
+      ? 'text target occurrence was not found'
+      : { start: match, end: match + search.length }
+  }
   if (exactMatches.length > 1) return 'text target is ambiguous'
   if (exactMatches.length === 1)
     return { start: exactMatches[0]!, end: exactMatches[0]! + search.length }

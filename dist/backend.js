@@ -816,7 +816,9 @@ function parseTarget(value) {
   if (hasRelativePosition !== hasRelativeText) return null;
   if (target.punctuation !== void 0 && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
     return null;
-  if (target.punctuation === void 0 && (target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
+  if (target.punctuation === void 0 && (target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
+    return null;
+  if (target.punctuation === void 0 && target.occurrence !== void 0 && target.exactText === void 0)
     return null;
   if ((target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0) && (target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.scope !== void 0 || target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
     return null;
@@ -860,7 +862,8 @@ function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms
       cleanText,
       operation.target.exactText,
       range.start,
-      range.end
+      range.end,
+      operation.target.occurrence
     );
     if (typeof match === "string") return match;
     start = match.start;
@@ -1057,6 +1060,34 @@ function findSentenceTerminal(remainder, from) {
   }
   return null;
 }
+function findTextTargetMatches(cleanText, paragraphs, search, scope = {}) {
+  const scoped = paragraphs.filter(
+    (paragraph) => (scope.paragraphId === void 0 || paragraph.id === scope.paragraphId) && (scope.paragraphOrdinal === void 0 || paragraph.ordinal === scope.paragraphOrdinal)
+  );
+  if (!scoped.length) return [];
+  const matches = [];
+  for (const paragraph of scoped) {
+    const range = paragraphRange(cleanText, paragraph);
+    for (const start of findAll(cleanText, search, range.start, range.end))
+      matches.push({ start, end: start + search.length, paragraphOrdinal: paragraph.ordinal });
+  }
+  if (matches.length) return matches;
+  for (const paragraph of scoped) {
+    const range = paragraphRange(cleanText, paragraph);
+    for (const sentence of findSentenceRanges(cleanText, range.start, range.end)) {
+      const match = findExactOrFuzzyMatch(cleanText, search, sentence.start, sentence.end);
+      if (typeof match === "string") continue;
+      matches.push({
+        start: match.start,
+        end: match.end,
+        paragraphOrdinal: paragraph.ordinal
+      });
+    }
+  }
+  const unique2 = /* @__PURE__ */ new Map();
+  for (const match of matches) unique2.set(`${match.start}:${match.end}`, match);
+  return [...unique2.values()].sort((left, right) => left.start - right.start);
+}
 function resolveTextTarget(cleanText, paragraphs, target, label) {
   const paragraphMatches = paragraphs.filter(
     (paragraph2) => (target.paragraphId === void 0 || paragraph2.id === target.paragraphId) && (target.paragraphOrdinal === void 0 || paragraph2.ordinal === target.paragraphOrdinal)
@@ -1079,7 +1110,13 @@ function resolveTextTarget(cleanText, paragraphs, target, label) {
     start = match.start;
     end = match.end;
   } else if (target.exactText !== void 0) {
-    const match = findExactOrFuzzyMatch(cleanText, target.exactText, range.start, range.end);
+    const match = findExactOrFuzzyMatch(
+      cleanText,
+      target.exactText,
+      range.start,
+      range.end,
+      target.occurrence
+    );
     if (match === "text target is ambiguous") return `${label} is ambiguous`;
     if (match === "text target was not found") return `${label} was not found`;
     if (typeof match === "string") return `${label}: ${match}`;
@@ -1413,8 +1450,12 @@ function findAll(text, search, start, end) {
   }
   return matches;
 }
-function findExactOrFuzzyMatch(text, search, start, end) {
+function findExactOrFuzzyMatch(text, search, start, end, occurrence) {
   const exactMatches = findAll(text, search, start, end);
+  if (occurrence !== void 0) {
+    const match = exactMatches[occurrence - 1];
+    return match === void 0 ? "text target occurrence was not found" : { start: match, end: match + search.length };
+  }
   if (exactMatches.length > 1) return "text target is ambiguous";
   if (exactMatches.length === 1)
     return { start: exactMatches[0], end: exactMatches[0] + search.length };
@@ -3377,38 +3418,58 @@ async function handleEditInterpretation(request, context, activeRequest) {
 function createEditCandidateContext(request, session, plan) {
   if (plan.operations.length !== 1) return null;
   const operation = plan.operations[0];
-  const exactText = operation.target.exactText;
-  if (!exactText || operation.target.paragraphId !== void 0 || operation.target.paragraphOrdinal !== void 0)
-    return null;
-  const matchingParagraphs = session.paragraphs.filter(
-    (paragraph) => countExactOccurrences(paragraph.text, exactText) === 1
-  );
-  if (matchingParagraphs.length < 2) return null;
+  const searchText = operation.target.exactText ?? operation.target.approximateText;
+  if (!searchText) return null;
+  const matches = findTextTargetMatches(session.cleanText, session.paragraphs, searchText, {
+    ...operation.target.paragraphId === void 0 ? {} : { paragraphId: operation.target.paragraphId },
+    ...operation.target.paragraphOrdinal === void 0 ? {} : { paragraphOrdinal: operation.target.paragraphOrdinal }
+  });
+  if (matches.length < 2) return null;
+  let searchCursor = 0;
+  const paragraphStarts = /* @__PURE__ */ new Map();
+  for (const paragraph of session.paragraphs) {
+    const start = session.cleanText.indexOf(paragraph.text, searchCursor);
+    if (start < 0) continue;
+    paragraphStarts.set(paragraph.id, start);
+    searchCursor = start + paragraph.text.length;
+  }
   const plans = /* @__PURE__ */ new Map();
-  const candidates = matchingParagraphs.map((paragraph) => {
-    const id = `${operation.id}:${paragraph.id}`;
-    plans.set(id, {
-      ...plan,
-      operations: [
-        {
-          ...operation,
-          target: {
-            ...operation.target,
-            paragraphId: paragraph.id,
-            paragraphOrdinal: paragraph.ordinal
-          }
-        }
-      ]
-    });
-    return {
-      id,
-      operationId: operation.id,
+  const candidates = matches.flatMap((match) => {
+    const paragraph = session.paragraphs.find(
+      (candidate) => candidate.ordinal === match.paragraphOrdinal
+    );
+    if (!paragraph) return [];
+    const matchedText = session.cleanText.slice(match.start, match.end);
+    if (!matchedText) return [];
+    const paragraphStart = paragraphStarts.get(paragraph.id);
+    if (paragraphStart === void 0) return [];
+    const occurrence = countExactOccurrences(session.cleanText.slice(paragraphStart, match.start), matchedText) + 1;
+    const id = `${operation.id}:${match.start}`;
+    const target = {
       paragraphId: paragraph.id,
       paragraphOrdinal: paragraph.ordinal,
-      exactText,
-      preview: paragraph.text
+      exactText: matchedText,
+      occurrence
     };
+    plans.set(id, {
+      ...plan,
+      operations: [{ ...operation, target }]
+    });
+    const contextStart = Math.max(0, match.start - 48);
+    const contextEnd = Math.min(session.cleanText.length, match.end + 48);
+    const preview = `${contextStart > 0 ? "\u2026" : ""}${session.cleanText.slice(contextStart, contextEnd).replace(/\s+/gu, " ").trim()}${contextEnd < session.cleanText.length ? "\u2026" : ""}`;
+    return [
+      {
+        id,
+        operationId: operation.id,
+        paragraphId: paragraph.id,
+        paragraphOrdinal: paragraph.ordinal,
+        exactText: matchedText,
+        preview
+      }
+    ];
   });
+  if (candidates.length < 2) return null;
   return {
     candidateSet: {
       operationId: request.operationId,

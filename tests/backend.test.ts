@@ -3041,6 +3041,65 @@ test('offers explicit choices for paragraph-resolvable ambiguity without mutatin
   }
 })
 
+test('offers choices for multiple fuzzy sentence targets in one paragraph', async () => {
+  const userId = 'fuzzy-candidate-user'
+  const chatId = 'fuzzy-candidate-chat'
+  activeChatId = chatId
+  const draft =
+    "Well, someone's got to do the planning around here. End speech. I load the groceries. Begin speech. All right, dear. Emphasis on fun. End speech."
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'fuzzy-candidate-interpret',
+      operationId: 'fuzzy-candidate-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the sentence and speech.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.candidates.response')
+  if (response?.type !== 'edit.candidates.response') return
+  assert.equal(generationRequests.length, 0)
+  assert.deepEqual(
+    response.candidateSet.candidates.map(({ paragraphOrdinal }) => paragraphOrdinal),
+    [1, 1],
+  )
+  assert.notEqual(
+    response.candidateSet.candidates[0]?.preview,
+    response.candidateSet.candidates[1]?.preview,
+  )
+  assert.equal(response.candidateSet.candidates[0]?.exactText, 'End speech')
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.candidate.select.request',
+      requestId: 'fuzzy-candidate-select',
+      operationId: 'fuzzy-candidate-operation',
+      chatId,
+      expectedVersion: 1,
+      candidateId: response.candidateSet.candidates[1]!.id,
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    "Well, someone's got to do the planning around here. End speech. I load the groceries. Begin speech. All right, dear. Emphasis on fun.",
+  )
+})
+
 test('interprets an explicit add-new-paragraph synonym deterministically', async () => {
   const userId = 'paragraph-insert-user'
   const chatId = 'paragraph-insert-chat'

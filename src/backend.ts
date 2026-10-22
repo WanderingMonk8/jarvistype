@@ -16,6 +16,7 @@ import {
 } from './domain/draft-session'
 import {
   executeEditPlan,
+  findTextTargetMatches,
   parseEditPlan,
   type EditPlan,
   type ResolvedEditOperation,
@@ -773,42 +774,66 @@ function createEditCandidateContext(
 ): { candidateSet: EditCandidateSet; plans: Map<string, EditPlan> } | null {
   if (plan.operations.length !== 1) return null
   const operation = plan.operations[0]!
-  const exactText = operation.target.exactText
-  if (
-    !exactText ||
-    operation.target.paragraphId !== undefined ||
-    operation.target.paragraphOrdinal !== undefined
-  )
-    return null
-  const matchingParagraphs = session.paragraphs.filter(
-    (paragraph) => countExactOccurrences(paragraph.text, exactText) === 1,
-  )
-  if (matchingParagraphs.length < 2) return null
+  const searchText = operation.target.exactText ?? operation.target.approximateText
+  if (!searchText) return null
+  const matches = findTextTargetMatches(session.cleanText, session.paragraphs, searchText, {
+    ...(operation.target.paragraphId === undefined
+      ? {}
+      : { paragraphId: operation.target.paragraphId }),
+    ...(operation.target.paragraphOrdinal === undefined
+      ? {}
+      : { paragraphOrdinal: operation.target.paragraphOrdinal }),
+  })
+  if (matches.length < 2) return null
+  let searchCursor = 0
+  const paragraphStarts = new Map<string, number>()
+  for (const paragraph of session.paragraphs) {
+    const start = session.cleanText.indexOf(paragraph.text, searchCursor)
+    if (start < 0) continue
+    paragraphStarts.set(paragraph.id, start)
+    searchCursor = start + paragraph.text.length
+  }
   const plans = new Map<string, EditPlan>()
-  const candidates = matchingParagraphs.map((paragraph) => {
-    const id = `${operation.id}:${paragraph.id}`
-    plans.set(id, {
-      ...plan,
-      operations: [
-        {
-          ...operation,
-          target: {
-            ...operation.target,
-            paragraphId: paragraph.id,
-            paragraphOrdinal: paragraph.ordinal,
-          },
-        },
-      ],
-    })
-    return {
-      id,
-      operationId: operation.id,
+  const candidates = matches.flatMap((match) => {
+    const paragraph = session.paragraphs.find(
+      (candidate) => candidate.ordinal === match.paragraphOrdinal,
+    )
+    if (!paragraph) return []
+    const matchedText = session.cleanText.slice(match.start, match.end)
+    if (!matchedText) return []
+    const paragraphStart = paragraphStarts.get(paragraph.id)
+    if (paragraphStart === undefined) return []
+    const occurrence =
+      countExactOccurrences(session.cleanText.slice(paragraphStart, match.start), matchedText) + 1
+    const id = `${operation.id}:${match.start}`
+    const target: EditTarget = {
       paragraphId: paragraph.id,
       paragraphOrdinal: paragraph.ordinal,
-      exactText,
-      preview: paragraph.text,
+      exactText: matchedText,
+      occurrence,
     }
+    plans.set(id, {
+      ...plan,
+      operations: [{ ...operation, target }],
+    })
+    const contextStart = Math.max(0, match.start - 48)
+    const contextEnd = Math.min(session.cleanText.length, match.end + 48)
+    const preview = `${contextStart > 0 ? '…' : ''}${session.cleanText
+      .slice(contextStart, contextEnd)
+      .replace(/\s+/gu, ' ')
+      .trim()}${contextEnd < session.cleanText.length ? '…' : ''}`
+    return [
+      {
+        id,
+        operationId: operation.id,
+        paragraphId: paragraph.id,
+        paragraphOrdinal: paragraph.ordinal,
+        exactText: matchedText,
+        preview,
+      },
+    ]
   })
+  if (candidates.length < 2) return null
   return {
     candidateSet: {
       operationId: request.operationId,

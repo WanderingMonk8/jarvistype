@@ -1812,6 +1812,69 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('puts quotation marks around a spoken text range without a provider call', async () => {
+  const userId = 'quotation-range-user'
+  const chatId = 'quotation-range-chat'
+  activeChatId = chatId
+  const draft =
+    "“Well, someone's got to do the planning around here, so I have to be practical while taking care of you.” I load the groceries in the small trunk of my sapphire blue Miata, then I open the passenger side door for her before walking over to the driver's seat. All right, dear, this is a fun ride, but not the most comfortable, just letting you know. Emphasis on fun."
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'quotation-range-interpret',
+      operationId: 'quotation-range-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'put quotations from all right, dear, to emphasis on fun.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    `“Well, someone's got to do the planning around here, so I have to be practical while taking care of you.” I load the groceries in the small trunk of my sapphire blue Miata, then I open the passenger side door for her before walking over to the driver's seat. “All right, dear, this is a fun ride, but not the most comfortable, just letting you know. Emphasis on fun.”`,
+  )
+  assert.deepEqual(
+    proposal.proposal.plan.operations.map((operation) => operation.type),
+    ['insert_before', 'insert_after'],
+  )
+  assert.equal(generationRequests.length, 0)
+})
+
+test('supports single style and before-after quotation ranges', async () => {
+  const userId = 'quotation-range-single-user'
+  const chatId = 'quotation-range-single-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Intro sentence. Start here and end there. Tail.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'quotation-range-single-interpret',
+      operationId: 'quotation-range-single-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'put single quotations before start here and after end there',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'Intro sentence. ‘Start here and end there.’ Tail.')
+  }
+})
+
 test('inserts quotation marks around an exact sentence target', async () => {
   const userId = 'exact-sentence-quotation-user'
   const chatId = 'exact-sentence-quotation-chat'

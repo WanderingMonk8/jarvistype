@@ -3710,6 +3710,8 @@ async function interpretEditInstruction(instructionTranscript, session, settings
     session.paragraphs.length
   );
   if (paragraphQuotation) return finalizeInterpretedPlan(instructionTranscript, paragraphQuotation);
+  const quotationRange = parseDeterministicQuotationRange(instructionTranscript, session);
+  if (quotationRange) return finalizeInterpretedPlan(instructionTranscript, quotationRange);
   const sentenceQuotation = parseDeterministicSentenceQuotationInsertion(
     instructionTranscript,
     session.draftVersion
@@ -4509,6 +4511,73 @@ function parseDeterministicQualifiedAsInReplacement(instructionTranscript, sessi
   if (!operation || typeof operation.text !== "string" || /\bas\s+in\b/iu.test(operation.text) || operation.target.exactText === void 0)
     return null;
   return plan;
+}
+function parseDeterministicQuotationRange(instructionTranscript, session) {
+  if (/[\r\n;]/u.test(instructionTranscript)) return null;
+  const trimmed = instructionTranscript.trim();
+  const quotationToken = "(?:(single|double)\\s+)?(?:quotation\\s+marks?|quote\\s+marks?|quotations?|quotes?)";
+  const rangeMatch = trimmed.match(
+    new RegExp(
+      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:from|starting\\s+(?:at|from))\\s+(.+?)\\s+(?:to|through|until|ending\\s+(?:at|with))\\s+(.+?)$`,
+      "iu"
+    )
+  );
+  const beforeAfterMatch = rangeMatch ? null : trimmed.match(
+    new RegExp(
+      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+before\\s+(.+?)\\s+(?:and\\s+)?after\\s+(.+?)$`,
+      "iu"
+    )
+  );
+  const afterBeforeMatch = rangeMatch || beforeAfterMatch ? null : trimmed.match(
+    new RegExp(
+      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+after\\s+(.+?)\\s+(?:and\\s+)?before\\s+(.+?)$`,
+      "iu"
+    )
+  );
+  const match = rangeMatch ?? beforeAfterMatch ?? afterBeforeMatch;
+  if (!match) return null;
+  const style = (match[1] ?? "").toLocaleLowerCase();
+  const firstTarget = unwrapEditArgument(stripUnquotedEditArgumentLabel((match[2] ?? "").trim()));
+  const secondTarget = unwrapEditArgument(stripUnquotedEditArgumentLabel((match[3] ?? "").trim()));
+  if (!firstTarget || !secondTarget) return null;
+  const reverse = Boolean(afterBeforeMatch);
+  const spokenStart = reverse ? secondTarget : firstTarget;
+  const spokenEnd = reverse ? firstTarget : secondTarget;
+  const startText = adoptUnambiguousDraftCasing(session, spokenStart, void 0);
+  const endText = adoptUnambiguousDraftCasing(session, spokenEnd, void 0);
+  const startIndex = session.cleanText.indexOf(startText);
+  const endIndex = session.cleanText.indexOf(endText);
+  if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) return null;
+  const endTerminal = session.cleanText.slice(endIndex + endText.length).match(/^(?:\.{3}|[.!?\u2026])["'\u201d\u2019)\]]*/u)?.[0];
+  const effectiveEndText = endTerminal ? `${endText}${endTerminal}` : endText;
+  const [opening, closing] = style === "single" ? ["\u2018", "\u2019"] : ["\u201C", "\u201D"];
+  const plan = parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: `Put quotation marks from \u201C${startText}\u201D through \u201C${effectiveEndText}\u201D.`,
+    operations: [
+      {
+        id: "deterministic-open-quotation-range",
+        type: "insert_before",
+        target: { exactText: startText },
+        text: opening
+      },
+      {
+        id: "deterministic-close-quotation-range",
+        type: "insert_after",
+        target: { exactText: effectiveEndText },
+        text: closing
+      }
+    ]
+  });
+  if (!plan) return null;
+  const resolved = executeEditPlan(
+    session.cleanText,
+    session.paragraphs,
+    session.draftVersion,
+    plan
+  );
+  return resolved.ok && resolved.afterText !== session.cleanText ? plan : null;
 }
 function parseDeterministicSentenceQuotationInsertion(instructionTranscript, draftVersion) {
   if (/[\r\n;]/u.test(instructionTranscript)) return null;

@@ -1346,6 +1346,38 @@ test('rejects incompatible structural and inline operation groups atomically', (
   })
 })
 
+test('never leaves a quotation mark floating outside paragraph text', () => {
+  const floating = executeEditPlan('Alpha beta gamma.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'floating closing quote',
+    operations: [
+      {
+        id: 'floating',
+        type: 'replace',
+        target: { exactText: 'gamma.' },
+        text: 'gamma.\n\n”',
+      },
+    ],
+  })
+  assert.deepEqual(floating, {
+    ok: false,
+    reason: 'quotation mark would fall outside the paragraph',
+  })
+
+  const attached = executeEditPlan('Alpha beta gamma.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'attached quotes',
+    operations: [
+      { id: 'open', type: 'insert_before', target: { exactText: 'Alpha' }, text: '“' },
+      { id: 'close', type: 'insert_after', target: { exactText: 'gamma.' }, text: '”' },
+    ],
+  })
+  assert.equal(attached.ok, true)
+  if (attached.ok) assert.equal(attached.afterText, '“Alpha beta gamma.”')
+})
+
 test('resolves one high-confidence approximate phrase and rejects equal candidates', () => {
   const seeded = applyManualEdit(
     createDraftSession('approximate-chat'),

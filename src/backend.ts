@@ -2465,34 +2465,62 @@ function parseDeterministicQuotationRange(
   const match = rangeMatch ?? beforeAfterMatch ?? afterBeforeMatch
   if (!match) return null
   const style = (match[1] ?? '').toLocaleLowerCase()
-  const firstTarget = unwrapEditArgument(
-    stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[2] ?? '').trim())),
+  const firstTarget = cleanQuotationRangeTarget(
+    unwrapEditArgument(
+      stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[2] ?? '').trim())),
+    ),
   )
-  const secondTarget = unwrapEditArgument(
-    stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[3] ?? '').trim())),
+  const secondTarget = cleanQuotationRangeTarget(
+    unwrapEditArgument(
+      stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[3] ?? '').trim())),
+    ),
   )
   if (!firstTarget || !secondTarget) return null
   const reverse = Boolean(afterBeforeMatch)
   const spokenStart = reverse ? secondTarget : firstTarget
   const spokenEnd = reverse ? firstTarget : secondTarget
+  const sentencePosition = isSentencePositionTarget(spokenEnd)
+    ? parseSentencePosition(spokenEnd)
+    : null
   const startText = adoptUnambiguousDraftCasing(session, spokenStart, undefined)
-  const endText = adoptUnambiguousDraftCasing(session, spokenEnd, undefined)
   const startIndex = session.cleanText.indexOf(startText)
-  const endIndex = session.cleanText.lastIndexOf(endText)
-  if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) return null
-  const endTerminal = session.cleanText
-    .slice(endIndex + endText.length)
-    .match(/^(?:\.{3}|[.!?\u2026])["'\u201d\u2019)\]]*/u)?.[0]
-  const effectiveEndText = endTerminal ? `${endText}${endTerminal}` : endText
+  if (startIndex < 0) return null
   const startOccurrence =
     countExactOccurrences(session.cleanText.slice(0, startIndex), startText) + 1
-  const endOccurrence =
-    countExactOccurrences(session.cleanText.slice(0, endIndex), effectiveEndText) + 1
   const [opening, closing] = style === 'single' ? ['\u2018', '\u2019'] : ['\u201c', '\u201d']
+
+  let closeOperation: EditPlan['operations'][number]
+  if (sentencePosition) {
+    closeOperation = {
+      id: 'deterministic-close-quotation-range',
+      type: 'insert_after',
+      target: sentencePosition,
+      text: closing,
+    }
+  } else {
+    const endText = adoptUnambiguousDraftCasing(session, spokenEnd, undefined)
+    const endIndex = session.cleanText.lastIndexOf(endText)
+    if (endIndex < startIndex) return null
+    const endTerminal = session.cleanText
+      .slice(endIndex + endText.length)
+      .match(/^(?:\.{3}|[.!?\u2026])["'\u201d\u2019)\]]*/u)?.[0]
+    const effectiveEndText = endTerminal ? `${endText}${endTerminal}` : endText
+    const endOccurrence =
+      countExactOccurrences(session.cleanText.slice(0, endIndex), effectiveEndText) + 1
+    closeOperation = {
+      id: 'deterministic-close-quotation-range',
+      type: 'insert_after',
+      target: { exactText: effectiveEndText, occurrence: endOccurrence },
+      text: closing,
+    }
+  }
+
   const plan = parseEditPlan({
     schemaVersion: 2,
     draftVersion: session.draftVersion,
-    explanation: `Put quotation marks from “${startText}” through “${effectiveEndText}”.`,
+    explanation: sentencePosition
+      ? `Put quotation marks from “${startText}” through the ${spokenEnd}.`
+      : `Put quotation marks from “${startText}” through “${spokenEnd}”.`,
     operations: [
       {
         id: 'deterministic-open-quotation-range',
@@ -2500,12 +2528,7 @@ function parseDeterministicQuotationRange(
         target: { exactText: startText, occurrence: startOccurrence },
         text: opening,
       },
-      {
-        id: 'deterministic-close-quotation-range',
-        type: 'insert_after',
-        target: { exactText: effectiveEndText, occurrence: endOccurrence },
-        text: closing,
-      },
+      closeOperation,
     ],
   })
   if (!plan) return null
@@ -2698,6 +2721,16 @@ function parseDeterministicSimpleReplacement(
 
 function stripQuotationRangeLabel(value: string): string {
   return value.replace(/^(?:the\s+)?(?:sentence|phrase|words?|text)\s*[:,]?\s+/iu, '')
+}
+
+function cleanQuotationRangeTarget(value: string): string {
+  return value.replace(/[\s,;:.!?]+$/u, '').trim()
+}
+
+function isSentencePositionTarget(value: string): boolean {
+  return /^(?:(?:the|this|that)\s+)?(?:(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final|penultimate|second[- ]to[- ]last|\d+(?:st|nd|rd|th)?)\s+)?sentences?$/iu.test(
+    value.trim(),
+  )
 }
 
 function stripUnquotedEditArgumentLabel(value: string): string {

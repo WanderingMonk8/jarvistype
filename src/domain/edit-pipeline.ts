@@ -180,6 +180,8 @@ export function executeEditPlan(
   }
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
   return {
     ok: true,
@@ -721,6 +723,8 @@ function executeInlineMove(
   const afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
 
   return {
@@ -1305,6 +1309,8 @@ function executeStructuralPlan(
   const afterText = working.map((paragraph) => paragraph.text).join('\n\n')
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
   return {
     ok: true,
@@ -1338,6 +1344,19 @@ function paragraphRange(text: string, paragraph: DraftParagraph): { start: numbe
   let start = 0
   for (let index = 0; index < paragraph.lineIndex; index += 1) start += lines[index]!.length + 1
   return { start, end: start + lines[paragraph.lineIndex]!.length }
+}
+
+const QUOTATION_OUTSIDE_PARAGRAPH_REASON = 'quotation mark would fall outside the paragraph'
+
+function countFloatingQuotationMarks(text: string): number {
+  let count = 0
+  for (const match of text.matchAll(/[“”‘’"]/gu)) {
+    const index = match.index
+    const before = text[index - 1] ?? ''
+    const after = text[index + 1] ?? ''
+    if (!/\S/u.test(before) && !/\S/u.test(after)) count += 1
+  }
+  return count
 }
 
 function findAll(text: string, search: string, start: number, end: number): number[] {

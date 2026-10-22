@@ -1884,6 +1884,44 @@ test('quotes a range ending at a repeated phrase inside the paragraph', async ()
   assert.equal(generationRequests.length, 0)
 })
 
+test('quotes a range ending at a positional last sentence inside the paragraph', async () => {
+  const userId = 'quotation-range-last-sentence-user'
+  const chatId = 'quotation-range-last-sentence-chat'
+  activeChatId = chatId
+  const draft =
+    "I mix the batter. Yes, the syrup, I got the good kind. You see, most of the syrup you get from the store aren't real syrup. This is from Canada, real syrup."
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'quotation-range-last-sentence-interpret',
+      operationId: 'quotation-range-last-sentence-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'put quotations from the sentence, Yes, the syrup, to the last sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    "I mix the batter. “Yes, the syrup, I got the good kind. You see, most of the syrup you get from the store aren't real syrup. This is from Canada, real syrup.”",
+  )
+  assert.deepEqual(
+    proposal.proposal.plan.operations.map((operation) => operation.target),
+    [{ exactText: 'Yes, the syrup', occurrence: 1 }, { sentenceFromEnd: 1 }],
+  )
+  assert.equal(generationRequests.length, 0)
+})
+
 test('supports single style and before-after quotation ranges', async () => {
   const userId = 'quotation-range-single-user'
   const chatId = 'quotation-range-single-chat'

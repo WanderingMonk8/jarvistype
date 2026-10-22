@@ -3557,6 +3557,7 @@ async function handleEditConfirmation(request, context, activeRequest) {
 }
 async function handleEditCandidateSelection(request, context, activeRequest) {
   const startedAt = performance.now();
+  spindle.log.info("JarvisType edit candidate selection received.");
   const key = proposalKey(context.userId, request.operationId);
   let candidateContext = editCandidateContexts.get(key);
   if (!candidateContext?.plans.has(request.candidateId)) {
@@ -3599,6 +3600,7 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
       candidateContext.candidateSet.instructionTranscript,
       glossary.entries
     );
+    spindle.log.info("JarvisType edit candidate selection executing.");
     const executed = executeEditPlan(
       session.cleanText,
       session.paragraphs,
@@ -3620,7 +3622,8 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
       glossary,
       [],
       context.userId,
-      activeRequest.abort.signal
+      activeRequest.abort.signal,
+      CANDIDATE_GRAMMAR_TIMEOUT_MS
     );
     if (activeRequest.cancelled) return { error: true, session };
     const proposal = {
@@ -3890,13 +3893,14 @@ function parseDeterministicSentenceTextDeletion(instructionTranscript, session) 
   });
 }
 var GRAMMAR_REPAIR_TIMEOUT_MS = 6e3;
+var CANDIDATE_GRAMMAR_TIMEOUT_MS = 2500;
 var MAX_GRAMMAR_SEGMENT_CHARACTERS = 3e3;
 var MAX_GRAMMAR_EDITS = 8;
 var MAX_GRAMMAR_FIND_CHARACTERS = 160;
 var MAX_GRAMMAR_REPLACE_CHARACTERS = 200;
 var MAX_GRAMMAR_PROTECTED_TERMS = 40;
 var MAX_GRAMMAR_PROTECTED_CHARACTERS = 800;
-async function maybeRepairEditGrammar(beforeText, proposedText, operations, affectedParagraphOrdinals, settings, glossary, conversationReferences, userId, signal) {
+async function maybeRepairEditGrammar(beforeText, proposedText, operations, affectedParagraphOrdinals, settings, glossary, conversationReferences, userId, signal, timeoutMs = GRAMMAR_REPAIR_TIMEOUT_MS) {
   const unchanged = { text: proposedText, changes: [] };
   if (proposedText === beforeText) return unchanged;
   if (operations.every((operation) => operation.type === "case")) return unchanged;
@@ -3981,7 +3985,7 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
         timeout = setTimeout(() => {
           controller.abort();
           resolve(null);
-        }, GRAMMAR_REPAIR_TIMEOUT_MS);
+        }, timeoutMs);
       })
     ]);
     if (!response) {

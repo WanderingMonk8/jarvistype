@@ -942,6 +942,7 @@ async function handleEditCandidateSelection(
   activeRequest: ActiveRequest,
 ): Promise<void> {
   const startedAt = performance.now()
+  spindle.log.info('JarvisType edit candidate selection received.')
   const key = proposalKey(context.userId, request.operationId)
   let candidateContext = editCandidateContexts.get(key)
   if (!candidateContext?.plans.has(request.candidateId)) {
@@ -994,6 +995,7 @@ async function handleEditCandidateSelection(
       candidateContext.candidateSet.instructionTranscript,
       glossary.entries,
     )
+    spindle.log.info('JarvisType edit candidate selection executing.')
     const executed = executeEditPlan(
       session.cleanText,
       session.paragraphs,
@@ -1016,6 +1018,7 @@ async function handleEditCandidateSelection(
       [],
       context.userId,
       activeRequest.abort.signal,
+      CANDIDATE_GRAMMAR_TIMEOUT_MS,
     )
     if (activeRequest.cancelled) return { error: true as const, session }
     const proposal: EditProposal = {
@@ -1370,6 +1373,7 @@ interface GrammarRepairEdit {
 }
 
 const GRAMMAR_REPAIR_TIMEOUT_MS = 6_000
+const CANDIDATE_GRAMMAR_TIMEOUT_MS = 2_500
 const MAX_GRAMMAR_SEGMENT_CHARACTERS = 3_000
 const MAX_GRAMMAR_EDITS = 8
 const MAX_GRAMMAR_FIND_CHARACTERS = 160
@@ -1387,6 +1391,7 @@ async function maybeRepairEditGrammar(
   conversationReferences: readonly string[],
   userId: string,
   signal: AbortSignal,
+  timeoutMs = GRAMMAR_REPAIR_TIMEOUT_MS,
 ): Promise<{ text: string; changes: string[] }> {
   const unchanged = { text: proposedText, changes: [] }
   if (proposedText === beforeText) return unchanged
@@ -1494,7 +1499,7 @@ async function maybeRepairEditGrammar(
         timeout = setTimeout(() => {
           controller.abort()
           resolve(null)
-        }, GRAMMAR_REPAIR_TIMEOUT_MS)
+        }, timeoutMs)
       }),
     ])
     if (!response) {

@@ -25,6 +25,7 @@ let generationCommandDecisions: unknown[] = []
 let editPlanResponse: unknown = null
 let grammarRepairResponse: unknown = null
 let grammarRepairHangs = false
+let grammarRepairIgnoresAbort = false
 let grammarRepairSignal: AbortSignal | undefined
 let chatMessages: Array<{
   role: 'system' | 'user' | 'assistant'
@@ -112,6 +113,7 @@ const spindleMock = {
         if (!grammarRepairHangs)
           return Promise.resolve({ content: JSON.stringify(grammarRepairResponse) })
         grammarRepairSignal = request.signal
+        if (grammarRepairIgnoresAbort) return new Promise(() => undefined)
         return new Promise((_resolve, reject) => {
           request.signal?.addEventListener(
             'abort',
@@ -164,6 +166,7 @@ test.beforeEach(() => {
   editPlanResponse = null
   grammarRepairResponse = null
   grammarRepairHangs = false
+  grammarRepairIgnoresAbort = false
   grammarRepairSignal = undefined
   chatMessages = []
 })
@@ -3886,6 +3889,72 @@ test('rejects a provider casing change to a domain', async () => {
     }).length,
     1,
   )
+})
+
+test('bounds candidate selection when the grammar provider ignores abort', async () => {
+  const userId = 'candidate-selection-timeout-user'
+  const chatId = 'candidate-selection-timeout-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'candidate-selection-timeout-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'always',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(
+    userId,
+    chatId,
+    'First sentence. End speech. Middle sentence. End speech. Last sentence.',
+  )
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'candidate-selection-timeout-interpret',
+      operationId: 'candidate-selection-timeout-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the sentence and speech.',
+    },
+    userId,
+  )
+  const candidates = responses.at(-1)?.payload
+  assert.equal(candidates?.type, 'edit.candidates.response')
+  if (candidates?.type !== 'edit.candidates.response') return
+
+  grammarRepairIgnoresAbort = true
+  const startedAt = Date.now()
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.candidate.select.request',
+      requestId: 'candidate-selection-timeout-select',
+      operationId: 'candidate-selection-timeout-operation',
+      chatId,
+      expectedVersion: 1,
+      candidateId: candidates.candidateSet.candidates[0]!.id,
+    },
+    userId,
+  )
+  const deadline = Date.now() + 6_000
+  while (Date.now() < deadline && responses.at(-1)?.payload.type !== 'edit.proposal.response')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  const elapsed = Date.now() - startedAt
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  assert.ok(elapsed < 5_500, `selection took ${elapsed} ms`)
 })
 
 test('aborts an in-flight grammar request when the operation is cancelled', async () => {

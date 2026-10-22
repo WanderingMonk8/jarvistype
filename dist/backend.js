@@ -596,6 +596,56 @@ function defaultId() {
   return crypto.randomUUID();
 }
 
+// src/domain/debug.ts
+var MAX_ENTRIES = 2e3;
+var MAX_MESSAGE_CHARACTERS = 500;
+var MAX_CATEGORY_CHARACTERS = 40;
+var entriesByUser = /* @__PURE__ */ new Map();
+var enabledUsers = /* @__PURE__ */ new Set();
+var startedAt = performance.now();
+function setDebugEnabled(userId, enabled) {
+  if (enabled) enabledUsers.add(userId);
+  else enabledUsers.delete(userId);
+}
+function recordDebug(userId, category, message) {
+  if (!enabledUsers.has(userId)) return;
+  const entries = entriesByUser.get(userId) ?? [];
+  entries.push({
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    offsetMs: performance.now() - startedAt,
+    category: clip(category, MAX_CATEGORY_CHARACTERS),
+    message: clip(message, MAX_MESSAGE_CHARACTERS)
+  });
+  if (entries.length > MAX_ENTRIES) entries.splice(0, entries.length - MAX_ENTRIES);
+  entriesByUser.set(userId, entries);
+}
+function formatDebugEntries(userId) {
+  const entries = entriesByUser.get(userId) ?? [];
+  const header = [
+    "# JarvisType debug timing log",
+    `# Generated ${(/* @__PURE__ */ new Date()).toISOString()}`,
+    `# ${entries.length} entries; backend system time is UTC and offsets are monotonic.`,
+    "# Metadata only: no draft text, transcript, prompt, or provider output is recorded."
+  ];
+  if (!enabledUsers.has(userId)) header.push("# Debug logging is currently off.");
+  return [
+    ...header,
+    ...entries.map(
+      (entry) => `${entry.at} +${entry.offsetMs.toFixed(1)}ms [${entry.category}] ${entry.message}`
+    )
+  ];
+}
+function clearDebugEntries(userId) {
+  entriesByUser.delete(userId);
+}
+function debugDuration(startedAtMs) {
+  return `${Math.max(0, performance.now() - startedAtMs).toFixed(1)}ms`;
+}
+function clip(value, limit) {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length > limit ? `${normalized.slice(0, limit - 1)}\u2026` : normalized;
+}
+
 // src/domain/edit-pipeline.ts
 var EDIT_SCHEMA_VERSION = 2;
 var MAX_EDIT_OPERATIONS = 8;
@@ -2114,7 +2164,7 @@ function repairDeterministicGrammar(text, options = {}) {
     if (!desired) return match;
     const next = article[0] === article[0]?.toLocaleUpperCase() ? capitalize(desired) : desired;
     if (next === article) return match;
-    pushChange(changes, `Changed \u201C${article}\u201D to \u201C${next}\u201D before \u201C${clip(word, 40)}\u201D.`);
+    pushChange(changes, `Changed \u201C${article}\u201D to \u201C${next}\u201D before \u201C${clip2(word, 40)}\u201D.`);
     return `${next}${match.slice(article.length)}`;
   });
   if (options.capitalizeSentenceStarts !== false && !options.insideQuoteAtStart) {
@@ -2239,7 +2289,7 @@ function capitalizeSentenceOpenings(text, protectedTerms, changes) {
       const domainSuffix = afterWord.match(/^\.([\p{L}\d-]+)/u)?.[1];
       if (domainSuffix && COMMON_COMPACT_SUFFIXES.has(domainSuffix.toLocaleLowerCase()))
         return whole;
-      pushChange(changes, `Capitalized \u201C${clip(word, 40)}\u201D.`);
+      pushChange(changes, `Capitalized \u201C${clip2(word, 40)}\u201D.`);
       return `${boundary}${openers}${capitalize(word)}`;
     }
   );
@@ -2264,7 +2314,7 @@ function desiredArticle(word) {
 function capitalize(value) {
   return `${value.slice(0, 1).toLocaleUpperCase()}${value.slice(1)}`;
 }
-function clip(value, limit) {
+function clip2(value, limit) {
   return value.length > limit ? value.slice(0, limit) : value;
 }
 function pushChange(changes, change) {
@@ -2809,6 +2859,8 @@ function isFrontendRequest(value) {
     return isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger3(value.expectedVersion);
   }
   if (value.type === "phase4.load.request" || value.type === "glossary.undo.request") return true;
+  if (value.type === "debug.log.request")
+    return value.clear === void 0 || typeof value.clear === "boolean";
   if (value.type === "phase4.settings.update.request") return isPhaseFourSettings(value.settings);
   if (value.type === "glossary.upsert.request") {
     return (value.entryId === void 0 || isIdentifier2(value.entryId)) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.length <= 20 && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && typeof value.hint === "string" && value.hint.length <= 500;
@@ -2823,7 +2875,7 @@ function sanitizeGrantedPermissions(granted) {
   };
 }
 function isPhaseFourSettings(value) {
-  return isRecord4(value) && isNonNegativeInteger3(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200;
+  return isRecord4(value) && isNonNegativeInteger3(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function hasEnvelope(value) {
   return isRecord4(value) && value.protocolVersion === PROTOCOL_VERSION && isBoundedString(value.type, 1, 128) && isIdentifier2(value.requestId);
@@ -2860,7 +2912,8 @@ var DEFAULT_SETTINGS = {
   contextualNormalizationEnabled: true,
   grammarRepairMode: "off",
   normalizationConnectionId: null,
-  normalizationModelOverride: ""
+  normalizationModelOverride: "",
+  debugLoggingEnabled: false
 };
 function send(response, context) {
   spindle.sendToFrontend(response, context.userId, {
@@ -2901,6 +2954,14 @@ async function handleRequest(request, context) {
     cancellable: request.type !== "draft.send.request",
     abort: new AbortController()
   };
+  const cachedSettings = settingsCache.get(context.userId);
+  if (cachedSettings) setDebugEnabled(context.userId, cachedSettings.debugLoggingEnabled === true);
+  const requestStartedAt = performance.now();
+  recordDebug(
+    context.userId,
+    "request",
+    `start type=${request.type} request=${request.requestId}${"operationId" in request ? ` operation=${request.operationId}` : ""}${"chatId" in request ? ` chat=${request.chatId}` : ""}`
+  );
   activeRequests.set(request.requestId, activeRequest);
   try {
     if (request.type === "app.health.request") {
@@ -2935,6 +2996,8 @@ async function handleRequest(request, context) {
       await handleGlossaryDelete(request, context, activeRequest);
     } else if (request.type === "glossary.undo.request") {
       await handleGlossaryUndo(request, context, activeRequest);
+    } else if (request.type === "debug.log.request") {
+      handleDebugLogRequest(request, context);
     } else {
       await handleDraftSend(request, context);
     }
@@ -2956,10 +3019,17 @@ async function handleRequest(request, context) {
       context
     );
   } finally {
+    recordDebug(
+      context.userId,
+      "request",
+      `end type=${request.type} request=${request.requestId} total=${debugDuration(requestStartedAt)}`
+    );
     activeRequests.delete(request.requestId);
   }
 }
 async function handleTranscriptNormalization(request, context, activeRequest) {
+  const normalizeStartedAt = performance.now();
+  recordDebug(context.userId, "normalize", `start chat=${request.chatId}`);
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const session = await loadDraft(context.userId, request.chatId);
     if (!spindle.permissions.has("chats") || !spindle.permissions.has("generation")) {
@@ -2971,6 +3041,11 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       loadGlossary(context.userId),
       spindle.chat.getMessages(request.chatId)
     ]);
+    recordDebug(
+      context.userId,
+      "normalize.context",
+      `messages=${messages.length} contextCount=${settings.contextMessageCount} duration=${debugDuration(normalizeStartedAt)}`
+    );
     const referenceContext = selectRecentContext(messages, settings.contextMessageCount);
     const selected = selectRecentContext(
       messages,
@@ -3001,7 +3076,14 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     if (normalizedAgainstNewerDraft) reasons.push("normalized against newer same-chat draft");
     const ambiguities = [...deterministic.ambiguities];
     const learningCandidates = [...deterministic.learningCandidates];
+    recordDebug(
+      context.userId,
+      "normalize.deterministic",
+      `changed=${deterministic.changed} reasons=${deterministic.reasons.length} duration=${debugDuration(normalizeStartedAt)}`
+    );
     if (settings.contextualNormalizationEnabled) {
+      const contextualStartedAt = performance.now();
+      recordDebug(context.userId, "normalize.contextual", "start");
       const contextual = explicitQuotationAliasHandled ? null : await normalizeWithContext(
         recoveredBoundary.text,
         candidateText,
@@ -3057,6 +3139,11 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
           )
         );
       }
+      recordDebug(
+        context.userId,
+        "normalize.contextual",
+        `end used=${contextualModelUsed} duration=${debugDuration(contextualStartedAt)}`
+      );
     }
     const recoveredCommands = recoverHighConfidenceContextualCommands(candidateText);
     if (recoveredCommands.text !== candidateText) {
@@ -3093,6 +3180,11 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       contextualModelUsed
     };
     rememberProposal(context.userId, proposal);
+    recordDebug(
+      context.userId,
+      "normalize",
+      `proposal contextual=${contextualModelUsed} duration=${debugDuration(normalizeStartedAt)}`
+    );
     return { kind: "proposal", proposal };
   });
   if (activeRequest.cancelled) return;
@@ -3291,6 +3383,8 @@ function shouldCapitalizeRecordingOpening(cleanText) {
   return !priorText || /[.!?…][”’"')\]]*$/u.test(priorText);
 }
 async function handleEditInterpretation(request, context, activeRequest) {
+  const editStartedAt = performance.now();
+  recordDebug(context.userId, "edit", `start chat=${request.chatId}`);
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const session = await loadDraft(context.userId, request.chatId);
     if (!spindle.permissions.has("chats") || !spindle.permissions.has("generation"))
@@ -3303,9 +3397,16 @@ async function handleEditInterpretation(request, context, activeRequest) {
       loadGlossary(context.userId),
       spindle.chat.getMessages(request.chatId)
     ]);
+    recordDebug(
+      context.userId,
+      "edit.loaded",
+      `messages=${messages.length} references=${settings.contextualNormalizationEnabled ? "on" : "off"} duration=${debugDuration(editStartedAt)}`
+    );
     const referenceContext = selectRecentContext(messages, settings.contextMessageCount);
     const conversationReferences = settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : [];
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries);
+    const interpretStartedAt = performance.now();
+    recordDebug(context.userId, "edit.interpret", "start");
     const interpretedPlan = await interpretEditInstruction(
       request.instructionTranscript,
       session,
@@ -3313,6 +3414,11 @@ async function handleEditInterpretation(request, context, activeRequest) {
       glossary,
       conversationReferences,
       context.userId
+    );
+    recordDebug(
+      context.userId,
+      "edit.interpret",
+      `end plan=${Boolean(interpretedPlan)} duration=${debugDuration(interpretStartedAt)}`
     );
     if (activeRequest.cancelled) return { error: "cancelled", session };
     if (!interpretedPlan) return { error: "interpretation", session };
@@ -3327,6 +3433,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
       conversationReferences,
       spelling.learningCandidates.map((candidate) => candidate.canonical)
     );
+    const executeStartedAt = performance.now();
     const executed = executeEditPlan(
       session.cleanText,
       session.paragraphs,
@@ -3339,9 +3446,19 @@ async function handleEditInterpretation(request, context, activeRequest) {
         ...qualifiedAsInProtectedTerms(request.instructionTranscript)
       ]
     );
+    recordDebug(
+      context.userId,
+      "edit.execute",
+      `end ok=${executed.ok} ${executed.ok ? "" : `reason=${executed.reason} `}duration=${debugDuration(executeStartedAt)}`
+    );
     if (!executed.ok) {
       const candidates = createEditCandidateContext(request, session, plan);
       if (candidates) {
+        recordDebug(
+          context.userId,
+          "edit.candidates",
+          `count=${candidates.candidateSet.candidates.length}`
+        );
         await rememberEditCandidateContext(context.userId, request.operationId, candidates);
         return { candidateSet: candidates.candidateSet };
       }
@@ -3380,6 +3497,11 @@ async function handleEditInterpretation(request, context, activeRequest) {
       ...executed.resultingParagraphIds ? { resultingParagraphIds: executed.resultingParagraphIds } : {}
     };
     rememberEditProposal(context.userId, proposal);
+    recordDebug(
+      context.userId,
+      "edit",
+      `proposal operations=${executed.operations.length} duration=${debugDuration(editStartedAt)}`
+    );
     return { proposal };
   });
   if (activeRequest.cancelled || "error" in result && result.error === "cancelled") return;
@@ -3482,6 +3604,8 @@ function createEditCandidateContext(request, session, plan) {
   };
 }
 async function handleEditConfirmation(request, context, activeRequest) {
+  const confirmStartedAt = performance.now();
+  recordDebug(context.userId, "edit.confirm", `start operation=${request.operationId}`);
   const proposal = editProposals.get(proposalKey(context.userId, request.operationId));
   if (!proposal || proposal.chatId !== request.chatId || proposal.expectedVersion !== request.expectedVersion) {
     send(
@@ -3515,6 +3639,11 @@ async function handleEditConfirmation(request, context, activeRequest) {
       ...proposal.resultingParagraphIds ? { paragraphIdOrder: proposal.resultingParagraphIds } : {}
     });
     if (!mutation.applied) return { error: "stale-version", session: mutation.session };
+    recordDebug(
+      context.userId,
+      "edit.confirm.apply",
+      `version=${mutation.session.draftVersion} duration=${debugDuration(confirmStartedAt)}`
+    );
     let glossary = await loadGlossary(context.userId);
     const learned = [];
     for (const candidate of proposal.learningCandidates) {
@@ -3554,10 +3683,16 @@ async function handleEditConfirmation(request, context, activeRequest) {
     },
     context
   );
+  recordDebug(
+    context.userId,
+    "edit.confirm",
+    `committed duration=${debugDuration(confirmStartedAt)}`
+  );
 }
 async function handleEditCandidateSelection(request, context, activeRequest) {
-  const startedAt = performance.now();
+  const startedAt2 = performance.now();
   spindle.log.info("JarvisType edit candidate selection received.");
+  recordDebug(context.userId, "edit.candidate", `start operation=${request.operationId}`);
   const key = proposalKey(context.userId, request.operationId);
   let candidateContext = editCandidateContexts.get(key);
   if (!candidateContext?.plans.has(request.candidateId)) {
@@ -3569,6 +3704,7 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
   }
   const plan = candidateContext?.plans.get(request.candidateId);
   if (!candidateContext || !plan || candidateContext.candidateSet.chatId !== request.chatId || candidateContext.candidateSet.expectedVersion !== request.expectedVersion) {
+    recordDebug(context.userId, "edit.candidate", "expired");
     spindle.log.warn(
       `JarvisType edit candidate selection expired (memory=${Boolean(candidateContext)}, plan=${Boolean(plan)}).`
     );
@@ -3592,7 +3728,7 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
   if (!activeChat || activeChat.id !== request.chatId || session.draftVersion !== request.expectedVersion || activeRequest.cancelled) {
     if (!activeRequest.cancelled) {
       spindle.log.warn(
-        `JarvisType edit candidate selection failed after ${Math.round(performance.now() - startedAt)} ms.`
+        `JarvisType edit candidate selection failed after ${Math.round(performance.now() - startedAt2)} ms.`
       );
       sendDraftError(
         request,
@@ -3613,6 +3749,7 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
     glossary.entries
   );
   spindle.log.info("JarvisType edit candidate selection executing.");
+  recordDebug(context.userId, "edit.candidate", "execute");
   const executed = executeEditPlan(
     session.cleanText,
     session.paragraphs,
@@ -3626,7 +3763,7 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
   );
   if (!executed.ok) {
     spindle.log.warn(
-      `JarvisType edit candidate selection failed after ${Math.round(performance.now() - startedAt)} ms.`
+      `JarvisType edit candidate selection failed after ${Math.round(performance.now() - startedAt2)} ms.`
     );
     sendDraftError(
       request,
@@ -3670,6 +3807,11 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
     ...executed.resultingParagraphIds ? { resultingParagraphIds: executed.resultingParagraphIds } : {}
   };
   rememberEditProposal(context.userId, proposal);
+  recordDebug(
+    context.userId,
+    "edit.candidate",
+    `proposal operations=${executed.operations.length} duration=${debugDuration(startedAt2)}`
+  );
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -3682,7 +3824,7 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
     context
   );
   spindle.log.info(
-    `JarvisType edit candidate selection completed in ${Math.round(performance.now() - startedAt)} ms.`
+    `JarvisType edit candidate selection completed in ${Math.round(performance.now() - startedAt2)} ms.`
   );
 }
 async function interpretEditInstruction(instructionTranscript, session, settings, glossary, conversationReferences, userId) {
@@ -3737,6 +3879,13 @@ async function interpretEditInstruction(instructionTranscript, session, settings
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session);
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement);
   const qualifiedAsInReference = hasQualifiedAsInReference(instructionTranscript);
+  const providerStartedAt = performance.now();
+  recordDebug(userId, "provider.edit-interpretation", "start");
+  const finishProvider = (outcome) => recordDebug(
+    userId,
+    "provider.edit-interpretation",
+    `end outcome=${outcome} duration=${debugDuration(providerStartedAt)}`
+  );
   try {
     const response = await spindle.generate.quiet({
       type: "quiet",
@@ -3771,10 +3920,19 @@ async function interpretEditInstruction(instructionTranscript, session, settings
       ]
     });
     const content = extractGenerationContent(response);
-    if (!content) return null;
+    if (!content) {
+      finishProvider("no-content");
+      return null;
+    }
     const plan = parseEditPlan(JSON.parse(stripCodeFence(content)));
-    return plan ? finalizeInterpretedPlan(instructionTranscript, plan) : null;
+    if (!plan) {
+      finishProvider("invalid-plan");
+      return null;
+    }
+    finishProvider("ok");
+    return finalizeInterpretedPlan(instructionTranscript, plan);
   } catch (error) {
+    finishProvider("failed");
     logSafeFailure("warn", "EDIT_INTERPRETATION", error);
     return null;
   }
@@ -3914,6 +4072,12 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
   const unchanged = { text: proposedText, changes: [] };
   if (proposedText === beforeText) return unchanged;
   if (operations.every((operation) => operation.type === "case")) return unchanged;
+  const grammarStartedAt = performance.now();
+  recordDebug(
+    userId,
+    "grammar",
+    `start mode=${settings.grammarRepairMode} paragraphs=${affectedParagraphOrdinals.length}`
+  );
   const slices = paragraphSlices(proposedText);
   const beforeSlices = paragraphSlices(beforeText);
   const affected = new Set(affectedParagraphOrdinals);
@@ -3939,7 +4103,15 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
   }
   const deterministicText = joinGrammarSegments(proposedText, segments, deterministicTexts);
   const fallback = { text: deterministicText, changes: [] };
-  if (settings.grammarRepairMode === "off") return fallback;
+  recordDebug(
+    userId,
+    "grammar.local",
+    `segments=${segments.length} changed=${deterministicTexts.size} protected=${protectedTerms.length} duration=${debugDuration(grammarStartedAt)}`
+  );
+  if (settings.grammarRepairMode === "off") {
+    recordDebug(userId, "grammar", "provider skipped mode=off");
+    return fallback;
+  }
   const hasLetters = operations.some(
     (operation) => /\p{L}/u.test(operation.beforeText + operation.afterText)
   );
@@ -3952,7 +4124,17 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
   ));
   if (!needsProvider) return fallback;
   if (signal.aborted) return fallback;
-  const startedAt = performance.now();
+  recordDebug(
+    userId,
+    "grammar.provider",
+    `start mode=${settings.grammarRepairMode} chars=${providerCharacters}`
+  );
+  const finishProvider = (outcome) => recordDebug(
+    userId,
+    "grammar.provider",
+    `end outcome=${outcome} duration=${debugDuration(startedAt2)}`
+  );
+  const startedAt2 = performance.now();
   const controller = new AbortController();
   const abortFromRequest = () => controller.abort();
   signal.addEventListener("abort", abortFromRequest, { once: true });
@@ -3999,22 +4181,26 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
       })
     ]);
     if (!response) {
-      logGrammarRepairOutcome("timed out", startedAt);
+      finishProvider("timed-out");
+      logGrammarRepairOutcome("timed out", startedAt2);
       return fallback;
     }
     const content = extractGenerationContent(response);
     if (!content) {
-      logGrammarRepairOutcome("returned no content", startedAt);
+      finishProvider("no-content");
+      logGrammarRepairOutcome("returned no content", startedAt2);
       return fallback;
     }
     const parsed = JSON.parse(stripCodeFence(content));
     const edits = parseGrammarRepairEdits(parsed, segments);
     if (!edits) {
-      logGrammarRepairOutcome("returned an invalid schema", startedAt);
+      finishProvider("invalid-schema");
+      logGrammarRepairOutcome("returned an invalid schema", startedAt2);
       return fallback;
     }
     if (!edits.length) {
-      logGrammarRepairOutcome("found nothing to repair", startedAt);
+      finishProvider("no-edits");
+      logGrammarRepairOutcome("found nothing to repair", startedAt2);
       return fallback;
     }
     const working = /* @__PURE__ */ new Map();
@@ -4045,24 +4231,31 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
     const accepted = new Set(acceptedTexts.keys());
     const appliedChanges = edits.filter((edit) => accepted.has(edit.segmentId)).map((edit) => edit.reason);
     if (!accepted.size) {
-      logGrammarRepairOutcome("was rejected by safety validation", startedAt);
+      finishProvider("rejected-safety");
+      logGrammarRepairOutcome("was rejected by safety validation", startedAt2);
       return fallback;
     }
     const combined = new Map(deterministicTexts);
     for (const [id, text] of acceptedTexts) combined.set(id, text);
     const repaired = joinGrammarSegments(proposedText, segments, combined);
-    if (repaired.length > MAX_DRAFT_CHARACTERS) return fallback;
+    if (repaired.length > MAX_DRAFT_CHARACTERS) {
+      finishProvider("rejected-too-large");
+      return fallback;
+    }
     const changes = boundedGrammarChanges(appliedChanges);
-    logGrammarRepairOutcome("applied localized repairs", startedAt);
+    finishProvider(`applied-edits-${acceptedTexts.size}`);
+    logGrammarRepairOutcome("applied localized repairs", startedAt2);
     return {
       text: repaired,
       changes: changes.length ? changes : ["Repaired grammar affected by the edit."]
     };
   } catch (error) {
     if (controller.signal.aborted) {
-      logGrammarRepairOutcome(signal.aborted ? "was cancelled" : "timed out", startedAt);
+      finishProvider(signal.aborted ? "cancelled" : "timed-out");
+      logGrammarRepairOutcome(signal.aborted ? "was cancelled" : "timed out", startedAt2);
       return fallback;
     }
+    finishProvider("failed");
     logSafeFailure("warn", "EDIT_GRAMMAR_REPAIR", error);
     return fallback;
   } finally {
@@ -4070,8 +4263,8 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
     signal.removeEventListener("abort", abortFromRequest);
   }
 }
-function logGrammarRepairOutcome(outcome, startedAt) {
-  const elapsed = Math.max(0, Math.round(performance.now() - startedAt));
+function logGrammarRepairOutcome(outcome, startedAt2) {
+  const elapsed = Math.max(0, Math.round(performance.now() - startedAt2));
   spindle.log.info(`JarvisType grammar repair ${outcome} in ${elapsed} ms.`);
 }
 function repairSegmentFocus(segment, options) {
@@ -5037,6 +5230,17 @@ function apostropheFlexiblePattern(value) {
   return escapeRegularExpression(value).replace(/['\u2019]/gu, "['\\u2019]");
 }
 async function normalizeWithContext(rawTranscript, deterministicCandidate, messages, conversationReferences, glossary, settings, userId) {
+  const startedAt2 = performance.now();
+  recordDebug(
+    userId,
+    "provider.normalization",
+    `start model=${settings.normalizationModelOverride || "connection-default"} messages=${messages.length} references=${conversationReferences.length}`
+  );
+  const finish = (outcome) => recordDebug(
+    userId,
+    "provider.normalization",
+    `end outcome=${outcome} duration=${debugDuration(startedAt2)}`
+  );
   try {
     const response = await spindle.generate.quiet({
       type: "quiet",
@@ -5067,25 +5271,41 @@ async function normalizeWithContext(rawTranscript, deterministicCandidate, messa
       ]
     });
     const content = extractGenerationContent(response);
-    if (!content) return null;
+    if (!content) {
+      finish("no-content");
+      return null;
+    }
     const parsed = JSON.parse(stripCodeFence(content));
-    if (!isRecord5(parsed) || typeof parsed.normalizedText !== "string") return null;
+    if (!isRecord5(parsed) || typeof parsed.normalizedText !== "string") {
+      finish("invalid-schema");
+      return null;
+    }
     const decisions = parseContextualCommandDecisions(parsed.commandDecisions, rawTranscript);
-    if (!decisions) return null;
+    if (!decisions) {
+      finish("invalid-decisions");
+      return null;
+    }
     const normalizedBody = parsed.normalizedText.trim();
     const leadingBreak = deterministicCandidate.match(/^(?:\r?\n)+/)?.[0] ?? "";
     const normalized = `${leadingBreak}${normalizedBody}`;
-    if (!isSafeContextualCandidate(deterministicCandidate, normalized)) return null;
-    for (const decision of decisions) {
-      if (decision.interpretation === "command" && !containsCaseInsensitive(normalized, decision.command))
-        return null;
+    if (!isSafeContextualCandidate(deterministicCandidate, normalized)) {
+      finish("rejected-unsafe");
+      return null;
     }
+    for (const decision of decisions) {
+      if (decision.interpretation === "command" && !containsCaseInsensitive(normalized, decision.command)) {
+        finish("rejected-missing-command");
+        return null;
+      }
+    }
+    finish("ok");
     return {
       text: normalized,
       reasons: decisions.filter((decision) => decision.interpretation === "command").map((decision) => `contextual spoken command: ${decision.command}`),
       ambiguities: decisions.filter((decision) => decision.interpretation === "uncertain").map((decision) => `Possible spoken command left literal: \u201C${decision.sourceText}\u201D.`)
     };
   } catch (error) {
+    finish("failed");
     logSafeFailure("warn", "CONTEXT_NORMALIZATION", error);
     return null;
   }
@@ -5166,6 +5386,19 @@ function isSafeContextualCandidate(before, after) {
   const overlap = afterWords.filter((word) => beforeWords.includes(word)).length;
   return overlap / Math.max(beforeWords.length, afterWords.length, 1) >= 0.65;
 }
+function handleDebugLogRequest(request, context) {
+  if (request.clear === true) clearDebugEntries(context.userId);
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "debug.log.response",
+      requestId: request.requestId,
+      ok: true,
+      entries: formatDebugEntries(context.userId)
+    },
+    context
+  );
+}
 async function handlePhaseFourLoad(request, context, activeRequest) {
   const [settings, glossary] = await Promise.all([
     loadSettings(context.userId),
@@ -5180,7 +5413,8 @@ async function handleSettingsUpdate(request, context, activeRequest) {
     contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled,
     grammarRepairMode: request.settings.grammarRepairMode,
     normalizationConnectionId: request.settings.normalizationConnectionId,
-    normalizationModelOverride: request.settings.normalizationModelOverride.trim()
+    normalizationModelOverride: request.settings.normalizationModelOverride.trim(),
+    debugLoggingEnabled: request.settings.debugLoggingEnabled === true
   };
   if (settings.normalizationConnectionId) {
     const connection = await spindle.connections.get(
@@ -5204,6 +5438,7 @@ async function handleSettingsUpdate(request, context, activeRequest) {
     }
   }
   await persistSettings(context.userId, settings);
+  setDebugEnabled(context.userId, settings.debugLoggingEnabled === true);
   const glossary = await loadGlossary(context.userId);
   if (!activeRequest.cancelled)
     await sendPhaseFourState(
@@ -5293,8 +5528,15 @@ async function sendPhaseFourState(requestId, context, settings, glossary, notice
   );
 }
 async function listNormalizationConnections(userId) {
+  const startedAt2 = performance.now();
   try {
-    return (await spindle.connections.list(userId)).map((connection) => ({
+    const connections = await spindle.connections.list(userId);
+    recordDebug(
+      userId,
+      "connections.list",
+      `count=${connections.length} duration=${debugDuration(startedAt2)}`
+    );
+    return connections.map((connection) => ({
       id: connection.id,
       name: connection.name,
       provider: connection.provider,
@@ -5302,6 +5544,7 @@ async function listNormalizationConnections(userId) {
       isDefault: connection.is_default
     }));
   } catch (error) {
+    recordDebug(userId, "connections.list", `failed duration=${debugDuration(startedAt2)}`);
     logSafeFailure("warn", "CONNECTION_LIST", error);
     return [];
   }
@@ -5385,6 +5628,7 @@ async function handleDraftLoad(request, context, activeRequest) {
   );
 }
 async function handleDraftMutation(request, context, activeRequest) {
+  const mutateStartedAt = performance.now();
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const session = await loadDraft(context.userId, request.chatId);
     const mutation = applyManualEdit(session, request.cleanText, {
@@ -5394,6 +5638,11 @@ async function handleDraftMutation(request, context, activeRequest) {
     if (mutation.applied) await persistDraft(context.userId, mutation.session);
     return mutation;
   });
+  recordDebug(
+    context.userId,
+    "draft.mutate",
+    `applied=${result.applied} version=${result.session.draftVersion} duration=${debugDuration(mutateStartedAt)}`
+  );
   if (activeRequest.cancelled) return;
   if (result.reason === "too-large") {
     sendDraftError(
@@ -5461,6 +5710,8 @@ async function handleDraftRedo(request, context, activeRequest) {
   );
 }
 async function handleDraftSend(request, context) {
+  const sendStartedAt = performance.now();
+  recordDebug(context.userId, "draft.send", `start chat=${request.chatId}`);
   const sendKey = `${context.userId}:${request.operationId}`;
   const completed = completedSends.get(sendKey);
   if (completed) {
@@ -5483,6 +5734,7 @@ async function handleDraftSend(request, context) {
       return { error: "chat-mismatch", session };
     }
     try {
+      const appendStartedAt = performance.now();
       const appendResult = await spindle.chat.appendMessage(
         request.chatId,
         {
@@ -5498,6 +5750,7 @@ async function handleDraftSend(request, context) {
         },
         { triggerGeneration: true }
       );
+      recordDebug(context.userId, "draft.send.append", `duration=${debugDuration(appendStartedAt)}`);
       if (!appendResult.id) throw new Error("Lumiverse did not confirm a message identifier");
       const cleared = clearDraftAfterSend(session);
       draftCache.set(draftKey(context.userId, request.chatId), cleared);
@@ -5555,6 +5808,7 @@ async function handleDraftSend(request, context) {
   }
   if ("completed" in result && result.completed) {
     sendSendResponse(request, context, result.completed);
+    recordDebug(context.userId, "draft.send", `completed duration=${debugDuration(sendStartedAt)}`);
   }
 }
 function sendSendResponse(request, context, completed) {
@@ -5592,22 +5846,38 @@ function sendDraftError(request, context, code, message, session, diagnosticId) 
 async function loadDraft(userId, chatId) {
   const key = draftKey(userId, chatId);
   const cached = draftCache.get(key);
-  if (cached) return cached;
+  if (cached) {
+    recordDebug(userId, "draft.load", `cache chat=${chatId}`);
+    return cached;
+  }
+  const startedAt2 = performance.now();
   const raw = await spindle.userStorage.getJson(draftPath(chatId), {
     fallback: null,
     userId
   });
   const session = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId);
   draftCache.set(key, session);
+  recordDebug(userId, "draft.load", `host chat=${chatId} duration=${debugDuration(startedAt2)}`);
   return session;
 }
 async function persistDraft(userId, session) {
+  const startedAt2 = performance.now();
   await spindle.userStorage.setJson(draftPath(session.chatId), session, { userId });
   draftCache.set(draftKey(userId, session.chatId), session);
+  recordDebug(
+    userId,
+    "draft.persist",
+    `chat=${session.chatId} version=${session.draftVersion} duration=${debugDuration(startedAt2)}`
+  );
 }
 async function loadSettings(userId) {
   const cached = settingsCache.get(userId);
-  if (cached) return cached;
+  if (cached) {
+    setDebugEnabled(userId, cached.debugLoggingEnabled === true);
+    recordDebug(userId, "settings.load", "cache");
+    return cached;
+  }
+  const startedAt2 = performance.now();
   const raw = await spindle.userStorage.getJson("phase4-settings.json", {
     fallback: null,
     userId
@@ -5617,29 +5887,49 @@ async function loadSettings(userId) {
     contextualNormalizationEnabled: raw.contextualNormalizationEnabled,
     grammarRepairMode: raw.grammarRepairMode === "when_needed" || raw.grammarRepairMode === "always" ? raw.grammarRepairMode : "off",
     normalizationConnectionId: typeof raw.normalizationConnectionId === "string" && raw.normalizationConnectionId.length > 0 ? raw.normalizationConnectionId.slice(0, 256) : null,
-    normalizationModelOverride: typeof raw.normalizationModelOverride === "string" ? raw.normalizationModelOverride.trim().slice(0, 200) : ""
+    normalizationModelOverride: typeof raw.normalizationModelOverride === "string" ? raw.normalizationModelOverride.trim().slice(0, 200) : "",
+    debugLoggingEnabled: raw.debugLoggingEnabled === true
   } : { ...DEFAULT_SETTINGS };
   settingsCache.set(userId, settings);
+  setDebugEnabled(userId, settings.debugLoggingEnabled === true);
+  recordDebug(userId, "settings.load", `host duration=${debugDuration(startedAt2)}`);
   return settings;
 }
 async function persistSettings(userId, settings) {
+  const startedAt2 = performance.now();
   await spindle.userStorage.setJson("phase4-settings.json", settings, { userId });
   settingsCache.set(userId, settings);
+  recordDebug(userId, "settings.persist", `duration=${debugDuration(startedAt2)}`);
 }
 async function loadGlossary(userId) {
   const cached = glossaryCache.get(userId);
-  if (cached) return cached;
+  if (cached) {
+    recordDebug(userId, "glossary.load", "cache");
+    return cached;
+  }
+  const startedAt2 = performance.now();
   const raw = await spindle.userStorage.getJson("glossary.json", {
     fallback: null,
     userId
   });
   const glossary = isGlossaryState(raw) ? raw : createGlossaryState();
   glossaryCache.set(userId, glossary);
+  recordDebug(
+    userId,
+    "glossary.load",
+    `host entries=${glossary.entries.length} duration=${debugDuration(startedAt2)}`
+  );
   return glossary;
 }
 async function persistGlossary(userId, glossary) {
+  const startedAt2 = performance.now();
   await spindle.userStorage.setJson("glossary.json", glossary, { userId });
   glossaryCache.set(userId, glossary);
+  recordDebug(
+    userId,
+    "glossary.persist",
+    `entries=${glossary.entries.length} duration=${debugDuration(startedAt2)}`
+  );
 }
 async function clearPersistedDraft(userId, chatId, cleared) {
   try {
@@ -5654,6 +5944,8 @@ async function clearPersistedDraft(userId, chatId, cleared) {
 }
 async function withDraftLock(userId, chatId, task) {
   const key = draftKey(userId, chatId);
+  const waitStartedAt = performance.now();
+  recordDebug(userId, "draft-lock", `wait chat=${chatId}`);
   const previous = draftLocks.get(key) ?? Promise.resolve();
   let release = () => void 0;
   const current = new Promise((resolve) => {
@@ -5662,9 +5954,16 @@ async function withDraftLock(userId, chatId, task) {
   const chain = previous.then(() => current);
   draftLocks.set(key, chain);
   await previous;
+  recordDebug(userId, "draft-lock", `acquired chat=${chatId} wait=${debugDuration(waitStartedAt)}`);
+  const holdStartedAt = performance.now();
   try {
     return await task();
   } finally {
+    recordDebug(
+      userId,
+      "draft-lock",
+      `released chat=${chatId} hold=${debugDuration(holdStartedAt)}`
+    );
     release();
     if (draftLocks.get(key) === chain) draftLocks.delete(key);
   }

@@ -471,6 +471,8 @@ A bare spoken `period` or `full stop` immediately following provider-supplied `.
 
 **FR-UI-005:** After hosted parity verification, routine composition controls shall be retired from the drawer. The drawer shall permanently retain personal-glossary management and may retain non-routine settings, privacy disclosures, and diagnostics.
 
+**FR-UI-006:** The drawer shall provide an opt-in debug timing log for latency diagnosis. When enabled it shall record backend request, lock, storage, provider, edit, grammar, and candidate-selection phases with system timestamps and durations, and expose a copyable text output. It shall record metadata only: never draft text, transcripts, prompts, provider output, or glossary contents.
+
 **Implementation status (October 16, 2026):** Hosted parity was accepted and the drawer composition workflow was retired. One composer surface is now permanently owned by the floating workspace. Closing it preserves draft and review state, cancels active capture safely, and restores focus to the invoking launcher.
 
 **FR-UI-006:** The ready view shall prioritize the numbered draft and labeled actions for **Record Message**, **Record Edit**, **Undo**, conditional **Redo**, **History**, **Commands**, and **Confirm & Send**.

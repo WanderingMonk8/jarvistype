@@ -15,6 +15,13 @@ import {
   type PersistedDraftSession,
 } from './domain/draft-session'
 import {
+  clearDebugEntries,
+  debugDuration,
+  formatDebugEntries,
+  recordDebug,
+  setDebugEnabled,
+} from './domain/debug'
+import {
   executeEditPlan,
   findTextTargetMatches,
   parseEditPlan,
@@ -107,6 +114,7 @@ const DEFAULT_SETTINGS: PhaseFourSettings = {
   grammarRepairMode: 'off',
   normalizationConnectionId: null,
   normalizationModelOverride: '',
+  debugLoggingEnabled: false,
 }
 
 function send(response: BackendResponse, context: RequestContext): void {
@@ -151,6 +159,14 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
     cancellable: request.type !== 'draft.send.request',
     abort: new AbortController(),
   }
+  const cachedSettings = settingsCache.get(context.userId)
+  if (cachedSettings) setDebugEnabled(context.userId, cachedSettings.debugLoggingEnabled === true)
+  const requestStartedAt = performance.now()
+  recordDebug(
+    context.userId,
+    'request',
+    `start type=${request.type} request=${request.requestId}${'operationId' in request ? ` operation=${request.operationId}` : ''}${'chatId' in request ? ` chat=${request.chatId}` : ''}`,
+  )
   activeRequests.set(request.requestId, activeRequest)
   try {
     if (request.type === 'app.health.request') {
@@ -185,6 +201,8 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
       await handleGlossaryDelete(request, context, activeRequest)
     } else if (request.type === 'glossary.undo.request') {
       await handleGlossaryUndo(request, context, activeRequest)
+    } else if (request.type === 'debug.log.request') {
+      handleDebugLogRequest(request, context)
     } else {
       await handleDraftSend(request, context)
     }
@@ -206,6 +224,11 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
       context,
     )
   } finally {
+    recordDebug(
+      context.userId,
+      'request',
+      `end type=${request.type} request=${request.requestId} total=${debugDuration(requestStartedAt)}`,
+    )
     activeRequests.delete(request.requestId)
   }
 }
@@ -215,6 +238,8 @@ async function handleTranscriptNormalization(
   context: RequestContext,
   activeRequest: ActiveRequest,
 ): Promise<void> {
+  const normalizeStartedAt = performance.now()
+  recordDebug(context.userId, 'normalize', `start chat=${request.chatId}`)
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const session = await loadDraft(context.userId, request.chatId)
     if (!spindle.permissions.has('chats') || !spindle.permissions.has('generation')) {
@@ -227,6 +252,11 @@ async function handleTranscriptNormalization(
       loadGlossary(context.userId),
       spindle.chat.getMessages(request.chatId),
     ])
+    recordDebug(
+      context.userId,
+      'normalize.context',
+      `messages=${messages.length} contextCount=${settings.contextMessageCount} duration=${debugDuration(normalizeStartedAt)}`,
+    )
     const referenceContext = selectRecentContext(messages, settings.contextMessageCount)
     const selected = selectRecentContext(
       messages,
@@ -257,7 +287,14 @@ async function handleTranscriptNormalization(
     if (normalizedAgainstNewerDraft) reasons.push('normalized against newer same-chat draft')
     const ambiguities = [...deterministic.ambiguities]
     const learningCandidates = [...deterministic.learningCandidates]
+    recordDebug(
+      context.userId,
+      'normalize.deterministic',
+      `changed=${deterministic.changed} reasons=${deterministic.reasons.length} duration=${debugDuration(normalizeStartedAt)}`,
+    )
     if (settings.contextualNormalizationEnabled) {
+      const contextualStartedAt = performance.now()
+      recordDebug(context.userId, 'normalize.contextual', 'start')
       const contextual = explicitQuotationAliasHandled
         ? null
         : await normalizeWithContext(
@@ -323,6 +360,11 @@ async function handleTranscriptNormalization(
           ),
         )
       }
+      recordDebug(
+        context.userId,
+        'normalize.contextual',
+        `end used=${contextualModelUsed} duration=${debugDuration(contextualStartedAt)}`,
+      )
     }
     const recoveredCommands = recoverHighConfidenceContextualCommands(candidateText)
     if (recoveredCommands.text !== candidateText) {
@@ -363,6 +405,11 @@ async function handleTranscriptNormalization(
       contextualModelUsed,
     }
     rememberProposal(context.userId, proposal)
+    recordDebug(
+      context.userId,
+      'normalize',
+      `proposal contextual=${contextualModelUsed} duration=${debugDuration(normalizeStartedAt)}`,
+    )
     return { kind: 'proposal' as const, proposal }
   })
   if (activeRequest.cancelled) return
@@ -625,6 +672,8 @@ async function handleEditInterpretation(
   context: RequestContext,
   activeRequest: ActiveRequest,
 ): Promise<void> {
+  const editStartedAt = performance.now()
+  recordDebug(context.userId, 'edit', `start chat=${request.chatId}`)
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const session = await loadDraft(context.userId, request.chatId)
     if (!spindle.permissions.has('chats') || !spindle.permissions.has('generation'))
@@ -638,11 +687,18 @@ async function handleEditInterpretation(
       loadGlossary(context.userId),
       spindle.chat.getMessages(request.chatId),
     ])
+    recordDebug(
+      context.userId,
+      'edit.loaded',
+      `messages=${messages.length} references=${settings.contextualNormalizationEnabled ? 'on' : 'off'} duration=${debugDuration(editStartedAt)}`,
+    )
     const referenceContext = selectRecentContext(messages, settings.contextMessageCount)
     const conversationReferences = settings.contextualNormalizationEnabled
       ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages)
       : []
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries)
+    const interpretStartedAt = performance.now()
+    recordDebug(context.userId, 'edit.interpret', 'start')
     const interpretedPlan = await interpretEditInstruction(
       request.instructionTranscript,
       session,
@@ -650,6 +706,11 @@ async function handleEditInterpretation(
       glossary,
       conversationReferences,
       context.userId,
+    )
+    recordDebug(
+      context.userId,
+      'edit.interpret',
+      `end plan=${Boolean(interpretedPlan)} duration=${debugDuration(interpretStartedAt)}`,
     )
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
     if (!interpretedPlan) return { error: 'interpretation' as const, session }
@@ -664,6 +725,7 @@ async function handleEditInterpretation(
       conversationReferences,
       spelling.learningCandidates.map((candidate) => candidate.canonical),
     )
+    const executeStartedAt = performance.now()
     const executed = executeEditPlan(
       session.cleanText,
       session.paragraphs,
@@ -676,9 +738,19 @@ async function handleEditInterpretation(
         ...qualifiedAsInProtectedTerms(request.instructionTranscript),
       ],
     )
+    recordDebug(
+      context.userId,
+      'edit.execute',
+      `end ok=${executed.ok} ${executed.ok ? '' : `reason=${executed.reason} `}duration=${debugDuration(executeStartedAt)}`,
+    )
     if (!executed.ok) {
       const candidates = createEditCandidateContext(request, session, plan)
       if (candidates) {
+        recordDebug(
+          context.userId,
+          'edit.candidates',
+          `count=${candidates.candidateSet.candidates.length}`,
+        )
         await rememberEditCandidateContext(context.userId, request.operationId, candidates)
         return { candidateSet: candidates.candidateSet }
       }
@@ -719,6 +791,11 @@ async function handleEditInterpretation(
         : {}),
     }
     rememberEditProposal(context.userId, proposal)
+    recordDebug(
+      context.userId,
+      'edit',
+      `proposal operations=${executed.operations.length} duration=${debugDuration(editStartedAt)}`,
+    )
     return { proposal }
   })
   if (activeRequest.cancelled || ('error' in result && result.error === 'cancelled')) return
@@ -851,6 +928,8 @@ async function handleEditConfirmation(
   context: RequestContext,
   activeRequest: ActiveRequest,
 ): Promise<void> {
+  const confirmStartedAt = performance.now()
+  recordDebug(context.userId, 'edit.confirm', `start operation=${request.operationId}`)
   const proposal = editProposals.get(proposalKey(context.userId, request.operationId))
   if (
     !proposal ||
@@ -890,6 +969,11 @@ async function handleEditConfirmation(
         : {}),
     })
     if (!mutation.applied) return { error: 'stale-version' as const, session: mutation.session }
+    recordDebug(
+      context.userId,
+      'edit.confirm.apply',
+      `version=${mutation.session.draftVersion} duration=${debugDuration(confirmStartedAt)}`,
+    )
     let glossary = await loadGlossary(context.userId)
     const learned = []
     for (const candidate of proposal.learningCandidates) {
@@ -934,6 +1018,11 @@ async function handleEditConfirmation(
     },
     context,
   )
+  recordDebug(
+    context.userId,
+    'edit.confirm',
+    `committed duration=${debugDuration(confirmStartedAt)}`,
+  )
 }
 
 async function handleEditCandidateSelection(
@@ -943,6 +1032,7 @@ async function handleEditCandidateSelection(
 ): Promise<void> {
   const startedAt = performance.now()
   spindle.log.info('JarvisType edit candidate selection received.')
+  recordDebug(context.userId, 'edit.candidate', `start operation=${request.operationId}`)
   const key = proposalKey(context.userId, request.operationId)
   let candidateContext = editCandidateContexts.get(key)
   if (!candidateContext?.plans.has(request.candidateId)) {
@@ -959,6 +1049,7 @@ async function handleEditCandidateSelection(
     candidateContext.candidateSet.chatId !== request.chatId ||
     candidateContext.candidateSet.expectedVersion !== request.expectedVersion
   ) {
+    recordDebug(context.userId, 'edit.candidate', 'expired')
     spindle.log.warn(
       `JarvisType edit candidate selection expired (memory=${Boolean(candidateContext)}, plan=${Boolean(plan)}).`,
     )
@@ -1008,6 +1099,7 @@ async function handleEditCandidateSelection(
     glossary.entries,
   )
   spindle.log.info('JarvisType edit candidate selection executing.')
+  recordDebug(context.userId, 'edit.candidate', 'execute')
   const executed = executeEditPlan(
     session.cleanText,
     session.paragraphs,
@@ -1067,6 +1159,11 @@ async function handleEditCandidateSelection(
       : {}),
   }
   rememberEditProposal(context.userId, proposal)
+  recordDebug(
+    context.userId,
+    'edit.candidate',
+    `proposal operations=${executed.operations.length} duration=${debugDuration(startedAt)}`,
+  )
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -1142,6 +1239,14 @@ async function interpretEditInstruction(
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session)
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement)
   const qualifiedAsInReference = hasQualifiedAsInReference(instructionTranscript)
+  const providerStartedAt = performance.now()
+  recordDebug(userId, 'provider.edit-interpretation', 'start')
+  const finishProvider = (outcome: string) =>
+    recordDebug(
+      userId,
+      'provider.edit-interpretation',
+      `end outcome=${outcome} duration=${debugDuration(providerStartedAt)}`,
+    )
   try {
     const response = await spindle.generate.quiet({
       type: 'quiet',
@@ -1182,10 +1287,19 @@ async function interpretEditInstruction(
       ],
     })
     const content = extractGenerationContent(response)
-    if (!content) return null
+    if (!content) {
+      finishProvider('no-content')
+      return null
+    }
     const plan = parseEditPlan(JSON.parse(stripCodeFence(content)) as unknown)
-    return plan ? finalizeInterpretedPlan(instructionTranscript, plan) : null
+    if (!plan) {
+      finishProvider('invalid-plan')
+      return null
+    }
+    finishProvider('ok')
+    return finalizeInterpretedPlan(instructionTranscript, plan)
   } catch (error) {
+    finishProvider('failed')
     logSafeFailure('warn', 'EDIT_INTERPRETATION', error)
     return null
   }
@@ -1406,6 +1520,12 @@ async function maybeRepairEditGrammar(
   const unchanged = { text: proposedText, changes: [] }
   if (proposedText === beforeText) return unchanged
   if (operations.every((operation) => operation.type === 'case')) return unchanged
+  const grammarStartedAt = performance.now()
+  recordDebug(
+    userId,
+    'grammar',
+    `start mode=${settings.grammarRepairMode} paragraphs=${affectedParagraphOrdinals.length}`,
+  )
 
   const slices = paragraphSlices(proposedText)
   const beforeSlices = paragraphSlices(beforeText)
@@ -1439,8 +1559,16 @@ async function maybeRepairEditGrammar(
   }
   const deterministicText = joinGrammarSegments(proposedText, segments, deterministicTexts)
   const fallback = { text: deterministicText, changes: [] }
+  recordDebug(
+    userId,
+    'grammar.local',
+    `segments=${segments.length} changed=${deterministicTexts.size} protected=${protectedTerms.length} duration=${debugDuration(grammarStartedAt)}`,
+  )
 
-  if (settings.grammarRepairMode === 'off') return fallback
+  if (settings.grammarRepairMode === 'off') {
+    recordDebug(userId, 'grammar', 'provider skipped mode=off')
+    return fallback
+  }
 
   const hasLetters = operations.some((operation) =>
     /\p{L}/u.test(operation.beforeText + operation.afterText),
@@ -1459,6 +1587,17 @@ async function maybeRepairEditGrammar(
       ))
   if (!needsProvider) return fallback
   if (signal.aborted) return fallback
+  recordDebug(
+    userId,
+    'grammar.provider',
+    `start mode=${settings.grammarRepairMode} chars=${providerCharacters}`,
+  )
+  const finishProvider = (outcome: string) =>
+    recordDebug(
+      userId,
+      'grammar.provider',
+      `end outcome=${outcome} duration=${debugDuration(startedAt)}`,
+    )
 
   const startedAt = performance.now()
   const controller = new AbortController()
@@ -1513,21 +1652,25 @@ async function maybeRepairEditGrammar(
       }),
     ])
     if (!response) {
+      finishProvider('timed-out')
       logGrammarRepairOutcome('timed out', startedAt)
       return fallback
     }
     const content = extractGenerationContent(response)
     if (!content) {
+      finishProvider('no-content')
       logGrammarRepairOutcome('returned no content', startedAt)
       return fallback
     }
     const parsed = JSON.parse(stripCodeFence(content)) as unknown
     const edits = parseGrammarRepairEdits(parsed, segments)
     if (!edits) {
+      finishProvider('invalid-schema')
       logGrammarRepairOutcome('returned an invalid schema', startedAt)
       return fallback
     }
     if (!edits.length) {
+      finishProvider('no-edits')
       logGrammarRepairOutcome('found nothing to repair', startedAt)
       return fallback
     }
@@ -1563,6 +1706,7 @@ async function maybeRepairEditGrammar(
       .filter((edit) => accepted.has(edit.segmentId))
       .map((edit) => edit.reason)
     if (!accepted.size) {
+      finishProvider('rejected-safety')
       logGrammarRepairOutcome('was rejected by safety validation', startedAt)
       return fallback
     }
@@ -1570,8 +1714,12 @@ async function maybeRepairEditGrammar(
     const combined = new Map(deterministicTexts)
     for (const [id, text] of acceptedTexts) combined.set(id, text)
     const repaired = joinGrammarSegments(proposedText, segments, combined)
-    if (repaired.length > MAX_DRAFT_CHARACTERS) return fallback
+    if (repaired.length > MAX_DRAFT_CHARACTERS) {
+      finishProvider('rejected-too-large')
+      return fallback
+    }
     const changes = boundedGrammarChanges(appliedChanges)
+    finishProvider(`applied-edits-${acceptedTexts.size}`)
     logGrammarRepairOutcome('applied localized repairs', startedAt)
     return {
       text: repaired,
@@ -1579,9 +1727,11 @@ async function maybeRepairEditGrammar(
     }
   } catch (error) {
     if (controller.signal.aborted) {
+      finishProvider(signal.aborted ? 'cancelled' : 'timed-out')
       logGrammarRepairOutcome(signal.aborted ? 'was cancelled' : 'timed out', startedAt)
       return fallback
     }
+    finishProvider('failed')
     logSafeFailure('warn', 'EDIT_GRAMMAR_REPAIR', error)
     return fallback
   } finally {
@@ -2889,6 +3039,18 @@ async function normalizeWithContext(
   reasons: string[]
   ambiguities: string[]
 } | null> {
+  const startedAt = performance.now()
+  recordDebug(
+    userId,
+    'provider.normalization',
+    `start model=${settings.normalizationModelOverride || 'connection-default'} messages=${messages.length} references=${conversationReferences.length}`,
+  )
+  const finish = (outcome: string) =>
+    recordDebug(
+      userId,
+      'provider.normalization',
+      `end outcome=${outcome} duration=${debugDuration(startedAt)}`,
+    )
   try {
     const response = await spindle.generate.quiet({
       type: 'quiet',
@@ -2924,22 +3086,37 @@ async function normalizeWithContext(
       ],
     })
     const content = extractGenerationContent(response)
-    if (!content) return null
+    if (!content) {
+      finish('no-content')
+      return null
+    }
     const parsed = JSON.parse(stripCodeFence(content)) as unknown
-    if (!isRecord(parsed) || typeof parsed.normalizedText !== 'string') return null
+    if (!isRecord(parsed) || typeof parsed.normalizedText !== 'string') {
+      finish('invalid-schema')
+      return null
+    }
     const decisions = parseContextualCommandDecisions(parsed.commandDecisions, rawTranscript)
-    if (!decisions) return null
+    if (!decisions) {
+      finish('invalid-decisions')
+      return null
+    }
     const normalizedBody = parsed.normalizedText.trim()
     const leadingBreak = deterministicCandidate.match(/^(?:\r?\n)+/)?.[0] ?? ''
     const normalized = `${leadingBreak}${normalizedBody}`
-    if (!isSafeContextualCandidate(deterministicCandidate, normalized)) return null
+    if (!isSafeContextualCandidate(deterministicCandidate, normalized)) {
+      finish('rejected-unsafe')
+      return null
+    }
     for (const decision of decisions) {
       if (
         decision.interpretation === 'command' &&
         !containsCaseInsensitive(normalized, decision.command)
-      )
+      ) {
+        finish('rejected-missing-command')
         return null
+      }
     }
+    finish('ok')
     return {
       text: normalized,
       reasons: decisions
@@ -2950,6 +3127,7 @@ async function normalizeWithContext(
         .map((decision) => `Possible spoken command left literal: “${decision.sourceText}”.`),
     }
   } catch (error) {
+    finish('failed')
     logSafeFailure('warn', 'CONTEXT_NORMALIZATION', error)
     return null
   }
@@ -3077,6 +3255,23 @@ function isSafeContextualCandidate(before: string, after: string): boolean {
   return overlap / Math.max(beforeWords.length, afterWords.length, 1) >= 0.65
 }
 
+function handleDebugLogRequest(
+  request: Extract<FrontendRequest, { type: 'debug.log.request' }>,
+  context: RequestContext,
+): void {
+  if (request.clear === true) clearDebugEntries(context.userId)
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.response',
+      requestId: request.requestId,
+      ok: true,
+      entries: formatDebugEntries(context.userId),
+    },
+    context,
+  )
+}
+
 async function handlePhaseFourLoad(
   request: Extract<FrontendRequest, { type: 'phase4.load.request' }>,
   context: RequestContext,
@@ -3101,6 +3296,7 @@ async function handleSettingsUpdate(
     grammarRepairMode: request.settings.grammarRepairMode,
     normalizationConnectionId: request.settings.normalizationConnectionId,
     normalizationModelOverride: request.settings.normalizationModelOverride.trim(),
+    debugLoggingEnabled: request.settings.debugLoggingEnabled === true,
   }
   if (settings.normalizationConnectionId) {
     const connection = await spindle.connections.get(
@@ -3125,6 +3321,7 @@ async function handleSettingsUpdate(
     }
   }
   await persistSettings(context.userId, settings)
+  setDebugEnabled(context.userId, settings.debugLoggingEnabled === true)
   const glossary = await loadGlossary(context.userId)
   if (!activeRequest.cancelled)
     await sendPhaseFourState(
@@ -3243,8 +3440,15 @@ async function sendPhaseFourState(
 async function listNormalizationConnections(
   userId: string,
 ): Promise<NormalizationConnectionOption[]> {
+  const startedAt = performance.now()
   try {
-    return (await spindle.connections.list(userId)).map((connection) => ({
+    const connections = await spindle.connections.list(userId)
+    recordDebug(
+      userId,
+      'connections.list',
+      `count=${connections.length} duration=${debugDuration(startedAt)}`,
+    )
+    return connections.map((connection) => ({
       id: connection.id,
       name: connection.name,
       provider: connection.provider,
@@ -3252,6 +3456,7 @@ async function listNormalizationConnections(
       isDefault: connection.is_default,
     }))
   } catch (error) {
+    recordDebug(userId, 'connections.list', `failed duration=${debugDuration(startedAt)}`)
     logSafeFailure('warn', 'CONNECTION_LIST', error)
     return []
   }
@@ -3359,6 +3564,7 @@ async function handleDraftMutation(
   context: RequestContext,
   activeRequest: ActiveRequest,
 ): Promise<void> {
+  const mutateStartedAt = performance.now()
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const session = await loadDraft(context.userId, request.chatId)
     const mutation = applyManualEdit(session, request.cleanText, {
@@ -3368,6 +3574,11 @@ async function handleDraftMutation(
     if (mutation.applied) await persistDraft(context.userId, mutation.session)
     return mutation
   })
+  recordDebug(
+    context.userId,
+    'draft.mutate',
+    `applied=${result.applied} version=${result.session.draftVersion} duration=${debugDuration(mutateStartedAt)}`,
+  )
   if (activeRequest.cancelled) return
   if (result.reason === 'too-large') {
     sendDraftError(
@@ -3461,6 +3672,8 @@ async function handleDraftSend(
   request: Extract<FrontendRequest, { type: 'draft.send.request' }>,
   context: RequestContext,
 ): Promise<void> {
+  const sendStartedAt = performance.now()
+  recordDebug(context.userId, 'draft.send', `start chat=${request.chatId}`)
   const sendKey = `${context.userId}:${request.operationId}`
   const completed = completedSends.get(sendKey)
   if (completed) {
@@ -3489,6 +3702,7 @@ async function handleDraftSend(
     }
 
     try {
+      const appendStartedAt = performance.now()
       const appendResult = await spindle.chat.appendMessage(
         request.chatId,
         {
@@ -3504,6 +3718,7 @@ async function handleDraftSend(
         },
         { triggerGeneration: true },
       )
+      recordDebug(context.userId, 'draft.send.append', `duration=${debugDuration(appendStartedAt)}`)
       if (!appendResult.id) throw new Error('Lumiverse did not confirm a message identifier')
 
       const cleared = clearDraftAfterSend(session)
@@ -3564,6 +3779,7 @@ async function handleDraftSend(
 
   if ('completed' in result && result.completed) {
     sendSendResponse(request, context, result.completed)
+    recordDebug(context.userId, 'draft.send', `completed duration=${debugDuration(sendStartedAt)}`)
   }
 }
 
@@ -3615,25 +3831,41 @@ function sendDraftError(
 async function loadDraft(userId: string, chatId: string): Promise<PersistedDraftSession> {
   const key = draftKey(userId, chatId)
   const cached = draftCache.get(key)
-  if (cached) return cached
+  if (cached) {
+    recordDebug(userId, 'draft.load', `cache chat=${chatId}`)
+    return cached
+  }
 
+  const startedAt = performance.now()
   const raw = await spindle.userStorage.getJson<unknown>(draftPath(chatId), {
     fallback: null,
     userId,
   })
   const session = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId)
   draftCache.set(key, session)
+  recordDebug(userId, 'draft.load', `host chat=${chatId} duration=${debugDuration(startedAt)}`)
   return session
 }
 
 async function persistDraft(userId: string, session: PersistedDraftSession): Promise<void> {
+  const startedAt = performance.now()
   await spindle.userStorage.setJson(draftPath(session.chatId), session, { userId })
   draftCache.set(draftKey(userId, session.chatId), session)
+  recordDebug(
+    userId,
+    'draft.persist',
+    `chat=${session.chatId} version=${session.draftVersion} duration=${debugDuration(startedAt)}`,
+  )
 }
 
 async function loadSettings(userId: string): Promise<PhaseFourSettings> {
   const cached = settingsCache.get(userId)
-  if (cached) return cached
+  if (cached) {
+    setDebugEnabled(userId, cached.debugLoggingEnabled === true)
+    recordDebug(userId, 'settings.load', 'cache')
+    return cached
+  }
+  const startedAt = performance.now()
   const raw = await spindle.userStorage.getJson<unknown>('phase4-settings.json', {
     fallback: null,
     userId,
@@ -3656,32 +3888,52 @@ async function loadSettings(userId: string): Promise<PhaseFourSettings> {
             typeof raw.normalizationModelOverride === 'string'
               ? raw.normalizationModelOverride.trim().slice(0, 200)
               : '',
+          debugLoggingEnabled: raw.debugLoggingEnabled === true,
         }
       : { ...DEFAULT_SETTINGS }
   settingsCache.set(userId, settings)
+  setDebugEnabled(userId, settings.debugLoggingEnabled === true)
+  recordDebug(userId, 'settings.load', `host duration=${debugDuration(startedAt)}`)
   return settings
 }
 
 async function persistSettings(userId: string, settings: PhaseFourSettings): Promise<void> {
+  const startedAt = performance.now()
   await spindle.userStorage.setJson('phase4-settings.json', settings, { userId })
   settingsCache.set(userId, settings)
+  recordDebug(userId, 'settings.persist', `duration=${debugDuration(startedAt)}`)
 }
 
 async function loadGlossary(userId: string): Promise<GlossaryState> {
   const cached = glossaryCache.get(userId)
-  if (cached) return cached
+  if (cached) {
+    recordDebug(userId, 'glossary.load', 'cache')
+    return cached
+  }
+  const startedAt = performance.now()
   const raw = await spindle.userStorage.getJson<unknown>('glossary.json', {
     fallback: null,
     userId,
   })
   const glossary = isGlossaryState(raw) ? raw : createGlossaryState()
   glossaryCache.set(userId, glossary)
+  recordDebug(
+    userId,
+    'glossary.load',
+    `host entries=${glossary.entries.length} duration=${debugDuration(startedAt)}`,
+  )
   return glossary
 }
 
 async function persistGlossary(userId: string, glossary: GlossaryState): Promise<void> {
+  const startedAt = performance.now()
   await spindle.userStorage.setJson('glossary.json', glossary, { userId })
   glossaryCache.set(userId, glossary)
+  recordDebug(
+    userId,
+    'glossary.persist',
+    `entries=${glossary.entries.length} duration=${debugDuration(startedAt)}`,
+  )
 }
 
 async function clearPersistedDraft(
@@ -3706,6 +3958,8 @@ async function withDraftLock<T>(
   task: () => Promise<T>,
 ): Promise<T> {
   const key = draftKey(userId, chatId)
+  const waitStartedAt = performance.now()
+  recordDebug(userId, 'draft-lock', `wait chat=${chatId}`)
   const previous = draftLocks.get(key) ?? Promise.resolve()
   let release: () => void = () => undefined
   const current = new Promise<void>((resolve) => {
@@ -3714,9 +3968,16 @@ async function withDraftLock<T>(
   const chain = previous.then(() => current)
   draftLocks.set(key, chain)
   await previous
+  recordDebug(userId, 'draft-lock', `acquired chat=${chatId} wait=${debugDuration(waitStartedAt)}`)
+  const holdStartedAt = performance.now()
   try {
     return await task()
   } finally {
+    recordDebug(
+      userId,
+      'draft-lock',
+      `released chat=${chatId} hold=${debugDuration(holdStartedAt)}`,
+    )
     release()
     if (draftLocks.get(key) === chain) draftLocks.delete(key)
   }

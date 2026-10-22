@@ -4643,6 +4643,114 @@ function sendRequest(chatId: string, operationId: string) {
   }
 }
 
+test('collects a copiable backend timing log when debug logging is enabled', async () => {
+  const userId = 'debug-log-user'
+  const chatId = 'debug-log-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'debug-log-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'off',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+        debugLoggingEnabled: true,
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'Earlier one. This is a wide entrance.')
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: 'debug-log-clear',
+      clear: true,
+    },
+    userId,
+  )
+  const cleared = responses.at(-1)?.payload
+  assert.equal(cleared?.type, 'debug.log.response')
+  if (cleared?.type === 'debug.log.response') {
+    assert.equal(
+      cleared.entries.some((entry) => entry.includes('[request] start')),
+      false,
+    )
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'debug-log-edit',
+      operationId: 'debug-log-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace wide with accessible.',
+    },
+    userId,
+  )
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: 'debug-log-read',
+    },
+    userId,
+  )
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'debug.log.response')
+  if (response?.type !== 'debug.log.response') return
+  const text = response.entries.join('\n')
+  assert.ok(text.includes('# JarvisType debug timing log'))
+  assert.match(text, /\[request\] start type=edit\.interpret\.request/u)
+  assert.match(text, /\[edit\] start/u)
+  assert.match(text, /\[edit\.interpret\]/u)
+  assert.match(text, /\[edit\.execute\]/u)
+  assert.match(text, /\[grammar\.local\]/u)
+  assert.match(text, /\[request\] end type=edit\.interpret\.request/u)
+  assert.match(text, /\+\d+\.\dms/u)
+  assert.equal(text.includes('entrance'), false)
+  assert.equal(text.includes('accessible'), false)
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'debug-log-settings-off',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'off',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+        debugLoggingEnabled: false,
+      },
+    },
+    userId,
+  )
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: 'debug-log-read-off',
+    },
+    userId,
+  )
+  const disabled = responses.at(-1)?.payload
+  assert.equal(disabled?.type, 'debug.log.response')
+  if (disabled?.type === 'debug.log.response') {
+    assert.ok(disabled.entries.some((entry) => entry.includes('Debug logging is currently off.')))
+  }
+})
+
 test('cleaner end-to-end matrix', async () => {
   interface CleanerCase {
     name: string

@@ -285,6 +285,9 @@ function isBackendResponse(value) {
   if (value.type === "phase4.state.response") {
     return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.connections) && value.connections.every(isNormalizationConnectionOption) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
   }
+  if (value.type === "debug.log.response") {
+    return value.ok === true && Array.isArray(value.entries) && value.entries.length <= 2100 && value.entries.every((entry) => typeof entry === "string" && entry.length <= 2e3);
+  }
   if (value.type === "app.error") {
     return value.ok === false && typeof value.code === "string" && ERROR_CODES.includes(value.code) && isBoundedString(value.message, 1, 2e3) && typeof value.retryable === "boolean" && (value.diagnosticId === void 0 || isBoundedString(value.diagnosticId, 1, 100)) && (value.operationId === void 0 || isIdentifier2(value.operationId)) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot));
   }
@@ -321,7 +324,7 @@ function isPermissionSnapshot(value) {
   return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function isPhaseFourSettings(value) {
-  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200;
+  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function isNormalizationConnectionOption(value) {
   return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
@@ -639,6 +642,12 @@ function setup(ctx) {
     tab.root,
     "[data-grammar-repair-mode]"
   );
+  const debugEnabledToggle = requireElement(tab.root, "[data-debug-enabled]");
+  const debugOutput = requireElement(tab.root, "[data-debug-output]");
+  const debugRefreshButton = requireElement(tab.root, "[data-debug-refresh]");
+  const debugCopyButton = requireElement(tab.root, "[data-debug-copy]");
+  const debugClearButton = requireElement(tab.root, "[data-debug-clear]");
+  const debugStatus = requireElement(tab.root, "[data-debug-status]");
   const saveSettingsButton = requireElement(tab.root, "[data-settings-save]");
   const normalizationConnectionSelect = requireElement(
     tab.root,
@@ -725,7 +734,8 @@ function setup(ctx) {
       contextualNormalizationEnabled: true,
       grammarRepairMode: "off",
       normalizationConnectionId: null,
-      normalizationModelOverride: ""
+      normalizationModelOverride: "",
+      debugLoggingEnabled: false
     },
     normalizationConnections: [],
     glossary: [],
@@ -882,6 +892,10 @@ function setup(ctx) {
     contextCountInput.value = String(state.settings.contextMessageCount);
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
     grammarRepairSelect.value = state.settings.grammarRepairMode;
+    debugEnabledToggle.checked = state.settings.debugLoggingEnabled === true;
+    debugRefreshButton.disabled = state.settings.debugLoggingEnabled !== true;
+    debugCopyButton.disabled = false;
+    debugClearButton.disabled = state.settings.debugLoggingEnabled !== true;
     renderConnectionOptions(
       normalizationConnectionSelect,
       state.normalizationConnections,
@@ -1447,6 +1461,7 @@ function setup(ctx) {
     state.settings.contextMessageCount = contextMessageCount;
     state.settings.contextualNormalizationEnabled = contextualToggle.checked;
     state.settings.grammarRepairMode = grammarRepairMode;
+    state.settings.debugLoggingEnabled = debugEnabledToggle.checked;
     state.settings.normalizationModelOverride = normalizationModelPicker.getValue().trim();
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
@@ -1457,13 +1472,49 @@ function setup(ctx) {
         contextualNormalizationEnabled: contextualToggle.checked,
         grammarRepairMode,
         normalizationConnectionId: state.settings.normalizationConnectionId,
-        normalizationModelOverride: state.settings.normalizationModelOverride
+        normalizationModelOverride: state.settings.normalizationModelOverride,
+        debugLoggingEnabled: debugEnabledToggle.checked
       }
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
       applyPhaseFourResponse(outcome.value);
     else state.phaseFourMessage = "Settings were not saved. Try again.";
     render();
+  };
+  const refreshDebugLog = async (clear = false) => {
+    if (state.settings.debugLoggingEnabled !== true) {
+      debugStatus.textContent = "Enable debug logging and save settings first.";
+      return;
+    }
+    debugStatus.textContent = clear ? "Clearing the debug log\u2026" : "Loading the debug log\u2026";
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "debug.log.request",
+      requestId: createRequestId("debug-log"),
+      ...clear ? { clear: true } : {}
+    });
+    if (!alive) return;
+    if (outcome.status === "resolved" && outcome.value.type === "debug.log.response") {
+      debugOutput.value = outcome.value.entries.join("\n");
+      debugStatus.textContent = clear ? "Debug log cleared." : `${outcome.value.entries.length} log lines loaded. Review and copy them.`;
+    } else {
+      debugStatus.textContent = "The debug log request failed or timed out.";
+    }
+  };
+  const copyDebugLog = async () => {
+    if (!debugOutput.value) {
+      await refreshDebugLog();
+      if (!debugOutput.value) return;
+    }
+    if (!alive) return;
+    try {
+      await navigator.clipboard.writeText(debugOutput.value);
+      debugStatus.textContent = "Debug log copied to the clipboard.";
+    } catch {
+      debugOutput.focus();
+      debugOutput.select();
+      debugStatus.textContent = "Clipboard access is unavailable. The log is selected; copy it manually.";
+    }
   };
   const saveGlossaryEntry = async (surface = "drawer") => {
     const canonicalInput = surface === "floating" ? floatingGlossaryCanonicalInput : glossaryCanonicalInput;
@@ -1899,6 +1950,13 @@ function setup(ctx) {
   const handleGrammarRepairModeChange = () => {
     state.settings.grammarRepairMode = grammarRepairSelect.value === "always" ? "always" : grammarRepairSelect.value === "when_needed" ? "when_needed" : "off";
   };
+  const handleDebugEnabledChange = () => {
+    state.settings.debugLoggingEnabled = debugEnabledToggle.checked;
+    debugStatus.textContent = debugEnabledToggle.checked ? "Save settings to start collecting the debug log." : "Save settings to stop collecting the debug log.";
+  };
+  const handleDebugRefreshClick = () => void refreshDebugLog();
+  const handleDebugCopyClick = () => void copyDebugLog();
+  const handleDebugClearClick = () => void refreshDebugLog(true);
   const handleNormalizationConnectionChange = () => {
     state.settings.normalizationConnectionId = normalizationConnectionSelect.value || null;
     state.settings.normalizationModelOverride = "";
@@ -2003,6 +2061,10 @@ function setup(ctx) {
   cancelEditCandidatesButton.addEventListener("click", handleCancelEditCandidatesClick);
   saveSettingsButton.addEventListener("click", handleSaveSettingsClick);
   grammarRepairSelect.addEventListener("change", handleGrammarRepairModeChange);
+  debugEnabledToggle.addEventListener("change", handleDebugEnabledChange);
+  debugRefreshButton.addEventListener("click", handleDebugRefreshClick);
+  debugCopyButton.addEventListener("click", handleDebugCopyClick);
+  debugClearButton.addEventListener("click", handleDebugClearClick);
   normalizationConnectionSelect.addEventListener("change", handleNormalizationConnectionChange);
   glossarySaveButton.addEventListener("click", handleSaveGlossaryClick);
   glossaryCancelButton.addEventListener("click", handleCancelGlossaryClick);
@@ -2063,6 +2125,10 @@ function setup(ctx) {
     cancelEditCandidatesButton.removeEventListener("click", handleCancelEditCandidatesClick);
     saveSettingsButton.removeEventListener("click", handleSaveSettingsClick);
     grammarRepairSelect.removeEventListener("change", handleGrammarRepairModeChange);
+    debugEnabledToggle.removeEventListener("change", handleDebugEnabledChange);
+    debugRefreshButton.removeEventListener("click", handleDebugRefreshClick);
+    debugCopyButton.removeEventListener("click", handleDebugCopyClick);
+    debugClearButton.removeEventListener("click", handleDebugClearClick);
     normalizationConnectionSelect.removeEventListener("change", handleNormalizationConnectionChange);
     glossarySaveButton.removeEventListener("click", handleSaveGlossaryClick);
     glossaryCancelButton.removeEventListener("click", handleCancelGlossaryClick);
@@ -2352,6 +2418,7 @@ function shellMarkup() {
       .jt-proposal__details { display: grid; gap: .55rem; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: .45rem; padding: .55rem; }
       .jt-proposal__details summary { cursor: pointer; font-weight: 700; }
       .jt-proposal__details[open] summary { margin-bottom: .55rem; }
+      .jt-debug-output { width: 100%; min-height: 12rem; resize: vertical; padding: .55rem; border-radius: .45rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .78rem; white-space: pre; overflow: auto; }
       .jt-candidate-list { display: grid; gap: .5rem; }
       .jt-candidate-list button { text-align: start; white-space: normal; }
       .jt-glossary { display: grid; gap: .55rem; }
@@ -2531,6 +2598,18 @@ function shellMarkup() {
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
+        <details class="jt-proposal__details">
+          <summary>Debug timing log</summary>
+          <label><span><input type="checkbox" data-debug-enabled> Enable debug timing log</span></label>
+          <p class="jt-shell__notice">Records backend timings and request metadata only. It never records draft text, transcripts, prompts, or provider output. Enable it, save settings, reproduce the action, then Refresh and Copy.</p>
+          <div class="jt-actions">
+            <button type="button" data-debug-refresh>Refresh log</button>
+            <button type="button" data-debug-copy>Copy log</button>
+            <button type="button" data-debug-clear>Clear log</button>
+          </div>
+          <textarea class="jt-debug-output" readonly data-debug-output rows="14" spellcheck="false" aria-label="JarvisType debug timing log"></textarea>
+          <p role="status" aria-live="polite" data-debug-status></p>
+        </details>
         <div class="jt-actions"><button type="button" data-settings-save>Save settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings\u2026</p>
 

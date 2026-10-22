@@ -1049,6 +1049,12 @@ async function interpretEditInstruction(
     session.draftVersion,
   )
   if (sentenceDeletion) return sentenceDeletion
+  const sentenceTextDeletion = parseDeterministicSentenceTextDeletion(
+    instructionTranscript,
+    session,
+  )
+  if (sentenceTextDeletion)
+    return finalizeInterpretedPlan(instructionTranscript, sentenceTextDeletion)
   const paragraphDeletion = parseDeterministicParagraphDeletion(instructionTranscript, session)
   if (paragraphDeletion) return paragraphDeletion
   const paragraphQuotation = parseDeterministicParagraphQuotation(
@@ -1247,6 +1253,50 @@ function parseDeterministicSentenceDeletion(
         target: {
           ...(paragraphOrdinal === undefined ? {} : { paragraphOrdinal }),
           ...sentencePosition,
+        },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
+}
+
+function parseDeterministicSentenceTextDeletion(
+  instructionTranscript: string,
+  session: PersistedDraftSession,
+): EditPlan | null {
+  if (/[\r\n;]/u.test(instructionTranscript)) return null
+  const trimmed = instructionTranscript.trim()
+  const scope = trimmed.match(/^in\s+paragraph\s+(\d+)\s*,?\s*/iu)
+  const paragraphOrdinal = scope ? Number(scope[1]) : undefined
+  if (
+    paragraphOrdinal !== undefined &&
+    (!Number.isSafeInteger(paragraphOrdinal) || paragraphOrdinal < 1)
+  )
+    return null
+  const body = scope ? trimmed.slice(scope[0].length) : trimmed
+  const match = body.match(
+    /^(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+(?:the|this|that)?\s*sentence\b\s*(?:(?:that\s+says|saying|with\s+the\s+text|,|:)\s*)?(.+?)\s*[.!?]*$/iu,
+  )
+  if (!match) return null
+  const spokenTarget = unwrapEditArgument(stripUnquotedEditArgumentLabel((match[1] ?? '').trim()))
+  if (
+    !spokenTarget ||
+    /^(?:in|from|of)\s+paragraph\b/iu.test(spokenTarget) ||
+    isSemanticReplacementTarget(spokenTarget)
+  )
+    return null
+  const targetText = adoptUnambiguousDraftCasing(session, spokenTarget, paragraphOrdinal)
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: `Delete the sentence containing “${targetText}”.`,
+    operations: [
+      {
+        id: 'deterministic-delete-sentence-text',
+        type: 'delete',
+        target: {
+          ...(paragraphOrdinal === undefined ? {} : { paragraphOrdinal }),
+          exactText: targetText,
         },
         includeTrailingPunctuation: true,
       },

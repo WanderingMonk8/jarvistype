@@ -1865,6 +1865,82 @@ test('inserts quotation marks around an exact sentence target', async () => {
   assert.equal(generationRequests.length, 0)
 })
 
+test('deletes a sentence identified by its spoken text', async () => {
+  const userId = 'sentence-text-deletion-user'
+  const chatId = 'sentence-text-deletion-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    "Well, someone's got to do the planning. End speech. I load the groceries. Begin speech. All right, dear.",
+  )
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-text-deletion-interpret',
+      operationId: 'sentence-text-deletion-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the sentence Begin speech.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    "Well, someone's got to do the planning. End speech. I load the groceries. All right, dear.",
+  )
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
+test('supports sentence-text deletion aliases and quoted targets', async () => {
+  const userId = 'sentence-text-deletion-alias-user'
+  const chatId = 'sentence-text-deletion-alias-chat'
+  activeChatId = chatId
+  const draft = 'First sentence. Begin speech. Last sentence.'
+  const cases = [
+    ['Delete the sentence that says Begin speech.', 'First sentence. Last sentence.'],
+    ['Remove the sentence saying Begin speech.', 'First sentence. Last sentence.'],
+    ['Erase the sentence, “Begin speech.”', 'First sentence. Last sentence.'],
+    ['In paragraph 1, take off the sentence Begin speech.', 'First sentence. Last sentence.'],
+  ] as const
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    await seedDraft(userId, `${chatId}-${index}`, draft)
+    activeChatId = `${chatId}-${index}`
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `sentence-text-deletion-alias-interpret-${index}`,
+        operationId: `sentence-text-deletion-alias-operation-${index}`,
+        chatId: `${chatId}-${index}`,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type === 'edit.proposal.response') {
+      assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    }
+  }
+})
+
 test('deletes positional sentences across every alias and paragraph scope', async () => {
   const userId = 'sentence-deletion-alias-user'
   const chatId = 'sentence-deletion-alias-chat'

@@ -45,12 +45,12 @@ function getFloatingWidgetSize(): { width: number; height: number } {
   if (viewport.width < NARROW_COMPOSER_BREAKPOINT_PX) {
     return {
       width: Math.max(1, Math.min(430, viewport.width - 24)),
-      height: Math.max(1, Math.min(720, viewport.height - 24)),
+      height: Math.max(1, Math.min(672, viewport.height - 24)),
     }
   }
   return {
     width: Math.max(1, Math.min(960, viewport.width - 48)),
-    height: Math.max(1, Math.min(600, viewport.height - 48)),
+    height: Math.max(1, Math.min(552, viewport.height - 48)),
   }
 }
 
@@ -2714,26 +2714,28 @@ function floatingMarkup(): string {
       <div class="jt-floating__body">
         <div data-floating-composer-mount></div>
         <div class="jt-floating__tools">
-          <button type="button" data-command-toggle aria-expanded="false" aria-controls="jt-command-panel">Command list</button>
+          <div class="jt-tools-row">
+            <button type="button" data-command-toggle aria-expanded="false" aria-controls="jt-command-panel">Command list</button>
+            <details>
+              <summary>Glossary</summary>
+              <div class="jt-form-grid">
+                <label>Search glossary<input type="search" placeholder="Search spellings, variants, or hints" data-floating-glossary-search></label>
+                <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-floating-glossary-canonical></label>
+                <label>Heard-as variants<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-floating-glossary-variants></label>
+                <label>Optional hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-floating-glossary-hint></label>
+              </div>
+              <div class="jt-actions">
+                <button type="button" data-floating-glossary-save>Add entry</button>
+                <button type="button" data-floating-glossary-cancel hidden>Cancel edit</button>
+                <button type="button" data-floating-glossary-undo disabled>Undo change</button>
+              </div>
+              <div class="jt-glossary" data-floating-glossary-list></div>
+            </details>
+          </div>
           <section id="jt-command-panel" data-command-panel hidden aria-label="Available voice edit commands">
             <label class="jt-form-grid">Search commands<input type="search" placeholder="Search commands or examples" data-command-search></label>
             <div class="jt-command-list">${commands}</div>
           </section>
-          <details>
-            <summary>Glossary</summary>
-            <div class="jt-form-grid">
-              <label>Search glossary<input type="search" placeholder="Search spellings, variants, or hints" data-floating-glossary-search></label>
-              <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-floating-glossary-canonical></label>
-              <label>Heard-as variants<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-floating-glossary-variants></label>
-              <label>Optional hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-floating-glossary-hint></label>
-            </div>
-            <div class="jt-actions">
-              <button type="button" data-floating-glossary-save>Add entry</button>
-              <button type="button" data-floating-glossary-cancel hidden>Cancel edit</button>
-              <button type="button" data-floating-glossary-undo disabled>Undo change</button>
-            </div>
-            <div class="jt-glossary" data-floating-glossary-list></div>
-          </details>
         </div>
       </div>
     </aside>`
@@ -2815,6 +2817,9 @@ function shellMarkup(): string {
       .jt-floating__body { min-height: 0; overflow: visible; }
       .jt-floating__body > .jt-shell__card { margin: .75rem; }
       .jt-floating__tools { display: grid; gap: .65rem; padding: 0 .75rem .75rem; }
+      .jt-tools-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; width: 100%; align-items: start; }
+      .jt-tools-row > button, .jt-tools-row > details { width: 100%; min-width: 0; margin: 0; }
+      .jt-tools-row > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
       .jt-floating summary { cursor: pointer; font-weight: 700; }
@@ -2835,8 +2840,8 @@ function shellMarkup(): string {
         .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: stretch; height: auto; overflow: visible; }
         .jt-floating .jt-composer__pane { min-height: 0; overflow: visible; padding-right: .25rem; }
         .jt-floating .jt-draft-editor { min-height: 10rem; }
-        .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; }
-        .jt-floating__tools > section, .jt-floating__tools > details { grid-column: 1 / -1; max-height: 24rem; overflow-y: auto; overscroll-behavior: contain; }
+        .jt-floating__tools { padding-top: .65rem; }
+        .jt-floating__tools > section, .jt-tools-row > details { max-height: 24rem; overflow-y: auto; overscroll-behavior: contain; }
       }
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">

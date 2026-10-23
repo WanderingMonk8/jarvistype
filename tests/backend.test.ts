@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { applyManualEdit, restoreDraftSession } from '../src/domain/draft-session'
 import { PROTOCOL_VERSION, type BackendResponse } from '../src/protocol/messages'
 
 type FrontendHandler = (payload: unknown, userId: string, frontendSessionId?: string) => void
@@ -252,6 +253,40 @@ test('loads and persists a chat-owned draft', async () => {
     [...stored.keys()].some((key) => key.startsWith(`${userId}:draft-`)),
     true,
   )
+})
+
+test('an explicit load refreshes a draft changed through shared storage on another device', async () => {
+  const userId = 'cross-device-load-user'
+  const chatId = 'cross-device-load-chat'
+  await seedDraft(userId, chatId, 'Desktop draft')
+
+  const storageKey = `${userId}:draft-${encodeURIComponent(chatId)}.json`
+  const persisted = restoreDraftSession(stored.get(storageKey), chatId)
+  assert.ok(persisted)
+  const externalMutation = applyManualEdit(persisted, 'Mobile draft', {
+    expectedVersion: persisted.draftVersion,
+    editGroupId: 'mobile-edit-group',
+  })
+  assert.equal(externalMutation.applied, true)
+  stored.set(storageKey, structuredClone(externalMutation.session))
+
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.load.request',
+      requestId: 'cross-device-refresh',
+      chatId,
+    },
+    userId,
+  )
+
+  const refreshed = responses.at(-1)?.payload
+  assert.equal(refreshed?.type, 'draft.snapshot.response')
+  if (refreshed?.type === 'draft.snapshot.response') {
+    assert.equal(refreshed.snapshot.cleanText, 'Mobile draft')
+    assert.equal(refreshed.snapshot.draftVersion, 2)
+  }
 })
 
 test('undoes and redoes a draft mutation through the backend protocol', async () => {

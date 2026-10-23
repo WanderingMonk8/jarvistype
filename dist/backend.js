@@ -6032,7 +6032,7 @@ async function handleDraftLoad(request, context, activeRequest) {
   const session = await withDraftLock(
     context.userId,
     request.chatId,
-    () => loadDraft(context.userId, request.chatId)
+    () => loadDraft(context.userId, request.chatId, true)
   );
   if (activeRequest.cancelled) return;
   send(
@@ -6263,10 +6263,10 @@ function sendDraftError(request, context, code, message, session, diagnosticId) 
     context
   );
 }
-async function loadDraft(userId, chatId) {
+async function loadDraft(userId, chatId, refreshFromStorage = false) {
   const key = draftKey(userId, chatId);
   const cached = draftCache.get(key);
-  if (cached) {
+  if (cached && !refreshFromStorage) {
     recordDebug(userId, "draft.load", `cache chat=${chatId}`);
     return cached;
   }
@@ -6275,9 +6275,14 @@ async function loadDraft(userId, chatId) {
     fallback: null,
     userId
   });
-  const session = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId);
+  const storedSession = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId);
+  const session = cached && cached.draftVersion > storedSession.draftVersion ? cached : storedSession;
   draftCache.set(key, session);
-  recordDebug(userId, "draft.load", `host chat=${chatId} duration=${debugDuration(startedAt2)}`);
+  recordDebug(
+    userId,
+    "draft.load",
+    `host chat=${chatId} version=${session.draftVersion} duration=${debugDuration(startedAt2)}`
+  );
   return session;
 }
 async function persistDraft(userId, session) {

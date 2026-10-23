@@ -3923,7 +3923,7 @@ async function handleDraftLoad(
   activeRequest: ActiveRequest,
 ): Promise<void> {
   const session = await withDraftLock(context.userId, request.chatId, () =>
-    loadDraft(context.userId, request.chatId),
+    loadDraft(context.userId, request.chatId, true),
   )
   if (activeRequest.cancelled) return
   send(
@@ -4208,10 +4208,14 @@ function sendDraftError(
   )
 }
 
-async function loadDraft(userId: string, chatId: string): Promise<PersistedDraftSession> {
+async function loadDraft(
+  userId: string,
+  chatId: string,
+  refreshFromStorage = false,
+): Promise<PersistedDraftSession> {
   const key = draftKey(userId, chatId)
   const cached = draftCache.get(key)
-  if (cached) {
+  if (cached && !refreshFromStorage) {
     recordDebug(userId, 'draft.load', `cache chat=${chatId}`)
     return cached
   }
@@ -4221,9 +4225,16 @@ async function loadDraft(userId: string, chatId: string): Promise<PersistedDraft
     fallback: null,
     userId,
   })
-  const session = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId)
+  const storedSession = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId)
+  // A just-persisted local session can briefly be newer than a cross-device
+  // storage read. Versions are monotonic, so never regress in that case.
+  const session = cached && cached.draftVersion > storedSession.draftVersion ? cached : storedSession
   draftCache.set(key, session)
-  recordDebug(userId, 'draft.load', `host chat=${chatId} duration=${debugDuration(startedAt)}`)
+  recordDebug(
+    userId,
+    'draft.load',
+    `host chat=${chatId} version=${session.draftVersion} duration=${debugDuration(startedAt)}`,
+  )
   return session
 }
 

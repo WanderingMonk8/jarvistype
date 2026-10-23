@@ -919,7 +919,30 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.activeChatId = nextChatId
     const transitionId = changed ? ++chatTransitionId : chatTransitionId
     await refreshPermissions()
-    if (!alive || !changed) return
+    if (!alive) return
+
+    if (!changed) {
+      if (
+        !nextChatId ||
+        state.automatedBusy ||
+        state.sending ||
+        voiceBusy() ||
+        state.pendingProposal ||
+        state.pendingEditProposal ||
+        state.pendingEditCandidates
+      )
+        return
+      await drainMutations()
+      if (
+        !alive ||
+        ctx.getActiveChat().chatId !== nextChatId ||
+        state.saving ||
+        (state.snapshot !== null && desiredText !== state.snapshot.cleanText)
+      )
+        return
+      await loadDraft(nextChatId)
+      return
+    }
 
     await drainMutations()
     if (!alive || transitionId !== chatTransitionId || ctx.getActiveChat().chatId !== nextChatId)

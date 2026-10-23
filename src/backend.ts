@@ -1555,6 +1555,27 @@ function parseDeterministicSentenceTextDeletion(
   session: PersistedDraftSession,
 ): EditPlan | null {
   if (/[\r\n;]/u.test(instructionTranscript)) return null
+  // “delete and speech” is a misheard “delete end speech”: remove the speech-end sentence.
+  if (
+    /^(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+(?:the\s+)?(?:and|end)\s+speech[.!?]*$/iu.test(
+      instructionTranscript.trim(),
+    ) &&
+    !/\band\s+speech\b/iu.test(session.cleanText)
+  ) {
+    return parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: session.draftVersion,
+      explanation: 'Delete the sentence containing “End speech”.',
+      operations: [
+        {
+          id: 'deterministic-delete-speech-end',
+          type: 'delete',
+          target: { exactText: 'End speech' },
+          includeTrailingPunctuation: true,
+        },
+      ],
+    })
+  }
   const trimmed = instructionTranscript.trim()
   const scope = trimmed.match(/^in\s+paragraph\s+(\d+)\s*,?\s*/iu)
   const paragraphOrdinal = scope ? Number(scope[1]) : undefined

@@ -3817,6 +3817,56 @@ test('removes adjacent and trailing sentences without leaving stray separators',
   }
 })
 
+test('resolves a misheard “delete and speech” deterministically', async () => {
+  const userId = 'delete-and-speech-user'
+  const chatId = 'delete-and-speech-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Hello there. Second item. End speech.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'delete-and-speech-interpret',
+      operationId: 'delete-and-speech-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete and speech.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'Hello there. Second item.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('asks for a choice without the provider when “delete and speech” matches twice', async () => {
+  const userId = 'delete-and-speech-duplicate-user'
+  const chatId = 'delete-and-speech-duplicate-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'End speech. Middle line. End speech.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'delete-and-speech-duplicate-interpret',
+      operationId: 'delete-and-speech-duplicate-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete and speech.',
+    },
+    userId,
+  )
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.candidates.response')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('every replace alias works deterministically with and without polite wording', async () => {
   const userId = 'replace-alias-user'
   const chatId = 'replace-alias-chat'

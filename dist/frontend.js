@@ -1199,12 +1199,13 @@ function setup(ctx) {
       render();
       return;
     }
-    if (!trimmed) {
-      state.voiceMessage = "A paragraph cannot be empty. Use a delete command to remove it.";
-      render();
-      return;
+    if (trimmed) {
+      lines[lineIndex] = trimmed;
+    } else {
+      if (lines[lineIndex + 1]?.trim() === "") lines.splice(lineIndex, 2);
+      else if (lineIndex > 0 && lines[lineIndex - 1]?.trim() === "") lines.splice(lineIndex - 1, 2);
+      else lines.splice(lineIndex, 1);
     }
-    lines[lineIndex] = trimmed;
     const nextText = lines.join("\n");
     if (nextText === desiredText) return;
     if (nextText.length > MAX_DRAFT_CHARACTERS) {

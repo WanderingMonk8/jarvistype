@@ -2811,12 +2811,12 @@ function shellMarkup(): string {
       .jt-launch { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: center; padding: .8rem; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: .75rem; }
       .jt-launch button { font-weight: 700; }
       .jt-floating-host { scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; }
-      .jt-floating { box-sizing: border-box; display: grid; grid-template-rows: auto auto; width: 100%; min-width: 0; min-height: 100%; overflow: visible; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: .9rem; background: var(--background, #171717); color: var(--foreground, inherit); box-shadow: 0 18px 55px rgb(0 0 0 / .38); }
+      .jt-floating { box-sizing: border-box; display: grid; grid-template-rows: auto auto; width: 100%; min-width: 0; min-height: 100%; padding-bottom: .75rem; overflow: visible; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: .9rem; background: var(--background, #171717); color: var(--foreground, inherit); box-shadow: 0 18px 55px rgb(0 0 0 / .38); }
       .jt-floating__bar { position: sticky; z-index: 10; top: 0; display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .55rem .7rem; border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent); background: var(--background, #171717); cursor: move; }
       .jt-floating__bar h2 { font-size: 1rem; }
       .jt-floating__body { min-height: 0; overflow: visible; }
       .jt-floating__body > .jt-shell__card { margin: .75rem; }
-      .jt-floating__tools { display: grid; gap: .65rem; margin-top: .75rem; padding: .75rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
+      .jt-floating__tools { display: grid; gap: .65rem; margin-top: .75rem; padding: .75rem .75rem 0; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
       .jt-tools-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; width: 100%; align-items: start; }
       .jt-tools-row > button, .jt-tools-row > details { width: 100%; min-width: 0; min-height: 2.75rem; margin: 0; }
       .jt-tools-row > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

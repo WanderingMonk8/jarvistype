@@ -615,7 +615,6 @@ function setup(ctx) {
     tab.root,
     "[data-cancel-recording]"
   );
-  const undoRecordingButton = requireElement(tab.root, "[data-undo-recording]");
   const voiceStatus = requireElement(tab.root, "[data-voice-status]");
   const voiceElapsed = requireElement(tab.root, "[data-voice-elapsed]");
   const voiceProvider = requireElement(tab.root, "[data-voice-provider]");
@@ -822,7 +821,7 @@ function setup(ctx) {
     paragraphRenderTimer = null;
     paragraphRenderDeadline = null;
     if (!alive || renderedParagraphText === desiredText) return;
-    renderParagraphs(paragraphList, desiredText);
+    renderParagraphs(paragraphList, desiredText, applyParagraphEdit);
     renderedParagraphText = desiredText;
   };
   const scheduleParagraphPreview = () => {
@@ -853,10 +852,11 @@ function setup(ctx) {
     historyPanel.hidden = !state.historyExpanded;
     historyButton.textContent = state.historyExpanded ? "Hide History" : "Show History";
     historyButton.disabled = !state.snapshot || state.snapshot.history.length === 0;
-    undoButton.disabled = !editorEnabled || state.saving || !state.snapshot?.canUndo || desiredText !== state.snapshot.cleanText;
     redoButton.hidden = !state.snapshot?.canRedo;
     redoButton.disabled = !editorEnabled || state.saving || !state.snapshot?.canRedo || desiredText !== state.snapshot.cleanText;
     const recordingOwnerReady = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.saving && !state.automatedBusy && !state.sending && !mismatch && state.activeChatId === state.snapshot.chatId && desiredText === state.snapshot.cleanText;
+    const undoIsRecording = Boolean(state.snapshot?.canUndoRecording);
+    undoButton.disabled = !editorEnabled || state.saving || (undoIsRecording ? !recordingOwnerReady || voiceBusy() : !state.snapshot?.canUndo) || desiredText !== state.snapshot?.cleanText;
     recordButton.textContent = state.voicePhase === "starting" || state.voicePhase === "recording" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record Message";
     recordButton.disabled = !hasNativeStt() || !recordingOwnerReady || voiceBusy() && activeRecording?.mode !== "message" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
     recordEditButton.textContent = (state.voicePhase === "starting" || state.voicePhase === "recording") && activeRecording?.mode === "edit" ? "Stop Edit Recording" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Record Edit";
@@ -866,7 +866,6 @@ function setup(ctx) {
     cancelRecordingButton.disabled = !activeRecording || activeRecording.mode !== "message";
     cancelEditRecordingButton.hidden = !recordingCanBeCancelled || activeRecording?.mode !== "edit";
     cancelEditRecordingButton.disabled = !activeRecording || activeRecording.mode !== "edit";
-    undoRecordingButton.disabled = !recordingOwnerReady || voiceBusy() || !state.snapshot?.canUndoRecording;
     voiceStatus.textContent = state.voiceMessage;
     voiceStatus.dataset.phase = state.voicePhase;
     voiceElapsed.textContent = `Elapsed: ${formatDuration(state.voiceElapsedMs)}`;
@@ -1173,6 +1172,35 @@ function setup(ctx) {
     render();
     void drainMutations();
   };
+  function applyParagraphEdit(lineIndex, originalLine, replacement) {
+    const trimmed = replacement.trim();
+    if (state.pendingProposal || state.pendingEditProposal || state.pendingEditCandidates || voiceBusy() || state.automatedBusy) {
+      state.voiceMessage = "Finish or reject the pending review before editing a paragraph.";
+      render();
+      return;
+    }
+    const lines = desiredText.split("\n");
+    if (lines[lineIndex] !== originalLine) {
+      state.voiceMessage = "That paragraph changed before your edit was saved. Nothing was changed.";
+      render();
+      return;
+    }
+    if (!trimmed) {
+      state.voiceMessage = "A paragraph cannot be empty. Use a delete command to remove it.";
+      render();
+      return;
+    }
+    lines[lineIndex] = trimmed;
+    const nextText = lines.join("\n");
+    if (nextText === desiredText) return;
+    if (nextText.length > MAX_DRAFT_CHARACTERS) {
+      state.voiceMessage = "That edit would exceed the draft character limit. Nothing was changed.";
+      render();
+      return;
+    }
+    editor.value = nextText;
+    handleEditorInput();
+  }
   const handleUndo = async () => {
     if (!state.snapshot || state.automatedBusy || state.sending) return;
     flushParagraphPreview();
@@ -1954,13 +1982,12 @@ function setup(ctx) {
     state.historyExpanded = !state.historyExpanded;
     render();
   };
-  const handleUndoClick = () => void handleUndo();
+  const handleUndoClick = () => void (state.snapshot?.canUndoRecording ? handleUndoRecording() : handleUndo());
   const handleRedoClick = () => void handleRedo();
   const handleRecordClick = () => void handleRecording("message");
   const handleRecordEditClick = () => void handleRecording("edit");
   const handleCancelRecordingClick = () => cancelActiveRecording("Recording cancelled. No transcript was appended.");
   const handleCancelEditRecordingClick = () => cancelActiveRecording("Edit recording cancelled. The draft was not changed.");
-  const handleUndoRecordingClick = () => void handleUndoRecording();
   const handleSendClick = () => void handleSend();
   const handleAcceptProposalClick = () => void acceptNormalizationProposal();
   const handleRejectProposalClick = () => rejectNormalizationProposal();
@@ -2075,7 +2102,6 @@ function setup(ctx) {
   recordEditButton.addEventListener("click", handleRecordEditClick);
   cancelEditRecordingButton.addEventListener("click", handleCancelEditRecordingClick);
   cancelRecordingButton.addEventListener("click", handleCancelRecordingClick);
-  undoRecordingButton.addEventListener("click", handleUndoRecordingClick);
   undoButton.addEventListener("click", handleUndoClick);
   redoButton.addEventListener("click", handleRedoClick);
   historyButton.addEventListener("click", handleHistoryToggle);
@@ -2139,7 +2165,6 @@ function setup(ctx) {
     recordEditButton.removeEventListener("click", handleRecordEditClick);
     cancelEditRecordingButton.removeEventListener("click", handleCancelEditRecordingClick);
     cancelRecordingButton.removeEventListener("click", handleCancelRecordingClick);
-    undoRecordingButton.removeEventListener("click", handleUndoRecordingClick);
     undoButton.removeEventListener("click", handleUndoClick);
     redoButton.removeEventListener("click", handleRedoClick);
     historyButton.removeEventListener("click", handleHistoryToggle);
@@ -2239,17 +2264,76 @@ function renderGlossary(container, entries, query = "") {
     container.append(row);
   }
 }
-function renderParagraphs(container, cleanText) {
+function attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit) {
+  let pressTimer = null;
+  let longPressed = false;
+  const cancelPress = () => {
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = null;
+  };
+  const beginEdit = () => {
+    cancelPress();
+    if (row.querySelector("textarea")) return;
+    const input = document.createElement("textarea");
+    input.className = "jt-paragraph-input";
+    input.value = line;
+    input.rows = Math.min(6, Math.max(2, Math.ceil(line.length / 60)));
+    input.setAttribute("aria-label", `Edit paragraph ${ordinal}`);
+    let settled = false;
+    const finish = (commit) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      text.hidden = false;
+      if (commit) onEdit(lineIndex, line, input.value);
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+    text.hidden = true;
+    row.append(input);
+    input.focus();
+  };
+  row.tabIndex = 0;
+  row.addEventListener("dblclick", beginEdit);
+  row.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target === row) beginEdit();
+  });
+  row.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse") return;
+    longPressed = false;
+    cancelPress();
+    pressTimer = setTimeout(() => {
+      longPressed = true;
+      beginEdit();
+    }, 500);
+  });
+  for (const type of ["pointerup", "pointercancel", "pointerleave"])
+    row.addEventListener(type, cancelPress);
+  row.addEventListener("contextmenu", (event) => {
+    if (!longPressed) return;
+    event.preventDefault();
+    longPressed = false;
+  });
+}
+function renderParagraphs(container, cleanText, onEdit) {
   container.replaceChildren();
   if (cleanText.length === 0) {
     const empty = document.createElement("p");
     empty.className = "jt-empty";
-    empty.textContent = "Paragraph numbers appear here as you type.";
+    empty.textContent = "Empty draft. Record a message, or open \u201CEdit the full draft text\u201D to type.";
     container.append(empty);
     return;
   }
   let ordinal = 0;
-  for (const line of cleanText.split("\n")) {
+  for (const [lineIndex, line] of cleanText.split("\n").entries()) {
     const row = document.createElement("div");
     row.className = "jt-paragraph-row";
     if (line.trim().length === 0) {
@@ -2267,6 +2351,7 @@ function renderParagraphs(container, cleanText) {
     text.className = "jt-paragraph-text";
     text.textContent = line;
     row.append(number, text);
+    if (onEdit) attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit);
     container.append(row);
   }
 }
@@ -2419,6 +2504,12 @@ function shellMarkup() {
       .jt-paragraph-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: .5rem; min-width: 0; min-height: 1.5rem; align-items: start; line-height: 1.5; }
       .jt-paragraph-row + .jt-paragraph-row { margin-top: .25rem; }
       .jt-paragraph-row--separator { min-height: .8rem; }
+      .jt-paragraph-row { -webkit-touch-callout: none; touch-action: manipulation; cursor: text; border-radius: .35rem; }
+      .jt-paragraph-row:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
+      .jt-paragraph-input { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; line-height: 1.5; padding: .35rem .5rem; border-radius: .4rem; resize: vertical; }
+      .jt-draft-details { margin-top: .6rem; }
+      .jt-draft-details summary { cursor: pointer; font-weight: 700; }
+      .jt-draft-details .jt-draft-editor { margin-top: .5rem; }
       .jt-paragraph-number { text-align: right; opacity: .6; user-select: none; }
       .jt-paragraph-text { white-space: pre-wrap; overflow-wrap: anywhere; }
       .jt-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
@@ -2463,10 +2554,8 @@ function shellMarkup() {
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
       .jt-floating summary { cursor: pointer; font-weight: 700; }
-      .jt-floating .jt-proposal { max-height: min(70vh, 34rem); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-      .jt-floating .jt-proposal pre { max-height: 12rem; overflow-y: auto; }
-      .jt-floating .jt-proposal > .jt-actions { position: sticky; z-index: 2; bottom: -.7rem; margin: .15rem -.7rem -.7rem; padding: .65rem .7rem; border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent); background: var(--background, #171717); }
-      .jt-decision { position: sticky; bottom: 0; z-index: 5; display: grid; gap: .5rem; margin-top: .5rem; padding: .65rem .75rem; border: 1px solid #d69e2e; border-radius: .6rem; background: var(--background, #171717); box-shadow: 0 -10px 24px rgb(0 0 0 / .32); }
+      .jt-floating .jt-proposal pre { max-height: none; overflow: visible; }
+      .jt-decision { grid-column: 1 / -1; position: sticky; bottom: 0; z-index: 5; display: grid; gap: .5rem; margin-top: .5rem; padding: .65rem .75rem; border: 1px solid #d69e2e; border-radius: .6rem; background: var(--background, #171717); box-shadow: 0 -10px 24px rgb(0 0 0 / .32); }
       .jt-decision__summary { margin: 0; font-size: .9rem; overflow-wrap: anywhere; }
       .jt-decision__actions { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
       .jt-decision__actions button { min-height: 2.75rem; font-weight: 700; }
@@ -2482,7 +2571,6 @@ function shellMarkup() {
         .jt-floating [data-floating-composer-mount] { min-height: 0; }
         .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: start; height: auto; overflow: visible; }
         .jt-floating .jt-composer__pane { min-height: 0; overflow: visible; padding-right: .25rem; }
-        .jt-floating .jt-proposal { max-height: clamp(18rem, 52vh, 30rem); }
         .jt-floating .jt-draft-editor { min-height: 10rem; }
         .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
         .jt-floating__tools > section, .jt-floating__tools > details { grid-column: 1 / -1; max-height: 24rem; overflow-y: auto; overscroll-behavior: contain; }
@@ -2525,13 +2613,15 @@ function shellMarkup() {
       <div data-composer-bootstrap hidden>
       <section class="jt-shell__card" data-composer-surface aria-labelledby="jt-draft-title">
         <div class="jt-composer__pane jt-composer__draft-pane">
-        <h3 id="jt-draft-title">Working draft</h3>
-        <textarea class="jt-draft-editor" data-draft-editor maxlength="${MAX_DRAFT_CHARACTERS}" aria-describedby="jt-draft-help" aria-label="JarvisType private working draft" disabled></textarea>
-        <p id="jt-draft-help">Paragraph numbers are shown separately and are never copied or sent.</p>
+        <h3 id="jt-draft-title">Numbered draft</h3>
+        <p id="jt-draft-help">Double-click or long-press a paragraph to edit it. Numbers are never copied or sent.</p>
         <p class="jt-draft-meta" data-draft-meta>Draft not loaded</p>
 
-        <h4>Numbered paragraphs</h4>
-        <div class="jt-paragraphs" data-paragraph-list role="region" aria-label="Numbered draft paragraphs" aria-live="polite" tabindex="0"></div>
+        <div class="jt-paragraphs" data-paragraph-list role="region" aria-label="Numbered draft paragraphs" aria-live="polite"></div>
+        <details class="jt-draft-details">
+          <summary>Edit the full draft text</summary>
+          <textarea class="jt-draft-editor" data-draft-editor maxlength="${MAX_DRAFT_CHARACTERS}" aria-describedby="jt-draft-help" aria-label="JarvisType private working draft" disabled></textarea>
+        </details>
         </div>
 
         <div class="jt-composer__pane jt-composer__action-pane">
@@ -2559,7 +2649,6 @@ function shellMarkup() {
           <div class="jt-actions" aria-label="Voice composition controls">
             <button type="button" data-record-message disabled>Record Message</button>
             <button type="button" data-cancel-recording hidden>Cancel Recording</button>
-            <button type="button" data-undo-recording disabled>Undo Last Recording</button>
           </div>
         </section>
 
@@ -2608,6 +2697,7 @@ function shellMarkup() {
           <h4 id="jt-history-title">Draft history</h4>
           <ol class="jt-history" data-history-list></ol>
         </section>
+        </div>
         <div class="jt-decision" data-decision-bar hidden>
           <p class="jt-decision__summary" data-decision-summary></p>
           <div class="jt-decision__actions">
@@ -2616,7 +2706,6 @@ function shellMarkup() {
             <button type="button" data-edit-reject hidden>Reject</button>
             <button type="button" data-edit-accept hidden>Accept edit</button>
           </div>
-        </div>
         </div>
       </section>
       </div>

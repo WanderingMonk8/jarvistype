@@ -603,8 +603,6 @@ function setup(ctx) {
   const retryButton = requireElement(tab.root, "[data-retry-backend]");
   const switchDraftButton = requireElement(tab.root, "[data-switch-draft]");
   const editor = requireElement(tab.root, "[data-draft-editor]");
-  const draftFullToggle = requireElement(tab.root, "[data-draft-full-toggle]");
-  const draftFull = requireElement(tab.root, "[data-draft-full]");
   const draftMeta = requireElement(tab.root, "[data-draft-meta]");
   const paragraphList = requireElement(tab.root, "[data-paragraph-list]");
   const recordButton = requireElement(tab.root, "[data-record-message]");
@@ -1999,13 +1997,6 @@ function setup(ctx) {
     state.historyExpanded = !state.historyExpanded;
     render();
   };
-  const handleDraftFullToggle = () => {
-    const opening = draftFull.hidden;
-    draftFull.hidden = !opening;
-    draftFullToggle.setAttribute("aria-expanded", String(opening));
-    draftFullToggle.textContent = opening ? "Hide the full draft text" : "Edit the full draft text";
-    if (opening) editor.focus();
-  };
   const handleUndoClick = () => void (state.snapshot?.canUndoRecording ? handleUndoRecording() : handleUndo());
   const handleRedoClick = () => void handleRedo();
   const handleRecordClick = () => void handleRecording("message");
@@ -2153,7 +2144,6 @@ function setup(ctx) {
   cancelEditRecordingButton.addEventListener("click", handleCancelEditRecordingClick);
   cancelRecordingButton.addEventListener("click", handleCancelRecordingClick);
   undoButton.addEventListener("click", handleUndoClick);
-  draftFullToggle.addEventListener("click", handleDraftFullToggle);
   redoButton.addEventListener("click", handleRedoClick);
   historyButton.addEventListener("click", handleHistoryToggle);
   sendButton.addEventListener("click", handleSendClick);
@@ -2218,7 +2208,6 @@ function setup(ctx) {
     cancelEditRecordingButton.removeEventListener("click", handleCancelEditRecordingClick);
     cancelRecordingButton.removeEventListener("click", handleCancelRecordingClick);
     undoButton.removeEventListener("click", handleUndoClick);
-    draftFullToggle.removeEventListener("click", handleDraftFullToggle);
     redoButton.removeEventListener("click", handleRedoClick);
     historyButton.removeEventListener("click", handleHistoryToggle);
     sendButton.removeEventListener("click", handleSendClick);
@@ -2382,7 +2371,7 @@ function renderParagraphs(container, cleanText, onEdit) {
   if (cleanText.length === 0) {
     const empty = document.createElement("p");
     empty.className = "jt-empty";
-    empty.textContent = "Empty draft. Record a message, or open \u201CEdit the full draft text\u201D to type.";
+    empty.textContent = "Empty draft. Record a message to start.";
     container.append(empty);
     return;
   }
@@ -2561,8 +2550,6 @@ function shellMarkup() {
       .jt-paragraph-row { -webkit-touch-callout: none; touch-action: manipulation; cursor: text; border-radius: .35rem; }
       .jt-paragraph-row:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-paragraph-input { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; line-height: 1.5; padding: .35rem .5rem; border-radius: .4rem; resize: vertical; }
-      .jt-draft-full-toggle { margin-top: .6rem; }
-      .jt-draft-full .jt-draft-editor { margin-top: .5rem; }
       .jt-paragraph-number { text-align: right; opacity: .6; user-select: none; }
       .jt-paragraph-text { white-space: pre-wrap; overflow-wrap: anywhere; }
       .jt-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
@@ -2573,7 +2560,7 @@ function shellMarkup() {
       .jt-shell [data-record-message], .jt-shell [data-record-edit], .jt-shell [data-send], .jt-shell [data-proposal-accept], .jt-shell [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
       .jt-record-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; width: 100%; }
       .jt-record-slot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; min-width: 0; }
-      .jt-record-slot > button { width: 100%; min-width: 0; margin: 0; white-space: nowrap; text-align: center; font-size: 1.1rem; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
+      .jt-record-slot > button { grid-row: 1; width: 100%; min-width: 0; margin: 0; white-space: nowrap; text-align: center; font-size: 1.1rem; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
       .jt-record-slot > [data-record-message], .jt-record-slot > [data-record-edit] { grid-column: 1 / -1; }
       .jt-record-slot[data-live="true"] > [data-record-message], .jt-record-slot[data-live="true"] > [data-record-edit] { grid-column: 1; font-size: 1.1rem; }
       .jt-record-slot > [data-cancel-recording], .jt-record-slot > [data-cancel-edit-recording] { grid-column: 2; }
@@ -2679,8 +2666,7 @@ function shellMarkup() {
         <p class="jt-draft-meta" data-draft-meta>Draft not loaded</p>
 
         <div class="jt-paragraphs" data-paragraph-list role="region" aria-label="Numbered draft paragraphs" aria-live="polite"></div>
-        <button type="button" class="jt-draft-full-toggle" data-draft-full-toggle aria-expanded="false" aria-controls="jt-draft-full">Edit the full draft text</button>
-        <div class="jt-draft-full" id="jt-draft-full" data-draft-full hidden>
+        <div class="jt-draft-full" data-draft-full hidden aria-hidden="true">
           <textarea class="jt-draft-editor" data-draft-editor maxlength="${MAX_DRAFT_CHARACTERS}" aria-describedby="jt-draft-help" aria-label="JarvisType private working draft" disabled></textarea>
         </div>
         </div>

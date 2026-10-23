@@ -161,33 +161,9 @@ export function extractConversationReferences(
   return references
 }
 
-export function extractCardTitleReferences(title: string): string[] {
-  const normalized = title.trim()
-  if (!normalized) return []
-  const primarySegment =
-    normalized.split(/\s*(?:[,;:|\u2013\u2014]|-(?=(?:the|a|an)\b))\s*/iu, 1)[0] ?? normalized
-  const extracted = extractConversationReferences([
-    { role: 'assistant', content: normalized },
-    { role: 'assistant', content: primarySegment },
-  ])
-  const references = new Map<string, string>()
-  for (const reference of [normalized, ...extracted]) {
-    const key = reference.toLocaleLowerCase()
-    if (!references.has(key)) references.set(key, reference)
-  }
-  return [...references.values()]
-}
-
-export function extractCardCharacterReferences(title: string, cardText: string): string[] {
-  const titleReferences = extractCardTitleReferences(title)
-  if (!cardText.trim()) return titleReferences
-  const cardReferences = extractConversationReferences([{ role: 'assistant', content: cardText }])
-  const references = new Map<string, string>()
-  for (const reference of [...titleReferences, ...cardReferences]) {
-    const key = reference.toLocaleLowerCase()
-    if (!references.has(key)) references.set(key, reference)
-  }
-  return [...references.values()]
+export function extractCardCharacterReferences(cardText: string): string[] {
+  if (!cardText.trim()) return []
+  return extractConversationReferences([{ role: 'assistant', content: cardText }])
 }
 
 export function correctFromConversationReferences(

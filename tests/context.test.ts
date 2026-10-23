@@ -5,7 +5,6 @@ import {
   clampContextMessageCount,
   correctFromConversationReferences,
   extractCardCharacterReferences,
-  extractCardTitleReferences,
   extractConversationReferences,
   selectRecentContext,
   selectRecentReferenceContext,
@@ -88,16 +87,8 @@ test('extracts the canonical name from a descriptive card title', () => {
   )
 })
 
-test('extracts a canonical name before an unspaced title separator', () => {
-  assert.ok(extractCardTitleReferences('Aiko-The Tired Worker').includes('Aiko'))
-  assert.ok(extractCardTitleReferences('Aiko,The Tired Worker').includes('Aiko'))
-  assert.ok(extractCardTitleReferences('Aiko—The Tired Worker').includes('Aiko'))
-  assert.ok(extractCardTitleReferences('Anne-Marie').includes('Anne-Marie'))
-})
-
 test('extracts both first and full character names from the card', () => {
   const references = extractCardCharacterReferences(
-    'Aiko - The Tired Worker',
     'Aiko Tanaka has worked the late shift for three years.',
   )
   assert.ok(references.includes('Aiko'))
@@ -106,7 +97,6 @@ test('extracts both first and full character names from the card', () => {
 
 test('extracts every named character from an ensemble card', () => {
   const references = extractCardCharacterReferences(
-    'Night Shift Roommates',
     'Aiko Tanaka works beside Hana Sato. Later, Marcus joins Aiko and Hana for dinner.',
   )
   for (const expected of ['Aiko Tanaka', 'Aiko', 'Hana Sato', 'Hana', 'Marcus']) {

@@ -1964,31 +1964,9 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
   }
   return references;
 }
-function extractCardTitleReferences(title) {
-  const normalized = title.trim();
-  if (!normalized) return [];
-  const primarySegment = normalized.split(/\s*(?:[,;:|\u2013\u2014]|-(?=(?:the|a|an)\b))\s*/iu, 1)[0] ?? normalized;
-  const extracted = extractConversationReferences([
-    { role: "assistant", content: normalized },
-    { role: "assistant", content: primarySegment }
-  ]);
-  const references = /* @__PURE__ */ new Map();
-  for (const reference of [normalized, ...extracted]) {
-    const key = reference.toLocaleLowerCase();
-    if (!references.has(key)) references.set(key, reference);
-  }
-  return [...references.values()];
-}
-function extractCardCharacterReferences(title, cardText) {
-  const titleReferences = extractCardTitleReferences(title);
-  if (!cardText.trim()) return titleReferences;
-  const cardReferences = extractConversationReferences([{ role: "assistant", content: cardText }]);
-  const references = /* @__PURE__ */ new Map();
-  for (const reference of [...titleReferences, ...cardReferences]) {
-    const key = reference.toLocaleLowerCase();
-    if (!references.has(key)) references.set(key, reference);
-  }
-  return [...references.values()];
+function extractCardCharacterReferences(cardText) {
+  if (!cardText.trim()) return [];
+  return extractConversationReferences([{ role: "assistant", content: cardText }]);
 }
 function correctFromConversationReferences(text, references, protectedTerms = []) {
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()));
@@ -5844,16 +5822,19 @@ async function loadCardCharacterReferences(chatId, userId) {
     const chat = await spindle.chats.get(chatId, userId);
     if (!chat?.character_id) return [];
     const character = await spindle.characters.get(chat.character_id, userId);
-    if (!character?.name.trim()) return [];
+    if (!character) return [];
     const cardText = [
       character.description,
       character.personality,
       character.scenario,
       character.first_mes,
       character.mes_example,
-      character.creator_notes
+      character.creator_notes,
+      character.system_prompt,
+      character.post_history_instructions,
+      ...character.alternate_greetings ?? []
     ].filter(Boolean).join("\n");
-    const references = extractCardCharacterReferences(character.name, cardText);
+    const references = extractCardCharacterReferences(cardText);
     cardCharacterReferenceCache.set(cacheKey, references);
     while (cardCharacterReferenceCache.size > MAX_CONVERSATION_REFERENCE_CACHES) {
       const oldest = cardCharacterReferenceCache.keys().next().value;

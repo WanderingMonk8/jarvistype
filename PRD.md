@@ -627,7 +627,7 @@ JarvisType is expected to use the following Spindle capabilities:
 - Frontend microphone capture through Lumiverse `ctx.stt.start(...)` where available, with browser microphone permission still controlled by the host environment.
 - Frontend-to-backend messaging for recordings, partial results, status, and draft operations.
 - `spindle.chats.getActive()` for active-chat identification.
-- `spindle.chats.get(chatId)` and `spindle.characters.get(characterId)` for the active card character's canonical name.
+- `spindle.chats.get(chatId)` and `spindle.characters.get(characterId)` for one-time extraction of character names and proper nouns from the active card's substantive fields.
 - `spindle.chat.getMessages(chatId)` for recent context.
 - `spindle.chat.appendMessage(...)` for confirmed submission.
 - Frontend `ctx.stt` behind `speech-to-text-v1` for live capture or supplied-audio transcription through the user's selected or explicitly configured Lumiverse STT provider.
@@ -639,7 +639,7 @@ JarvisType is expected to use the following Spindle capabilities:
 Expected gated permissions are:
 
 - `chats`
-- `characters` for keeping the active card character's canonical name in spelling references
+- `characters` for keeping names and proper nouns extracted from the active character card in spelling references
 - `chat_mutation`
 - `generation` when Lumiverse generation is used for edit parsing or correction, and when **Confirm & Send** triggers the normal Lumiverse response-generation flow
 - `cors_proxy` when an external service is used

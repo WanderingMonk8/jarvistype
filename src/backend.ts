@@ -3572,7 +3572,7 @@ async function loadCardCharacterReferences(chatId: string, userId: string): Prom
     const chat = await spindle.chats.get(chatId, userId)
     if (!chat?.character_id) return []
     const character = await spindle.characters.get(chat.character_id, userId)
-    if (!character?.name.trim()) return []
+    if (!character) return []
     const cardText = [
       character.description,
       character.personality,
@@ -3580,10 +3580,13 @@ async function loadCardCharacterReferences(chatId: string, userId: string): Prom
       character.first_mes,
       character.mes_example,
       character.creator_notes,
+      character.system_prompt,
+      character.post_history_instructions,
+      ...(character.alternate_greetings ?? []),
     ]
       .filter(Boolean)
       .join('\n')
-    const references = extractCardCharacterReferences(character.name, cardText)
+    const references = extractCardCharacterReferences(cardText)
     cardCharacterReferenceCache.set(cacheKey, references)
     while (cardCharacterReferenceCache.size > MAX_CONVERSATION_REFERENCE_CACHES) {
       const oldest = cardCharacterReferenceCache.keys().next().value

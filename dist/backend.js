@@ -3525,7 +3525,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
     const interpretStartedAt = performance.now();
     recordDebug(context.userId, "edit.interpret", "start");
     const interpretedPlan = await interpretEditInstruction(
-      canonicalDeleteInstruction(request.instructionTranscript),
+      canonicalEditInstruction(request.instructionTranscript),
       session,
       settings,
       glossary,
@@ -3944,11 +3944,8 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
     `JarvisType edit candidate selection completed in ${Math.round(performance.now() - startedAt2)} ms.`
   );
 }
-function canonicalDeleteInstruction(instructionTranscript) {
-  return instructionTranscript.replace(
-    /^\s*(?:please\s+)?(?:remove|take\s+(?:off|out)|erase|cut)\b/iu,
-    "delete"
-  );
+function canonicalEditInstruction(instructionTranscript) {
+  return instructionTranscript.replace(/^\s*(?:please\s+)?(?:remove|take\s+(?:off|out)|erase|cut)\b/iu, "delete").replace(/[\s,]*\bplease\s*([.!?]*)\s*$/iu, "$1");
 }
 async function interpretEditInstruction(instructionTranscript, session, settings, glossary, conversationReferences, userId) {
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(

@@ -3647,6 +3647,48 @@ test('preserves sentence casing when replacing an opening phrase', async () => {
   assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
 })
 
+test('treats remove and trailing please exactly like delete', async () => {
+  const userId = 'remove-alias-user'
+  const chatId = 'remove-alias-chat'
+  activeChatId = chatId
+  const draft = 'First one. Very good. Last one.\n\nSecond two. Second three.'
+  const instructions = [
+    'Delete the sentence very good.',
+    'Remove the sentence very good.',
+    'Remove the sentence very good, please.',
+    'Please remove the sentence very good.',
+  ]
+  const results: unknown[] = []
+  for (const [index, instructionTranscript] of instructions.entries()) {
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `remove-alias-interpret-${index}`,
+        operationId: `remove-alias-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response')
+    if (proposal?.type !== 'edit.proposal.response') return
+    results.push(proposal.proposal.afterText)
+    assert.equal(generationRequests.length, 0)
+  }
+  assert.deepEqual(results, [
+    'First one. Last one.\n\nSecond two. Second three.',
+    'First one. Last one.\n\nSecond two. Second three.',
+    'First one. Last one.\n\nSecond two. Second three.',
+    'First one. Last one.\n\nSecond two. Second three.',
+  ])
+})
+
 test('keeps grammar repairs from moving a quotation mark outside the paragraph', async () => {
   const userId = 'quotation-grammar-bound-user'
   const chatId = 'quotation-grammar-bound-chat'

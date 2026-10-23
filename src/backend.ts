@@ -728,7 +728,7 @@ async function handleEditInterpretation(
     const interpretStartedAt = performance.now()
     recordDebug(context.userId, 'edit.interpret', 'start')
     const interpretedPlan = await interpretEditInstruction(
-      canonicalDeleteInstruction(request.instructionTranscript),
+      canonicalEditInstruction(request.instructionTranscript),
       session,
       settings,
       glossary,
@@ -1208,11 +1208,10 @@ async function handleEditCandidateSelection(
   )
 }
 
-function canonicalDeleteInstruction(instructionTranscript: string): string {
-  return instructionTranscript.replace(
-    /^\s*(?:please\s+)?(?:remove|take\s+(?:off|out)|erase|cut)\b/iu,
-    'delete',
-  )
+function canonicalEditInstruction(instructionTranscript: string): string {
+  return instructionTranscript
+    .replace(/^\s*(?:please\s+)?(?:remove|take\s+(?:off|out)|erase|cut)\b/iu, 'delete')
+    .replace(/[\s,]*\bplease\s*([.!?]*)\s*$/iu, '$1')
 }
 
 async function interpretEditInstruction(

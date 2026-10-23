@@ -859,9 +859,13 @@ function setup(ctx) {
     const recordingOwnerReady = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.saving && !state.automatedBusy && !state.sending && !mismatch && state.activeChatId === state.snapshot.chatId && desiredText === state.snapshot.cleanText;
     const undoIsRecording = Boolean(state.snapshot?.canUndoRecording);
     undoButton.disabled = !editorEnabled || state.saving || (undoIsRecording ? !recordingOwnerReady || voiceBusy() : !state.snapshot?.canUndo) || desiredText !== state.snapshot?.cleanText;
-    recordButton.textContent = state.voicePhase === "starting" || state.voicePhase === "recording" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record Message";
+    const messageLive = activeRecording?.mode !== "edit";
+    recordButton.dataset.recordingState = messageLive && state.voicePhase === "starting" ? "starting" : messageLive && state.voicePhase === "recording" ? "recording" : "";
+    recordButton.textContent = state.voicePhase === "starting" && activeRecording?.mode !== "edit" ? "Getting ready to record" : state.voicePhase === "recording" && activeRecording?.mode !== "edit" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record Message";
     recordButton.disabled = !hasNativeStt() || !recordingOwnerReady || voiceBusy() && activeRecording?.mode !== "message" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
-    recordEditButton.textContent = (state.voicePhase === "starting" || state.voicePhase === "recording") && activeRecording?.mode === "edit" ? "Stop Edit Recording" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Record Edit";
+    const editLive = activeRecording?.mode === "edit";
+    recordEditButton.dataset.recordingState = editLive && state.voicePhase === "starting" ? "starting" : editLive && state.voicePhase === "recording" ? "recording" : "";
+    recordEditButton.textContent = state.voicePhase === "starting" && activeRecording?.mode === "edit" ? "Getting ready to record" : state.voicePhase === "recording" && activeRecording?.mode === "edit" ? "Stop Edit Recording" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Record Edit";
     recordEditButton.disabled = !hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() && activeRecording?.mode !== "edit" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
     const recordingCanBeCancelled = state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing";
     cancelRecordingButton.hidden = !recordingCanBeCancelled || activeRecording?.mode !== "message";
@@ -1717,8 +1721,8 @@ function setup(ctx) {
         onStatus: (status) => {
           if (activeRecording?.runId !== runId) return;
           if (status.phase === "listening") {
-            state.voicePhase = "recording";
-            state.voiceMessage = "Recording\u2026 Speak naturally, then select Stop Recording.";
+            if (state.voicePhase === "starting")
+              state.voiceMessage = "Getting ready to record\u2026 wait for \u201CRecording now\u201D.";
           } else if (status.phase === "processing") {
             state.voicePhase = "processing";
             state.voiceMessage = "Transcribing the completed recording\u2026";
@@ -1757,7 +1761,7 @@ function setup(ctx) {
       state.voiceElapsedMs = 0;
       state.voiceProvider = session.provider;
       state.voiceProvisionalText = "";
-      state.voiceMessage = mode === "edit" ? "Starting edit-instruction capture\u2026" : "Starting microphone capture\u2026";
+      state.voiceMessage = mode === "edit" ? "Getting ready to record the edit instruction\u2026" : "Getting ready to record\u2026";
       recordingTimer = setInterval(() => {
         if (recordingStartedAt !== startedAt) return;
         state.voiceElapsedMs = Date.now() - startedAt;
@@ -1771,7 +1775,7 @@ function setup(ctx) {
       void session.ready.then(() => {
         if (activeRecording?.runId !== runId || state.voicePhase === "processing") return;
         state.voicePhase = "recording";
-        state.voiceMessage = "Recording\u2026 Speak naturally, then select Stop Recording.";
+        state.voiceMessage = "Recording now. Speak naturally, then select Stop Recording.";
         render();
       }).catch((error) => failRecording(runId, error));
       void session.result.then((transcript) => finishRecording(runId, transcript)).catch((error) => failRecording(runId, error));
@@ -2559,6 +2563,8 @@ function shellMarkup() {
       .jt-shell button:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-shell button:disabled { cursor: not-allowed; opacity: .55; }
       .jt-shell [data-record-message], .jt-shell [data-record-edit], .jt-shell [data-send], .jt-shell [data-proposal-accept], .jt-shell [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
+      .jt-shell [data-recording-state="starting"] { border-color: #ecc94b; background: #ecc94b; color: #1a1a1a; font-weight: 700; }
+      .jt-shell [data-recording-state="recording"] { border-color: #e53e3e; background: #e53e3e; color: #ffffff; font-weight: 700; }
       .jt-shell [data-record-message]:hover:not(:disabled), .jt-shell [data-record-edit]:hover:not(:disabled), .jt-shell [data-send]:hover:not(:disabled), .jt-shell [data-proposal-accept]:hover:not(:disabled), .jt-shell [data-edit-accept]:hover:not(:disabled) { background: color-mix(in srgb, #d69e2e 28%, transparent); }
       .jt-voice { display: grid; gap: .55rem; padding: .7rem; border-radius: .5rem; background: color-mix(in srgb, currentColor 6%, transparent); }
       .jt-voice__meta { display: flex; flex-wrap: wrap; gap: .35rem 1rem; font-size: .8rem; opacity: .78; }

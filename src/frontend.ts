@@ -636,16 +636,25 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.saving ||
       (undoIsRecording ? !recordingOwnerReady || voiceBusy() : !state.snapshot?.canUndo) ||
       desiredText !== state.snapshot?.cleanText
+    const messageLive = activeRecording?.mode !== 'edit'
+    recordButton.dataset.recordingState =
+      messageLive && state.voicePhase === 'starting'
+        ? 'starting'
+        : messageLive && state.voicePhase === 'recording'
+          ? 'recording'
+          : ''
     recordButton.textContent =
-      state.voicePhase === 'starting' || state.voicePhase === 'recording'
-        ? 'Stop Recording'
-        : state.voicePhase === 'processing'
-          ? 'Transcribing…'
-          : state.voicePhase === 'committing'
-            ? 'Normalizing…'
-            : state.voicePhase === 'review'
-              ? 'Review required'
-              : 'Record Message'
+      state.voicePhase === 'starting' && activeRecording?.mode !== 'edit'
+        ? 'Getting ready to record'
+        : state.voicePhase === 'recording' && activeRecording?.mode !== 'edit'
+          ? 'Stop Recording'
+          : state.voicePhase === 'processing'
+            ? 'Transcribing…'
+            : state.voicePhase === 'committing'
+              ? 'Normalizing…'
+              : state.voicePhase === 'review'
+                ? 'Review required'
+                : 'Record Message'
     recordButton.disabled =
       !hasNativeStt() ||
       !recordingOwnerReady ||
@@ -653,13 +662,21 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.voicePhase === 'processing' ||
       state.voicePhase === 'committing' ||
       state.voicePhase === 'review'
+    const editLive = activeRecording?.mode === 'edit'
+    recordEditButton.dataset.recordingState =
+      editLive && state.voicePhase === 'starting'
+        ? 'starting'
+        : editLive && state.voicePhase === 'recording'
+          ? 'recording'
+          : ''
     recordEditButton.textContent =
-      (state.voicePhase === 'starting' || state.voicePhase === 'recording') &&
-      activeRecording?.mode === 'edit'
-        ? 'Stop Edit Recording'
-        : state.voicePhase === 'review' && state.pendingEditProposal
-          ? 'Review required'
-          : 'Record Edit'
+      state.voicePhase === 'starting' && activeRecording?.mode === 'edit'
+        ? 'Getting ready to record'
+        : state.voicePhase === 'recording' && activeRecording?.mode === 'edit'
+          ? 'Stop Edit Recording'
+          : state.voicePhase === 'review' && state.pendingEditProposal
+            ? 'Review required'
+            : 'Record Edit'
     recordEditButton.disabled =
       !hasNativeStt() ||
       !recordingOwnerReady ||
@@ -1700,8 +1717,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         onStatus: (status) => {
           if (activeRecording?.runId !== runId) return
           if (status.phase === 'listening') {
-            state.voicePhase = 'recording'
-            state.voiceMessage = 'Recording… Speak naturally, then select Stop Recording.'
+            // The host's ready promise is the only signal that capture has started, so a
+            // listening status never moves the UI to recording on its own.
+            if (state.voicePhase === 'starting')
+              state.voiceMessage = 'Getting ready to record… wait for “Recording now”.'
           } else if (status.phase === 'processing') {
             state.voicePhase = 'processing'
             state.voiceMessage = 'Transcribing the completed recording…'
@@ -1742,7 +1761,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.voiceProvider = session.provider
       state.voiceProvisionalText = ''
       state.voiceMessage =
-        mode === 'edit' ? 'Starting edit-instruction capture…' : 'Starting microphone capture…'
+        mode === 'edit'
+          ? 'Getting ready to record the edit instruction…'
+          : 'Getting ready to record…'
       recordingTimer = setInterval(() => {
         if (recordingStartedAt !== startedAt) return
         state.voiceElapsedMs = Date.now() - startedAt
@@ -1757,7 +1778,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         .then(() => {
           if (activeRecording?.runId !== runId || state.voicePhase === 'processing') return
           state.voicePhase = 'recording'
-          state.voiceMessage = 'Recording… Speak naturally, then select Stop Recording.'
+          state.voiceMessage = 'Recording now. Speak naturally, then select Stop Recording.'
           render()
         })
         .catch((error: unknown) => failRecording(runId, error))
@@ -2697,6 +2718,8 @@ function shellMarkup(): string {
       .jt-shell button:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-shell button:disabled { cursor: not-allowed; opacity: .55; }
       .jt-shell [data-record-message], .jt-shell [data-record-edit], .jt-shell [data-send], .jt-shell [data-proposal-accept], .jt-shell [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
+      .jt-shell [data-recording-state="starting"] { border-color: #ecc94b; background: #ecc94b; color: #1a1a1a; font-weight: 700; }
+      .jt-shell [data-recording-state="recording"] { border-color: #e53e3e; background: #e53e3e; color: #ffffff; font-weight: 700; }
       .jt-shell [data-record-message]:hover:not(:disabled), .jt-shell [data-record-edit]:hover:not(:disabled), .jt-shell [data-send]:hover:not(:disabled), .jt-shell [data-proposal-accept]:hover:not(:disabled), .jt-shell [data-edit-accept]:hover:not(:disabled) { background: color-mix(in srgb, #d69e2e 28%, transparent); }
       .jt-voice { display: grid; gap: .55rem; padding: .7rem; border-radius: .5rem; background: color-mix(in srgb, currentColor 6%, transparent); }
       .jt-voice__meta { display: flex; flex-wrap: wrap; gap: .35rem 1rem; font-size: .8rem; opacity: .78; }

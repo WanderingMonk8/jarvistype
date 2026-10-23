@@ -56,7 +56,6 @@ import {
 } from './domain/grammar'
 import type { DeterministicGrammarOptions } from './domain/grammar'
 import {
-  hasUnresolvedCommandSignal,
   normalizeDeterministically,
   recoverHighConfidenceContextualCommands,
   SPOKEN_PUNCTUATION_COMMAND_PHRASES,
@@ -361,11 +360,7 @@ async function handleTranscriptNormalization(
   if (settings.contextualNormalizationEnabled) {
     const contextualStartedAt = performance.now()
     recordDebug(context.userId, 'normalize.contextual', 'start')
-    const contextualSkipReason = explicitQuotationAliasHandled
-      ? 'quotation-fast-path'
-      : ambiguities.length === 0 && !hasUnresolvedCommandSignal(candidateText)
-        ? 'no-unresolved-command-signal'
-        : null
+    const contextualSkipReason = explicitQuotationAliasHandled ? 'quotation-fast-path' : null
     if (contextualSkipReason)
       recordDebug(context.userId, 'normalize.contextual', `skipped reason=${contextualSkipReason}`)
     const contextual = contextualSkipReason

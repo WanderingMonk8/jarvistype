@@ -1424,9 +1424,9 @@ test('does not append a second period after a punctuated spoken quotation', asyn
   }
 })
 
-test('skips the contextual provider for plain dictation and runs it for unresolved commands', async () => {
-  const userId = 'contextual-gate-user'
-  const chatId = 'contextual-gate-chat'
+test('calls the contextual provider for every recording outside the quotation fast path', async () => {
+  const userId = 'contextual-always-user'
+  const chatId = 'contextual-always-chat'
   activeChatId = chatId
   await seedDraft(userId, chatId, 'Earlier')
   responses.length = 0
@@ -1434,25 +1434,23 @@ test('skips the contextual provider for plain dictation and runs it for unresolv
 
   generationRequests.length = 0
   await dispatch(
-    recordingAppendRequest(chatId, 'contextual-gate-plain', 1, 'Alpha beta gamma delta.'),
+    recordingAppendRequest(chatId, 'contextual-always-plain', 1, 'Alpha beta gamma delta.'),
     userId,
   )
   let response = responses.at(-1)?.payload
   assert.equal(response?.type, 'transcript.normalization.response')
-  assert.equal(generationRequests.length, 0)
+  assert.equal(generationRequests.length, 1)
   if (response?.type === 'transcript.normalization.response')
-    assert.doesNotMatch(response.proposal.candidateText, /BETA/)
+    assert.match(response.proposal.candidateText, /BETA/)
 
   generationRequests.length = 0
   await dispatch(
-    recordingAppendRequest(chatId, 'contextual-gate-signal', 2, 'Alpha beta gamma speach delta.'),
+    recordingAppendRequest(chatId, 'contextual-always-signal', 2, 'Alpha beta gamma speach delta.'),
     userId,
   )
   response = responses.at(-1)?.payload
   assert.equal(response?.type, 'transcript.normalization.response')
   assert.equal(generationRequests.length, 1)
-  if (response?.type === 'transcript.normalization.response')
-    assert.match(response.proposal.candidateText, /BETA/)
   generationEditsOverride = null
 })
 

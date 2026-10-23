@@ -2515,52 +2515,6 @@ var LITERAL_PUNCTUATION_CONTEXTS = [
     "gi"
   )
 ];
-var COMMAND_SIGNAL_WORDS = [
-  "period",
-  "comma",
-  "colon",
-  "semicolon",
-  "question",
-  "exclamation",
-  "ellipsis",
-  "dash",
-  "hyphen",
-  "quotation",
-  "quote",
-  "paragraph",
-  "speech",
-  "apostrophe",
-  "parenthesis",
-  "bracket"
-];
-function withinEditDistance(left, right, maximum) {
-  if (Math.abs(left.length - right.length) > maximum) return false;
-  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-  for (let row = 1; row <= left.length; row += 1) {
-    const current = [row];
-    for (let column = 1; column <= right.length; column += 1) {
-      current[column] = Math.min(
-        previous[column] + 1,
-        current[column - 1] + 1,
-        previous[column - 1] + (left[row - 1] === right[column - 1] ? 0 : 1)
-      );
-    }
-    previous = current;
-  }
-  return previous[right.length] <= maximum;
-}
-function hasUnresolvedCommandSignal(text) {
-  if (/\bpair\s+of\s+graphs?\b/iu.test(text)) return true;
-  for (const match of text.matchAll(/\p{L}+/gu)) {
-    const word = match[0].toLocaleLowerCase();
-    if (COMMAND_SIGNAL_WORDS.includes(word)) return true;
-    if (word.length < 5) continue;
-    const maximum = word.length >= 8 ? 2 : 1;
-    if (COMMAND_SIGNAL_WORDS.some((command) => withinEditDistance(word, command, maximum)))
-      return true;
-  }
-  return false;
-}
 function normalizeDeterministically(raw, glossary, options = {}) {
   const protectedLiterals = [];
   let text = raw.replace(
@@ -3307,7 +3261,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
   if (settings.contextualNormalizationEnabled) {
     const contextualStartedAt = performance.now();
     recordDebug(context.userId, "normalize.contextual", "start");
-    const contextualSkipReason = explicitQuotationAliasHandled ? "quotation-fast-path" : ambiguities.length === 0 && !hasUnresolvedCommandSignal(candidateText) ? "no-unresolved-command-signal" : null;
+    const contextualSkipReason = explicitQuotationAliasHandled ? "quotation-fast-path" : null;
     if (contextualSkipReason)
       recordDebug(context.userId, "normalize.contextual", `skipped reason=${contextualSkipReason}`);
     const contextual = contextualSkipReason ? null : await normalizeWithContext(

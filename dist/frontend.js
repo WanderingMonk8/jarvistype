@@ -861,17 +861,24 @@ function setup(ctx) {
     undoButton.disabled = !editorEnabled || state.saving || (undoIsRecording ? !recordingOwnerReady || voiceBusy() : !state.snapshot?.canUndo) || desiredText !== state.snapshot?.cleanText;
     const messageLive = activeRecording?.mode !== "edit";
     recordButton.dataset.recordingState = messageLive && state.voicePhase === "starting" ? "starting" : messageLive && state.voicePhase === "recording" ? "recording" : "";
-    recordButton.textContent = state.voicePhase === "starting" && activeRecording?.mode !== "edit" ? "Preparing" : state.voicePhase === "recording" && activeRecording?.mode !== "edit" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record Message";
+    const messageIsLive = state.voicePhase === "recording" && activeRecording?.mode === "message";
+    const editIsLive = state.voicePhase === "recording" && activeRecording?.mode === "edit";
+    recordButton.textContent = state.voicePhase === "starting" && activeRecording?.mode !== "edit" ? "Preparing" : messageIsLive ? "\u25A0" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record Message";
     const ownRecordingRunning = activeRecording !== null && (state.voicePhase === "starting" || state.voicePhase === "recording");
     recordButton.disabled = !ownRecordingRunning && (!hasNativeStt() || !recordingOwnerReady || voiceBusy() && activeRecording?.mode !== "message" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review");
     const editLive = activeRecording?.mode === "edit";
     recordEditButton.dataset.recordingState = editLive && state.voicePhase === "starting" ? "starting" : editLive && state.voicePhase === "recording" ? "recording" : "";
-    recordEditButton.textContent = state.voicePhase === "starting" && activeRecording?.mode === "edit" ? "Preparing" : state.voicePhase === "recording" && activeRecording?.mode === "edit" ? "Stop Edit Recording" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Record Edit";
+    recordButton.setAttribute("aria-label", messageIsLive ? "Stop recording" : "Record message");
+    recordButton.title = messageIsLive ? "Stop recording" : "";
+    recordButton.parentElement?.setAttribute("data-live", String(messageIsLive || editIsLive));
+    recordEditButton.setAttribute("aria-label", editIsLive ? "Stop edit recording" : "Record edit");
+    recordEditButton.title = editIsLive ? "Stop edit recording" : "";
+    recordEditButton.parentElement?.setAttribute("data-live", String(editIsLive));
+    recordEditButton.textContent = state.voicePhase === "starting" && activeRecording?.mode === "edit" ? "Preparing" : editIsLive ? "\u25A0" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Record Edit";
     recordEditButton.disabled = !ownRecordingRunning && (!hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() && activeRecording?.mode !== "edit" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review");
-    const recordingCanBeCancelled = state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing";
-    cancelRecordingButton.style.visibility = recordingCanBeCancelled && activeRecording?.mode === "message" ? "visible" : "hidden";
-    cancelRecordingButton.disabled = !activeRecording || activeRecording.mode !== "message";
-    cancelEditRecordingButton.style.visibility = recordingCanBeCancelled && activeRecording?.mode === "edit" ? "visible" : "hidden";
+    cancelRecordingButton.style.visibility = messageIsLive ? "visible" : "hidden";
+    cancelRecordingButton.disabled = !messageIsLive;
+    cancelEditRecordingButton.style.visibility = editIsLive ? "visible" : "hidden";
     cancelEditRecordingButton.disabled = !activeRecording || activeRecording.mode !== "edit";
     voiceStatus.textContent = state.voiceMessage;
     voiceStatus.dataset.phase = state.voicePhase;
@@ -2564,8 +2571,13 @@ function shellMarkup() {
       .jt-shell button:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-shell button:disabled { cursor: not-allowed; opacity: .55; }
       .jt-shell [data-record-message], .jt-shell [data-record-edit], .jt-shell [data-send], .jt-shell [data-proposal-accept], .jt-shell [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
-      .jt-record-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; justify-items: stretch; align-items: stretch; justify-content: start; width: 100%; }
-      .jt-record-row > button { width: 100%; min-width: 0; justify-self: stretch; margin: 0; white-space: nowrap; text-align: center; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
+      .jt-record-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; width: 100%; }
+      .jt-record-slot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; min-width: 0; }
+      .jt-record-slot > button { width: 100%; min-width: 0; margin: 0; white-space: nowrap; text-align: center; font-size: 1.1rem; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
+      .jt-record-slot > [data-record-message], .jt-record-slot > [data-record-edit] { grid-column: 1 / -1; }
+      .jt-record-slot[data-live="true"] > [data-record-message], .jt-record-slot[data-live="true"] > [data-record-edit] { grid-column: 1; font-size: 1.1rem; }
+      .jt-record-slot > [data-cancel-recording], .jt-record-slot > [data-cancel-edit-recording] { grid-column: 2; }
+      .jt-actions > [data-send] { flex: 1 1 100%; }
       .jt-shell [data-recording-state="starting"] { border-color: #ecc94b; background: #ecc94b; color: #1a1a1a; font-weight: 700; }
       .jt-shell [data-recording-state="recording"] { border-color: #e53e3e; background: #e53e3e; color: #ffffff; font-weight: 700; }
       .jt-shell [data-record-message]:hover:not(:disabled), .jt-shell [data-record-edit]:hover:not(:disabled), .jt-shell [data-send]:hover:not(:disabled), .jt-shell [data-proposal-accept]:hover:not(:disabled), .jt-shell [data-edit-accept]:hover:not(:disabled) { background: color-mix(in srgb, #d69e2e 28%, transparent); }
@@ -2719,14 +2731,16 @@ function shellMarkup() {
           <p class="jt-voice__transcript jt-voice__transcript--provisional" data-voice-provisional hidden></p>
           <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
           <div class="jt-record-row" aria-label="Voice composition controls">
-            <button type="button" data-record-message disabled>Record Message</button>
-            <button type="button" data-cancel-recording style="visibility: hidden" disabled>Cancel Recording</button>
+            <div class="jt-record-slot" data-record-slot="message">
+              <button type="button" data-record-message disabled>Record Message</button>
+              <button type="button" data-cancel-recording aria-label="Cancel recording" title="Cancel recording" style="visibility: hidden" disabled>\u2715</button>
+            </div>
+            <div class="jt-record-slot" data-record-slot="edit">
+              <button type="button" data-record-edit disabled>Record Edit</button>
+              <button type="button" data-cancel-edit-recording aria-label="Cancel edit recording" title="Cancel edit recording" style="visibility: hidden" disabled>\u2715</button>
+            </div>
           </div>
         </section>
-        <div class="jt-record-row" aria-label="Editing voice controls">
-          <button type="button" data-record-edit disabled>Record Edit</button>
-          <button type="button" data-cancel-edit-recording style="visibility: hidden" disabled>Cancel Edit Recording</button>
-        </div>
         <div class="jt-actions">
           <button type="button" data-send disabled>Confirm &amp; Send</button>
         </div>

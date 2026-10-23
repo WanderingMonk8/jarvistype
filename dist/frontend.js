@@ -2062,6 +2062,32 @@ function setup(ctx) {
       group.hidden = !group.querySelector("[data-command-item]:not([hidden])");
     }
   };
+  const floatingFocusables = () => Array.from(
+    floatingWidget.root.querySelectorAll(
+      'button, input, textarea, select, a[href], [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((element) => !element.hasAttribute("disabled") && !element.closest("[hidden]"));
+  const handleFloatingFocusTrap = (event) => {
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (!floatingWidget.isVisible()) return;
+    const items = floatingFocusables();
+    const first = items[0];
+    const last = items.at(-1);
+    if (!first || !last) return;
+    const active = document.activeElement;
+    if (!(active instanceof Node) || !floatingWidget.root.contains(active)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+      return;
+    }
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    } else if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+    }
+  };
   const handleFloatingScrollKey = (event) => {
     if (event.key === "Escape" && floatingWidget.isVisible()) {
       event.preventDefault();
@@ -2148,6 +2174,7 @@ function setup(ctx) {
   floatingCommandButton.addEventListener("click", handleCommandToggle);
   floatingCommandSearch.addEventListener("input", handleCommandSearch);
   floatingWidget.root.addEventListener("keydown", handleFloatingScrollKey);
+  document.addEventListener("keydown", handleFloatingFocusTrap, true);
   render();
   void checkBackend();
   ctx.ready();
@@ -2212,6 +2239,7 @@ function setup(ctx) {
     floatingCommandButton.removeEventListener("click", handleCommandToggle);
     floatingCommandSearch.removeEventListener("input", handleCommandSearch);
     floatingWidget.root.removeEventListener("keydown", handleFloatingScrollKey);
+    document.removeEventListener("keydown", handleFloatingFocusTrap, true);
     normalizationModelPicker.destroy();
     composerLauncher.remove();
     composerLauncherStyle.remove();

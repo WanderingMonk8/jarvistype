@@ -37,6 +37,7 @@ import {
   DEFAULT_CONTEXT_MESSAGE_COUNT,
   clampContextMessageCount,
   correctFromConversationReferences,
+  extractCardTitleReferences,
   extractConversationReferences,
   selectRecentReferenceContext,
 } from './domain/context'
@@ -3578,10 +3579,7 @@ function mergeConversationReferences(
   recentReferences: readonly string[],
 ): string[] {
   if (!cardCharacterName) return [...recentReferences]
-  const cardReferences = [
-    cardCharacterName,
-    ...extractConversationReferences([{ role: 'assistant', content: cardCharacterName }]),
-  ]
+  const cardReferences = extractCardTitleReferences(cardCharacterName)
   const prioritized = new Map<string, string>()
   for (const reference of [...cardReferences, ...recentReferences]) {
     const normalized = reference.trim()

@@ -1964,6 +1964,21 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
   }
   return references;
 }
+function extractCardTitleReferences(title) {
+  const normalized = title.trim();
+  if (!normalized) return [];
+  const primarySegment = normalized.split(/\s*(?:[,;:|\u2013\u2014]|-(?=(?:the|a|an)\b))\s*/iu, 1)[0] ?? normalized;
+  const extracted = extractConversationReferences([
+    { role: "assistant", content: normalized },
+    { role: "assistant", content: primarySegment }
+  ]);
+  const references = /* @__PURE__ */ new Map();
+  for (const reference of [normalized, ...extracted]) {
+    const key = reference.toLocaleLowerCase();
+    if (!references.has(key)) references.set(key, reference);
+  }
+  return [...references.values()];
+}
 function correctFromConversationReferences(text, references, protectedTerms = []) {
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()));
   const referenceByKey = /* @__PURE__ */ new Map();
@@ -5821,10 +5836,7 @@ async function loadCardCharacterName(chatId, userId) {
 }
 function mergeConversationReferences(cardCharacterName, recentReferences) {
   if (!cardCharacterName) return [...recentReferences];
-  const cardReferences = [
-    cardCharacterName,
-    ...extractConversationReferences([{ role: "assistant", content: cardCharacterName }])
-  ];
+  const cardReferences = extractCardTitleReferences(cardCharacterName);
   const prioritized = /* @__PURE__ */ new Map();
   for (const reference of [...cardReferences, ...recentReferences]) {
     const normalized = reference.trim();

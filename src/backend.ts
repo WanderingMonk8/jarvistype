@@ -321,6 +321,7 @@ async function handleTranscriptNormalization(
       settings,
       glossary,
       referenceContext,
+      cardCharacterReferences,
       conversationReferences,
       capitalizeOpening,
       recoveredBoundary,
@@ -348,6 +349,7 @@ async function handleTranscriptNormalization(
     settings,
     glossary,
     referenceContext,
+    cardCharacterReferences,
     conversationReferences,
     capitalizeOpening,
     recoveredBoundary,
@@ -413,13 +415,27 @@ async function handleTranscriptNormalization(
       }
     }
 
+    const protectedReferences = [
+      ...glossary.entries.map((entry) => entry.canonical),
+      ...deterministic.learningCandidates.map((candidate) => candidate.canonical),
+    ]
+    const cardReferenceCorrection = correctFromConversationReferences(
+      candidateText,
+      cardCharacterReferences,
+      protectedReferences,
+    )
+    if (cardReferenceCorrection.text !== candidateText) {
+      candidateText = cardReferenceCorrection.text
+      reasons.push(
+        ...cardReferenceCorrection.correctedTerms.map(
+          ({ heard, canonical }) => `character card spelling: ${heard} → ${canonical}`,
+        ),
+      )
+    }
     const referenceCorrection = correctFromConversationReferences(
       candidateText,
       conversationReferences,
-      [
-        ...glossary.entries.map((entry) => entry.canonical),
-        ...deterministic.learningCandidates.map((candidate) => candidate.canonical),
-      ],
+      protectedReferences,
     )
     if (referenceCorrection.text !== candidateText) {
       candidateText = referenceCorrection.text
@@ -781,6 +797,7 @@ async function handleEditInterpretation(
         ),
       ),
       glossary,
+      cardCharacterReferences,
       conversationReferences,
       spelling.learningCandidates.map((candidate) => candidate.canonical),
     )
@@ -3224,6 +3241,7 @@ function stripQualifiedAsInEditPayloads(plan: EditPlan): EditPlan {
 function normalizeEditInputPayloads(
   plan: EditPlan,
   glossary: GlossaryState,
+  cardCharacterReferences: string[],
   conversationReferences: string[],
   protectedTerms: string[],
 ): EditPlan {
@@ -3234,10 +3252,20 @@ function normalizeEditInputPayloads(
       const deterministic = normalizeDeterministically(operation.text, glossary.entries, {
         capitalizeOpening: false,
       }).text
-      const normalized = correctFromConversationReferences(deterministic, conversationReferences, [
+      const protectedReferences = [
         ...glossary.entries.map((entry) => entry.canonical),
         ...protectedTerms,
-      ]).text
+      ]
+      const cardNormalized = correctFromConversationReferences(
+        deterministic,
+        cardCharacterReferences,
+        protectedReferences,
+      ).text
+      const normalized = correctFromConversationReferences(
+        cardNormalized,
+        conversationReferences,
+        protectedReferences,
+      ).text
       return normalized === operation.text ? operation : { ...operation, text: normalized }
     }),
   }

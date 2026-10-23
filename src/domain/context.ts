@@ -279,7 +279,8 @@ function isReferenceTerm(term: string): boolean {
 }
 
 function isHighConfidenceReferenceMatch(heard: string, reference: string): boolean {
-  if (Math.abs(heard.length - reference.length) > 1) return false
+  const maximumLengthDifference = Math.min(heard.length, reference.length) >= 6 ? 2 : 1
+  if (Math.abs(heard.length - reference.length) > maximumLengthDifference) return false
   if (
     Math.max(heard.length, reference.length) <= 5 &&
     referenceSoundKey(heard).length >= 3 &&

@@ -151,6 +151,13 @@ test('corrects a unique two-character name ending only after a stable prefix', (
   )
 })
 
+test('corrects a two-character length difference after a stable name prefix', () => {
+  assert.deepEqual(correctFromConversationReferences('Carrie Fishbourne', ['Fishborn']), {
+    text: 'Carrie Fishborn',
+    correctedTerms: [{ heard: 'Fishbourne', canonical: 'Fishborn' }],
+  })
+})
+
 test('corrects a unique short phonetic name and preserves its possessive apostrophe', () => {
   assert.deepEqual(
     correctFromConversationReferences("Cat's coat matched Cat’s boots.", ['Kat’s']),

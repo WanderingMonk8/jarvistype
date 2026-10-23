@@ -2049,7 +2049,8 @@ function isReferenceTerm(term) {
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1));
 }
 function isHighConfidenceReferenceMatch(heard, reference) {
-  if (Math.abs(heard.length - reference.length) > 1) return false;
+  const maximumLengthDifference = Math.min(heard.length, reference.length) >= 6 ? 2 : 1;
+  if (Math.abs(heard.length - reference.length) > maximumLengthDifference) return false;
   if (Math.max(heard.length, reference.length) <= 5 && referenceSoundKey(heard).length >= 3 && referenceSoundKey(heard) === referenceSoundKey(reference))
     return true;
   if (heard.charAt(0) !== reference.charAt(0)) {
@@ -3233,7 +3234,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       return { kind: "error", error: "permission", session: session2 };
     }
     const normalizedAgainstNewerDraft = session2.draftVersion !== request.expectedVersion;
-    const [settings2, glossary2, messages, cardCharacterReferences] = await Promise.all([
+    const [settings2, glossary2, messages, cardCharacterReferences2] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
       spindle.chat.getMessages(request.chatId),
@@ -3246,7 +3247,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     );
     const referenceContext2 = selectRecentReferenceContext(messages, settings2.contextMessageCount);
     const conversationReferences2 = mergeConversationReferences(
-      cardCharacterReferences,
+      cardCharacterReferences2,
       cachedConversationReferences(context.userId, request.chatId, referenceContext2.messages)
     );
     const capitalizeOpening2 = shouldCapitalizeRecordingOpening(session2.cleanText);
@@ -3278,6 +3279,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       settings: settings2,
       glossary: glossary2,
       referenceContext: referenceContext2,
+      cardCharacterReferences: cardCharacterReferences2,
       conversationReferences: conversationReferences2,
       capitalizeOpening: capitalizeOpening2,
       recoveredBoundary: recoveredBoundary2,
@@ -3305,6 +3307,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     settings,
     glossary,
     referenceContext,
+    cardCharacterReferences,
     conversationReferences,
     capitalizeOpening,
     recoveredBoundary,
@@ -3360,13 +3363,27 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
         reasons.push("bounded conversational context");
       }
     }
+    const protectedReferences = [
+      ...glossary.entries.map((entry) => entry.canonical),
+      ...deterministic.learningCandidates.map((candidate) => candidate.canonical)
+    ];
+    const cardReferenceCorrection = correctFromConversationReferences(
+      candidateText,
+      cardCharacterReferences,
+      protectedReferences
+    );
+    if (cardReferenceCorrection.text !== candidateText) {
+      candidateText = cardReferenceCorrection.text;
+      reasons.push(
+        ...cardReferenceCorrection.correctedTerms.map(
+          ({ heard, canonical }) => `character card spelling: ${heard} \u2192 ${canonical}`
+        )
+      );
+    }
     const referenceCorrection = correctFromConversationReferences(
       candidateText,
       conversationReferences,
-      [
-        ...glossary.entries.map((entry) => entry.canonical),
-        ...deterministic.learningCandidates.map((candidate) => candidate.canonical)
-      ]
+      protectedReferences
     );
     if (referenceCorrection.text !== candidateText) {
       candidateText = referenceCorrection.text;
@@ -3659,6 +3676,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
         )
       ),
       glossary,
+      cardCharacterReferences,
       conversationReferences,
       spelling.learningCandidates.map((candidate) => candidate.canonical)
     );
@@ -5562,7 +5580,7 @@ function stripQualifiedAsInEditPayloads(plan) {
     })
   };
 }
-function normalizeEditInputPayloads(plan, glossary, conversationReferences, protectedTerms) {
+function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, conversationReferences, protectedTerms) {
   return {
     ...plan,
     operations: plan.operations.map((operation) => {
@@ -5570,10 +5588,20 @@ function normalizeEditInputPayloads(plan, glossary, conversationReferences, prot
       const deterministic = normalizeDeterministically(operation.text, glossary.entries, {
         capitalizeOpening: false
       }).text;
-      const normalized = correctFromConversationReferences(deterministic, conversationReferences, [
+      const protectedReferences = [
         ...glossary.entries.map((entry) => entry.canonical),
         ...protectedTerms
-      ]).text;
+      ];
+      const cardNormalized = correctFromConversationReferences(
+        deterministic,
+        cardCharacterReferences,
+        protectedReferences
+      ).text;
+      const normalized = correctFromConversationReferences(
+        cardNormalized,
+        conversationReferences,
+        protectedReferences
+      ).text;
       return normalized === operation.text ? operation : { ...operation, text: normalized };
     })
   };

@@ -137,6 +137,24 @@ test('preserves punctuation vocabulary in ordinary noun and verb contexts', () =
   )
 })
 
+test('boundary punctuation commands replace the sentence punctuation before them', () => {
+  assert.equal(
+    normalizeDeterministically('She was laughing. Dash. Him, loud.', []).text,
+    'She was laughing — Him, loud.',
+  )
+  assert.equal(normalizeDeterministically('Are you sure. Question mark', []).text, 'Are you sure?')
+  assert.equal(normalizeDeterministically('Wow. Exclamation mark', []).text, 'Wow!')
+  assert.equal(
+    normalizeDeterministically('Let me think. Comma and then go.', []).text,
+    'Let me think, and then go.',
+  )
+  assert.equal(normalizeDeterministically('Hello. Period', []).text, 'Hello.')
+  assert.equal(
+    normalizeDeterministically('Look at the word dash here.', []).text,
+    'Look at dash here.',
+  )
+})
+
 test('supports expanded punctuation commands and explicit fallbacks', () => {
   assert.equal(
     normalizeDeterministically(

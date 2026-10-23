@@ -87,6 +87,16 @@ const PUNCTUATION: Array<[RegExp, string, string]> = [
   [/\bapostrophe\b([.,;:!?…—–-]*)/gi, '’', 'apostrophe'],
 ]
 
+/**
+ * A spoken mark that replaces the boundary (“dash”, “question mark”, “comma”, …)
+ * replaces the period that speech-to-text placed before it. Other terminal marks
+ * stay, since combinations such as “?!” are explicit and intentional.
+ */
+const TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
+  '\\.+(?=\\s*\\b(?:question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)',
+  'giu',
+)
+
 const SPOKEN_PUNCTUATION_TERM_SOURCE =
   'open single quote|close single quote|open quote|close quote|single quotation|single quote|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe'
 
@@ -172,6 +182,7 @@ export function normalizeDeterministically(
     authoritativePunctuationMarks.push('.')
   text = restoredSentenceBoundaries.text
 
+  text = text.replace(TERMINAL_BEFORE_BOUNDARY_COMMAND, '')
   for (const [pattern, replacement, reason] of PUNCTUATION) {
     const count = text.match(pattern)?.length ?? 0
     const next = text.replace(

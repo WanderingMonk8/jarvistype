@@ -869,9 +869,9 @@ function setup(ctx) {
     recordEditButton.textContent = state.voicePhase === "starting" && activeRecording?.mode === "edit" ? "Preparing" : state.voicePhase === "recording" && activeRecording?.mode === "edit" ? "Stop Edit Recording" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Record Edit";
     recordEditButton.disabled = !ownRecordingRunning && (!hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() && activeRecording?.mode !== "edit" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review");
     const recordingCanBeCancelled = state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing";
-    cancelRecordingButton.hidden = !recordingCanBeCancelled || activeRecording?.mode !== "message";
+    cancelRecordingButton.style.visibility = recordingCanBeCancelled && activeRecording?.mode === "message" ? "visible" : "hidden";
     cancelRecordingButton.disabled = !activeRecording || activeRecording.mode !== "message";
-    cancelEditRecordingButton.hidden = !recordingCanBeCancelled || activeRecording?.mode !== "edit";
+    cancelEditRecordingButton.style.visibility = recordingCanBeCancelled && activeRecording?.mode === "edit" ? "visible" : "hidden";
     cancelEditRecordingButton.disabled = !activeRecording || activeRecording.mode !== "edit";
     voiceStatus.textContent = state.voiceMessage;
     voiceStatus.dataset.phase = state.voicePhase;
@@ -2564,7 +2564,8 @@ function shellMarkup() {
       .jt-shell button:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-shell button:disabled { cursor: not-allowed; opacity: .55; }
       .jt-shell [data-record-message], .jt-shell [data-record-edit], .jt-shell [data-send], .jt-shell [data-proposal-accept], .jt-shell [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
-      .jt-shell [data-record-message], .jt-shell [data-record-edit] { min-width: 14rem; white-space: nowrap; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
+      .jt-record-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .5rem; }
+      .jt-record-row > button { width: 100%; min-width: 0; white-space: nowrap; text-align: center; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
       .jt-shell [data-recording-state="starting"] { border-color: #ecc94b; background: #ecc94b; color: #1a1a1a; font-weight: 700; }
       .jt-shell [data-recording-state="recording"] { border-color: #e53e3e; background: #e53e3e; color: #ffffff; font-weight: 700; }
       .jt-shell [data-record-message]:hover:not(:disabled), .jt-shell [data-record-edit]:hover:not(:disabled), .jt-shell [data-send]:hover:not(:disabled), .jt-shell [data-proposal-accept]:hover:not(:disabled), .jt-shell [data-edit-accept]:hover:not(:disabled) { background: color-mix(in srgb, #d69e2e 28%, transparent); }
@@ -2717,14 +2718,16 @@ function shellMarkup() {
           </div>
           <p class="jt-voice__transcript jt-voice__transcript--provisional" data-voice-provisional hidden></p>
           <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
-          <div class="jt-actions" aria-label="Voice composition controls">
+          <div class="jt-record-row" aria-label="Voice composition controls">
             <button type="button" data-record-message disabled>Record Message</button>
-            <button type="button" data-cancel-recording hidden>Cancel Recording</button>
+            <button type="button" data-cancel-recording style="visibility: hidden" disabled>Cancel Recording</button>
           </div>
         </section>
-        <div class="jt-actions" aria-label="Editing voice controls">
+        <div class="jt-record-row" aria-label="Editing voice controls">
           <button type="button" data-record-edit disabled>Record Edit</button>
-          <button type="button" data-cancel-edit-recording hidden>Cancel Edit Recording</button>
+          <button type="button" data-cancel-edit-recording style="visibility: hidden" disabled>Cancel Edit Recording</button>
+        </div>
+        <div class="jt-actions">
           <button type="button" data-send disabled>Confirm &amp; Send</button>
         </div>
         <div class="jt-actions">

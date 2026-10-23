@@ -3312,7 +3312,7 @@ async function normalizeWithContext(
     }
     const content = extractGenerationContent(response)
     if (!content) {
-      finish('no-content')
+      finish(`no-content ${describeGenerationShape(response)}`)
       return null
     }
     const parsed = JSON.parse(stripCodeFence(content)) as unknown
@@ -3408,7 +3408,25 @@ function applyContextualEdits(candidate: string, edits: readonly ContextualEdit[
 }
 
 function contextualOutputTokenLimit(rawTranscript: string): number {
-  return Math.min(1_200, Math.max(256, Math.ceil(rawTranscript.length / 2)))
+  return Math.min(2_048, Math.max(1_024, Math.ceil(rawTranscript.length / 2)))
+}
+
+/** Metadata only: field names, finish reasons, and token counts. Never generated text. */
+function describeGenerationShape(value: unknown): string {
+  if (!isRecord(value)) return `type=${value === null ? 'null' : typeof value}`
+  const keys = Object.keys(value).sort().join(',')
+  const finish = ['finish_reason', 'finishReason', 'stop_reason', 'stopReason']
+    .map((key) => value[key])
+    .find((item): item is string => typeof item === 'string' && item.length <= 40)
+  const usage = isRecord(value.usage) ? value.usage : null
+  const completion = usage?.completion_tokens ?? usage?.output_tokens
+  return [
+    `keys=${keys.slice(0, 120)}`,
+    finish ? `finish=${finish}` : null,
+    typeof completion === 'number' ? `completionTokens=${completion}` : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
 }
 
 interface ContextualCommandDecision {

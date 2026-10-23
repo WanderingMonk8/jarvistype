@@ -5550,7 +5550,7 @@ async function normalizeWithContext(rawTranscript, deterministicCandidate, messa
     }
     const content = extractGenerationContent(response);
     if (!content) {
-      finish("no-content");
+      finish(`no-content ${describeGenerationShape(response)}`);
       return null;
     }
     const parsed = JSON.parse(stripCodeFence(content));
@@ -5625,7 +5625,19 @@ function applyContextualEdits(candidate, edits) {
   return text;
 }
 function contextualOutputTokenLimit(rawTranscript) {
-  return Math.min(1200, Math.max(256, Math.ceil(rawTranscript.length / 2)));
+  return Math.min(2048, Math.max(1024, Math.ceil(rawTranscript.length / 2)));
+}
+function describeGenerationShape(value) {
+  if (!isRecord5(value)) return `type=${value === null ? "null" : typeof value}`;
+  const keys = Object.keys(value).sort().join(",");
+  const finish = ["finish_reason", "finishReason", "stop_reason", "stopReason"].map((key) => value[key]).find((item) => typeof item === "string" && item.length <= 40);
+  const usage = isRecord5(value.usage) ? value.usage : null;
+  const completion = usage?.completion_tokens ?? usage?.output_tokens;
+  return [
+    `keys=${keys.slice(0, 120)}`,
+    finish ? `finish=${finish}` : null,
+    typeof completion === "number" ? `completionTokens=${completion}` : null
+  ].filter(Boolean).join(" ");
 }
 function parseContextualCommandDecisions(value, rawTranscript) {
   if (!Array.isArray(value) || value.length > 32) return null;

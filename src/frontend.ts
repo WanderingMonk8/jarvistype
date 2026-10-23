@@ -2019,7 +2019,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
     resizeAndClampFloatingWidget()
     floatingWidget.setVisible(true)
-    void refreshHostState()
+    scheduleFloatingContentFit()
+    void refreshHostState().finally(scheduleFloatingContentFit)
     window.setTimeout(() => editor.focus(), 0)
   }
   function closeFloatingComposer(): void {
@@ -2222,17 +2223,38 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
   function resizeAndClampFloatingWidget(): void {
     const size = getFloatingWidgetSize()
+    setAndClampFloatingWidgetSize(size.width, size.height)
+  }
+  function setAndClampFloatingWidgetSize(width: number, height: number): void {
     const viewport = getViewportSize()
-    floatingWidget.setSize(size.width, size.height)
+    floatingWidget.setSize(width, height)
     const position = floatingWidget.getPosition()
-    const marginX = viewport.width >= size.width + 24 ? 12 : 0
-    const marginY = viewport.height >= size.height + 24 ? 12 : 0
-    const maxX = Math.max(marginX, viewport.width - size.width - marginX)
-    const maxY = Math.max(marginY, viewport.height - size.height - marginY)
+    const marginX = viewport.width >= width + 24 ? 12 : 0
+    const marginY = viewport.height >= height + 24 ? 12 : 0
+    const maxX = Math.max(marginX, viewport.width - width - marginX)
+    const maxY = Math.max(marginY, viewport.height - height - marginY)
     floatingWidget.moveTo(
       Math.min(maxX, Math.max(marginX, position.x)),
       Math.min(maxY, Math.max(marginY, position.y)),
     )
+  }
+  function scheduleFloatingContentFit(): void {
+    window.requestAnimationFrame(() => {
+      if (!floatingWidget.isVisible()) return
+      const overflow = Math.ceil(
+        floatingWidget.root.scrollHeight - floatingWidget.root.clientHeight,
+      )
+      if (overflow <= 1) return
+      const baseSize = getFloatingWidgetSize()
+      const viewport = getViewportSize()
+      const fittedHeight = Math.min(
+        Math.max(1, viewport.height - 24),
+        baseSize.height + overflow + 2,
+      )
+      if (fittedHeight > baseSize.height) {
+        setAndClampFloatingWidgetSize(baseSize.width, fittedHeight)
+      }
+    })
   }
   const handleViewportResize = () => resizeAndClampFloatingWidget()
   document.addEventListener('visibilitychange', handleVisibility)

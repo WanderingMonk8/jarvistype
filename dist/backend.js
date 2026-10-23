@@ -1981,19 +1981,10 @@ function extractCardTitleReferences(title) {
 }
 function extractCardCharacterReferences(title, cardText) {
   const titleReferences = extractCardTitleReferences(title);
-  const anchor = titleReferences.find(
-    (reference) => /^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(reference)
-  );
-  if (!anchor || !cardText.trim()) return titleReferences;
-  const anchorKey = anchor.toLocaleLowerCase();
-  const fullNames = extractConversationReferences([{ role: "assistant", content: cardText }]).filter(
-    (reference) => {
-      const words = reference.split(/\s+/u);
-      return words.length > 1 && words.length <= 4 && words.some((word) => word.toLocaleLowerCase() === anchorKey);
-    }
-  );
+  if (!cardText.trim()) return titleReferences;
+  const cardReferences = extractConversationReferences([{ role: "assistant", content: cardText }]);
   const references = /* @__PURE__ */ new Map();
-  for (const reference of [...fullNames, ...titleReferences]) {
+  for (const reference of [...titleReferences, ...cardReferences]) {
     const key = reference.toLocaleLowerCase();
     if (!references.has(key)) references.set(key, reference);
   }

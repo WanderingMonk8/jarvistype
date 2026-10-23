@@ -104,6 +104,16 @@ test('extracts both first and full character names from the card', () => {
   assert.ok(references.includes('Aiko Tanaka'))
 })
 
+test('extracts every named character from an ensemble card', () => {
+  const references = extractCardCharacterReferences(
+    'Night Shift Roommates',
+    'Aiko Tanaka works beside Hana Sato. Later, Marcus joins Aiko and Hana for dinner.',
+  )
+  for (const expected of ['Aiko Tanaka', 'Aiko', 'Hana Sato', 'Hana', 'Marcus']) {
+    assert.ok(references.includes(expected), `missing ${expected}`)
+  }
+})
+
 test('when the reference cap is reached, earlier input (the newest messages) keeps its terms', () => {
   assert.deepEqual(
     extractConversationReferences(

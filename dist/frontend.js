@@ -868,7 +868,7 @@ function setup(ctx) {
     recordEditButton.dataset.recordingState = editLive && state.voicePhase === "starting" ? "starting" : editLive && state.voicePhase === "recording" ? "recording" : "";
     recordButton.setAttribute("aria-label", messageIsLive ? "Stop recording" : "Record");
     recordButton.title = messageIsLive ? "Stop recording" : "";
-    recordButton.parentElement?.setAttribute("data-live", String(messageIsLive || editIsLive));
+    recordButton.parentElement?.setAttribute("data-live", String(messageIsLive));
     recordEditButton.setAttribute("aria-label", editIsLive ? "Stop edit recording" : "Edit");
     recordEditButton.title = editIsLive ? "Stop edit recording" : "";
     recordEditButton.parentElement?.setAttribute("data-live", String(editIsLive));

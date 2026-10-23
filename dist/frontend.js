@@ -850,7 +850,7 @@ function setup(ctx) {
     renderDiff(state.snapshot, diffPanel, diffParagraphs, diffRemoved, diffAdded);
     renderHistory(historyList, state.snapshot);
     historyPanel.hidden = !state.historyExpanded;
-    historyButton.textContent = state.historyExpanded ? "Hide History" : "Show History";
+    historyButton.textContent = state.historyExpanded ? "Hide" : "History";
     historyButton.disabled = !state.snapshot || state.snapshot.history.length === 0;
     redoButton.disabled = !editorEnabled || state.saving || !state.snapshot?.canRedo || desiredText !== state.snapshot.cleanText;
     const recordingOwnerReady = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.saving && !state.automatedBusy && !state.sending && !mismatch && state.activeChatId === state.snapshot.chatId && desiredText === state.snapshot.cleanText;
@@ -2734,7 +2734,7 @@ function shellMarkup() {
         <div class="jt-history-row">
           <button type="button" data-undo disabled>Undo</button>
           <button type="button" data-redo disabled>Redo</button>
-          <button type="button" data-history-toggle disabled>Show History</button>
+          <button type="button" data-history-toggle disabled>History</button>
         </div>
 
         <section class="jt-diff" data-diff-panel hidden aria-labelledby="jt-diff-title">

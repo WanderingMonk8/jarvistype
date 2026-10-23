@@ -45,12 +45,12 @@ function getFloatingWidgetSize(): { width: number; height: number } {
   if (viewport.width < NARROW_COMPOSER_BREAKPOINT_PX) {
     return {
       width: Math.max(1, Math.min(430, viewport.width - 24)),
-      height: Math.max(1, Math.min(720, viewport.height - 24)),
+      height: Math.max(1, Math.min(714, viewport.height - 24)),
     }
   }
   return {
     width: Math.max(1, Math.min(960, viewport.width - 48)),
-    height: Math.max(1, Math.min(600, viewport.height - 48)),
+    height: Math.max(1, Math.min(594, viewport.height - 48)),
   }
 }
 
@@ -2818,10 +2818,13 @@ function shellMarkup(): string {
       .jt-floating__body > .jt-shell__card { margin: .75rem; }
       .jt-floating__tools { display: grid; gap: .65rem; margin-top: 1rem; padding: .55rem .7rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
       .jt-tools-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; width: 100%; align-items: start; }
-      .jt-tools-row > button, .jt-tools-row > details { width: 100%; min-width: 0; min-height: 2.75rem; margin: 0; }
-      .jt-tools-row > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .jt-tools-row > button, .jt-tools-row > details { width: 100%; min-width: 0; min-height: 2.35rem; margin: 0; }
+      .jt-tools-row > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: start; border-color: color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; background: transparent; }
+      .jt-tools-row > button::before { content: '▸ '; }
+      .jt-tools-row > button[aria-expanded="true"]::before { content: '▾ '; }
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
+      .jt-floating .jt-tools-row > details { padding: .48rem .75rem; }
       .jt-floating summary { cursor: pointer; font-weight: 700; }
       .jt-floating .jt-proposal pre { max-height: none; overflow: visible; }
       .jt-decision { position: sticky; bottom: 0; z-index: 5; display: grid; gap: .4rem; margin: .4rem 0; padding: .5rem .6rem; border: 1px solid #d69e2e; border-radius: .6rem; background: var(--background, #171717); box-shadow: 0 -6px 16px rgb(0 0 0 / .3); }

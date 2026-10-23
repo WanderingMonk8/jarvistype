@@ -178,6 +178,31 @@ export function extractCardTitleReferences(title: string): string[] {
   return [...references.values()]
 }
 
+export function extractCardCharacterReferences(title: string, cardText: string): string[] {
+  const titleReferences = extractCardTitleReferences(title)
+  const anchor = titleReferences.find((reference) =>
+    /^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(reference),
+  )
+  if (!anchor || !cardText.trim()) return titleReferences
+  const anchorKey = anchor.toLocaleLowerCase()
+  const fullNames = extractConversationReferences([{ role: 'assistant', content: cardText }]).filter(
+    (reference) => {
+      const words = reference.split(/\s+/u)
+      return (
+        words.length > 1 &&
+        words.length <= 4 &&
+        words.some((word) => word.toLocaleLowerCase() === anchorKey)
+      )
+    },
+  )
+  const references = new Map<string, string>()
+  for (const reference of [...fullNames, ...titleReferences]) {
+    const key = reference.toLocaleLowerCase()
+    if (!references.has(key)) references.set(key, reference)
+  }
+  return [...references.values()]
+}
+
 export function correctFromConversationReferences(
   text: string,
   references: readonly string[],

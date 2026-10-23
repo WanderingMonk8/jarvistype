@@ -1979,6 +1979,26 @@ function extractCardTitleReferences(title) {
   }
   return [...references.values()];
 }
+function extractCardCharacterReferences(title, cardText) {
+  const titleReferences = extractCardTitleReferences(title);
+  const anchor = titleReferences.find(
+    (reference) => /^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(reference)
+  );
+  if (!anchor || !cardText.trim()) return titleReferences;
+  const anchorKey = anchor.toLocaleLowerCase();
+  const fullNames = extractConversationReferences([{ role: "assistant", content: cardText }]).filter(
+    (reference) => {
+      const words = reference.split(/\s+/u);
+      return words.length > 1 && words.length <= 4 && words.some((word) => word.toLocaleLowerCase() === anchorKey);
+    }
+  );
+  const references = /* @__PURE__ */ new Map();
+  for (const reference of [...fullNames, ...titleReferences]) {
+    const key = reference.toLocaleLowerCase();
+    if (!references.has(key)) references.set(key, reference);
+  }
+  return [...references.values()];
+}
 function correctFromConversationReferences(text, references, protectedTerms = []) {
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()));
   const referenceByKey = /* @__PURE__ */ new Map();
@@ -3085,6 +3105,7 @@ var editCandidateContexts = /* @__PURE__ */ new Map();
 var glossaryCache = /* @__PURE__ */ new Map();
 var settingsCache = /* @__PURE__ */ new Map();
 var conversationReferenceCache = /* @__PURE__ */ new Map();
+var cardCharacterReferenceCache = /* @__PURE__ */ new Map();
 var MAX_COMPLETED_SENDS = 100;
 var MAX_CONVERSATION_REFERENCE_CACHES = 100;
 var MAX_GLOSSARY_PROMPT_CHARACTERS = 8e3;
@@ -3243,11 +3264,11 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       return { kind: "error", error: "permission", session: session2 };
     }
     const normalizedAgainstNewerDraft = session2.draftVersion !== request.expectedVersion;
-    const [settings2, glossary2, messages, cardCharacterName] = await Promise.all([
+    const [settings2, glossary2, messages, cardCharacterReferences] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
       spindle.chat.getMessages(request.chatId),
-      loadCardCharacterName(request.chatId, context.userId)
+      loadCardCharacterReferences(request.chatId, context.userId)
     ]);
     recordDebug(
       context.userId,
@@ -3256,7 +3277,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     );
     const referenceContext2 = selectRecentReferenceContext(messages, settings2.contextMessageCount);
     const conversationReferences2 = mergeConversationReferences(
-      cardCharacterName,
+      cardCharacterReferences,
       cachedConversationReferences(context.userId, request.chatId, referenceContext2.messages)
     );
     const capitalizeOpening2 = shouldCapitalizeRecordingOpening(session2.cleanText);
@@ -3627,11 +3648,11 @@ async function handleEditInterpretation(request, context, activeRequest) {
     if (session.draftVersion !== request.expectedVersion)
       return { error: "stale", session };
     if (!session.cleanText.trim()) return { error: "empty", session };
-    const [settings, glossary, messages, cardCharacterName] = await Promise.all([
+    const [settings, glossary, messages, cardCharacterReferences] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
       spindle.chat.getMessages(request.chatId),
-      loadCardCharacterName(request.chatId, context.userId)
+      loadCardCharacterReferences(request.chatId, context.userId)
     ]);
     recordDebug(
       context.userId,
@@ -3640,7 +3661,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
     );
     const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount);
     const conversationReferences = mergeConversationReferences(
-      cardCharacterName,
+      cardCharacterReferences,
       settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : []
     );
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries);
@@ -5823,20 +5844,37 @@ function parseContextualCommandDecisions(value, rawTranscript) {
 function containsCaseInsensitive(haystack, needle) {
   return haystack.toLocaleLowerCase().includes(needle.toLocaleLowerCase());
 }
-async function loadCardCharacterName(chatId, userId) {
-  if (!spindle.permissions.has("characters")) return void 0;
+async function loadCardCharacterReferences(chatId, userId) {
+  const cacheKey = `${userId}\0${chatId}`;
+  const cached = cardCharacterReferenceCache.get(cacheKey);
+  if (cached) return cached;
+  if (!spindle.permissions.has("characters")) return [];
   try {
     const chat = await spindle.chats.get(chatId, userId);
-    if (!chat?.character_id) return void 0;
+    if (!chat?.character_id) return [];
     const character = await spindle.characters.get(chat.character_id, userId);
-    return character?.name.trim() || void 0;
+    if (!character?.name.trim()) return [];
+    const cardText = [
+      character.description,
+      character.personality,
+      character.scenario,
+      character.first_mes,
+      character.mes_example,
+      character.creator_notes
+    ].filter(Boolean).join("\n");
+    const references = extractCardCharacterReferences(character.name, cardText);
+    cardCharacterReferenceCache.set(cacheKey, references);
+    while (cardCharacterReferenceCache.size > MAX_CONVERSATION_REFERENCE_CACHES) {
+      const oldest = cardCharacterReferenceCache.keys().next().value;
+      if (typeof oldest !== "string") break;
+      cardCharacterReferenceCache.delete(oldest);
+    }
+    return references;
   } catch {
-    return void 0;
+    return [];
   }
 }
-function mergeConversationReferences(cardCharacterName, recentReferences) {
-  if (!cardCharacterName) return [...recentReferences];
-  const cardReferences = extractCardTitleReferences(cardCharacterName);
+function mergeConversationReferences(cardReferences, recentReferences) {
   const prioritized = /* @__PURE__ */ new Map();
   for (const reference of [...cardReferences, ...recentReferences]) {
     const normalized = reference.trim();

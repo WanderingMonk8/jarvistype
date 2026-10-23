@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   clampContextMessageCount,
   correctFromConversationReferences,
+  extractCardCharacterReferences,
   extractCardTitleReferences,
   extractConversationReferences,
   selectRecentContext,
@@ -92,6 +93,15 @@ test('extracts a canonical name before an unspaced title separator', () => {
   assert.ok(extractCardTitleReferences('Aiko,The Tired Worker').includes('Aiko'))
   assert.ok(extractCardTitleReferences('Aiko—The Tired Worker').includes('Aiko'))
   assert.ok(extractCardTitleReferences('Anne-Marie').includes('Anne-Marie'))
+})
+
+test('extracts both first and full character names from the card', () => {
+  const references = extractCardCharacterReferences(
+    'Aiko - The Tired Worker',
+    'Aiko Tanaka has worked the late shift for three years.',
+  )
+  assert.ok(references.includes('Aiko'))
+  assert.ok(references.includes('Aiko Tanaka'))
 })
 
 test('when the reference cap is reached, earlier input (the newest messages) keeps its terms', () => {

@@ -2622,7 +2622,7 @@ function shellMarkup() {
         .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: stretch; height: auto; overflow: visible; }
         .jt-floating .jt-composer__pane { min-height: 0; overflow: visible; padding-right: .25rem; }
         .jt-floating .jt-draft-editor { min-height: 10rem; }
-        .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
+        .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; }
         .jt-floating__tools > section, .jt-floating__tools > details { grid-column: 1 / -1; max-height: 24rem; overflow-y: auto; overscroll-behavior: contain; }
       }
     </style>

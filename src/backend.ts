@@ -3512,10 +3512,20 @@ function describeGenerationShape(value: unknown): string {
     .find((item): item is string => typeof item === 'string' && item.length <= 40)
   const usage = isRecord(value.usage) ? value.usage : null
   const completion = usage?.completion_tokens ?? usage?.output_tokens
+  const details =
+    usage && isRecord(usage.completion_tokens_details) ? usage.completion_tokens_details : null
+  const reasoningTokens = details?.reasoning_tokens
+  const reasoningChars = typeof value.reasoning === 'string' ? value.reasoning.length : null
+  const reasoningDetails = Array.isArray(value.reasoning_details)
+    ? value.reasoning_details.length
+    : null
   return [
     `keys=${keys.slice(0, 120)}`,
     finish ? `finish=${finish}` : null,
     typeof completion === 'number' ? `completionTokens=${completion}` : null,
+    typeof reasoningTokens === 'number' ? `reasoningTokens=${reasoningTokens}` : null,
+    reasoningChars === null ? null : `reasoningChars=${reasoningChars}`,
+    reasoningDetails === null ? null : `reasoningDetails=${reasoningDetails}`,
   ]
     .filter(Boolean)
     .join(' ')

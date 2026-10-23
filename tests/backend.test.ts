@@ -21,6 +21,7 @@ let appendShouldFail = false
 let appendAcknowledgementGate: Promise<void> | null = null
 let generationReturnsRawTranscript = false
 let generationNormalizedText: string | null = null
+let generationEditsOverride: unknown[] | null = null
 let generationCommandDecisions: unknown[] = []
 let editPlanResponse: unknown = null
 let grammarRepairResponse: unknown = null
@@ -126,11 +127,37 @@ const spindleMock = {
           )
         })
       }
+      if (generationEditsOverride)
+        return Promise.resolve({
+          content: JSON.stringify({ edits: generationEditsOverride, commandDecisions: [] }),
+        })
+      const candidate = input.candidate ?? ''
+      const target = generationReturnsRawTranscript
+        ? (input.rawTranscript ?? '')
+        : (generationNormalizedText ?? candidate)
+      let start = 0
+      while (
+        start < candidate.length &&
+        start < target.length &&
+        candidate[start] === target[start]
+      )
+        start += 1
+      let end = 0
+      while (
+        end < candidate.length - start &&
+        end < target.length - start &&
+        candidate[candidate.length - 1 - end] === target[target.length - 1 - end]
+      )
+        end += 1
+      const editAt = (from: number) => ({
+        find: candidate.slice(from, candidate.length - end),
+        replace: target.slice(from, target.length - end),
+      })
+      let edit = editAt(start)
+      if (!edit.find && start > 0) edit = editAt(start - 1)
       return Promise.resolve({
         content: JSON.stringify({
-          normalizedText: generationReturnsRawTranscript
-            ? (input.rawTranscript ?? '')
-            : (generationNormalizedText ?? input.candidate ?? ''),
+          edits: candidate === target ? [] : [edit],
           commandDecisions: generationCommandDecisions,
         }),
       })
@@ -162,6 +189,7 @@ test.beforeEach(() => {
   appendAcknowledgementGate = null
   generationReturnsRawTranscript = false
   generationNormalizedText = null
+  generationEditsOverride = null
   generationCommandDecisions = []
   editPlanResponse = null
   grammarRepairResponse = null
@@ -1396,6 +1424,36 @@ test('does not append a second period after a punctuated spoken quotation', asyn
   if (response?.type === 'transcript.normalization.response') {
     assert.equal(response.proposal.candidateText, '“I am not going anywhere.”')
   }
+})
+
+test('rejects ambiguous or missing contextual edits and keeps the deterministic candidate', async () => {
+  const userId = 'contextual-edit-fallback-user'
+  const chatId = 'contextual-edit-fallback-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  for (const edits of [
+    [{ find: 'beta', replace: 'BETA' }],
+    [{ find: 'missing phrase', replace: 'BETA' }],
+  ]) {
+    generationEditsOverride = edits
+    await dispatch(
+      recordingAppendRequest(
+        chatId,
+        `contextual-edit-fallback-${edits.length}`,
+        1,
+        'Alpha beta. Alpha beta.',
+      ),
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') {
+      assert.doesNotMatch(response.proposal.candidateText, /BETA/)
+      assert.equal(response.proposal.contextualModelUsed, false)
+    }
+  }
+  generationEditsOverride = null
 })
 
 test('does not let contextual normalization discard ordinary spoken punctuation commands', async () => {

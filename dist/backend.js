@@ -5721,7 +5721,7 @@ async function normalizeWithContext(rawTranscript, deterministicCandidate, messa
         return null;
       }
     }
-    finish("ok");
+    finish(`ok outputChars=${content.length} ${describeGenerationShape(response)}`);
     return {
       text: normalized,
       reasons: decisions.filter((decision) => decision.interpretation === "command").map((decision) => `contextual spoken command: ${decision.command}`),

@@ -3440,7 +3440,7 @@ async function normalizeWithContext(
         return null
       }
     }
-    finish('ok')
+    finish(`ok outputChars=${content.length} ${describeGenerationShape(response)}`)
     return {
       text: normalized,
       reasons: decisions

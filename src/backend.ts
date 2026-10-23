@@ -3288,20 +3288,26 @@ async function measureProviderFloor(userId: string, settings: PhaseFourSettings)
         reasoning: { source: 'off' },
         parameters: {
           temperature: 0,
-          max_tokens: 8,
+          max_tokens: 16,
           ...(settings.normalizationModelOverride
             ? { model: settings.normalizationModelOverride }
             : {}),
         },
-        messages: [{ role: 'user', content: 'Reply with OK.' }],
+        messages: [
+          { role: 'system', content: 'Reply with the single word OK.' },
+          { role: 'user', content: 'Ping.' },
+        ],
       }),
       new Promise<null>((resolve) => {
         timeout = setTimeout(() => resolve(null), FLOOR_PROBE_TIMEOUT_MS)
       }),
     ])
     if (!response) outcome = 'timed-out'
-  } catch {
-    outcome = 'failed'
+  } catch (error) {
+    // Metadata only: the error name and any numeric status, never its message text.
+    const status = isRecord(error) && typeof error.status === 'number' ? error.status : null
+    const name = error instanceof Error ? error.name.slice(0, 40) : typeof error
+    outcome = `failed error=${name}${status === null ? '' : ` status=${status}`}`
   } finally {
     clearTimeout(timeout)
   }

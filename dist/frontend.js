@@ -2645,7 +2645,7 @@ function shellMarkup() {
       .jt-floating__bar h2 { font-size: 1rem; }
       .jt-floating__body { min-height: 0; overflow: visible; }
       .jt-floating__body > .jt-shell__card { margin: .75rem; }
-      .jt-floating__tools { display: grid; gap: .65rem; padding: .75rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
+      .jt-floating__tools { display: grid; gap: .65rem; margin-top: .75rem; padding: .75rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
       .jt-tools-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; width: 100%; align-items: start; }
       .jt-tools-row > button, .jt-tools-row > details { width: 100%; min-width: 0; min-height: 2.75rem; margin: 0; }
       .jt-tools-row > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

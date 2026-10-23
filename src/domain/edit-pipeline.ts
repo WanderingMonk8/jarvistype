@@ -527,7 +527,8 @@ function resolveOperation(
     if (formatText) {
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
       const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
-      if (hasSeparatorBefore && (hasSeparatorAfter || end === range.end)) start -= 1
+      const endsLine = end >= range.end || /[\r\n]/.test(cleanText[end] ?? '')
+      if (hasSeparatorBefore && (hasSeparatorAfter || endsLine)) start -= 1
       else if (hasSeparatorAfter && start === range.start) end += 1
     }
   }

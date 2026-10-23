@@ -1278,7 +1278,7 @@ const EDIT_CLAUSE_VERB =
 function splitEditClauses(instructionTranscript: string): string[] {
   if (/["“”‘’]/u.test(instructionTranscript)) return [instructionTranscript]
   const separator = new RegExp(
-    `\\s*[,.]?\\s*\\b(?:and\\s+)?then\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)|\\s*,\\s*and\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)`,
+    `\\s*[,.]?\\s*\\b(?:and\\s+)?then\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)|\\s*,?\\s+and\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)`,
     'iu',
   )
   return instructionTranscript

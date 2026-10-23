@@ -966,7 +966,8 @@ ${formattedParagraph}`,
     if (formatText) {
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? "");
       const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? "");
-      if (hasSeparatorBefore && (hasSeparatorAfter || end === range.end)) start -= 1;
+      const endsLine = end >= range.end || /[\r\n]/.test(cleanText[end] ?? "");
+      if (hasSeparatorBefore && (hasSeparatorAfter || endsLine)) start -= 1;
       else if (hasSeparatorAfter && start === range.start) end += 1;
     }
   }
@@ -4004,7 +4005,7 @@ var EDIT_CLAUSE_VERB = "(?:replace|change|swap|substitute|delete|remove|take\\s+
 function splitEditClauses(instructionTranscript) {
   if (/["“”‘’]/u.test(instructionTranscript)) return [instructionTranscript];
   const separator = new RegExp(
-    `\\s*[,.]?\\s*\\b(?:and\\s+)?then\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)|\\s*,\\s*and\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)`,
+    `\\s*[,.]?\\s*\\b(?:and\\s+)?then\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)|\\s*,?\\s+and\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)`,
     "iu"
   );
   return instructionTranscript.split(separator).map((clause) => clause.trim()).filter(Boolean);

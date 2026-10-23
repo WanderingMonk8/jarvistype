@@ -3687,6 +3687,46 @@ test('splits compound instructions into deterministic clauses without swallowing
   }
 })
 
+test('removes adjacent and trailing sentences without leaving stray separators', async () => {
+  const userId = 'sentence-separator-user'
+  const chatId = 'sentence-separator-chat'
+  activeChatId = chatId
+  const draft = 'Alpha one. Beta two. Gamma three.\n\nDelta four. Epsilon five.'
+  const cases: Array<readonly [string, string]> = [
+    ['Remove the sentence Gamma three.', 'Alpha one. Beta two.\n\nDelta four. Epsilon five.'],
+    [
+      'Remove the sentence Beta two, and then remove the sentence Gamma three.',
+      'Alpha one.\n\nDelta four. Epsilon five.',
+    ],
+    [
+      'Replace Beta two with Second and delete the first sentence.',
+      'Second. Gamma three.\n\nDelta four. Epsilon five.',
+    ],
+  ]
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `separator-interpret-${index}`,
+        operationId: `separator-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
 test('every replace alias works deterministically with and without polite wording', async () => {
   const userId = 'replace-alias-user'
   const chatId = 'replace-alias-chat'

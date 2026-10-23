@@ -387,7 +387,7 @@ function getFloatingWidgetSize() {
   }
   return {
     width: Math.max(1, Math.min(960, viewport.width - 48)),
-    height: Math.max(1, Math.min(680, viewport.height - 48))
+    height: Math.max(1, Math.min(600, viewport.height - 48))
   };
 }
 var JARVISTYPE_ICON_SVG = `
@@ -397,31 +397,36 @@ var JARVISTYPE_ICON_SVG = `
   </svg>`;
 var COMMAND_GROUPS = [
   {
-    title: "Compose",
+    title: "Dictation",
     examples: [
       ["Record Message", "Record Message, then dictate a new segment."],
-      ["Record Edit", "Record Edit, then describe a change to the existing draft."],
-      [
-        "Spoken punctuation",
-        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen parenthesis\u201D or \u201Copen paren,\u201D \u201Cclose parenthesis\u201D or \u201Cclose paren,\u201D \u201Copen bracket,\u201D \u201Cclose bracket,\u201D \u201Cbegin bracket\u201D and \u201Cend bracket\u201D for angle brackets, \u201Cquote\u201D or \u201Cquotation\u201D at both ends of a quotation, or \u201Cbegin speech\u201D and \u201Cend speech.\u201D For single quotations, use \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D You can also say \u201Cnew line\u201D or \u201Cnew paragraph.\u201D"
-      ],
-      [
-        "Literal punctuation word",
-        "Say \u201Cthe word period,\u201D \u201Cliteral dash,\u201D \u201Cthe phrase new paragraph,\u201D or \u201Cthe words open parenthesis.\u201D"
-      ],
-      ["Explicit punctuation", "Say \u201Cinsert period,\u201D \u201Cpunctuation colon,\u201D or \u201Ccommand new line.\u201D"]
+      ["Record Edit", "Record Edit, then describe a change to the existing draft."]
     ]
   },
   {
-    title: "Change text",
+    title: "Punctuation and layout",
+    examples: [
+      [
+        "Spoken punctuation",
+        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen parenthesis\u201D or \u201Copen paren,\u201D \u201Cclose parenthesis\u201D or \u201Cclose paren,\u201D \u201Copen bracket,\u201D \u201Cclose bracket,\u201D \u201Cbegin bracket\u201D and \u201Cend bracket\u201D for angle brackets, \u201Cnew line,\u201D or \u201Cnew paragraph.\u201D"
+      ],
+      [
+        "Quotations",
+        "Say \u201Cquote\u201D or \u201Cquotation\u201D at both ends of a quotation, or \u201Cbegin speech\u201D and \u201Cend speech.\u201D For single quotations, say \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D"
+      ],
+      ["Explicit punctuation", "Say \u201Cinsert period,\u201D \u201Cpunctuation colon,\u201D or \u201Ccommand new line.\u201D"],
+      [
+        "Literal punctuation word",
+        "Say \u201Cthe word period,\u201D \u201Cliteral dash,\u201D \u201Cthe phrase new paragraph,\u201D or \u201Cthe words open parenthesis\u201D to dictate the words themselves."
+      ]
+    ]
+  },
+  {
+    title: "Replace and insert",
     examples: [
       [
         "Replace",
         "Replace, change, swap, or substitute a target\u2014for example, \u201CChange \u2018pending\u2019 to \u2018approved\u2019 in paragraph 2.\u201D"
-      ],
-      [
-        "Delete",
-        "Say \u201Cdelete,\u201D \u201Cremove,\u201D \u201Ctake off,\u201D \u201Ctake out,\u201D \u201Cerase,\u201D or \u201Ccut,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
       ],
       ["Insert before", "Insert, add, place, or put \u201CUrgent:\u201D before the first sentence."],
       [
@@ -435,25 +440,26 @@ var COMMAND_GROUPS = [
       [
         "Prepend",
         "Prepend, add to the beginning, place at the start, or put at the beginning of paragraph 1."
-      ],
-      ["Move", "Move, relocate, or shift \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
-      [
-        "Fuzzy target fallback",
-        "If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as \u201Cmouthlet\u201D for \u201CMao let.\u201D"
-      ],
-      [
-        "Punctuation targets",
-        "Say \u201Cthe second quote in paragraph 1\u201D, \u201Cthe last period in paragraph 1\u201D, or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
       ]
     ]
   },
   {
-    title: "Structure and order",
+    title: "Delete and move",
     examples: [
-      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
-      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph."],
+      [
+        "Delete",
+        "Say \u201Cdelete,\u201D \u201Cremove,\u201D \u201Ctake off,\u201D \u201Ctake out,\u201D \u201Cerase,\u201D or \u201Ccut,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
+      ],
+      ["Move", "Move, relocate, or shift \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
       ["Move before", "Move paragraph 3 before paragraph 1."],
       ["Move after", "Move paragraph 1 after paragraph 2."]
+    ]
+  },
+  {
+    title: "Paragraphs",
+    examples: [
+      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
+      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph."]
     ]
   },
   {
@@ -466,6 +472,19 @@ var COMMAND_GROUPS = [
       [
         "As in reference",
         "Use a qualified \u201Cas in\u201D reference anywhere you dictate new edit text: replace, insert before or after, prepend, or append. For example, \u201CPrepend \u2018I nod,\u2019 as in nodding one\u2019s head, to the first sentence.\u201D The intended word must occur immediately before \u201Cas in\u201D and repeat afterward exactly or as a clear inflection; otherwise the wording remains literal."
+      ]
+    ]
+  },
+  {
+    title: "Targets and multiple changes",
+    examples: [
+      [
+        "Fuzzy target fallback",
+        "If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as \u201Cmouthlet\u201D for \u201CMao let.\u201D"
+      ],
+      [
+        "Punctuation targets",
+        "Say \u201Cthe second quote in paragraph 1\u201D, \u201Cthe last period in paragraph 1\u201D, or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
       ],
       [
         "Multiple changes",
@@ -596,7 +615,6 @@ function setup(ctx) {
     tab.root,
     "[data-cancel-recording]"
   );
-  const undoRecordingButton = requireElement(tab.root, "[data-undo-recording]");
   const voiceStatus = requireElement(tab.root, "[data-voice-status]");
   const voiceElapsed = requireElement(tab.root, "[data-voice-elapsed]");
   const voiceProvider = requireElement(tab.root, "[data-voice-provider]");
@@ -636,6 +654,8 @@ function setup(ctx) {
   const editProposalAfter = requireElement(tab.root, "[data-edit-after]");
   const acceptEditButton = requireElement(tab.root, "[data-edit-accept]");
   const rejectEditButton = requireElement(tab.root, "[data-edit-reject]");
+  const decisionBar = requireElement(tab.root, "[data-decision-bar]");
+  const decisionSummary = requireElement(tab.root, "[data-decision-summary]");
   const contextCountInput = requireElement(tab.root, "[data-context-count]");
   const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
   const grammarRepairSelect = requireElement(
@@ -801,7 +821,7 @@ function setup(ctx) {
     paragraphRenderTimer = null;
     paragraphRenderDeadline = null;
     if (!alive || renderedParagraphText === desiredText) return;
-    renderParagraphs(paragraphList, desiredText);
+    renderParagraphs(paragraphList, desiredText, applyParagraphEdit);
     renderedParagraphText = desiredText;
   };
   const scheduleParagraphPreview = () => {
@@ -830,22 +850,33 @@ function setup(ctx) {
     renderDiff(state.snapshot, diffPanel, diffParagraphs, diffRemoved, diffAdded);
     renderHistory(historyList, state.snapshot);
     historyPanel.hidden = !state.historyExpanded;
-    historyButton.textContent = state.historyExpanded ? "Hide History" : "Show History";
+    historyButton.textContent = state.historyExpanded ? "Hide" : "History";
     historyButton.disabled = !state.snapshot || state.snapshot.history.length === 0;
-    undoButton.disabled = !editorEnabled || state.saving || !state.snapshot?.canUndo || desiredText !== state.snapshot.cleanText;
-    redoButton.hidden = !state.snapshot?.canRedo;
     redoButton.disabled = !editorEnabled || state.saving || !state.snapshot?.canRedo || desiredText !== state.snapshot.cleanText;
     const recordingOwnerReady = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.saving && !state.automatedBusy && !state.sending && !mismatch && state.activeChatId === state.snapshot.chatId && desiredText === state.snapshot.cleanText;
-    recordButton.textContent = state.voicePhase === "starting" || state.voicePhase === "recording" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record Message";
-    recordButton.disabled = !hasNativeStt() || !recordingOwnerReady || voiceBusy() && activeRecording?.mode !== "message" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
-    recordEditButton.textContent = (state.voicePhase === "starting" || state.voicePhase === "recording") && activeRecording?.mode === "edit" ? "Stop Edit Recording" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Record Edit";
-    recordEditButton.disabled = !hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() && activeRecording?.mode !== "edit" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
-    const recordingCanBeCancelled = state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing";
-    cancelRecordingButton.hidden = !recordingCanBeCancelled || activeRecording?.mode !== "message";
-    cancelRecordingButton.disabled = !activeRecording || activeRecording.mode !== "message";
-    cancelEditRecordingButton.hidden = !recordingCanBeCancelled || activeRecording?.mode !== "edit";
+    const undoIsRecording = Boolean(state.snapshot?.canUndoRecording);
+    undoButton.disabled = !editorEnabled || state.saving || (undoIsRecording ? !recordingOwnerReady || voiceBusy() : !state.snapshot?.canUndo) || desiredText !== state.snapshot?.cleanText;
+    const messageLive = activeRecording?.mode !== "edit";
+    recordButton.dataset.recordingState = messageLive && state.voicePhase === "starting" ? "starting" : messageLive && state.voicePhase === "recording" ? "recording" : "";
+    const messageIsLive = state.voicePhase === "recording" && activeRecording?.mode === "message";
+    const editIsLive = state.voicePhase === "recording" && activeRecording?.mode === "edit";
+    recordButton.textContent = state.voicePhase === "starting" && activeRecording?.mode !== "edit" ? "Preparing" : messageIsLive ? "\u25A0" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record";
+    const ownRecordingRunning = activeRecording !== null && (state.voicePhase === "starting" || state.voicePhase === "recording");
+    recordButton.disabled = !ownRecordingRunning && (!hasNativeStt() || !recordingOwnerReady || voiceBusy() && activeRecording?.mode !== "message" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review");
+    const editLive = activeRecording?.mode === "edit";
+    recordEditButton.dataset.recordingState = editLive && state.voicePhase === "starting" ? "starting" : editLive && state.voicePhase === "recording" ? "recording" : "";
+    recordButton.setAttribute("aria-label", messageIsLive ? "Stop recording" : "Record");
+    recordButton.title = messageIsLive ? "Stop recording" : "";
+    recordButton.parentElement?.setAttribute("data-live", String(messageIsLive));
+    recordEditButton.setAttribute("aria-label", editIsLive ? "Stop edit recording" : "Edit");
+    recordEditButton.title = editIsLive ? "Stop edit recording" : "";
+    recordEditButton.parentElement?.setAttribute("data-live", String(editIsLive));
+    recordEditButton.textContent = state.voicePhase === "starting" && activeRecording?.mode === "edit" ? "Preparing" : editIsLive ? "\u25A0" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Edit";
+    recordEditButton.disabled = !ownRecordingRunning && (!hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() && activeRecording?.mode !== "edit" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review");
+    cancelRecordingButton.style.visibility = messageIsLive ? "visible" : "hidden";
+    cancelRecordingButton.disabled = !messageIsLive;
+    cancelEditRecordingButton.style.visibility = editIsLive ? "visible" : "hidden";
     cancelEditRecordingButton.disabled = !activeRecording || activeRecording.mode !== "edit";
-    undoRecordingButton.disabled = !recordingOwnerReady || voiceBusy() || !state.snapshot?.canUndoRecording;
     voiceStatus.textContent = state.voiceMessage;
     voiceStatus.dataset.phase = state.voicePhase;
     voiceElapsed.textContent = `Elapsed: ${formatDuration(state.voiceElapsedMs)}`;
@@ -876,6 +907,15 @@ function setup(ctx) {
     editProposalAfter.textContent = editProposal?.afterText ?? "";
     acceptEditButton.disabled = !editProposal || state.automatedBusy || state.saving || desiredText !== state.snapshot?.cleanText || editProposal.expectedVersion !== state.snapshot?.draftVersion;
     rejectEditButton.disabled = !editProposal || state.automatedBusy;
+    acceptEditButton.hidden = !editProposal;
+    rejectEditButton.hidden = !editProposal;
+    acceptProposalButton.hidden = !proposal;
+    rejectProposalButton.hidden = !proposal;
+    const activeReview = proposal ? proposalPanel : editProposal ? editProposalPanel : null;
+    decisionBar.hidden = !activeReview;
+    if (activeReview && decisionBar.previousElementSibling !== activeReview)
+      activeReview.after(decisionBar);
+    decisionSummary.textContent = editProposal ? `Review the edit: ${editProposal.explanation}` : proposal ? "Review the normalized transcript before it is appended." : "";
     const editCandidates = state.pendingEditCandidates;
     editCandidatesPanel.hidden = !editCandidates;
     editCandidatesInstruction.textContent = editCandidates?.instructionTranscript ?? "";
@@ -1146,6 +1186,36 @@ function setup(ctx) {
     render();
     void drainMutations();
   };
+  function applyParagraphEdit(lineIndex, originalLine, replacement) {
+    const trimmed = replacement.trim();
+    if (state.pendingProposal || state.pendingEditProposal || state.pendingEditCandidates || voiceBusy() || state.automatedBusy) {
+      state.voiceMessage = "Finish or reject the pending review before editing a paragraph.";
+      render();
+      return;
+    }
+    const lines = desiredText.split("\n");
+    if (lines[lineIndex] !== originalLine) {
+      state.voiceMessage = "That paragraph changed before your edit was saved. Nothing was changed.";
+      render();
+      return;
+    }
+    if (trimmed) {
+      lines[lineIndex] = trimmed;
+    } else {
+      if (lines[lineIndex + 1]?.trim() === "") lines.splice(lineIndex, 2);
+      else if (lineIndex > 0 && lines[lineIndex - 1]?.trim() === "") lines.splice(lineIndex - 1, 2);
+      else lines.splice(lineIndex, 1);
+    }
+    const nextText = lines.join("\n");
+    if (nextText === desiredText) return;
+    if (nextText.length > MAX_DRAFT_CHARACTERS) {
+      state.voiceMessage = "That edit would exceed the draft character limit. Nothing was changed.";
+      render();
+      return;
+    }
+    editor.value = nextText;
+    handleEditorInput();
+  }
   const handleUndo = async () => {
     if (!state.snapshot || state.automatedBusy || state.sending) return;
     flushParagraphPreview();
@@ -1657,8 +1727,8 @@ function setup(ctx) {
         onStatus: (status) => {
           if (activeRecording?.runId !== runId) return;
           if (status.phase === "listening") {
-            state.voicePhase = "recording";
-            state.voiceMessage = "Recording\u2026 Speak naturally, then select Stop Recording.";
+            if (state.voicePhase === "starting")
+              state.voiceMessage = "Preparing\u2026 wait for \u201CRecording now\u201D.";
           } else if (status.phase === "processing") {
             state.voicePhase = "processing";
             state.voiceMessage = "Transcribing the completed recording\u2026";
@@ -1697,7 +1767,7 @@ function setup(ctx) {
       state.voiceElapsedMs = 0;
       state.voiceProvider = session.provider;
       state.voiceProvisionalText = "";
-      state.voiceMessage = mode === "edit" ? "Starting edit-instruction capture\u2026" : "Starting microphone capture\u2026";
+      state.voiceMessage = mode === "edit" ? "Preparing the edit instruction\u2026" : "Preparing\u2026";
       recordingTimer = setInterval(() => {
         if (recordingStartedAt !== startedAt) return;
         state.voiceElapsedMs = Date.now() - startedAt;
@@ -1711,7 +1781,7 @@ function setup(ctx) {
       void session.ready.then(() => {
         if (activeRecording?.runId !== runId || state.voicePhase === "processing") return;
         state.voicePhase = "recording";
-        state.voiceMessage = "Recording\u2026 Speak naturally, then select Stop Recording.";
+        state.voiceMessage = "Recording now. Speak naturally, then select Stop Recording.";
         render();
       }).catch((error) => failRecording(runId, error));
       void session.result.then((transcript) => finishRecording(runId, transcript)).catch((error) => failRecording(runId, error));
@@ -1735,7 +1805,7 @@ function setup(ctx) {
       });
       state.permissions = sanitizeGrantedPermissions(granted);
       const ready = required.every((permission) => granted.includes(permission));
-      state.voiceMessage = ready ? "Recording and normalization permissions are ready. Select Record Message again to begin." : "Required recording or normalization permission was not granted. No recording started.";
+      state.voiceMessage = ready ? "Recording and normalization permissions are ready. Select Record again to begin." : "Required recording or normalization permission was not granted. No recording started.";
       render();
       return ready;
     } catch {
@@ -1927,13 +1997,12 @@ function setup(ctx) {
     state.historyExpanded = !state.historyExpanded;
     render();
   };
-  const handleUndoClick = () => void handleUndo();
+  const handleUndoClick = () => void (state.snapshot?.canUndoRecording ? handleUndoRecording() : handleUndo());
   const handleRedoClick = () => void handleRedo();
   const handleRecordClick = () => void handleRecording("message");
   const handleRecordEditClick = () => void handleRecording("edit");
   const handleCancelRecordingClick = () => cancelActiveRecording("Recording cancelled. No transcript was appended.");
   const handleCancelEditRecordingClick = () => cancelActiveRecording("Edit recording cancelled. The draft was not changed.");
-  const handleUndoRecordingClick = () => void handleUndoRecording();
   const handleSendClick = () => void handleSend();
   const handleAcceptProposalClick = () => void acceptNormalizationProposal();
   const handleRejectProposalClick = () => rejectNormalizationProposal();
@@ -1996,6 +2065,32 @@ function setup(ctx) {
       group.hidden = !group.querySelector("[data-command-item]:not([hidden])");
     }
   };
+  const floatingFocusables = () => Array.from(
+    floatingWidget.root.querySelectorAll(
+      'button, input, textarea, select, a[href], [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((element) => !element.hasAttribute("disabled") && !element.closest("[hidden]"));
+  const handleFloatingFocusTrap = (event) => {
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (!floatingWidget.isVisible()) return;
+    const items = floatingFocusables();
+    const first = items[0];
+    const last = items.at(-1);
+    if (!first || !last) return;
+    const active = document.activeElement;
+    if (!(active instanceof Node) || !floatingWidget.root.contains(active)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+      return;
+    }
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    } else if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+    }
+  };
   const handleFloatingScrollKey = (event) => {
     if (event.key === "Escape" && floatingWidget.isVisible()) {
       event.preventDefault();
@@ -2048,7 +2143,6 @@ function setup(ctx) {
   recordEditButton.addEventListener("click", handleRecordEditClick);
   cancelEditRecordingButton.addEventListener("click", handleCancelEditRecordingClick);
   cancelRecordingButton.addEventListener("click", handleCancelRecordingClick);
-  undoRecordingButton.addEventListener("click", handleUndoRecordingClick);
   undoButton.addEventListener("click", handleUndoClick);
   redoButton.addEventListener("click", handleRedoClick);
   historyButton.addEventListener("click", handleHistoryToggle);
@@ -2082,6 +2176,7 @@ function setup(ctx) {
   floatingCommandButton.addEventListener("click", handleCommandToggle);
   floatingCommandSearch.addEventListener("input", handleCommandSearch);
   floatingWidget.root.addEventListener("keydown", handleFloatingScrollKey);
+  document.addEventListener("keydown", handleFloatingFocusTrap, true);
   render();
   void checkBackend();
   ctx.ready();
@@ -2112,7 +2207,6 @@ function setup(ctx) {
     recordEditButton.removeEventListener("click", handleRecordEditClick);
     cancelEditRecordingButton.removeEventListener("click", handleCancelEditRecordingClick);
     cancelRecordingButton.removeEventListener("click", handleCancelRecordingClick);
-    undoRecordingButton.removeEventListener("click", handleUndoRecordingClick);
     undoButton.removeEventListener("click", handleUndoClick);
     redoButton.removeEventListener("click", handleRedoClick);
     historyButton.removeEventListener("click", handleHistoryToggle);
@@ -2146,6 +2240,7 @@ function setup(ctx) {
     floatingCommandButton.removeEventListener("click", handleCommandToggle);
     floatingCommandSearch.removeEventListener("input", handleCommandSearch);
     floatingWidget.root.removeEventListener("keydown", handleFloatingScrollKey);
+    document.removeEventListener("keydown", handleFloatingFocusTrap, true);
     normalizationModelPicker.destroy();
     composerLauncher.remove();
     composerLauncherStyle.remove();
@@ -2212,17 +2307,76 @@ function renderGlossary(container, entries, query = "") {
     container.append(row);
   }
 }
-function renderParagraphs(container, cleanText) {
+function attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit) {
+  let pressTimer = null;
+  let longPressed = false;
+  const cancelPress = () => {
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = null;
+  };
+  const beginEdit = () => {
+    cancelPress();
+    if (row.querySelector("textarea")) return;
+    const input = document.createElement("textarea");
+    input.className = "jt-paragraph-input";
+    input.value = line;
+    input.rows = Math.min(6, Math.max(2, Math.ceil(line.length / 60)));
+    input.setAttribute("aria-label", `Edit paragraph ${ordinal}`);
+    let settled = false;
+    const finish = (commit) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      text.hidden = false;
+      if (commit) onEdit(lineIndex, line, input.value);
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+    text.hidden = true;
+    row.append(input);
+    input.focus();
+  };
+  row.tabIndex = 0;
+  row.addEventListener("dblclick", beginEdit);
+  row.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target === row) beginEdit();
+  });
+  row.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse") return;
+    longPressed = false;
+    cancelPress();
+    pressTimer = setTimeout(() => {
+      longPressed = true;
+      beginEdit();
+    }, 500);
+  });
+  for (const type of ["pointerup", "pointercancel", "pointerleave"])
+    row.addEventListener(type, cancelPress);
+  row.addEventListener("contextmenu", (event) => {
+    if (!longPressed) return;
+    event.preventDefault();
+    longPressed = false;
+  });
+}
+function renderParagraphs(container, cleanText, onEdit) {
   container.replaceChildren();
   if (cleanText.length === 0) {
     const empty = document.createElement("p");
     empty.className = "jt-empty";
-    empty.textContent = "Paragraph numbers appear here as you type.";
+    empty.textContent = "Empty draft. Record a message to start.";
     container.append(empty);
     return;
   }
   let ordinal = 0;
-  for (const line of cleanText.split("\n")) {
+  for (const [lineIndex, line] of cleanText.split("\n").entries()) {
     const row = document.createElement("div");
     row.className = "jt-paragraph-row";
     if (line.trim().length === 0) {
@@ -2240,6 +2394,7 @@ function renderParagraphs(container, cleanText) {
     text.className = "jt-paragraph-text";
     text.textContent = line;
     row.append(number, text);
+    if (onEdit) attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit);
     container.append(row);
   }
 }
@@ -2392,6 +2547,9 @@ function shellMarkup() {
       .jt-paragraph-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: .5rem; min-width: 0; min-height: 1.5rem; align-items: start; line-height: 1.5; }
       .jt-paragraph-row + .jt-paragraph-row { margin-top: .25rem; }
       .jt-paragraph-row--separator { min-height: .8rem; }
+      .jt-paragraph-row { -webkit-touch-callout: none; touch-action: manipulation; cursor: text; border-radius: .35rem; }
+      .jt-paragraph-row:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
+      .jt-paragraph-input { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; line-height: 1.5; padding: .35rem .5rem; border-radius: .4rem; resize: vertical; }
       .jt-paragraph-number { text-align: right; opacity: .6; user-select: none; }
       .jt-paragraph-text { white-space: pre-wrap; overflow-wrap: anywhere; }
       .jt-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
@@ -2400,6 +2558,17 @@ function shellMarkup() {
       .jt-shell button:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-shell button:disabled { cursor: not-allowed; opacity: .55; }
       .jt-shell [data-record-message], .jt-shell [data-record-edit], .jt-shell [data-send], .jt-shell [data-proposal-accept], .jt-shell [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
+      .jt-history-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; width: 100%; }
+      .jt-history-row > button { width: 100%; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .jt-record-row { display: flex; gap: .5rem; width: 100%; }
+      .jt-record-slot { flex: 1 1 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; min-width: 0; }
+      .jt-record-slot > button { grid-row: 1; width: 100%; min-width: 0; margin: 0; padding-inline: .4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
+      .jt-record-slot > [data-record-message], .jt-record-slot > [data-record-edit] { grid-column: 1 / -1; }
+      .jt-record-slot[data-live="true"] > [data-record-message], .jt-record-slot[data-live="true"] > [data-record-edit] { grid-column: 1; }
+      .jt-record-slot > [data-cancel-recording], .jt-record-slot > [data-cancel-edit-recording] { grid-column: 2; }
+      .jt-actions > [data-send] { flex: 1 1 100%; }
+      .jt-shell [data-recording-state="starting"] { border-color: #ecc94b; background: #ecc94b; color: #1a1a1a; font-weight: 700; }
+      .jt-shell [data-recording-state="recording"] { border-color: #e53e3e; background: #e53e3e; color: #ffffff; font-weight: 700; }
       .jt-shell [data-record-message]:hover:not(:disabled), .jt-shell [data-record-edit]:hover:not(:disabled), .jt-shell [data-send]:hover:not(:disabled), .jt-shell [data-proposal-accept]:hover:not(:disabled), .jt-shell [data-edit-accept]:hover:not(:disabled) { background: color-mix(in srgb, #d69e2e 28%, transparent); }
       .jt-voice { display: grid; gap: .55rem; padding: .7rem; border-radius: .5rem; background: color-mix(in srgb, currentColor 6%, transparent); }
       .jt-voice__meta { display: flex; flex-wrap: wrap; gap: .35rem 1rem; font-size: .8rem; opacity: .78; }
@@ -2436,9 +2605,11 @@ function shellMarkup() {
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
       .jt-floating summary { cursor: pointer; font-weight: 700; }
-      .jt-floating .jt-proposal { max-height: min(70vh, 34rem); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-      .jt-floating .jt-proposal pre { max-height: 12rem; overflow-y: auto; }
-      .jt-floating .jt-proposal > .jt-actions { position: sticky; z-index: 2; bottom: -.7rem; margin: .15rem -.7rem -.7rem; padding: .65rem .7rem; border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent); background: var(--background, #171717); }
+      .jt-floating .jt-proposal pre { max-height: none; overflow: visible; }
+      .jt-decision { position: sticky; bottom: 0; z-index: 5; display: grid; gap: .4rem; margin: .4rem 0; padding: .5rem .6rem; border: 1px solid #d69e2e; border-radius: .6rem; background: var(--background, #171717); box-shadow: 0 -6px 16px rgb(0 0 0 / .3); }
+      .jt-decision__summary { margin: 0; font-size: .85rem; overflow-wrap: anywhere; }
+      .jt-decision__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
+      .jt-decision__actions [data-proposal-accept], .jt-decision__actions [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
       .jt-command-list { display: grid; gap: .75rem; margin-top: .65rem; }
       .jt-command-list ul { display: grid; gap: .4rem; margin: .35rem 0 0; padding-left: 1.2rem; }
       .jt-empty { opacity: .65; font-style: italic; }
@@ -2448,11 +2619,10 @@ function shellMarkup() {
       @media (min-width: ${NARROW_COMPOSER_BREAKPOINT_PX}px) {
         .jt-floating__body { display: block; }
         .jt-floating [data-floating-composer-mount] { min-height: 0; }
-        .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: start; height: auto; overflow: visible; }
+        .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: stretch; height: auto; overflow: visible; }
         .jt-floating .jt-composer__pane { min-height: 0; overflow: visible; padding-right: .25rem; }
-        .jt-floating .jt-proposal { max-height: clamp(18rem, 52vh, 30rem); }
         .jt-floating .jt-draft-editor { min-height: 10rem; }
-        .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
+        .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; }
         .jt-floating__tools > section, .jt-floating__tools > details { grid-column: 1 / -1; max-height: 24rem; overflow-y: auto; overscroll-behavior: contain; }
       }
     </style>
@@ -2493,48 +2663,28 @@ function shellMarkup() {
       <div data-composer-bootstrap hidden>
       <section class="jt-shell__card" data-composer-surface aria-labelledby="jt-draft-title">
         <div class="jt-composer__pane jt-composer__draft-pane">
-        <h3 id="jt-draft-title">Working draft</h3>
-        <textarea class="jt-draft-editor" data-draft-editor maxlength="${MAX_DRAFT_CHARACTERS}" aria-describedby="jt-draft-help" aria-label="JarvisType private working draft" disabled></textarea>
-        <p id="jt-draft-help">Paragraph numbers are shown separately and are never copied or sent.</p>
+        <h3 id="jt-draft-title">Numbered draft</h3>
+        <p id="jt-draft-help">Double-click or long-press a paragraph to edit it. Numbers are never copied or sent.</p>
         <p class="jt-draft-meta" data-draft-meta>Draft not loaded</p>
 
-        <h4>Numbered paragraphs</h4>
-        <div class="jt-paragraphs" data-paragraph-list role="region" aria-label="Numbered draft paragraphs" aria-live="polite" tabindex="0"></div>
+        <div class="jt-paragraphs" data-paragraph-list role="region" aria-label="Numbered draft paragraphs" aria-live="polite"></div>
+        <div class="jt-draft-full" data-draft-full hidden aria-hidden="true">
+          <textarea class="jt-draft-editor" data-draft-editor maxlength="${MAX_DRAFT_CHARACTERS}" aria-describedby="jt-draft-help" aria-label="JarvisType private working draft" disabled></textarea>
+        </div>
         </div>
 
         <div class="jt-composer__pane jt-composer__action-pane">
-        <section class="jt-voice" aria-labelledby="jt-voice-title">
-          <h4 id="jt-voice-title">Voice message segment</h4>
-          <p role="status" aria-live="polite" data-voice-status>Ready to record a message segment.</p>
-          <div class="jt-voice__meta">
-            <span data-voice-elapsed>Elapsed: 0:00</span>
-            <span data-voice-provider>Provider: Lumiverse selection</span>
-            <span data-voice-segment-count>Committed recording segments: 0</span>
-          </div>
-          <p class="jt-voice__transcript jt-voice__transcript--provisional" data-voice-provisional hidden></p>
-          <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
-          <section class="jt-proposal" data-normalization-proposal hidden aria-labelledby="jt-proposal-title">
-            <h4 id="jt-proposal-title">Review normalized transcript</h4>
-            <p><strong>Proposed text</strong></p>
-            <pre data-proposal-candidate></pre>
-            <details class="jt-proposal__details">
-              <summary>Raw transcript and normalization details</summary>
-              <p><strong>Raw provider transcript</strong></p>
-              <pre data-proposal-raw></pre>
-              <p class="jt-draft-meta" data-proposal-meta></p>
-            </details>
-            <div class="jt-actions">
-              <button type="button" data-proposal-accept>Accept &amp; append</button>
-              <button type="button" data-proposal-reject>Reject</button>
-            </div>
-          </section>
-          <div class="jt-actions" aria-label="Voice composition controls">
-            <button type="button" data-record-message disabled>Record Message</button>
-            <button type="button" data-cancel-recording hidden>Cancel Recording</button>
-            <button type="button" data-undo-recording disabled>Undo Last Recording</button>
-          </div>
+        <section class="jt-proposal" data-normalization-proposal hidden aria-labelledby="jt-proposal-title">
+          <h4 id="jt-proposal-title">Review normalized transcript</h4>
+          <p><strong>Proposed text</strong></p>
+          <pre data-proposal-candidate></pre>
+          <details class="jt-proposal__details">
+            <summary>Raw transcript and normalization details</summary>
+            <p><strong>Raw provider transcript</strong></p>
+            <pre data-proposal-raw></pre>
+            <p class="jt-draft-meta" data-proposal-meta></p>
+          </details>
         </section>
-
         <section class="jt-proposal" data-edit-candidates hidden aria-labelledby="jt-edit-candidates-title">
           <h4 id="jt-edit-candidates-title">Choose the intended edit target</h4>
           <p><strong>Spoken instruction</strong></p>
@@ -2557,20 +2707,35 @@ function shellMarkup() {
             <p><strong>Before</strong></p>
             <pre data-edit-before></pre>
           </details>
-          <div class="jt-actions">
-            <button type="button" data-edit-accept>Accept edit</button>
-            <button type="button" data-edit-reject>Reject</button>
+        </section>
+        <section class="jt-voice" aria-labelledby="jt-voice-title">
+          <h4 id="jt-voice-title">Voice message segment</h4>
+          <p role="status" aria-live="polite" data-voice-status>Ready to record a message segment.</p>
+          <div class="jt-voice__meta">
+            <span data-voice-elapsed>Elapsed: 0:00</span>
+            <span data-voice-provider>Provider: Lumiverse selection</span>
+            <span data-voice-segment-count>Committed recording segments: 0</span>
+          </div>
+          <p class="jt-voice__transcript jt-voice__transcript--provisional" data-voice-provisional hidden></p>
+          <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
+          <div class="jt-record-row" aria-label="Voice composition controls">
+            <div class="jt-record-slot" data-record-slot="message">
+              <button type="button" data-record-message disabled>Record</button>
+              <button type="button" data-cancel-recording aria-label="Cancel recording" title="Cancel recording" style="visibility: hidden" disabled>\u2715</button>
+            </div>
+            <div class="jt-record-slot" data-record-slot="edit">
+              <button type="button" data-record-edit disabled>Edit</button>
+              <button type="button" data-cancel-edit-recording aria-label="Cancel edit recording" title="Cancel edit recording" style="visibility: hidden" disabled>\u2715</button>
+            </div>
           </div>
         </section>
-        <div class="jt-actions" aria-label="Editing voice controls">
-          <button type="button" data-record-edit disabled>Record Edit</button>
-          <button type="button" data-cancel-edit-recording hidden>Cancel Edit Recording</button>
+        <div class="jt-actions">
           <button type="button" data-send disabled>Confirm &amp; Send</button>
         </div>
-        <div class="jt-actions">
+        <div class="jt-history-row">
           <button type="button" data-undo disabled>Undo</button>
-          <button type="button" data-redo hidden>Redo</button>
-          <button type="button" data-history-toggle disabled>Show History</button>
+          <button type="button" data-redo disabled>Redo</button>
+          <button type="button" data-history-toggle disabled>History</button>
         </div>
 
         <section class="jt-diff" data-diff-panel hidden aria-labelledby="jt-diff-title">
@@ -2585,12 +2750,21 @@ function shellMarkup() {
           <ol class="jt-history" data-history-list></ol>
         </section>
         </div>
+        <div class="jt-decision" data-decision-bar hidden>
+          <p class="jt-decision__summary" data-decision-summary></p>
+          <div class="jt-decision__actions">
+            <button type="button" data-proposal-reject hidden>Reject</button>
+            <button type="button" data-proposal-accept hidden>Accept &amp; append</button>
+            <button type="button" data-edit-reject hidden>Reject</button>
+            <button type="button" data-edit-accept hidden>Accept edit</button>
+          </div>
+        </div>
       </section>
       </div>
 
       <section class="jt-shell__card" aria-labelledby="jt-context-title">
         <h3 id="jt-context-title">Context and glossary</h3>
-        <p class="jt-shell__notice">The message count controls how much recent chat history JarvisType scans for names, spellings, terminology, and subject references. After speech-to-text finishes, the normalization connection receives the current recording, only the two newest messages from that selected history, a compact reference list extracted from the full selected history, and the glossary. It receives text, never audio or the working draft. Chat history cannot activate dictation commands; command detection stays local to the current recording. Lumiverse STT remains independently managed by the host and receives no added context. Set the count to 0 to exclude chat history.</p>
+        <p class="jt-shell__notice">The message count sets how many recent chat messages JarvisType scans for names and proper nouns, which help with spelling. After speech-to-text finishes, the normalization connection receives the current recording, the glossary, and only that list of names and proper nouns. It never receives the chat messages themselves, the working draft, or audio. Chat history cannot activate dictation commands; command detection stays local to the current recording. Lumiverse STT remains independently managed by the host and receives no added context. Set the count to 0 to exclude chat history.</p>
         <div class="jt-form-grid">
           <label>Messages scanned for references (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>

@@ -87,6 +87,16 @@ const PUNCTUATION: Array<[RegExp, string, string]> = [
   [/\bapostrophe\b([.,;:!?…—–-]*)/gi, '’', 'apostrophe'],
 ]
 
+/**
+ * A spoken mark that replaces the boundary (“dash”, “question mark”, “comma”, …)
+ * replaces the period that speech-to-text placed before it. Other terminal marks
+ * stay, since combinations such as “?!” are explicit and intentional.
+ */
+const TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
+  '\\.+(?=\\s*\\b(?:question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)',
+  'giu',
+)
+
 const SPOKEN_PUNCTUATION_TERM_SOURCE =
   'open single quote|close single quote|open quote|close quote|single quotation|single quote|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe'
 
@@ -111,6 +121,61 @@ const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
     'gi',
   ),
 ]
+
+const COMMAND_SIGNAL_WORDS = [
+  'period',
+  'comma',
+  'colon',
+  'semicolon',
+  'question',
+  'exclamation',
+  'ellipsis',
+  'dash',
+  'hyphen',
+  'quotation',
+  'quote',
+  'paragraph',
+  'speech',
+  'apostrophe',
+  'parenthesis',
+  'bracket',
+]
+
+function withinEditDistance(left: string, right: string, maximum: number): boolean {
+  if (Math.abs(left.length - right.length) > maximum) return false
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index)
+  for (let row = 1; row <= left.length; row += 1) {
+    const current = [row]
+    for (let column = 1; column <= right.length; column += 1) {
+      current[column] = Math.min(
+        previous[column]! + 1,
+        current[column - 1]! + 1,
+        previous[column - 1]! + (left[row - 1] === right[column - 1] ? 0 : 1),
+      )
+    }
+    previous = current
+  }
+  return previous[right.length]! <= maximum
+}
+
+/**
+ * True when text still contains a word that looks like an unresolved spoken command,
+ * either exactly or with a small transcription error. Used to decide whether the
+ * contextual provider pass can add anything; false positives only cost time.
+ */
+export function hasUnresolvedCommandSignal(text: string): boolean {
+  // Known mishearing of “new paragraph”, which the provider prompt also documents.
+  if (/\bpair\s+of\s+graphs?\b/iu.test(text)) return true
+  for (const match of text.matchAll(/\p{L}+/gu)) {
+    const word = match[0].toLocaleLowerCase()
+    if (COMMAND_SIGNAL_WORDS.includes(word)) return true
+    if (word.length < 5) continue
+    const maximum = word.length >= 8 ? 2 : 1
+    if (COMMAND_SIGNAL_WORDS.some((command) => withinEditDistance(word, command, maximum)))
+      return true
+  }
+  return false
+}
 
 export function normalizeDeterministically(
   raw: string,
@@ -137,6 +202,9 @@ export function normalizeDeterministically(
   const deduplicatedTerminalPunctuation = removeRedundantTerminalPunctuationCommands(text)
   if (deduplicatedTerminalPunctuation !== text) reasons.push('provider terminal punctuation')
   text = deduplicatedTerminalPunctuation
+  const deduplicatedDashes = removeRedundantProviderDashes(text)
+  if (deduplicatedDashes !== text) reasons.push('provider dash')
+  text = deduplicatedDashes
   text = normalizeApostrophesInsideExplicitSpelling(text)
   const explicitPunctuation = replaceExplicitPunctuationCommands(text)
   text = explicitPunctuation.text
@@ -172,6 +240,7 @@ export function normalizeDeterministically(
     authoritativePunctuationMarks.push('.')
   text = restoredSentenceBoundaries.text
 
+  text = text.replace(TERMINAL_BEFORE_BOUNDARY_COMMAND, '')
   for (const [pattern, replacement, reason] of PUNCTUATION) {
     const count = text.match(pattern)?.length ?? 0
     const next = text.replace(
@@ -202,7 +271,7 @@ export function normalizeDeterministically(
     }
   }
 
-  text = cleanupPunctuationSpacing(text)
+  text = spaceEmDashes(cleanupPunctuationSpacing(text))
   const capitalized = capitalizeMessageOpenings(
     text,
     [
@@ -279,6 +348,16 @@ export function recoverHighConfidenceContextualCommands(input: string): Contextu
 
 function removeRedundantProviderTerminalMarks(input: string): string {
   return input.replace(/([.?!…][”’"']?)\s+\.(?=\s|[”’"']|$)/gu, '$1')
+}
+
+/** An em dash between words always has a space on each side, within its line. */
+function spaceEmDashes(input: string): string {
+  return input.replace(/([^\s—])[ \t]*—[ \t]*(?=[^\s—])/gu, '$1 — ')
+}
+
+/** A dash already rendered by the provider keeps its mark when the spoken “dash” follows it. */
+function removeRedundantProviderDashes(input: string): string {
+  return input.replace(/—\s*(?:em\s+)?dash\b[.,]?/giu, '—').replace(/—\s*—/gu, '—')
 }
 
 function removeRedundantTerminalPunctuationCommands(input: string): string {
@@ -399,11 +478,10 @@ function replaceSpokenQuotationCommands(
     const tokens = [...text.matchAll(tokenPattern)]
     if (!tokens.length || tokens.length % 2 !== 0) return
     if (
-      tokens.some((token, index) =>
-        index % 2 === 0
-          ? token[1]?.toLocaleLowerCase() !== beginPhrase
-          : token[1]?.toLocaleLowerCase() !== endPhrase,
-      )
+      tokens.some((token, index) => {
+        const phrase = index % 2 === 0 ? beginPhrase : endPhrase
+        return !new RegExp(`^${phrase}$`, 'iu').test(token[1] ?? '')
+      })
     )
       return
     if (hasNaturalAliasUsage(text)) return
@@ -427,7 +505,7 @@ function replaceSpokenQuotationCommands(
     )
   }
 
-  replaceGuardedAliasPair('begin speech', 'end speech', '“', '”', 'quote')
+  replaceGuardedAliasPair('begin(?:\\s+the)?\\s+speech', 'end speech', '“', '”', 'quote')
   replaceGuardedAliasPair('begin single', 'end single', '‘', '’', 'single quote')
 
   const replaceFixed = (pattern: RegExp, mark: string, reason: string, opening = false) => {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  hasUnresolvedCommandSignal,
   normalizeDeterministically,
   recoverHighConfidenceContextualCommands,
 } from '../src/domain/normalization'
@@ -137,6 +138,44 @@ test('preserves punctuation vocabulary in ordinary noun and verb contexts', () =
   )
 })
 
+test('flags unresolved spoken command words without flagging ordinary prose', () => {
+  assert.equal(hasUnresolvedCommandSignal('We went to the store and bought milk.'), false)
+  assert.equal(hasUnresolvedCommandSignal('Coffee at the shop tomorrow.'), false)
+  assert.equal(hasUnresolvedCommandSignal('Begin the speach here.'), true)
+  assert.equal(hasUnresolvedCommandSignal('She said period.'), true)
+  assert.equal(hasUnresolvedCommandSignal('Another dash here'), true)
+})
+
+test('a dash the provider already rendered is not doubled by a spoken dash', () => {
+  assert.equal(
+    normalizeDeterministically("Can, that's — dash you're here.", []).text,
+    "Can, that's — you're here.",
+  )
+  assert.equal(
+    normalizeDeterministically("Can, that's — — you're here.", []).text,
+    "Can, that's — you're here.",
+  )
+  assert.equal(normalizeDeterministically('Wait — dash. Next.', []).text, 'Wait — Next.')
+})
+
+test('boundary punctuation commands replace the sentence punctuation before them', () => {
+  assert.equal(
+    normalizeDeterministically('She was laughing. Dash. Him, loud.', []).text,
+    'She was laughing — Him, loud.',
+  )
+  assert.equal(normalizeDeterministically('Are you sure. Question mark', []).text, 'Are you sure?')
+  assert.equal(normalizeDeterministically('Wow. Exclamation mark', []).text, 'Wow!')
+  assert.equal(
+    normalizeDeterministically('Let me think. Comma and then go.', []).text,
+    'Let me think, and then go.',
+  )
+  assert.equal(normalizeDeterministically('Hello. Period', []).text, 'Hello.')
+  assert.equal(
+    normalizeDeterministically('Look at the word dash here.', []).text,
+    'Look at dash here.',
+  )
+})
+
 test('supports expanded punctuation commands and explicit fallbacks', () => {
   assert.equal(
     normalizeDeterministically(
@@ -269,6 +308,21 @@ test('recovers a closing end speech alias mistranscribed as and speech', () => {
     normalizeDeterministically('Begin speech. Hello there. Name your price and speech period', [])
       .text,
     '“Hello there. Name your price”.',
+  )
+})
+
+test('accepts an article in the begin speech alias and keeps natural usage literal', () => {
+  assert.equal(
+    normalizeDeterministically('Begin the speech. Well, there you go. You know. End speech.', [])
+      .text,
+    '“Well, there you go. You know.”',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'We begin the speech therapy today and end speech therapy next week.',
+      [],
+    ).text,
+    'We begin the speech therapy today and end speech therapy next week.',
   )
 })
 

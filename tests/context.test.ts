@@ -64,6 +64,19 @@ test('extracts compact proper-name and specialized-term references from conversa
   )
 })
 
+test('when the reference cap is reached, earlier input (the newest messages) keeps its terms', () => {
+  assert.deepEqual(
+    extractConversationReferences(
+      [
+        { role: 'user', content: 'Tessa Quill arrived.' },
+        { role: 'assistant', content: 'Mara Velin waited.' },
+      ],
+      'Tessa Quill'.length + 2,
+    ),
+    ['Tessa Quill'],
+  )
+})
+
 test('corrects only a unique one-character proper-name match from conversation references', () => {
   assert.deepEqual(
     correctFromConversationReferences('Yanniko waved while Kensai picked up Kensai’s plate.', [
@@ -99,13 +112,16 @@ test('corrects a unique two-character name ending only after a stable prefix', (
 })
 
 test('corrects a unique short phonetic name and preserves its possessive apostrophe', () => {
-  assert.deepEqual(correctFromConversationReferences("Cat's coat matched Cat’s boots.", ['Kat’s']), {
-    text: "Kat's coat matched Kat’s boots.",
-    correctedTerms: [
-      { heard: 'Cat', canonical: 'Kat' },
-      { heard: 'Cat', canonical: 'Kat' },
-    ],
-  })
+  assert.deepEqual(
+    correctFromConversationReferences("Cat's coat matched Cat’s boots.", ['Kat’s']),
+    {
+      text: "Kat's coat matched Kat’s boots.",
+      correctedTerms: [
+        { heard: 'Cat', canonical: 'Kat' },
+        { heard: 'Cat', canonical: 'Kat' },
+      ],
+    },
+  )
   assert.equal(correctFromConversationReferences("cat's coat", ['Kat']).text, "cat's coat")
   assert.equal(correctFromConversationReferences("Cat's coat", ['Kat', 'Qat']).text, "Cat's coat")
 })

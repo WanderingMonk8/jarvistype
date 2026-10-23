@@ -21,6 +21,7 @@ let appendShouldFail = false
 let appendAcknowledgementGate: Promise<void> | null = null
 let generationReturnsRawTranscript = false
 let generationNormalizedText: string | null = null
+let generationEditsOverride: unknown[] | null = null
 let generationCommandDecisions: unknown[] = []
 let editPlanResponse: unknown = null
 let grammarRepairResponse: unknown = null
@@ -126,11 +127,37 @@ const spindleMock = {
           )
         })
       }
+      if (generationEditsOverride)
+        return Promise.resolve({
+          content: JSON.stringify({ edits: generationEditsOverride, commandDecisions: [] }),
+        })
+      const candidate = input.candidate ?? ''
+      const target = generationReturnsRawTranscript
+        ? (input.rawTranscript ?? '')
+        : (generationNormalizedText ?? candidate)
+      let start = 0
+      while (
+        start < candidate.length &&
+        start < target.length &&
+        candidate[start] === target[start]
+      )
+        start += 1
+      let end = 0
+      while (
+        end < candidate.length - start &&
+        end < target.length - start &&
+        candidate[candidate.length - 1 - end] === target[target.length - 1 - end]
+      )
+        end += 1
+      const editAt = (from: number) => ({
+        find: candidate.slice(from, candidate.length - end),
+        replace: target.slice(from, target.length - end),
+      })
+      let edit = editAt(start)
+      if (!edit.find && start > 0) edit = editAt(start - 1)
       return Promise.resolve({
         content: JSON.stringify({
-          normalizedText: generationReturnsRawTranscript
-            ? (input.rawTranscript ?? '')
-            : (generationNormalizedText ?? input.candidate ?? ''),
+          edits: candidate === target ? [] : [edit],
           commandDecisions: generationCommandDecisions,
         }),
       })
@@ -162,6 +189,7 @@ test.beforeEach(() => {
   appendAcknowledgementGate = null
   generationReturnsRawTranscript = false
   generationNormalizedText = null
+  generationEditsOverride = null
   generationCommandDecisions = []
   editPlanResponse = null
   grammarRepairResponse = null
@@ -306,7 +334,7 @@ test('lists safe normalization connections and dispatches with selected connecti
   await seedDraft(userId, chatId, 'Existing draft')
   generationRequests.length = 0
   await dispatch(
-    recordingAppendRequest(chatId, 'selected-connection-segment', 1, 'Plain text'),
+    recordingAppendRequest(chatId, 'selected-connection-segment', 1, 'Plain speach text'),
     userId,
   )
 
@@ -328,16 +356,14 @@ test('uses local command context with compact conversational spelling references
   await seedDraft(userId, chatId, 'This draft content must not enter the normalization prompt.')
 
   await dispatch(
-    recordingAppendRequest(chatId, 'split-context-segment', 1, 'She reached the harbor period'),
+    recordingAppendRequest(chatId, 'split-context-segment', 1, 'She reached the harbor speach'),
     userId,
   )
 
   const request = generationRequests.at(-1)
   const prompt = JSON.parse(request?.messages?.at(-1)?.content ?? '{}') as Record<string, unknown>
-  assert.deepEqual(prompt.recentReferenceContext, [
-    { role: 'assistant', content: 'She is mapping the coast near Port Meridian.' },
-    { role: 'user', content: 'Continue that account.' },
-  ])
+  assert.equal('recentReferenceContext' in prompt, false)
+  assert.equal(JSON.stringify(prompt).includes('Continue that account'), false)
   assert.ok(Array.isArray(prompt.conversationReferences))
   assert.ok(prompt.conversationReferences.includes('Caelora'))
   assert.ok(prompt.conversationReferences.includes('Northern Survey'))
@@ -1396,6 +1422,66 @@ test('does not append a second period after a punctuated spoken quotation', asyn
   if (response?.type === 'transcript.normalization.response') {
     assert.equal(response.proposal.candidateText, '“I am not going anywhere.”')
   }
+})
+
+test('calls the contextual provider for every recording outside the quotation fast path', async () => {
+  const userId = 'contextual-always-user'
+  const chatId = 'contextual-always-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationEditsOverride = [{ find: 'beta', replace: 'BETA' }]
+
+  generationRequests.length = 0
+  await dispatch(
+    recordingAppendRequest(chatId, 'contextual-always-plain', 1, 'Alpha beta gamma delta.'),
+    userId,
+  )
+  let response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  assert.equal(generationRequests.length, 1)
+  if (response?.type === 'transcript.normalization.response')
+    assert.match(response.proposal.candidateText, /BETA/)
+
+  generationRequests.length = 0
+  await dispatch(
+    recordingAppendRequest(chatId, 'contextual-always-signal', 2, 'Alpha beta gamma speach delta.'),
+    userId,
+  )
+  response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  assert.equal(generationRequests.length, 1)
+  generationEditsOverride = null
+})
+
+test('rejects ambiguous or missing contextual edits and keeps the deterministic candidate', async () => {
+  const userId = 'contextual-edit-fallback-user'
+  const chatId = 'contextual-edit-fallback-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  for (const edits of [
+    [{ find: 'beta', replace: 'BETA' }],
+    [{ find: 'missing phrase', replace: 'BETA' }],
+  ]) {
+    generationEditsOverride = edits
+    await dispatch(
+      recordingAppendRequest(
+        chatId,
+        `contextual-edit-fallback-${edits.length}`,
+        1,
+        'Alpha beta. Alpha beta.',
+      ),
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') {
+      assert.doesNotMatch(response.proposal.candidateText, /BETA/)
+      assert.equal(response.proposal.contextualModelUsed, false)
+    }
+  }
+  generationEditsOverride = null
 })
 
 test('does not let contextual normalization discard ordinary spoken punctuation commands', async () => {
@@ -3645,6 +3731,244 @@ test('preserves sentence casing when replacing an opening phrase', async () => {
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
+})
+
+test('splits compound instructions into deterministic clauses without swallowing later commands', async () => {
+  const userId = 'compound-clause-user'
+  const chatId = 'compound-clause-chat'
+  activeChatId = chatId
+  const draft =
+    'I slide the cooked pancake onto a plate with my spatula. You know, what you said about the real people. Now, do you wanna give it a try? I will show you how to tilt the pan. You just use the spatula. What do you say? End speech.'
+  const cases: Array<readonly [string, string]> = [
+    [
+      'Remove the sentence and speech, and then put quotations from the phrase, you know to what do you say.',
+      'I slide the cooked pancake onto a plate with my spatula. “You know, what you said about the real people. Now, do you wanna give it a try? I will show you how to tilt the pan. You just use the spatula. What do you say?”',
+    ],
+    [
+      'Remove the sentence and speech, and then replace tilt with lift.',
+      'I slide the cooked pancake onto a plate with my spatula. You know, what you said about the real people. Now, do you wanna give it a try? I will show you how to lift the pan. You just use the spatula. What do you say?',
+    ],
+  ]
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `compound-clause-interpret-${index}`,
+        operationId: `compound-clause-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
+test('removes adjacent and trailing sentences without leaving stray separators', async () => {
+  const userId = 'sentence-separator-user'
+  const chatId = 'sentence-separator-chat'
+  activeChatId = chatId
+  const draft = 'Alpha one. Beta two. Gamma three.\n\nDelta four. Epsilon five.'
+  const cases: Array<readonly [string, string]> = [
+    ['Remove the sentence Gamma three.', 'Alpha one. Beta two.\n\nDelta four. Epsilon five.'],
+    [
+      'Remove the sentence Beta two, and then remove the sentence Gamma three.',
+      'Alpha one.\n\nDelta four. Epsilon five.',
+    ],
+    [
+      'Replace Beta two with Second and delete the first sentence.',
+      'Second. Gamma three.\n\nDelta four. Epsilon five.',
+    ],
+  ]
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `separator-interpret-${index}`,
+        operationId: `separator-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
+test('resolves a misheard “delete and speech” deterministically', async () => {
+  const userId = 'delete-and-speech-user'
+  const chatId = 'delete-and-speech-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Hello there. Second item. End speech.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'delete-and-speech-interpret',
+      operationId: 'delete-and-speech-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete and speech.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'Hello there. Second item.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('choosing a provider delete candidate removes the whole sentence and its period', async () => {
+  const userId = 'provider-delete-candidate-user'
+  const chatId = 'provider-delete-candidate-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Keep this. End speech. Middle line. End speech.')
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete end speech.',
+    operations: [{ id: 'provider-delete', type: 'delete', target: { exactText: 'End speech' } }],
+  }
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'provider-delete-candidate-interpret',
+      operationId: 'provider-delete-candidate-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Take out the closing speech line.',
+    },
+    userId,
+  )
+  editPlanResponse = null
+  const choice = responses.at(-1)?.payload
+  assert.equal(choice?.type, 'edit.candidates.response')
+  if (choice?.type !== 'edit.candidates.response') return
+  const expected = ['Keep this. Middle line. End speech.', 'Keep this. End speech. Middle line.']
+  for (const [index, candidate] of choice.candidateSet.candidates.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.candidate.select.request',
+        requestId: `provider-delete-candidate-select-${index}`,
+        operationId: 'provider-delete-candidate-operation',
+        chatId,
+        expectedVersion: 1,
+        candidateId: candidate.id,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response')
+    if (proposal?.type === 'edit.proposal.response')
+      assert.equal(proposal.proposal.afterText, expected[index], `candidate ${index}`)
+  }
+})
+
+test('asks for a choice without the provider when “delete and speech” matches twice', async () => {
+  const userId = 'delete-and-speech-duplicate-user'
+  const chatId = 'delete-and-speech-duplicate-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'End speech. Middle line. End speech.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'delete-and-speech-duplicate-interpret',
+      operationId: 'delete-and-speech-duplicate-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete and speech.',
+    },
+    userId,
+  )
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.candidates.response')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('every replace alias works deterministically with and without polite wording', async () => {
+  const userId = 'replace-alias-user'
+  const chatId = 'replace-alias-chat'
+  activeChatId = chatId
+  const draft = 'The status is pending. Second item.\n\nThird sentence here. Last one.'
+  const approved = 'The status is approved. Second item.\n\nThird sentence here. Last one.'
+  const cases: Array<readonly [string, string]> = [
+    ['Replace pending with approved.', approved],
+    ['Change pending to approved.', approved],
+    ['Change pending into approved.', approved],
+    ['Swap pending with approved.', approved],
+    ['Swap pending for approved.', approved],
+    ['Substitute pending with approved.', approved],
+    ['Substitute pending for approved.', approved],
+    ['Change ‘pending’ to ‘approved’ in paragraph 1.', approved],
+    ['Please swap pending with approved.', approved],
+    ['Replace pending with approved, please.', approved],
+    [
+      'Replace the first sentence with Hello there.',
+      'Hello there. Second item.\n\nThird sentence here. Last one.',
+    ],
+    [
+      'Substitute the third sentence with Fresh start.',
+      'The status is pending. Second item.\n\nFresh start. Last one.',
+    ],
+    [
+      'Change the last sentence to Done.',
+      'The status is pending. Second item.\n\nThird sentence here. Done.',
+    ],
+    [
+      'Swap the second sentence for New one.',
+      'The status is pending. New one.\n\nThird sentence here. Last one.',
+    ],
+  ]
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `replace-alias-interpret-${index}`,
+        operationId: `replace-alias-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
 })
 
 test('treats remove and trailing please exactly like delete', async () => {

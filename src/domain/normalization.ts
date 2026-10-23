@@ -202,6 +202,9 @@ export function normalizeDeterministically(
   const deduplicatedTerminalPunctuation = removeRedundantTerminalPunctuationCommands(text)
   if (deduplicatedTerminalPunctuation !== text) reasons.push('provider terminal punctuation')
   text = deduplicatedTerminalPunctuation
+  const deduplicatedDashes = removeRedundantProviderDashes(text)
+  if (deduplicatedDashes !== text) reasons.push('provider dash')
+  text = deduplicatedDashes
   text = normalizeApostrophesInsideExplicitSpelling(text)
   const explicitPunctuation = replaceExplicitPunctuationCommands(text)
   text = explicitPunctuation.text
@@ -345,6 +348,11 @@ export function recoverHighConfidenceContextualCommands(input: string): Contextu
 
 function removeRedundantProviderTerminalMarks(input: string): string {
   return input.replace(/([.?!…][”’"']?)\s+\.(?=\s|[”’"']|$)/gu, '$1')
+}
+
+/** A dash already rendered by the provider keeps its mark when the spoken “dash” follows it. */
+function removeRedundantProviderDashes(input: string): string {
+  return input.replace(/—\s*(?:em\s+)?dash\b[.,]?/giu, '—').replace(/—\s*—/gu, '—')
 }
 
 function removeRedundantTerminalPunctuationCommands(input: string): string {

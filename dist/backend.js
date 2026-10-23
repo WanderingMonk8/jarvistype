@@ -2573,6 +2573,9 @@ function normalizeDeterministically(raw, glossary, options = {}) {
   const deduplicatedTerminalPunctuation = removeRedundantTerminalPunctuationCommands(text);
   if (deduplicatedTerminalPunctuation !== text) reasons.push("provider terminal punctuation");
   text = deduplicatedTerminalPunctuation;
+  const deduplicatedDashes = removeRedundantProviderDashes(text);
+  if (deduplicatedDashes !== text) reasons.push("provider dash");
+  text = deduplicatedDashes;
   text = normalizeApostrophesInsideExplicitSpelling(text);
   const explicitPunctuation = replaceExplicitPunctuationCommands(text);
   text = explicitPunctuation.text;
@@ -2698,6 +2701,9 @@ function recoverHighConfidenceContextualCommands(input) {
 }
 function removeRedundantProviderTerminalMarks(input) {
   return input.replace(/([.?!…][”’"']?)\s+\.(?=\s|[”’"']|$)/gu, "$1");
+}
+function removeRedundantProviderDashes(input) {
+  return input.replace(/—\s*(?:em\s+)?dash\b[.,]?/giu, "\u2014").replace(/—\s*—/gu, "\u2014");
 }
 function removeRedundantTerminalPunctuationCommands(input) {
   return input.replace(/([.?!…][”’"']?)\s+(?:period|full stop)\b[.,]?/giu, "$1").replace(/(\?[”’"']?)\s+question mark\b[.,]?/giu, "$1").replace(/(![”’"']?)\s+exclamation (?:mark|point)\b[.,]?/giu, "$1").replace(/(…[”’"']?)\s+(?:ellipsis|dot dot dot|three dots)\b[.,]?/giu, "$1");

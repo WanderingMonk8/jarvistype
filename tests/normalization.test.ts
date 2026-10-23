@@ -146,6 +146,18 @@ test('flags unresolved spoken command words without flagging ordinary prose', ()
   assert.equal(hasUnresolvedCommandSignal('Another dash here'), true)
 })
 
+test('a dash the provider already rendered is not doubled by a spoken dash', () => {
+  assert.equal(
+    normalizeDeterministically("Can, that's — dash you're here.", []).text,
+    "Can, that's — you're here.",
+  )
+  assert.equal(
+    normalizeDeterministically("Can, that's — — you're here.", []).text,
+    "Can, that's — you're here.",
+  )
+  assert.equal(normalizeDeterministically('Wait — dash. Next.', []).text, 'Wait — Next.')
+})
+
 test('boundary punctuation commands replace the sentence punctuation before them', () => {
   assert.equal(
     normalizeDeterministically('She was laughing. Dash. Him, loud.', []).text,

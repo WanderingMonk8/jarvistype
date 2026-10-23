@@ -387,7 +387,7 @@ function getFloatingWidgetSize() {
   }
   return {
     width: Math.max(1, Math.min(960, viewport.width - 48)),
-    height: Math.max(1, Math.min(680, viewport.height - 48))
+    height: Math.max(1, Math.min(600, viewport.height - 48))
   };
 }
 var JARVISTYPE_ICON_SVG = `

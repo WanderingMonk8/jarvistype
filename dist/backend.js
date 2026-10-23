@@ -3525,7 +3525,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
     const interpretStartedAt = performance.now();
     recordDebug(context.userId, "edit.interpret", "start");
     const interpretedPlan = await interpretEditInstruction(
-      request.instructionTranscript,
+      canonicalDeleteInstruction(request.instructionTranscript),
       session,
       settings,
       glossary,
@@ -3942,6 +3942,12 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
   );
   spindle.log.info(
     `JarvisType edit candidate selection completed in ${Math.round(performance.now() - startedAt2)} ms.`
+  );
+}
+function canonicalDeleteInstruction(instructionTranscript) {
+  return instructionTranscript.replace(
+    /^\s*(?:please\s+)?(?:remove|take\s+(?:off|out)|erase|cut)\b/iu,
+    "delete"
   );
 }
 async function interpretEditInstruction(instructionTranscript, session, settings, glossary, conversationReferences, userId) {

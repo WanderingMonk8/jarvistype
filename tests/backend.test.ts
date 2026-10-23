@@ -2101,6 +2101,10 @@ test('deletes positional sentences across every alias and paragraph scope', asyn
       'First one. First two.\n\nSecond one. Second two.',
     ],
     ['Erase the last sentence.', 'First one. First two.\n\nSecond one. Second two.'],
+    [
+      'Please remove the second sentence in paragraph 2.',
+      'First one. First two.\n\nSecond one. Second three.',
+    ],
     ['Cut the first sentence.', 'First two.\n\nSecond one. Second two. Second three.'],
     [
       'Delete the penultimate sentence in paragraph 2.',

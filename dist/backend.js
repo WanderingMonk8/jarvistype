@@ -616,6 +616,9 @@ function endDebugCapture(userId) {
   if (active <= 1) activeCaptureUsers.delete(userId);
   else activeCaptureUsers.set(userId, active - 1);
 }
+function isDebugEnabled(userId) {
+  return enabledUsers.has(userId);
+}
 function recordDebug(userId, category, message) {
   if (!enabledUsers.has(userId) || !activeCaptureUsers.has(userId)) return;
   const entries = entriesByUser.get(userId) ?? [];
@@ -3418,6 +3421,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     `proposal contextual=${contextualModelUsed} duration=${debugDuration(normalizeStartedAt)}`
   );
   if (activeRequest.cancelled) return;
+  if (isDebugEnabled(context.userId)) void measureProviderFloor(context.userId, settings);
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -5575,6 +5579,42 @@ function apostropheFlexiblePattern(value) {
   return escapeRegularExpression(value).replace(/['\u2019]/gu, "['\\u2019]");
 }
 var CONTEXTUAL_NORMALIZATION_TIMEOUT_MS = 12e3;
+var FLOOR_PROBE_TIMEOUT_MS = 3e4;
+async function measureProviderFloor(userId, settings) {
+  const startedAt2 = performance.now();
+  recordDebug(userId, "provider.floor", "start");
+  let timeout;
+  let outcome = "ok";
+  try {
+    const response = await Promise.race([
+      spindle.generate.quiet({
+        type: "quiet",
+        userId,
+        ...settings.normalizationConnectionId ? { connection_id: settings.normalizationConnectionId } : {},
+        reasoning: { source: "off" },
+        parameters: {
+          temperature: 0,
+          max_tokens: 8,
+          ...settings.normalizationModelOverride ? { model: settings.normalizationModelOverride } : {}
+        },
+        messages: [{ role: "user", content: "Reply with OK." }]
+      }),
+      new Promise((resolve) => {
+        timeout = setTimeout(() => resolve(null), FLOOR_PROBE_TIMEOUT_MS);
+      })
+    ]);
+    if (!response) outcome = "timed-out";
+  } catch {
+    outcome = "failed";
+  } finally {
+    clearTimeout(timeout);
+  }
+  recordDebug(
+    userId,
+    "provider.floor",
+    `end outcome=${outcome} duration=${debugDuration(startedAt2)}`
+  );
+}
 async function normalizeWithContext(rawTranscript, deterministicCandidate, messages, conversationReferences, glossary, settings, userId, timeoutMs = CONTEXTUAL_NORMALIZATION_TIMEOUT_MS) {
   const startedAt2 = performance.now();
   recordDebug(

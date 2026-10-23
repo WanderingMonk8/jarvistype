@@ -20,6 +20,7 @@ import {
   debugDuration,
   endDebugCapture,
   formatDebugEntries,
+  isDebugEnabled,
   recordDebug,
   setDebugEnabled,
 } from './domain/debug'
@@ -492,6 +493,7 @@ async function handleTranscriptNormalization(
     `proposal contextual=${contextualModelUsed} duration=${debugDuration(normalizeStartedAt)}`,
   )
   if (activeRequest.cancelled) return
+  if (isDebugEnabled(context.userId)) void measureProviderFloor(context.userId, settings)
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -3261,6 +3263,52 @@ function apostropheFlexiblePattern(value: string): string {
 }
 
 const CONTEXTUAL_NORMALIZATION_TIMEOUT_MS = 12_000
+const FLOOR_PROBE_TIMEOUT_MS = 30_000
+
+/**
+ * Debug-only: times a near-empty request through the same normalization connection and
+ * model, to separate fixed per-call overhead from the cost of the real prompt. Runs after
+ * the proposal is sent, never holds the draft lock, and never changes the result.
+ */
+async function measureProviderFloor(userId: string, settings: PhaseFourSettings): Promise<void> {
+  const startedAt = performance.now()
+  recordDebug(userId, 'provider.floor', 'start')
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  let outcome = 'ok'
+  try {
+    const response = await Promise.race([
+      spindle.generate.quiet({
+        type: 'quiet',
+        userId,
+        ...(settings.normalizationConnectionId
+          ? { connection_id: settings.normalizationConnectionId }
+          : {}),
+        reasoning: { source: 'off' },
+        parameters: {
+          temperature: 0,
+          max_tokens: 8,
+          ...(settings.normalizationModelOverride
+            ? { model: settings.normalizationModelOverride }
+            : {}),
+        },
+        messages: [{ role: 'user', content: 'Reply with OK.' }],
+      }),
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => resolve(null), FLOOR_PROBE_TIMEOUT_MS)
+      }),
+    ])
+    if (!response) outcome = 'timed-out'
+  } catch {
+    outcome = 'failed'
+  } finally {
+    clearTimeout(timeout)
+  }
+  recordDebug(
+    userId,
+    'provider.floor',
+    `end outcome=${outcome} duration=${debugDuration(startedAt)}`,
+  )
+}
 
 async function normalizeWithContext(
   rawTranscript: string,

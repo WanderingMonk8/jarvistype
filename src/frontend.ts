@@ -1090,6 +1090,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       render()
       return
     }
+    if (!trimmed && !originalLine.trim()) return
     if (trimmed) {
       lines[lineIndex] = trimmed
     } else {
@@ -2410,7 +2411,7 @@ function attachParagraphEditing(
   text: HTMLElement,
   lineIndex: number,
   line: string,
-  ordinal: number,
+  editLabel: string,
   onEdit: (lineIndex: number, originalLine: string, replacement: string) => void,
 ): void {
   let pressTimer: ReturnType<typeof setTimeout> | null = null
@@ -2426,7 +2427,7 @@ function attachParagraphEditing(
     input.className = 'jt-paragraph-input'
     input.value = line
     input.rows = Math.min(6, Math.max(2, Math.ceil(line.length / 60)))
-    input.setAttribute('aria-label', `Edit paragraph ${ordinal}`)
+    input.setAttribute('aria-label', editLabel)
     let settled = false
     const finish = (commit: boolean) => {
       if (settled) return
@@ -2490,10 +2491,18 @@ function renderParagraphs(
 ): void {
   container.replaceChildren()
   if (cleanText.length === 0) {
-    const empty = document.createElement('p')
-    empty.className = 'jt-empty'
-    empty.textContent = 'Empty draft. Record a message to start.'
-    container.append(empty)
+    const row = document.createElement('div')
+    row.className = 'jt-paragraph-row jt-paragraph-row--separator'
+    row.setAttribute('aria-label', 'Empty draft paragraph')
+    const number = document.createElement('span')
+    number.className = 'jt-paragraph-number'
+    number.setAttribute('aria-hidden', 'true')
+    const empty = document.createElement('span')
+    empty.className = 'jt-empty jt-paragraph-text'
+    empty.textContent = 'Empty draft. Double-click or long-press to type.'
+    row.append(number, empty)
+    if (onEdit) attachParagraphEditing(row, empty, 0, '', 'Edit empty draft paragraph', onEdit)
+    container.append(row)
     return
   }
 
@@ -2504,6 +2513,21 @@ function renderParagraphs(
     if (line.trim().length === 0) {
       row.classList.add('jt-paragraph-row--separator')
       row.setAttribute('aria-label', 'Blank paragraph separator')
+      const number = document.createElement('span')
+      number.className = 'jt-paragraph-number'
+      number.setAttribute('aria-hidden', 'true')
+      const text = document.createElement('span')
+      text.className = 'jt-paragraph-text'
+      row.append(number, text)
+      if (onEdit)
+        attachParagraphEditing(
+          row,
+          text,
+          lineIndex,
+          line,
+          `Edit blank draft line ${lineIndex + 1}`,
+          onEdit,
+        )
       container.append(row)
       continue
     }
@@ -2516,7 +2540,8 @@ function renderParagraphs(
     text.className = 'jt-paragraph-text'
     text.textContent = line
     row.append(number, text)
-    if (onEdit) attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit)
+    if (onEdit)
+      attachParagraphEditing(row, text, lineIndex, line, `Edit paragraph ${ordinal}`, onEdit)
     container.append(row)
   }
 }
@@ -2711,7 +2736,7 @@ function shellMarkup(): string {
       .jt-paragraphs:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-paragraph-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: .5rem; min-width: 0; min-height: 1.5rem; align-items: start; line-height: 1.5; }
       .jt-paragraph-row + .jt-paragraph-row { margin-top: .25rem; }
-      .jt-paragraph-row--separator { min-height: .8rem; }
+      .jt-paragraph-row--separator { min-height: 1.5rem; }
       .jt-paragraph-row { -webkit-touch-callout: none; touch-action: manipulation; cursor: text; border-radius: .35rem; }
       .jt-paragraph-row:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-paragraph-input { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; line-height: 1.5; padding: .35rem .5rem; border-radius: .4rem; resize: vertical; }

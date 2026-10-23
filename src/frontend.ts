@@ -2456,6 +2456,11 @@ function attachParagraphEditing(
   })
   row.addEventListener('pointerdown', (event) => {
     if (event.pointerType === 'mouse') return
+    // The host float widget also uses a touch hold for its widget menu. Keep a
+    // paragraph-owned hold from starting that ancestor gesture while leaving
+    // native scrolling intact (no preventDefault).
+    event.stopPropagation()
+    if (event.target instanceof HTMLTextAreaElement) return
     longPressed = false
     cancelPress()
     pressTimer = setTimeout(() => {
@@ -2466,8 +2471,14 @@ function attachParagraphEditing(
   for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const)
     row.addEventListener(type, cancelPress)
   row.addEventListener('contextmenu', (event) => {
-    if (!longPressed) return
+    if (event.target instanceof HTMLTextAreaElement) {
+      event.stopPropagation()
+      return
+    }
+    if (event.pointerType === 'mouse' && !longPressed) return
     event.preventDefault()
+    event.stopPropagation()
+    if (!longPressed) beginEdit()
     longPressed = false
   })
 }

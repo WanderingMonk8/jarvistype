@@ -2351,6 +2351,8 @@ function attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit) {
   });
   row.addEventListener("pointerdown", (event) => {
     if (event.pointerType === "mouse") return;
+    event.stopPropagation();
+    if (event.target instanceof HTMLTextAreaElement) return;
     longPressed = false;
     cancelPress();
     pressTimer = setTimeout(() => {
@@ -2361,8 +2363,14 @@ function attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit) {
   for (const type of ["pointerup", "pointercancel", "pointerleave"])
     row.addEventListener(type, cancelPress);
   row.addEventListener("contextmenu", (event) => {
-    if (!longPressed) return;
+    if (event.target instanceof HTMLTextAreaElement) {
+      event.stopPropagation();
+      return;
+    }
+    if (event.pointerType === "mouse" && !longPressed) return;
     event.preventDefault();
+    event.stopPropagation();
+    if (!longPressed) beginEdit();
     longPressed = false;
   });
 }

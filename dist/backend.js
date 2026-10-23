@@ -1964,9 +1964,21 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
   }
   return references;
 }
-function extractCardCharacterReferences(cardText) {
-  if (!cardText.trim()) return [];
-  return extractConversationReferences([{ role: "assistant", content: cardText }]);
+function extractCardCharacterReferences(title, cardText) {
+  const normalizedTitle = title.trim();
+  const titleReferences = normalizedTitle ? extractConversationReferences([{ role: "assistant", content: normalizedTitle }]) : [];
+  const cardReferences = cardText.trim() ? extractConversationReferences([{ role: "assistant", content: cardText }]) : [];
+  const cardKeys = new Set(cardReferences.map((reference) => reference.toLocaleLowerCase()));
+  const confirmedTitleReferences = titleReferences.filter(
+    (reference) => cardKeys.has(reference.toLocaleLowerCase())
+  );
+  const selectedTitleReferences = confirmedTitleReferences.length ? confirmedTitleReferences : titleReferences;
+  const references = /* @__PURE__ */ new Map();
+  for (const reference of [...selectedTitleReferences, ...cardReferences]) {
+    const key = reference.toLocaleLowerCase();
+    if (!references.has(key)) references.set(key, reference);
+  }
+  return [...references.values()];
 }
 function correctFromConversationReferences(text, references, protectedTerms = []) {
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()));
@@ -5862,7 +5874,7 @@ async function loadCardCharacterReferences(chatId, userId) {
       character.post_history_instructions,
       ...character.alternate_greetings ?? []
     ].filter(Boolean).join("\n");
-    const references = extractCardCharacterReferences(cardText);
+    const references = extractCardCharacterReferences(character.name, cardText);
     cardCharacterReferenceCache.set(cacheKey, references);
     while (cardCharacterReferenceCache.size > MAX_CONVERSATION_REFERENCE_CACHES) {
       const oldest = cardCharacterReferenceCache.keys().next().value;

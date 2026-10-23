@@ -627,7 +627,7 @@ JarvisType is expected to use the following Spindle capabilities:
 - Frontend microphone capture through Lumiverse `ctx.stt.start(...)` where available, with browser microphone permission still controlled by the host environment.
 - Frontend-to-backend messaging for recordings, partial results, status, and draft operations.
 - `spindle.chats.getActive()` for active-chat identification.
-- `spindle.chats.get(chatId)` and `spindle.characters.get(characterId)` for one-time extraction of character names and proper nouns from the active card's substantive fields.
+- `spindle.chats.get(chatId)` and `spindle.characters.get(characterId)` for one-time extraction of character names and proper nouns from the active card, with title candidates corroborated by substantive fields when possible and retained as a fallback when no title candidate appears there.
 - `spindle.chat.getMessages(chatId)` for recent context.
 - `spindle.chat.appendMessage(...)` for confirmed submission.
 - Frontend `ctx.stt` behind `speech-to-text-v1` for live capture or supplied-audio transcription through the user's selected or explicitly configured Lumiverse STT provider.

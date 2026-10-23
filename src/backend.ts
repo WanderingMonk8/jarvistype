@@ -3614,7 +3614,7 @@ async function loadCardCharacterReferences(chatId: string, userId: string): Prom
     ]
       .filter(Boolean)
       .join('\n')
-    const references = extractCardCharacterReferences(cardText)
+    const references = extractCardCharacterReferences(character.name, cardText)
     cardCharacterReferenceCache.set(cacheKey, references)
     while (cardCharacterReferenceCache.size > MAX_CONVERSATION_REFERENCE_CACHES) {
       const oldest = cardCharacterReferenceCache.keys().next().value

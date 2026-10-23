@@ -89,6 +89,7 @@ test('extracts the canonical name from a descriptive card title', () => {
 
 test('extracts both first and full character names from the card', () => {
   const references = extractCardCharacterReferences(
+    'Aiko - The Tired Worker',
     'Aiko Tanaka has worked the late shift for three years.',
   )
   assert.ok(references.includes('Aiko'))
@@ -97,11 +98,31 @@ test('extracts both first and full character names from the card', () => {
 
 test('extracts every named character from an ensemble card', () => {
   const references = extractCardCharacterReferences(
+    'Night Shift Roommates',
     'Aiko Tanaka works beside Hana Sato. Later, Marcus joins Aiko and Hana for dinner.',
   )
   for (const expected of ['Aiko Tanaka', 'Aiko', 'Hana Sato', 'Hana', 'Marcus']) {
     assert.ok(references.includes(expected), `missing ${expected}`)
   }
+})
+
+test('falls back to title names when the card body never mentions them', () => {
+  const references = extractCardCharacterReferences(
+    'Carrie Fishborn',
+    'A tired worker closes the pharmacy after the morning shift.',
+  )
+  for (const expected of ['Carrie Fishborn', 'Carrie', 'Fishborn']) {
+    assert.ok(references.includes(expected), `missing ${expected}`)
+  }
+})
+
+test('keeps only title references corroborated by the card body when available', () => {
+  const references = extractCardCharacterReferences(
+    'Aiko - The Tired Worker',
+    'Aiko Tanaka works the late shift.',
+  )
+  assert.ok(references.includes('Aiko'))
+  assert.equal(references.includes('Tired Worker'), false)
 })
 
 test('when the reference cap is reached, earlier input (the newest messages) keeps its terms', () => {

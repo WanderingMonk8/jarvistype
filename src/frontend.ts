@@ -62,31 +62,36 @@ export const JARVISTYPE_ICON_SVG = `
 
 export const COMMAND_GROUPS = [
   {
-    title: 'Compose',
+    title: 'Dictation',
     examples: [
       ['Record Message', 'Record Message, then dictate a new segment.'],
       ['Record Edit', 'Record Edit, then describe a change to the existing draft.'],
-      [
-        'Spoken punctuation',
-        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “begin bracket” and “end bracket” for angle brackets, “quote” or “quotation” at both ends of a quotation, or “begin speech” and “end speech.” For single quotations, use “single quote” or “single quotation” at both ends, or “begin single” and “end single.” You can also say “new line” or “new paragraph.”',
-      ],
-      [
-        'Literal punctuation word',
-        'Say “the word period,” “literal dash,” “the phrase new paragraph,” or “the words open parenthesis.”',
-      ],
-      ['Explicit punctuation', 'Say “insert period,” “punctuation colon,” or “command new line.”'],
     ],
   },
   {
-    title: 'Change text',
+    title: 'Punctuation and layout',
+    examples: [
+      [
+        'Spoken punctuation',
+        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “begin bracket” and “end bracket” for angle brackets, “new line,” or “new paragraph.”',
+      ],
+      [
+        'Quotations',
+        'Say “quote” or “quotation” at both ends of a quotation, or “begin speech” and “end speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”',
+      ],
+      ['Explicit punctuation', 'Say “insert period,” “punctuation colon,” or “command new line.”'],
+      [
+        'Literal punctuation word',
+        'Say “the word period,” “literal dash,” “the phrase new paragraph,” or “the words open parenthesis” to dictate the words themselves.',
+      ],
+    ],
+  },
+  {
+    title: 'Replace and insert',
     examples: [
       [
         'Replace',
         'Replace, change, swap, or substitute a target—for example, “Change ‘pending’ to ‘approved’ in paragraph 2.”',
-      ],
-      [
-        'Delete',
-        'Say “delete,” “remove,” “take off,” “take out,” “erase,” or “cut,” followed by the target—for example, “Take off the second sentence in paragraph 1.”',
       ],
       ['Insert before', 'Insert, add, place, or put “Urgent:” before the first sentence.'],
       [
@@ -101,24 +106,25 @@ export const COMMAND_GROUPS = [
         'Prepend',
         'Prepend, add to the beginning, place at the start, or put at the beginning of paragraph 1.',
       ],
-      ['Move', 'Move, relocate, or shift “approved” before “pending” in paragraph 1.'],
-      [
-        'Fuzzy target fallback',
-        'If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as “mouthlet” for “Mao let.”',
-      ],
-      [
-        'Punctuation targets',
-        'Say “the second quote in paragraph 1”, “the last period in paragraph 1”, or “the quote after the phrase ‘this is very good’” with move, replace, insert, or delete.',
-      ],
     ],
   },
   {
-    title: 'Structure and order',
+    title: 'Delete and move',
+    examples: [
+      [
+        'Delete',
+        'Say “delete,” “remove,” “take off,” “take out,” “erase,” or “cut,” followed by the target—for example, “Take off the second sentence in paragraph 1.”',
+      ],
+      ['Move', 'Move, relocate, or shift “approved” before “pending” in paragraph 1.'],
+      ['Move before', 'Move paragraph 3 before paragraph 1.'],
+      ['Move after', 'Move paragraph 1 after paragraph 2.'],
+    ],
+  },
+  {
+    title: 'Paragraphs',
     examples: [
       ['Split', 'Split, break, or divide paragraph 1 after “The launch checklist is ready.”'],
       ['Join', 'Join, merge, or combine paragraph 1 with the following paragraph.'],
-      ['Move before', 'Move paragraph 3 before paragraph 1.'],
-      ['Move after', 'Move paragraph 1 after paragraph 2.'],
     ],
   },
   {
@@ -131,6 +137,19 @@ export const COMMAND_GROUPS = [
       [
         'As in reference',
         'Use a qualified “as in” reference anywhere you dictate new edit text: replace, insert before or after, prepend, or append. For example, “Prepend ‘I nod,’ as in nodding one’s head, to the first sentence.” The intended word must occur immediately before “as in” and repeat afterward exactly or as a clear inflection; otherwise the wording remains literal.',
+      ],
+    ],
+  },
+  {
+    title: 'Targets and multiple changes',
+    examples: [
+      [
+        'Fuzzy target fallback',
+        'If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as “mouthlet” for “Mao let.”',
+      ],
+      [
+        'Punctuation targets',
+        'Say “the second quote in paragraph 1”, “the last period in paragraph 1”, or “the quote after the phrase ‘this is very good’” with move, replace, insert, or delete.',
       ],
       [
         'Multiple changes',

@@ -397,31 +397,36 @@ var JARVISTYPE_ICON_SVG = `
   </svg>`;
 var COMMAND_GROUPS = [
   {
-    title: "Compose",
+    title: "Dictation",
     examples: [
       ["Record Message", "Record Message, then dictate a new segment."],
-      ["Record Edit", "Record Edit, then describe a change to the existing draft."],
-      [
-        "Spoken punctuation",
-        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen parenthesis\u201D or \u201Copen paren,\u201D \u201Cclose parenthesis\u201D or \u201Cclose paren,\u201D \u201Copen bracket,\u201D \u201Cclose bracket,\u201D \u201Cbegin bracket\u201D and \u201Cend bracket\u201D for angle brackets, \u201Cquote\u201D or \u201Cquotation\u201D at both ends of a quotation, or \u201Cbegin speech\u201D and \u201Cend speech.\u201D For single quotations, use \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D You can also say \u201Cnew line\u201D or \u201Cnew paragraph.\u201D"
-      ],
-      [
-        "Literal punctuation word",
-        "Say \u201Cthe word period,\u201D \u201Cliteral dash,\u201D \u201Cthe phrase new paragraph,\u201D or \u201Cthe words open parenthesis.\u201D"
-      ],
-      ["Explicit punctuation", "Say \u201Cinsert period,\u201D \u201Cpunctuation colon,\u201D or \u201Ccommand new line.\u201D"]
+      ["Record Edit", "Record Edit, then describe a change to the existing draft."]
     ]
   },
   {
-    title: "Change text",
+    title: "Punctuation and layout",
+    examples: [
+      [
+        "Spoken punctuation",
+        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen parenthesis\u201D or \u201Copen paren,\u201D \u201Cclose parenthesis\u201D or \u201Cclose paren,\u201D \u201Copen bracket,\u201D \u201Cclose bracket,\u201D \u201Cbegin bracket\u201D and \u201Cend bracket\u201D for angle brackets, \u201Cnew line,\u201D or \u201Cnew paragraph.\u201D"
+      ],
+      [
+        "Quotations",
+        "Say \u201Cquote\u201D or \u201Cquotation\u201D at both ends of a quotation, or \u201Cbegin speech\u201D and \u201Cend speech.\u201D For single quotations, say \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D"
+      ],
+      ["Explicit punctuation", "Say \u201Cinsert period,\u201D \u201Cpunctuation colon,\u201D or \u201Ccommand new line.\u201D"],
+      [
+        "Literal punctuation word",
+        "Say \u201Cthe word period,\u201D \u201Cliteral dash,\u201D \u201Cthe phrase new paragraph,\u201D or \u201Cthe words open parenthesis\u201D to dictate the words themselves."
+      ]
+    ]
+  },
+  {
+    title: "Replace and insert",
     examples: [
       [
         "Replace",
         "Replace, change, swap, or substitute a target\u2014for example, \u201CChange \u2018pending\u2019 to \u2018approved\u2019 in paragraph 2.\u201D"
-      ],
-      [
-        "Delete",
-        "Say \u201Cdelete,\u201D \u201Cremove,\u201D \u201Ctake off,\u201D \u201Ctake out,\u201D \u201Cerase,\u201D or \u201Ccut,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
       ],
       ["Insert before", "Insert, add, place, or put \u201CUrgent:\u201D before the first sentence."],
       [
@@ -435,25 +440,26 @@ var COMMAND_GROUPS = [
       [
         "Prepend",
         "Prepend, add to the beginning, place at the start, or put at the beginning of paragraph 1."
-      ],
-      ["Move", "Move, relocate, or shift \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
-      [
-        "Fuzzy target fallback",
-        "If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as \u201Cmouthlet\u201D for \u201CMao let.\u201D"
-      ],
-      [
-        "Punctuation targets",
-        "Say \u201Cthe second quote in paragraph 1\u201D, \u201Cthe last period in paragraph 1\u201D, or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
       ]
     ]
   },
   {
-    title: "Structure and order",
+    title: "Delete and move",
     examples: [
-      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
-      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph."],
+      [
+        "Delete",
+        "Say \u201Cdelete,\u201D \u201Cremove,\u201D \u201Ctake off,\u201D \u201Ctake out,\u201D \u201Cerase,\u201D or \u201Ccut,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
+      ],
+      ["Move", "Move, relocate, or shift \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
       ["Move before", "Move paragraph 3 before paragraph 1."],
       ["Move after", "Move paragraph 1 after paragraph 2."]
+    ]
+  },
+  {
+    title: "Paragraphs",
+    examples: [
+      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
+      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph."]
     ]
   },
   {
@@ -466,6 +472,19 @@ var COMMAND_GROUPS = [
       [
         "As in reference",
         "Use a qualified \u201Cas in\u201D reference anywhere you dictate new edit text: replace, insert before or after, prepend, or append. For example, \u201CPrepend \u2018I nod,\u2019 as in nodding one\u2019s head, to the first sentence.\u201D The intended word must occur immediately before \u201Cas in\u201D and repeat afterward exactly or as a clear inflection; otherwise the wording remains literal."
+      ]
+    ]
+  },
+  {
+    title: "Targets and multiple changes",
+    examples: [
+      [
+        "Fuzzy target fallback",
+        "If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as \u201Cmouthlet\u201D for \u201CMao let.\u201D"
+      ],
+      [
+        "Punctuation targets",
+        "Say \u201Cthe second quote in paragraph 1\u201D, \u201Cthe last period in paragraph 1\u201D, or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
       ],
       [
         "Multiple changes",

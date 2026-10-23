@@ -25,6 +25,7 @@ let generationCommandDecisions: unknown[] = []
 let editPlanResponse: unknown = null
 let grammarRepairResponse: unknown = null
 let grammarRepairHangs = false
+let grammarRepairIgnoresAbort = false
 let grammarRepairSignal: AbortSignal | undefined
 let chatMessages: Array<{
   role: 'system' | 'user' | 'assistant'
@@ -112,6 +113,7 @@ const spindleMock = {
         if (!grammarRepairHangs)
           return Promise.resolve({ content: JSON.stringify(grammarRepairResponse) })
         grammarRepairSignal = request.signal
+        if (grammarRepairIgnoresAbort) return new Promise(() => undefined)
         return new Promise((_resolve, reject) => {
           request.signal?.addEventListener(
             'abort',
@@ -164,6 +166,7 @@ test.beforeEach(() => {
   editPlanResponse = null
   grammarRepairResponse = null
   grammarRepairHangs = false
+  grammarRepairIgnoresAbort = false
   grammarRepairSignal = undefined
   chatMessages = []
 })
@@ -1809,6 +1812,141 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('puts quotation marks around a spoken text range without a provider call', async () => {
+  const userId = 'quotation-range-user'
+  const chatId = 'quotation-range-chat'
+  activeChatId = chatId
+  const draft =
+    "“Well, someone's got to do the planning around here, so I have to be practical while taking care of you.” I load the groceries in the small trunk of my sapphire blue Miata, then I open the passenger side door for her before walking over to the driver's seat. All right, dear, this is a fun ride, but not the most comfortable, just letting you know. Emphasis on fun."
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'quotation-range-interpret',
+      operationId: 'quotation-range-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'put quotations from all right, dear, to emphasis on fun.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    `“Well, someone's got to do the planning around here, so I have to be practical while taking care of you.” I load the groceries in the small trunk of my sapphire blue Miata, then I open the passenger side door for her before walking over to the driver's seat. “All right, dear, this is a fun ride, but not the most comfortable, just letting you know. Emphasis on fun.”`,
+  )
+  assert.deepEqual(
+    proposal.proposal.plan.operations.map((operation) => operation.type),
+    ['insert_before', 'insert_after'],
+  )
+  assert.equal(generationRequests.length, 0)
+})
+
+test('quotes a range ending at a repeated phrase inside the paragraph', async () => {
+  const userId = 'quotation-range-repeated-end-user'
+  const chatId = 'quotation-range-repeated-end-chat'
+  activeChatId = chatId
+  const draft =
+    "I set the grocery bags on the counter, and I'm already moving. I go to the cabinet to take out some plates that have been unused for some time, and take another bowl from it, and begin mixing the flour for pancakes. As I work, I carefully narrate the process. The batter begins to take shape as I mix in more ingredients such as eggs, sugar, and milk. It becomes a viscous and fluffy mix, and gradually becomes doughy. Yes, the syrup, I got the good kind. You see, most of the syrup you get from the store aren't real syrup. This is from Canada, real syrup."
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'quotation-range-repeated-end-interpret',
+      operationId: 'quotation-range-repeated-end-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'put quotations from the sentence, Yes, the syrup to real syrup.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  const expected = draft.replace(
+    'Yes, the syrup, I got the good kind.',
+    '“Yes, the syrup, I got the good kind.',
+  )
+  assert.equal(proposal.proposal.afterText, `${expected}”`)
+  assert.equal(proposal.proposal.afterText.endsWith('\n”'), false)
+  assert.equal(generationRequests.length, 0)
+})
+
+test('quotes a range ending at a positional last sentence inside the paragraph', async () => {
+  const userId = 'quotation-range-last-sentence-user'
+  const chatId = 'quotation-range-last-sentence-chat'
+  activeChatId = chatId
+  const draft =
+    "I mix the batter. Yes, the syrup, I got the good kind. You see, most of the syrup you get from the store aren't real syrup. This is from Canada, real syrup."
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'quotation-range-last-sentence-interpret',
+      operationId: 'quotation-range-last-sentence-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotations from the phrase Yes, the syrup to the last sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    "I mix the batter. “Yes, the syrup, I got the good kind. You see, most of the syrup you get from the store aren't real syrup. This is from Canada, real syrup.”",
+  )
+  assert.deepEqual(
+    proposal.proposal.plan.operations.map((operation) => operation.target),
+    [{ exactText: 'Yes, the syrup', occurrence: 1 }, { sentenceFromEnd: 1 }],
+  )
+  assert.equal(generationRequests.length, 0)
+})
+
+test('supports single style and before-after quotation ranges', async () => {
+  const userId = 'quotation-range-single-user'
+  const chatId = 'quotation-range-single-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Intro sentence. Start here and end there. Tail.')
+  responses.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'quotation-range-single-interpret',
+      operationId: 'quotation-range-single-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'put single quotations before start here and after end there',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'Intro sentence. ‘Start here and end there.’ Tail.')
+  }
+})
+
 test('inserts quotation marks around an exact sentence target', async () => {
   const userId = 'exact-sentence-quotation-user'
   const chatId = 'exact-sentence-quotation-chat'
@@ -1865,6 +2003,82 @@ test('inserts quotation marks around an exact sentence target', async () => {
   assert.equal(generationRequests.length, 0)
 })
 
+test('deletes a sentence identified by its spoken text', async () => {
+  const userId = 'sentence-text-deletion-user'
+  const chatId = 'sentence-text-deletion-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    "Well, someone's got to do the planning. End speech. I load the groceries. Begin speech. All right, dear.",
+  )
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'sentence-text-deletion-interpret',
+      operationId: 'sentence-text-deletion-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the sentence Begin speech.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    "Well, someone's got to do the planning. End speech. I load the groceries. All right, dear.",
+  )
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
+test('supports sentence-text deletion aliases and quoted targets', async () => {
+  const userId = 'sentence-text-deletion-alias-user'
+  const chatId = 'sentence-text-deletion-alias-chat'
+  activeChatId = chatId
+  const draft = 'First sentence. Begin speech. Last sentence.'
+  const cases = [
+    ['Delete the sentence that says Begin speech.', 'First sentence. Last sentence.'],
+    ['Remove the sentence saying Begin speech.', 'First sentence. Last sentence.'],
+    ['Erase the sentence, “Begin speech.”', 'First sentence. Last sentence.'],
+    ['In paragraph 1, take off the sentence Begin speech.', 'First sentence. Last sentence.'],
+  ] as const
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    await seedDraft(userId, `${chatId}-${index}`, draft)
+    activeChatId = `${chatId}-${index}`
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `sentence-text-deletion-alias-interpret-${index}`,
+        operationId: `sentence-text-deletion-alias-operation-${index}`,
+        chatId: `${chatId}-${index}`,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type === 'edit.proposal.response') {
+      assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    }
+  }
+})
+
 test('deletes positional sentences across every alias and paragraph scope', async () => {
   const userId = 'sentence-deletion-alias-user'
   const chatId = 'sentence-deletion-alias-chat'
@@ -1887,6 +2101,10 @@ test('deletes positional sentences across every alias and paragraph scope', asyn
       'First one. First two.\n\nSecond one. Second two.',
     ],
     ['Erase the last sentence.', 'First one. First two.\n\nSecond one. Second two.'],
+    [
+      'Please remove the second sentence in paragraph 2.',
+      'First one. First two.\n\nSecond one. Second three.',
+    ],
     ['Cut the first sentence.', 'First two.\n\nSecond one. Second two. Second three.'],
     [
       'Delete the penultimate sentence in paragraph 2.',
@@ -2965,6 +3183,86 @@ test('offers explicit choices for paragraph-resolvable ambiguity without mutatin
   }
 })
 
+test('offers choices for multiple fuzzy sentence targets in one paragraph', async () => {
+  const userId = 'fuzzy-candidate-user'
+  const chatId = 'fuzzy-candidate-chat'
+  activeChatId = chatId
+  const draft =
+    "Well, someone's got to do the planning around here. End speech. I load the groceries. Begin speech. All right, dear. Emphasis on fun. End speech."
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'fuzzy-candidate-interpret',
+      operationId: 'fuzzy-candidate-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the sentence and speech.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.candidates.response')
+  if (response?.type !== 'edit.candidates.response') return
+  assert.equal(generationRequests.length, 0)
+  assert.deepEqual(
+    response.candidateSet.candidates.map(({ paragraphOrdinal }) => paragraphOrdinal),
+    [1, 1],
+  )
+  assert.notEqual(
+    response.candidateSet.candidates[0]?.preview,
+    response.candidateSet.candidates[1]?.preview,
+  )
+  assert.equal(response.candidateSet.candidates[0]?.exactText, 'End speech')
+  assert.equal(stored.has(`${userId}:edit-candidates-${encodeURIComponent(chatId)}.json`), true)
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.candidate.select.request',
+      requestId: 'fuzzy-candidate-select',
+      operationId: 'fuzzy-candidate-operation',
+      chatId,
+      expectedVersion: 1,
+      candidateId: response.candidateSet.candidates[1]!.id,
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    "Well, someone's got to do the planning around here. End speech. I load the groceries. Begin speech. All right, dear. Emphasis on fun.",
+  )
+
+  // Selecting again must still work: the candidate context is persisted and is
+  // not discarded when the first proposal is prepared.
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.candidate.select.request',
+      requestId: 'fuzzy-candidate-select-retry',
+      operationId: 'fuzzy-candidate-operation',
+      chatId,
+      expectedVersion: 1,
+      candidateId: response.candidateSet.candidates[1]!.id,
+    },
+    userId,
+  )
+  const retried = responses.at(-1)?.payload
+  assert.equal(retried?.type, 'edit.proposal.response')
+  if (retried?.type === 'edit.proposal.response') {
+    assert.equal(retried.proposal.afterText, proposal.proposal.afterText)
+  }
+})
+
 test('interprets an explicit add-new-paragraph synonym deterministically', async () => {
   const userId = 'paragraph-insert-user'
   const chatId = 'paragraph-insert-chat'
@@ -3347,6 +3645,103 @@ test('preserves sentence casing when replacing an opening phrase', async () => {
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
+})
+
+test('treats remove and trailing please exactly like delete', async () => {
+  const userId = 'remove-alias-user'
+  const chatId = 'remove-alias-chat'
+  activeChatId = chatId
+  const draft = 'First one. Very good. Last one.\n\nSecond two. Second three.'
+  const instructions = [
+    'Delete the sentence very good.',
+    'Remove the sentence very good.',
+    'Remove the sentence very good, please.',
+    'Please remove the sentence very good.',
+  ]
+  const results: unknown[] = []
+  for (const [index, instructionTranscript] of instructions.entries()) {
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `remove-alias-interpret-${index}`,
+        operationId: `remove-alias-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response')
+    if (proposal?.type !== 'edit.proposal.response') return
+    results.push(proposal.proposal.afterText)
+    assert.equal(generationRequests.length, 0)
+  }
+  assert.deepEqual(results, [
+    'First one. Last one.\n\nSecond two. Second three.',
+    'First one. Last one.\n\nSecond two. Second three.',
+    'First one. Last one.\n\nSecond two. Second three.',
+    'First one. Last one.\n\nSecond two. Second three.',
+  ])
+})
+
+test('keeps grammar repairs from moving a quotation mark outside the paragraph', async () => {
+  const userId = 'quotation-grammar-bound-user'
+  const chatId = 'quotation-grammar-bound-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'quotation-grammar-bound-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'always',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  const draft =
+    'I mix the batter. Yes, the syrup, I got the good kind. This is from Canada, real syrup.'
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  grammarRepairResponse = {
+    edits: [
+      {
+        segmentId: 'paragraph-1-segment-1',
+        find: 'real syrup.',
+        replace: 'real syrup.\n\n”',
+        reason: 'Moved closing quotation mark.',
+      },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'quotation-grammar-bound-interpret',
+      operationId: 'quotation-grammar-bound-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Put quotations from the phrase Yes, the syrup to the last sentence.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'I mix the batter. “Yes, the syrup, I got the good kind. This is from Canada, real syrup.”',
+  )
 })
 
 test('applies and discloses an enabled conservative post-edit grammar repair', async () => {
@@ -3732,6 +4127,72 @@ test('rejects a provider casing change to a domain', async () => {
   )
 })
 
+test('bounds candidate selection when the grammar provider ignores abort', async () => {
+  const userId = 'candidate-selection-timeout-user'
+  const chatId = 'candidate-selection-timeout-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'candidate-selection-timeout-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'always',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(
+    userId,
+    chatId,
+    'First sentence. End speech. Middle sentence. End speech. Last sentence.',
+  )
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'candidate-selection-timeout-interpret',
+      operationId: 'candidate-selection-timeout-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the sentence and speech.',
+    },
+    userId,
+  )
+  const candidates = responses.at(-1)?.payload
+  assert.equal(candidates?.type, 'edit.candidates.response')
+  if (candidates?.type !== 'edit.candidates.response') return
+
+  grammarRepairIgnoresAbort = true
+  const startedAt = Date.now()
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.candidate.select.request',
+      requestId: 'candidate-selection-timeout-select',
+      operationId: 'candidate-selection-timeout-operation',
+      chatId,
+      expectedVersion: 1,
+      candidateId: candidates.candidateSet.candidates[0]!.id,
+    },
+    userId,
+  )
+  const deadline = Date.now() + 6_000
+  while (Date.now() < deadline && responses.at(-1)?.payload.type !== 'edit.proposal.response')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  const elapsed = Date.now() - startedAt
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  assert.ok(elapsed < 5_500, `selection took ${elapsed} ms`)
+})
+
 test('aborts an in-flight grammar request when the operation is cancelled', async () => {
   const userId = 'cancelled-grammar-repair-user'
   const chatId = 'cancelled-grammar-repair-chat'
@@ -3982,6 +4443,48 @@ test('replaces with a qualified as in reference without a provider interpretatio
     "So, I guess you can name your price. I'm indebted to you now.",
   )
   assert.equal(proposal.proposal.operations[0]?.text, 'indebted')
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Interpret this edit instruction against the numbered draft.'
+    }).length,
+    0,
+  )
+})
+
+test('matches an expanded contraction in a referenced edit target', async () => {
+  const userId = 'contraction-reference-user'
+  const chatId = 'contraction-reference-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    "I set the groceries down on the kitchen counter, and before turning on the light, we're viewing an apartment that is modest but well-kept, neat and clean, perhaps far too clean and neat for a man that she is used to.",
+  )
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'contraction-reference-interpret',
+      operationId: 'contraction-reference-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Replace the phrase We are viewing an apartment with reviewing an apartment, as in reviewing outfits.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'I set the groceries down on the kitchen counter, and before turning on the light, reviewing an apartment that is modest but well-kept, neat and clean, perhaps far too clean and neat for a man that she is used to.',
+  )
   assert.equal(
     generationRequests.filter((request) => {
       const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
@@ -4354,6 +4857,172 @@ function sendRequest(chatId: string, operationId: string) {
     expectedVersion: 1,
   }
 }
+
+test('collects a copiable backend timing log when debug logging is enabled', async () => {
+  const userId = 'debug-log-user'
+  const chatId = 'debug-log-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'debug-log-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'off',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+        debugLoggingEnabled: true,
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'Earlier one. This is a wide entrance.')
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: 'debug-log-clear',
+      clear: true,
+    },
+    userId,
+  )
+  const cleared = responses.at(-1)?.payload
+  assert.equal(cleared?.type, 'debug.log.response')
+  if (cleared?.type === 'debug.log.response') {
+    assert.equal(
+      cleared.entries.some((entry) => entry.includes('[request] start')),
+      false,
+    )
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'debug-log-first-edit',
+      operationId: 'debug-log-first-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace wide with accessible.',
+    },
+    userId,
+  )
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: 'debug-log-read',
+    },
+    userId,
+  )
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'debug.log.response')
+  if (response?.type !== 'debug.log.response') return
+  const text = response.entries.join('\n')
+  assert.ok(text.includes('# JarvisType debug timing log'))
+  assert.match(text, /\[request\] start type=edit\.interpret\.request/u)
+  assert.match(text, /request=debug-log-first-edit/u)
+  assert.match(text, /\[edit\] start/u)
+  assert.match(text, /\[edit\.interpret\]/u)
+  assert.match(text, /\[edit\.execute\]/u)
+  assert.match(text, /\[grammar\.local\]/u)
+  assert.match(text, /\[request\] end type=edit\.interpret\.request/u)
+  assert.match(text, /\+\d+\.\dms/u)
+  assert.equal(text.includes('entrance'), false)
+  assert.equal(text.includes('accessible'), false)
+
+  // Drawing the drawer must not reset the log or add its own settings work.
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.load.request',
+      requestId: 'debug-log-drawer-load',
+    },
+    userId,
+  )
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: 'debug-log-read-after-drawer',
+    },
+    userId,
+  )
+  const afterDrawer = responses.at(-1)?.payload
+  assert.equal(afterDrawer?.type, 'debug.log.response')
+  if (afterDrawer?.type === 'debug.log.response') {
+    const afterDrawerText = afterDrawer.entries.join('\n')
+    assert.match(afterDrawerText, /request=debug-log-first-edit/u)
+    assert.equal(afterDrawerText.includes('phase4.load'), false)
+    assert.equal(afterDrawerText.includes('connections.list'), false)
+  }
+
+  // A new user action starts a fresh log.
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'debug-log-second-edit',
+      operationId: 'debug-log-second-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace entrance with doorway.',
+    },
+    userId,
+  )
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: 'debug-log-read-second',
+    },
+    userId,
+  )
+  const secondResponse = responses.at(-1)?.payload
+  assert.equal(secondResponse?.type, 'debug.log.response')
+  if (secondResponse?.type === 'debug.log.response') {
+    const secondText = secondResponse.entries.join('\n')
+    assert.match(secondText, /request=debug-log-second-edit/u)
+    assert.equal(secondText.includes('debug-log-first-edit'), false)
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'debug-log-settings-off',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'off',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+        debugLoggingEnabled: false,
+      },
+    },
+    userId,
+  )
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: 'debug-log-read-off',
+    },
+    userId,
+  )
+  const disabled = responses.at(-1)?.payload
+  assert.equal(disabled?.type, 'debug.log.response')
+  if (disabled?.type === 'debug.log.response') {
+    assert.ok(disabled.entries.some((entry) => entry.includes('Debug logging is currently off.')))
+  }
+})
 
 test('cleaner end-to-end matrix', async () => {
   interface CleanerCase {

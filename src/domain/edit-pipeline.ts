@@ -180,6 +180,8 @@ export function executeEditPlan(
   }
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
   return {
     ok: true,
@@ -390,10 +392,13 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     return null
   if (
     target.punctuation === undefined &&
-    (target.occurrence !== undefined ||
-      target.occurrenceFromEnd !== undefined ||
-      hasRelativePosition ||
-      hasRelativeText)
+    (target.occurrenceFromEnd !== undefined || hasRelativePosition || hasRelativeText)
+  )
+    return null
+  if (
+    target.punctuation === undefined &&
+    target.occurrence !== undefined &&
+    target.exactText === undefined
   )
     return null
   if (
@@ -472,6 +477,7 @@ function resolveOperation(
       operation.target.exactText,
       range.start,
       range.end,
+      operation.target.occurrence,
     )
     if (typeof match === 'string') return match
     start = match.start
@@ -717,6 +723,8 @@ function executeInlineMove(
   const afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
 
   return {
@@ -802,6 +810,54 @@ function findSentenceTerminal(remainder: string, from: number): RegExpExecArray 
   return null
 }
 
+export interface TextTargetMatch {
+  start: number
+  end: number
+  paragraphOrdinal: number
+}
+
+/**
+ * Lists every plausible location for a text target so the caller can offer
+ * explicit choices. Exact matches take precedence; otherwise the same guarded
+ * fuzzy matcher is applied sentence by sentence, which keeps multiple
+ * occurrences inside one paragraph distinct.
+ */
+export function findTextTargetMatches(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  search: string,
+  scope: { paragraphId?: string; paragraphOrdinal?: number } = {},
+): TextTargetMatch[] {
+  const scoped = paragraphs.filter(
+    (paragraph) =>
+      (scope.paragraphId === undefined || paragraph.id === scope.paragraphId) &&
+      (scope.paragraphOrdinal === undefined || paragraph.ordinal === scope.paragraphOrdinal),
+  )
+  if (!scoped.length) return []
+  const matches: TextTargetMatch[] = []
+  for (const paragraph of scoped) {
+    const range = paragraphRange(cleanText, paragraph)
+    for (const start of findAll(cleanText, search, range.start, range.end))
+      matches.push({ start, end: start + search.length, paragraphOrdinal: paragraph.ordinal })
+  }
+  if (matches.length) return matches
+  for (const paragraph of scoped) {
+    const range = paragraphRange(cleanText, paragraph)
+    for (const sentence of findSentenceRanges(cleanText, range.start, range.end)) {
+      const match = findExactOrFuzzyMatch(cleanText, search, sentence.start, sentence.end)
+      if (typeof match === 'string') continue
+      matches.push({
+        start: match.start,
+        end: match.end,
+        paragraphOrdinal: paragraph.ordinal,
+      })
+    }
+  }
+  const unique = new Map<string, TextTargetMatch>()
+  for (const match of matches) unique.set(`${match.start}:${match.end}`, match)
+  return [...unique.values()].sort((left, right) => left.start - right.start)
+}
+
 function resolveTextTarget(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
@@ -836,7 +892,13 @@ function resolveTextTarget(
     start = match.start
     end = match.end
   } else if (target.exactText !== undefined) {
-    const match = findExactOrFuzzyMatch(cleanText, target.exactText, range.start, range.end)
+    const match = findExactOrFuzzyMatch(
+      cleanText,
+      target.exactText,
+      range.start,
+      range.end,
+      target.occurrence,
+    )
     if (match === 'text target is ambiguous') return `${label} is ambiguous`
     if (match === 'text target was not found') return `${label} was not found`
     if (typeof match === 'string') return `${label}: ${match}`
@@ -1247,6 +1309,8 @@ function executeStructuralPlan(
   const afterText = working.map((paragraph) => paragraph.text).join('\n\n')
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
   return {
     ok: true,
@@ -1282,6 +1346,19 @@ function paragraphRange(text: string, paragraph: DraftParagraph): { start: numbe
   return { start, end: start + lines[paragraph.lineIndex]!.length }
 }
 
+const QUOTATION_OUTSIDE_PARAGRAPH_REASON = 'quotation mark would fall outside the paragraph'
+
+function countFloatingQuotationMarks(text: string): number {
+  let count = 0
+  for (const match of text.matchAll(/[“”‘’"]/gu)) {
+    const index = match.index
+    const before = text[index - 1] ?? ''
+    const after = text[index + 1] ?? ''
+    if (!/\S/u.test(before) && !/\S/u.test(after)) count += 1
+  }
+  return count
+}
+
 function findAll(text: string, search: string, start: number, end: number): number[] {
   const matches: number[] = []
   let offset = start
@@ -1299,8 +1376,15 @@ function findExactOrFuzzyMatch(
   search: string,
   start: number,
   end: number,
+  occurrence?: number,
 ): { start: number; end: number } | string {
   const exactMatches = findAll(text, search, start, end)
+  if (occurrence !== undefined) {
+    const match = exactMatches[occurrence - 1]
+    return match === undefined
+      ? 'text target occurrence was not found'
+      : { start: match, end: match + search.length }
+  }
   if (exactMatches.length > 1) return 'text target is ambiguous'
   if (exactMatches.length === 1)
     return { start: exactMatches[0]!, end: exactMatches[0]! + search.length }
@@ -1316,6 +1400,82 @@ function findExactOrFuzzyMatch(
     : 'text target was not found'
 }
 
+const CONTRACTIONS: Readonly<Record<string, readonly string[]>> = {
+  "i'm": ['i', 'am'],
+  "i've": ['i', 'have'],
+  "i'll": ['i', 'will'],
+  "i'd": ['i', 'would'],
+  "you're": ['you', 'are'],
+  "you've": ['you', 'have'],
+  "you'll": ['you', 'will'],
+  "you'd": ['you', 'would'],
+  "he's": ['he', 'is'],
+  "she's": ['she', 'is'],
+  "it's": ['it', 'is'],
+  "we're": ['we', 'are'],
+  "we've": ['we', 'have'],
+  "we'll": ['we', 'will'],
+  "we'd": ['we', 'would'],
+  "they're": ['they', 'are'],
+  "they've": ['they', 'have'],
+  "they'll": ['they', 'will'],
+  "they'd": ['they', 'would'],
+  "that's": ['that', 'is'],
+  "there's": ['there', 'is'],
+  "what's": ['what', 'is'],
+  "who's": ['who', 'is'],
+  "where's": ['where', 'is'],
+  "how's": ['how', 'is'],
+  "isn't": ['is', 'not'],
+  "aren't": ['are', 'not'],
+  "wasn't": ['was', 'not'],
+  "weren't": ['were', 'not'],
+  "don't": ['do', 'not'],
+  "doesn't": ['does', 'not'],
+  "didn't": ['did', 'not'],
+  "can't": ['can', 'not'],
+  cannot: ['can', 'not'],
+  "couldn't": ['could', 'not'],
+  "won't": ['will', 'not'],
+  "wouldn't": ['would', 'not'],
+  "shouldn't": ['should', 'not'],
+  "mustn't": ['must', 'not'],
+  "haven't": ['have', 'not'],
+  "hasn't": ['has', 'not'],
+  "hadn't": ['had', 'not'],
+}
+
+interface ExpandedToken {
+  value: string
+  start: number
+  end: number
+  partIndex: number
+  partCount: number
+}
+
+function expandToken(value: string): string[] {
+  const normalized = value.toLocaleLowerCase().replace(/\u2019/gu, "'")
+  const parts = CONTRACTIONS[normalized]
+  return parts ? [...parts] : [stripTokenPunctuation(value)]
+}
+
+function expandTokens(tokens: readonly FuzzyToken[]): ExpandedToken[] {
+  const expanded: ExpandedToken[] = []
+  for (const token of tokens) {
+    const parts = expandToken(token.value)
+    for (const [partIndex, value] of parts.entries()) {
+      expanded.push({
+        value,
+        start: token.start,
+        end: token.end,
+        partIndex,
+        partCount: parts.length,
+      })
+    }
+  }
+  return expanded
+}
+
 function findPunctuationInsensitiveMatch(
   text: string,
   search: string,
@@ -1325,16 +1485,18 @@ function findPunctuationInsensitiveMatch(
   const wanted = tokenizeWithOffsets(search, 0, search.length)
   if (!wanted.length) return 'punctuation-insensitive text target was not found'
   const available = tokenizeCachedDraftRange(text, start, end)
-  if (available.length < wanted.length) return 'punctuation-insensitive text target was not found'
+  const wantedExpanded = expandTokens(wanted)
+  const availableExpanded = expandTokens(available)
+  if (availableExpanded.length < wantedExpanded.length)
+    return 'punctuation-insensitive text target was not found'
 
-  const wantedValues = wanted.map(({ value }) => stripTokenPunctuation(value))
   const candidates: Array<{ start: number; end: number; punctuation: string }> = []
-  for (let index = 0; index <= available.length - wanted.length; index += 1) {
-    const window = available.slice(index, index + wanted.length)
+  for (let index = 0; index <= availableExpanded.length - wantedExpanded.length; index += 1) {
+    const window = availableExpanded.slice(index, index + wantedExpanded.length)
     if (
-      !window.every(
-        (token, tokenIndex) => stripTokenPunctuation(token.value) === wantedValues[tokenIndex],
-      )
+      window[0]!.partIndex !== 0 ||
+      window.at(-1)!.partIndex !== window.at(-1)!.partCount - 1 ||
+      !window.every((token, tokenIndex) => token.value === wantedExpanded[tokenIndex]!.value)
     )
       continue
     candidates.push({
@@ -1367,7 +1529,7 @@ function internalPunctuationSignature(text: string, start: number, end: number):
   return text
     .slice(start, end)
     .replace(/[\p{L}\p{N}\s]/gu, '')
-    .replace(/[\u2018\u2019]/gu, "'")
+    .replace(/[\u2018\u2019]/gu, '')
     .replace(/[\u201c\u201d]/gu, '"')
 }
 

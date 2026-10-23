@@ -109,6 +109,8 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
     )
   }
   if (value.type === 'phase4.load.request' || value.type === 'glossary.undo.request') return true
+  if (value.type === 'debug.log.request')
+    return value.clear === undefined || typeof value.clear === 'boolean'
   if (value.type === 'phase4.settings.update.request') return isPhaseFourSettings(value.settings)
   if (value.type === 'glossary.upsert.request') {
     return (
@@ -201,6 +203,14 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
       value.glossary.every(isGlossaryEntry) &&
       typeof value.canUndoGlossary === 'boolean' &&
       (value.notice === undefined || isBoundedString(value.notice, 1, 1_000))
+    )
+  }
+  if (value.type === 'debug.log.response') {
+    return (
+      value.ok === true &&
+      Array.isArray(value.entries) &&
+      value.entries.length <= 2_100 &&
+      value.entries.every((entry) => typeof entry === 'string' && entry.length <= 2_000)
     )
   }
   if (value.type === 'app.error') {
@@ -340,7 +350,8 @@ function isPhaseFourSettings(value: unknown): boolean {
       value.grammarRepairMode === 'always') &&
     (value.normalizationConnectionId === null || isIdentifier(value.normalizationConnectionId)) &&
     typeof value.normalizationModelOverride === 'string' &&
-    value.normalizationModelOverride.length <= 200
+    value.normalizationModelOverride.length <= 200 &&
+    (value.debugLoggingEnabled === undefined || typeof value.debugLoggingEnabled === 'boolean')
   )
 }
 

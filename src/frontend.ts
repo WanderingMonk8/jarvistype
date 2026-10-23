@@ -358,6 +358,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     tab.root,
     '[data-grammar-repair-mode]',
   )
+  const debugEnabledToggle = requireElement<HTMLInputElement>(tab.root, '[data-debug-enabled]')
+  const debugOutput = requireElement<HTMLTextAreaElement>(tab.root, '[data-debug-output]')
+  const debugRefreshButton = requireElement<HTMLButtonElement>(tab.root, '[data-debug-refresh]')
+  const debugCopyButton = requireElement<HTMLButtonElement>(tab.root, '[data-debug-copy]')
+  const debugClearButton = requireElement<HTMLButtonElement>(tab.root, '[data-debug-clear]')
+  const debugStatus = requireElement<HTMLElement>(tab.root, '[data-debug-status]')
   const saveSettingsButton = requireElement<HTMLButtonElement>(tab.root, '[data-settings-save]')
   const normalizationConnectionSelect = requireElement<HTMLSelectElement>(
     tab.root,
@@ -449,6 +455,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       grammarRepairMode: 'off',
       normalizationConnectionId: null,
       normalizationModelOverride: '',
+      debugLoggingEnabled: false,
     },
     normalizationConnections: [],
     glossary: [],
@@ -708,6 +715,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     contextCountInput.value = String(state.settings.contextMessageCount)
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
     grammarRepairSelect.value = state.settings.grammarRepairMode
+    debugEnabledToggle.checked = state.settings.debugLoggingEnabled === true
+    debugRefreshButton.disabled = state.settings.debugLoggingEnabled !== true
+    debugCopyButton.disabled = false
+    debugClearButton.disabled = state.settings.debugLoggingEnabled !== true
     renderConnectionOptions(
       normalizationConnectionSelect,
       state.normalizationConnections,
@@ -1286,15 +1297,23 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.automatedBusy = true
     state.voiceMessage = 'Resolving the selected target…'
     render()
-    const outcome = await performRequest({
+    const buildRequest = (requestId: string) => ({
       protocolVersion: PROTOCOL_VERSION,
-      type: 'edit.candidate.select.request',
-      requestId: createRequestId('edit-candidate-select'),
+      type: 'edit.candidate.select.request' as const,
+      requestId,
       operationId: candidateSet.operationId,
       chatId: candidateSet.chatId,
       expectedVersion: candidateSet.expectedVersion,
       candidateId,
     })
+    let outcome = await performRequest(buildRequest(createRequestId('edit-candidate-select')))
+    if (outcome.status === 'timed-out' && alive) {
+      // The backend retains the candidate context, so one retry can recover a
+      // request that was dropped before it reached the handler.
+      state.voiceMessage = 'Target selection is taking longer than expected. Retrying once…'
+      render()
+      outcome = await performRequest(buildRequest(createRequestId('edit-candidate-select-retry')))
+    }
     state.automatedBusy = false
     if (!alive) return
     if (outcome.status === 'resolved' && outcome.value.type === 'edit.proposal.response') {
@@ -1392,6 +1411,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.settings.contextMessageCount = contextMessageCount
     state.settings.contextualNormalizationEnabled = contextualToggle.checked
     state.settings.grammarRepairMode = grammarRepairMode
+    state.settings.debugLoggingEnabled = debugEnabledToggle.checked
     state.settings.normalizationModelOverride = normalizationModelPicker.getValue().trim()
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
@@ -1403,12 +1423,53 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         grammarRepairMode,
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: state.settings.normalizationModelOverride,
+        debugLoggingEnabled: debugEnabledToggle.checked,
       },
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
       applyPhaseFourResponse(outcome.value)
     else state.phaseFourMessage = 'Settings were not saved. Try again.'
     render()
+  }
+
+  const refreshDebugLog = async (clear = false): Promise<void> => {
+    if (state.settings.debugLoggingEnabled !== true) {
+      debugStatus.textContent = 'Enable debug logging and save settings first.'
+      return
+    }
+    debugStatus.textContent = clear ? 'Clearing the debug log…' : 'Loading the debug log…'
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: createRequestId('debug-log'),
+      ...(clear ? { clear: true } : {}),
+    })
+    if (!alive) return
+    if (outcome.status === 'resolved' && outcome.value.type === 'debug.log.response') {
+      debugOutput.value = outcome.value.entries.join('\n')
+      debugStatus.textContent = clear
+        ? 'Debug log cleared.'
+        : `${outcome.value.entries.length} log lines loaded. Review and copy them.`
+    } else {
+      debugStatus.textContent = 'The debug log request failed or timed out.'
+    }
+  }
+
+  const copyDebugLog = async (): Promise<void> => {
+    if (!debugOutput.value) {
+      await refreshDebugLog()
+      if (!debugOutput.value) return
+    }
+    if (!alive) return
+    try {
+      await navigator.clipboard.writeText(debugOutput.value)
+      debugStatus.textContent = 'Debug log copied to the clipboard.'
+    } catch {
+      debugOutput.focus()
+      debugOutput.select()
+      debugStatus.textContent =
+        'Clipboard access is unavailable. The log is selected; copy it manually.'
+    }
   }
 
   const saveGlossaryEntry = async (surface: 'drawer' | 'floating' = 'drawer') => {
@@ -1914,6 +1975,15 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           ? 'when_needed'
           : 'off'
   }
+  const handleDebugEnabledChange = () => {
+    state.settings.debugLoggingEnabled = debugEnabledToggle.checked
+    debugStatus.textContent = debugEnabledToggle.checked
+      ? 'Save settings to start collecting the debug log.'
+      : 'Save settings to stop collecting the debug log.'
+  }
+  const handleDebugRefreshClick = () => void refreshDebugLog()
+  const handleDebugCopyClick = () => void copyDebugLog()
+  const handleDebugClearClick = () => void refreshDebugLog(true)
   const handleNormalizationConnectionChange = () => {
     state.settings.normalizationConnectionId = normalizationConnectionSelect.value || null
     state.settings.normalizationModelOverride = ''
@@ -2043,6 +2113,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cancelEditCandidatesButton.addEventListener('click', handleCancelEditCandidatesClick)
   saveSettingsButton.addEventListener('click', handleSaveSettingsClick)
   grammarRepairSelect.addEventListener('change', handleGrammarRepairModeChange)
+  debugEnabledToggle.addEventListener('change', handleDebugEnabledChange)
+  debugRefreshButton.addEventListener('click', handleDebugRefreshClick)
+  debugCopyButton.addEventListener('click', handleDebugCopyClick)
+  debugClearButton.addEventListener('click', handleDebugClearClick)
   normalizationConnectionSelect.addEventListener('change', handleNormalizationConnectionChange)
   glossarySaveButton.addEventListener('click', handleSaveGlossaryClick)
   glossaryCancelButton.addEventListener('click', handleCancelGlossaryClick)
@@ -2105,6 +2179,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     cancelEditCandidatesButton.removeEventListener('click', handleCancelEditCandidatesClick)
     saveSettingsButton.removeEventListener('click', handleSaveSettingsClick)
     grammarRepairSelect.removeEventListener('change', handleGrammarRepairModeChange)
+    debugEnabledToggle.removeEventListener('change', handleDebugEnabledChange)
+    debugRefreshButton.removeEventListener('click', handleDebugRefreshClick)
+    debugCopyButton.removeEventListener('click', handleDebugCopyClick)
+    debugClearButton.removeEventListener('click', handleDebugClearClick)
     normalizationConnectionSelect.removeEventListener('change', handleNormalizationConnectionChange)
     glossarySaveButton.removeEventListener('click', handleSaveGlossaryClick)
     glossaryCancelButton.removeEventListener('click', handleCancelGlossaryClick)
@@ -2453,6 +2531,7 @@ function shellMarkup(): string {
       .jt-proposal__details { display: grid; gap: .55rem; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: .45rem; padding: .55rem; }
       .jt-proposal__details summary { cursor: pointer; font-weight: 700; }
       .jt-proposal__details[open] summary { margin-bottom: .55rem; }
+      .jt-debug-output { width: 100%; min-height: 12rem; resize: vertical; padding: .55rem; border-radius: .45rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .78rem; white-space: pre; overflow: auto; }
       .jt-candidate-list { display: grid; gap: .5rem; }
       .jt-candidate-list button { text-align: start; white-space: normal; }
       .jt-glossary { display: grid; gap: .55rem; }
@@ -2632,6 +2711,18 @@ function shellMarkup(): string {
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
+        <details class="jt-proposal__details">
+          <summary>Debug timing log</summary>
+          <label><span><input type="checkbox" data-debug-enabled> Enable debug timing log</span></label>
+          <p class="jt-shell__notice">Records backend timings and request metadata only. It never records draft text, transcripts, prompts, or provider output. The log starts fresh for each new recording, edit, send, recording undo, undo, or redo, and follow-up steps append to the same action. Drawer loads, settings changes, and glossary edits are not logged. Enable it, save settings, reproduce the action, then Refresh and Copy.</p>
+          <div class="jt-actions">
+            <button type="button" data-debug-refresh>Refresh log</button>
+            <button type="button" data-debug-copy>Copy log</button>
+            <button type="button" data-debug-clear>Clear log</button>
+          </div>
+          <textarea class="jt-debug-output" readonly data-debug-output rows="14" spellcheck="false" aria-label="JarvisType debug timing log"></textarea>
+          <p role="status" aria-live="polite" data-debug-status></p>
+        </details>
         <div class="jt-actions"><button type="button" data-settings-save>Save settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings…</p>
 

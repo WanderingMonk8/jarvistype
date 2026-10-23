@@ -1346,6 +1346,38 @@ test('rejects incompatible structural and inline operation groups atomically', (
   })
 })
 
+test('never leaves a quotation mark floating outside paragraph text', () => {
+  const floating = executeEditPlan('Alpha beta gamma.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'floating closing quote',
+    operations: [
+      {
+        id: 'floating',
+        type: 'replace',
+        target: { exactText: 'gamma.' },
+        text: 'gamma.\n\n”',
+      },
+    ],
+  })
+  assert.deepEqual(floating, {
+    ok: false,
+    reason: 'quotation mark would fall outside the paragraph',
+  })
+
+  const attached = executeEditPlan('Alpha beta gamma.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'attached quotes',
+    operations: [
+      { id: 'open', type: 'insert_before', target: { exactText: 'Alpha' }, text: '“' },
+      { id: 'close', type: 'insert_after', target: { exactText: 'gamma.' }, text: '”' },
+    ],
+  })
+  assert.equal(attached.ok, true)
+  if (attached.ok) assert.equal(attached.afterText, '“Alpha beta gamma.”')
+})
+
 test('resolves one high-confidence approximate phrase and rejects equal candidates', () => {
   const seeded = applyManualEdit(
     createDraftSession('approximate-chat'),
@@ -1512,4 +1544,52 @@ test('ignores punctuation for unique text targets and uses it only to resolve le
     ok: false,
     reason: 'punctuation-insensitive text target is ambiguous',
   })
+})
+
+test('matches an expanded contraction against contracted draft text', () => {
+  const expanded = executeEditPlan(
+    "I set the groceries down, and before turning on the light, we're viewing an apartment that is modest.",
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'match an expanded contraction',
+      operations: [
+        {
+          id: 'expanded-contraction',
+          type: 'replace',
+          target: { exactText: 'We are viewing an apartment' },
+          text: 'reviewing an apartment',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    expanded.ok && expanded.afterText,
+    'I set the groceries down, and before turning on the light, reviewing an apartment that is modest.',
+  )
+
+  const contracted = executeEditPlan(
+    'Before turning on the light, We are viewing an apartment.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'match a contracted target',
+      operations: [
+        {
+          id: 'contracted-target',
+          type: 'replace',
+          target: { exactText: "we're viewing an apartment" },
+          text: 'reviewing an apartment',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    contracted.ok && contracted.afterText,
+    'Before turning on the light, reviewing an apartment.',
+  )
 })

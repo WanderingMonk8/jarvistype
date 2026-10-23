@@ -19,6 +19,7 @@ export interface PhaseFourSettings {
   grammarRepairMode: 'off' | 'when_needed' | 'always'
   normalizationConnectionId: string | null
   normalizationModelOverride: string
+  debugLoggingEnabled?: boolean
 }
 
 export interface NormalizationConnectionOption {
@@ -183,6 +184,10 @@ export type FrontendRequest =
       type: 'glossary.undo.request'
     })
   | (RequestEnvelope & {
+      type: 'debug.log.request'
+      clear?: boolean
+    })
+  | (RequestEnvelope & {
       type: 'draft.send.request'
       operationId: string
       chatId: string
@@ -249,6 +254,11 @@ export type BackendResponse =
       glossary: GlossaryEntry[]
       canUndoGlossary: boolean
       notice?: string
+    })
+  | (RequestEnvelope & {
+      type: 'debug.log.response'
+      ok: true
+      entries: string[]
     })
   | (RequestEnvelope & {
       type: 'app.error'

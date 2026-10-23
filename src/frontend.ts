@@ -645,7 +645,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           : ''
     recordButton.textContent =
       state.voicePhase === 'starting' && activeRecording?.mode !== 'edit'
-        ? 'Getting ready to record'
+        ? 'Preparing'
         : state.voicePhase === 'recording' && activeRecording?.mode !== 'edit'
           ? 'Stop Recording'
           : state.voicePhase === 'processing'
@@ -675,7 +675,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           : ''
     recordEditButton.textContent =
       state.voicePhase === 'starting' && activeRecording?.mode === 'edit'
-        ? 'Getting ready to record'
+        ? 'Preparing'
         : state.voicePhase === 'recording' && activeRecording?.mode === 'edit'
           ? 'Stop Edit Recording'
           : state.voicePhase === 'review' && state.pendingEditProposal
@@ -1725,7 +1725,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             // The host's ready promise is the only signal that capture has started, so a
             // listening status never moves the UI to recording on its own.
             if (state.voicePhase === 'starting')
-              state.voiceMessage = 'Getting ready to record… wait for “Recording now”.'
+              state.voiceMessage = 'Preparing… wait for “Recording now”.'
           } else if (status.phase === 'processing') {
             state.voicePhase = 'processing'
             state.voiceMessage = 'Transcribing the completed recording…'
@@ -1765,10 +1765,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.voiceElapsedMs = 0
       state.voiceProvider = session.provider
       state.voiceProvisionalText = ''
-      state.voiceMessage =
-        mode === 'edit'
-          ? 'Getting ready to record the edit instruction…'
-          : 'Getting ready to record…'
+      state.voiceMessage = mode === 'edit' ? 'Preparing the edit instruction…' : 'Preparing…'
       recordingTimer = setInterval(() => {
         if (recordingStartedAt !== startedAt) return
         state.voiceElapsedMs = Date.now() - startedAt

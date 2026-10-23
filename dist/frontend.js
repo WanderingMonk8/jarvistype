@@ -861,12 +861,12 @@ function setup(ctx) {
     undoButton.disabled = !editorEnabled || state.saving || (undoIsRecording ? !recordingOwnerReady || voiceBusy() : !state.snapshot?.canUndo) || desiredText !== state.snapshot?.cleanText;
     const messageLive = activeRecording?.mode !== "edit";
     recordButton.dataset.recordingState = messageLive && state.voicePhase === "starting" ? "starting" : messageLive && state.voicePhase === "recording" ? "recording" : "";
-    recordButton.textContent = state.voicePhase === "starting" && activeRecording?.mode !== "edit" ? "Getting ready to record" : state.voicePhase === "recording" && activeRecording?.mode !== "edit" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record Message";
+    recordButton.textContent = state.voicePhase === "starting" && activeRecording?.mode !== "edit" ? "Preparing" : state.voicePhase === "recording" && activeRecording?.mode !== "edit" ? "Stop Recording" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record Message";
     const ownRecordingRunning = activeRecording !== null && (state.voicePhase === "starting" || state.voicePhase === "recording");
     recordButton.disabled = !ownRecordingRunning && (!hasNativeStt() || !recordingOwnerReady || voiceBusy() && activeRecording?.mode !== "message" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review");
     const editLive = activeRecording?.mode === "edit";
     recordEditButton.dataset.recordingState = editLive && state.voicePhase === "starting" ? "starting" : editLive && state.voicePhase === "recording" ? "recording" : "";
-    recordEditButton.textContent = state.voicePhase === "starting" && activeRecording?.mode === "edit" ? "Getting ready to record" : state.voicePhase === "recording" && activeRecording?.mode === "edit" ? "Stop Edit Recording" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Record Edit";
+    recordEditButton.textContent = state.voicePhase === "starting" && activeRecording?.mode === "edit" ? "Preparing" : state.voicePhase === "recording" && activeRecording?.mode === "edit" ? "Stop Edit Recording" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Record Edit";
     recordEditButton.disabled = !ownRecordingRunning && (!hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() && activeRecording?.mode !== "edit" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review");
     const recordingCanBeCancelled = state.voicePhase === "starting" || state.voicePhase === "recording" || state.voicePhase === "processing";
     cancelRecordingButton.hidden = !recordingCanBeCancelled || activeRecording?.mode !== "message";
@@ -1723,7 +1723,7 @@ function setup(ctx) {
           if (activeRecording?.runId !== runId) return;
           if (status.phase === "listening") {
             if (state.voicePhase === "starting")
-              state.voiceMessage = "Getting ready to record\u2026 wait for \u201CRecording now\u201D.";
+              state.voiceMessage = "Preparing\u2026 wait for \u201CRecording now\u201D.";
           } else if (status.phase === "processing") {
             state.voicePhase = "processing";
             state.voiceMessage = "Transcribing the completed recording\u2026";
@@ -1762,7 +1762,7 @@ function setup(ctx) {
       state.voiceElapsedMs = 0;
       state.voiceProvider = session.provider;
       state.voiceProvisionalText = "";
-      state.voiceMessage = mode === "edit" ? "Getting ready to record the edit instruction\u2026" : "Getting ready to record\u2026";
+      state.voiceMessage = mode === "edit" ? "Preparing the edit instruction\u2026" : "Preparing\u2026";
       recordingTimer = setInterval(() => {
         if (recordingStartedAt !== startedAt) return;
         state.voiceElapsedMs = Date.now() - startedAt;

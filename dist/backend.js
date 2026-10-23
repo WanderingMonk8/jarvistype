@@ -5500,7 +5500,7 @@ async function normalizeWithContext(rawTranscript, deterministicCandidate, messa
   recordDebug(
     userId,
     "provider.normalization",
-    `start model=${settings.normalizationModelOverride || "connection-default"} messages=${messages.length} references=${conversationReferences.length}`
+    `start model=${settings.normalizationModelOverride || "connection-default"} chars=${rawTranscript.length} messages=${messages.length} references=${conversationReferences.length}`
   );
   const finish = (outcome) => recordDebug(
     userId,

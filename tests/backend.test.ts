@@ -3647,6 +3647,64 @@ test('preserves sentence casing when replacing an opening phrase', async () => {
   assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
 })
 
+test('every replace alias works deterministically with and without polite wording', async () => {
+  const userId = 'replace-alias-user'
+  const chatId = 'replace-alias-chat'
+  activeChatId = chatId
+  const draft = 'The status is pending. Second item.\n\nThird sentence here. Last one.'
+  const approved = 'The status is approved. Second item.\n\nThird sentence here. Last one.'
+  const cases: Array<readonly [string, string]> = [
+    ['Replace pending with approved.', approved],
+    ['Change pending to approved.', approved],
+    ['Change pending into approved.', approved],
+    ['Swap pending with approved.', approved],
+    ['Swap pending for approved.', approved],
+    ['Substitute pending with approved.', approved],
+    ['Substitute pending for approved.', approved],
+    ['Change ‘pending’ to ‘approved’ in paragraph 1.', approved],
+    ['Please swap pending with approved.', approved],
+    ['Replace pending with approved, please.', approved],
+    [
+      'Replace the first sentence with Hello there.',
+      'Hello there. Second item.\n\nThird sentence here. Last one.',
+    ],
+    [
+      'Substitute the third sentence with Fresh start.',
+      'The status is pending. Second item.\n\nFresh start. Last one.',
+    ],
+    [
+      'Change the last sentence to Done.',
+      'The status is pending. Second item.\n\nThird sentence here. Done.',
+    ],
+    [
+      'Swap the second sentence for New one.',
+      'The status is pending. New one.\n\nThird sentence here. Last one.',
+    ],
+  ]
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `replace-alias-interpret-${index}`,
+        operationId: `replace-alias-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
 test('treats remove and trailing please exactly like delete', async () => {
   const userId = 'remove-alias-user'
   const chatId = 'remove-alias-chat'

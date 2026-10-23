@@ -1210,7 +1210,8 @@ async function handleEditCandidateSelection(
 
 function canonicalEditInstruction(instructionTranscript: string): string {
   return instructionTranscript
-    .replace(/^\s*(?:please\s+)?(?:remove|take\s+(?:off|out)|erase|cut)\b/iu, 'delete')
+    .replace(/^\s*please\s+/iu, '')
+    .replace(/^\s*(?:remove|take\s+(?:off|out)|erase|cut)\b/iu, 'delete')
     .replace(/[\s,]*\bplease\s*([.!?]*)\s*$/iu, '$1')
 }
 

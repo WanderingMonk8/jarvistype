@@ -3578,11 +3578,17 @@ function mergeConversationReferences(
   recentReferences: readonly string[],
 ): string[] {
   if (!cardCharacterName) return [...recentReferences]
-  const cardKey = cardCharacterName.toLocaleLowerCase()
-  return [
+  const cardReferences = [
     cardCharacterName,
-    ...recentReferences.filter((reference) => reference.toLocaleLowerCase() !== cardKey),
+    ...extractConversationReferences([{ role: 'assistant', content: cardCharacterName }]),
   ]
+  const prioritized = new Map<string, string>()
+  for (const reference of [...cardReferences, ...recentReferences]) {
+    const normalized = reference.trim()
+    const key = normalized.toLocaleLowerCase()
+    if (normalized && !prioritized.has(key)) prioritized.set(key, normalized)
+  }
+  return [...prioritized.values()]
 }
 
 function cachedConversationReferences(

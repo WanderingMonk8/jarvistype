@@ -77,6 +77,15 @@ test('extracts compact proper-name and specialized-term references from conversa
   )
 })
 
+test('extracts the canonical name from a descriptive card title', () => {
+  assert.deepEqual(
+    extractConversationReferences([
+      { role: 'assistant', content: 'Aiko the tired worker' },
+    ]),
+    ['Aiko'],
+  )
+})
+
 test('when the reference cap is reached, earlier input (the newest messages) keeps its terms', () => {
   assert.deepEqual(
     extractConversationReferences(

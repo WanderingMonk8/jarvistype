@@ -5821,11 +5821,17 @@ async function loadCardCharacterName(chatId, userId) {
 }
 function mergeConversationReferences(cardCharacterName, recentReferences) {
   if (!cardCharacterName) return [...recentReferences];
-  const cardKey = cardCharacterName.toLocaleLowerCase();
-  return [
+  const cardReferences = [
     cardCharacterName,
-    ...recentReferences.filter((reference) => reference.toLocaleLowerCase() !== cardKey)
+    ...extractConversationReferences([{ role: "assistant", content: cardCharacterName }])
   ];
+  const prioritized = /* @__PURE__ */ new Map();
+  for (const reference of [...cardReferences, ...recentReferences]) {
+    const normalized = reference.trim();
+    const key = normalized.toLocaleLowerCase();
+    if (normalized && !prioritized.has(key)) prioritized.set(key, normalized);
+  }
+  return [...prioritized.values()];
 }
 function cachedConversationReferences(userId, chatId, messages) {
   const key = `${userId}\0${chatId}`;

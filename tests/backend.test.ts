@@ -362,10 +362,8 @@ test('uses local command context with compact conversational spelling references
 
   const request = generationRequests.at(-1)
   const prompt = JSON.parse(request?.messages?.at(-1)?.content ?? '{}') as Record<string, unknown>
-  assert.deepEqual(prompt.recentReferenceContext, [
-    { role: 'assistant', content: 'She is mapping the coast near Port Meridian.' },
-    { role: 'user', content: 'Continue that account.' },
-  ])
+  assert.equal('recentReferenceContext' in prompt, false)
+  assert.equal(JSON.stringify(prompt).includes('Continue that account'), false)
   assert.ok(Array.isArray(prompt.conversationReferences))
   assert.ok(prompt.conversationReferences.includes('Caelora'))
   assert.ok(prompt.conversationReferences.includes('Northern Survey'))

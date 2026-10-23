@@ -399,11 +399,10 @@ function replaceSpokenQuotationCommands(
     const tokens = [...text.matchAll(tokenPattern)]
     if (!tokens.length || tokens.length % 2 !== 0) return
     if (
-      tokens.some((token, index) =>
-        index % 2 === 0
-          ? token[1]?.toLocaleLowerCase() !== beginPhrase
-          : token[1]?.toLocaleLowerCase() !== endPhrase,
-      )
+      tokens.some((token, index) => {
+        const phrase = index % 2 === 0 ? beginPhrase : endPhrase
+        return !new RegExp(`^${phrase}$`, 'iu').test(token[1] ?? '')
+      })
     )
       return
     if (hasNaturalAliasUsage(text)) return
@@ -427,7 +426,7 @@ function replaceSpokenQuotationCommands(
     )
   }
 
-  replaceGuardedAliasPair('begin speech', 'end speech', '“', '”', 'quote')
+  replaceGuardedAliasPair('begin(?:\\s+the)?\\s+speech', 'end speech', '“', '”', 'quote')
   replaceGuardedAliasPair('begin single', 'end single', '‘', '’', 'single quote')
 
   const replaceFixed = (pattern: RegExp, mark: string, reason: string, opening = false) => {

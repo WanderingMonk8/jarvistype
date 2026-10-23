@@ -2729,9 +2729,10 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
     const tokenPattern = new RegExp(`\\b(${beginPhrase}|${endPhrase})\\b`, "giu");
     const tokens = [...text.matchAll(tokenPattern)];
     if (!tokens.length || tokens.length % 2 !== 0) return;
-    if (tokens.some(
-      (token, index) => index % 2 === 0 ? token[1]?.toLocaleLowerCase() !== beginPhrase : token[1]?.toLocaleLowerCase() !== endPhrase
-    ))
+    if (tokens.some((token, index) => {
+      const phrase = index % 2 === 0 ? beginPhrase : endPhrase;
+      return !new RegExp(`^${phrase}$`, "iu").test(token[1] ?? "");
+    }))
       return;
     if (hasNaturalAliasUsage(text)) return;
     for (let index = 0; index < tokens.length; index += 2) {
@@ -2753,7 +2754,7 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
       }
     );
   };
-  replaceGuardedAliasPair("begin speech", "end speech", "\u201C", "\u201D", "quote");
+  replaceGuardedAliasPair("begin(?:\\s+the)?\\s+speech", "end speech", "\u201C", "\u201D", "quote");
   replaceGuardedAliasPair("begin single", "end single", "\u2018", "\u2019", "single quote");
   const replaceFixed = (pattern, mark, reason, opening = false) => {
     text = text.replace(pattern, (_whole, attachedPunctuation, offset) => {

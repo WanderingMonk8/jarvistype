@@ -2564,8 +2564,8 @@ function shellMarkup() {
       .jt-shell button:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-shell button:disabled { cursor: not-allowed; opacity: .55; }
       .jt-shell [data-record-message], .jt-shell [data-record-edit], .jt-shell [data-send], .jt-shell [data-proposal-accept], .jt-shell [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
-      .jt-record-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .5rem; }
-      .jt-record-row > button { width: 100%; min-width: 0; white-space: nowrap; text-align: center; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
+      .jt-record-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; justify-items: stretch; align-items: stretch; justify-content: start; width: 100%; }
+      .jt-record-row > button { width: 100%; min-width: 0; justify-self: stretch; margin: 0; white-space: nowrap; text-align: center; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
       .jt-shell [data-recording-state="starting"] { border-color: #ecc94b; background: #ecc94b; color: #1a1a1a; font-weight: 700; }
       .jt-shell [data-recording-state="recording"] { border-color: #e53e3e; background: #e53e3e; color: #ffffff; font-weight: 700; }
       .jt-shell [data-record-message]:hover:not(:disabled), .jt-shell [data-record-edit]:hover:not(:disabled), .jt-shell [data-send]:hover:not(:disabled), .jt-shell [data-proposal-accept]:hover:not(:disabled), .jt-shell [data-edit-accept]:hover:not(:disabled) { background: color-mix(in srgb, #d69e2e 28%, transparent); }

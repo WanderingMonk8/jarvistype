@@ -654,7 +654,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
               ? 'Normalizing…'
               : state.voicePhase === 'review'
                 ? 'Review required'
-                : 'Record Message'
+                : 'Record'
     const ownRecordingRunning =
       activeRecording !== null &&
       (state.voicePhase === 'starting' || state.voicePhase === 'recording')
@@ -673,10 +673,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         : editLive && state.voicePhase === 'recording'
           ? 'recording'
           : ''
-    recordButton.setAttribute('aria-label', messageIsLive ? 'Stop recording' : 'Record message')
+    recordButton.setAttribute('aria-label', messageIsLive ? 'Stop recording' : 'Record')
     recordButton.title = messageIsLive ? 'Stop recording' : ''
     recordButton.parentElement?.setAttribute('data-live', String(messageIsLive || editIsLive))
-    recordEditButton.setAttribute('aria-label', editIsLive ? 'Stop edit recording' : 'Record edit')
+    recordEditButton.setAttribute('aria-label', editIsLive ? 'Stop edit recording' : 'Edit')
     recordEditButton.title = editIsLive ? 'Stop edit recording' : ''
     recordEditButton.parentElement?.setAttribute('data-live', String(editIsLive))
     recordEditButton.textContent =
@@ -686,7 +686,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           ? '■'
           : state.voicePhase === 'review' && state.pendingEditProposal
             ? 'Review required'
-            : 'Record Edit'
+            : 'Edit'
     recordEditButton.disabled =
       !ownRecordingRunning &&
       (!hasNativeStt() ||
@@ -1812,7 +1812,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.permissions = sanitizeGrantedPermissions(granted)
       const ready = required.every((permission) => granted.includes(permission))
       state.voiceMessage = ready
-        ? 'Recording and normalization permissions are ready. Select Record Message again to begin.'
+        ? 'Recording and normalization permissions are ready. Select Record again to begin.'
         : 'Required recording or normalization permission was not granted. No recording started.'
       render()
       return ready
@@ -2711,8 +2711,8 @@ function shellMarkup(): string {
       .jt-shell button:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-shell button:disabled { cursor: not-allowed; opacity: .55; }
       .jt-shell [data-record-message], .jt-shell [data-record-edit], .jt-shell [data-send], .jt-shell [data-proposal-accept], .jt-shell [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
-      .jt-record-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; width: 100%; }
-      .jt-record-slot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; min-width: 0; }
+      .jt-record-row { display: flex; gap: .5rem; width: 100%; }
+      .jt-record-slot { flex: 1 1 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; min-width: 0; }
       .jt-record-slot > button { grid-row: 1; width: 100%; min-width: 0; margin: 0; padding-inline: .4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
       .jt-record-slot > [data-record-message], .jt-record-slot > [data-record-edit] { grid-column: 1 / -1; }
       .jt-record-slot[data-live="true"] > [data-record-message], .jt-record-slot[data-live="true"] > [data-record-edit] { grid-column: 1; }
@@ -2871,11 +2871,11 @@ function shellMarkup(): string {
           <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
           <div class="jt-record-row" aria-label="Voice composition controls">
             <div class="jt-record-slot" data-record-slot="message">
-              <button type="button" data-record-message disabled>Record Message</button>
+              <button type="button" data-record-message disabled>Record</button>
               <button type="button" data-cancel-recording aria-label="Cancel recording" title="Cancel recording" style="visibility: hidden" disabled>✕</button>
             </div>
             <div class="jt-record-slot" data-record-slot="edit">
-              <button type="button" data-record-edit disabled>Record Edit</button>
+              <button type="button" data-record-edit disabled>Edit</button>
               <button type="button" data-cancel-edit-recording aria-label="Cancel edit recording" title="Cancel edit recording" style="visibility: hidden" disabled>✕</button>
             </div>
           </div>

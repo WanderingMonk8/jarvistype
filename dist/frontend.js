@@ -655,6 +655,8 @@ function setup(ctx) {
   const editProposalAfter = requireElement(tab.root, "[data-edit-after]");
   const acceptEditButton = requireElement(tab.root, "[data-edit-accept]");
   const rejectEditButton = requireElement(tab.root, "[data-edit-reject]");
+  const decisionBar = requireElement(tab.root, "[data-decision-bar]");
+  const decisionSummary = requireElement(tab.root, "[data-decision-summary]");
   const contextCountInput = requireElement(tab.root, "[data-context-count]");
   const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
   const grammarRepairSelect = requireElement(
@@ -895,6 +897,12 @@ function setup(ctx) {
     editProposalAfter.textContent = editProposal?.afterText ?? "";
     acceptEditButton.disabled = !editProposal || state.automatedBusy || state.saving || desiredText !== state.snapshot?.cleanText || editProposal.expectedVersion !== state.snapshot?.draftVersion;
     rejectEditButton.disabled = !editProposal || state.automatedBusy;
+    acceptEditButton.hidden = !editProposal;
+    rejectEditButton.hidden = !editProposal;
+    acceptProposalButton.hidden = !proposal;
+    rejectProposalButton.hidden = !proposal;
+    decisionBar.hidden = !proposal && !editProposal;
+    decisionSummary.textContent = editProposal ? `Review the edit: ${editProposal.explanation}` : proposal ? "Review the normalized transcript before it is appended." : "";
     const editCandidates = state.pendingEditCandidates;
     editCandidatesPanel.hidden = !editCandidates;
     editCandidatesInstruction.textContent = editCandidates?.instructionTranscript ?? "";
@@ -2458,6 +2466,11 @@ function shellMarkup() {
       .jt-floating .jt-proposal { max-height: min(70vh, 34rem); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
       .jt-floating .jt-proposal pre { max-height: 12rem; overflow-y: auto; }
       .jt-floating .jt-proposal > .jt-actions { position: sticky; z-index: 2; bottom: -.7rem; margin: .15rem -.7rem -.7rem; padding: .65rem .7rem; border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent); background: var(--background, #171717); }
+      .jt-decision { position: sticky; bottom: 0; z-index: 5; display: grid; gap: .5rem; margin-top: .5rem; padding: .65rem .75rem; border: 1px solid #d69e2e; border-radius: .6rem; background: var(--background, #171717); box-shadow: 0 -10px 24px rgb(0 0 0 / .32); }
+      .jt-decision__summary { margin: 0; font-size: .9rem; overflow-wrap: anywhere; }
+      .jt-decision__actions { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+      .jt-decision__actions button { min-height: 2.75rem; font-weight: 700; }
+      .jt-decision__actions [data-proposal-accept], .jt-decision__actions [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
       .jt-command-list { display: grid; gap: .75rem; margin-top: .65rem; }
       .jt-command-list ul { display: grid; gap: .4rem; margin: .35rem 0 0; padding-left: 1.2rem; }
       .jt-empty { opacity: .65; font-style: italic; }
@@ -2542,10 +2555,6 @@ function shellMarkup() {
               <pre data-proposal-raw></pre>
               <p class="jt-draft-meta" data-proposal-meta></p>
             </details>
-            <div class="jt-actions">
-              <button type="button" data-proposal-accept>Accept &amp; append</button>
-              <button type="button" data-proposal-reject>Reject</button>
-            </div>
           </section>
           <div class="jt-actions" aria-label="Voice composition controls">
             <button type="button" data-record-message disabled>Record Message</button>
@@ -2576,10 +2585,6 @@ function shellMarkup() {
             <p><strong>Before</strong></p>
             <pre data-edit-before></pre>
           </details>
-          <div class="jt-actions">
-            <button type="button" data-edit-accept>Accept edit</button>
-            <button type="button" data-edit-reject>Reject</button>
-          </div>
         </section>
         <div class="jt-actions" aria-label="Editing voice controls">
           <button type="button" data-record-edit disabled>Record Edit</button>
@@ -2603,6 +2608,15 @@ function shellMarkup() {
           <h4 id="jt-history-title">Draft history</h4>
           <ol class="jt-history" data-history-list></ol>
         </section>
+        <div class="jt-decision" data-decision-bar hidden>
+          <p class="jt-decision__summary" data-decision-summary></p>
+          <div class="jt-decision__actions">
+            <button type="button" data-proposal-reject hidden>Reject</button>
+            <button type="button" data-proposal-accept hidden>Accept &amp; append</button>
+            <button type="button" data-edit-reject hidden>Reject</button>
+            <button type="button" data-edit-accept hidden>Accept edit</button>
+          </div>
+        </div>
         </div>
       </section>
       </div>

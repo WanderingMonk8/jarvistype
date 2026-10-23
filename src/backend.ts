@@ -3272,6 +3272,8 @@ const FLOOR_PROBE_TIMEOUT_MS = 30_000
  */
 async function measureProviderFloor(userId: string, settings: PhaseFourSettings): Promise<void> {
   const startedAt = performance.now()
+  // The request's own capture has already ended, so hold one open until this line is recorded.
+  beginDebugCapture(userId)
   recordDebug(userId, 'provider.floor', 'start')
   let timeout: ReturnType<typeof setTimeout> | undefined
   let outcome = 'ok'
@@ -3308,6 +3310,7 @@ async function measureProviderFloor(userId: string, settings: PhaseFourSettings)
     'provider.floor',
     `end outcome=${outcome} duration=${debugDuration(startedAt)}`,
   )
+  endDebugCapture(userId)
 }
 
 async function normalizeWithContext(

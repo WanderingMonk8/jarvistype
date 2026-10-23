@@ -5582,6 +5582,7 @@ var CONTEXTUAL_NORMALIZATION_TIMEOUT_MS = 12e3;
 var FLOOR_PROBE_TIMEOUT_MS = 3e4;
 async function measureProviderFloor(userId, settings) {
   const startedAt2 = performance.now();
+  beginDebugCapture(userId);
   recordDebug(userId, "provider.floor", "start");
   let timeout;
   let outcome = "ok";
@@ -5614,6 +5615,7 @@ async function measureProviderFloor(userId, settings) {
     "provider.floor",
     `end outcome=${outcome} duration=${debugDuration(startedAt2)}`
   );
+  endDebugCapture(userId);
 }
 async function normalizeWithContext(rawTranscript, deterministicCandidate, messages, conversationReferences, glossary, settings, userId, timeoutMs = CONTEXTUAL_NORMALIZATION_TIMEOUT_MS) {
   const startedAt2 = performance.now();

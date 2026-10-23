@@ -852,7 +852,6 @@ function setup(ctx) {
     historyPanel.hidden = !state.historyExpanded;
     historyButton.textContent = state.historyExpanded ? "Hide History" : "Show History";
     historyButton.disabled = !state.snapshot || state.snapshot.history.length === 0;
-    redoButton.hidden = !state.snapshot?.canRedo;
     redoButton.disabled = !editorEnabled || state.saving || !state.snapshot?.canRedo || desiredText !== state.snapshot.cleanText;
     const recordingOwnerReady = state.backendState === "ready" && state.snapshot !== null && !state.loading && !state.saving && !state.automatedBusy && !state.sending && !mismatch && state.activeChatId === state.snapshot.chatId && desiredText === state.snapshot.cleanText;
     const undoIsRecording = Boolean(state.snapshot?.canUndoRecording);
@@ -2558,6 +2557,8 @@ function shellMarkup() {
       .jt-shell button:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-shell button:disabled { cursor: not-allowed; opacity: .55; }
       .jt-shell [data-record-message], .jt-shell [data-record-edit], .jt-shell [data-send], .jt-shell [data-proposal-accept], .jt-shell [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
+      .jt-history-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; width: 100%; }
+      .jt-history-row > button { width: 100%; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .jt-record-row { display: flex; gap: .5rem; width: 100%; }
       .jt-record-slot { flex: 1 1 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; min-width: 0; }
       .jt-record-slot > button { grid-row: 1; width: 100%; min-width: 0; margin: 0; padding-inline: .4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
@@ -2730,9 +2731,9 @@ function shellMarkup() {
         <div class="jt-actions">
           <button type="button" data-send disabled>Confirm &amp; Send</button>
         </div>
-        <div class="jt-actions">
+        <div class="jt-history-row">
           <button type="button" data-undo disabled>Undo</button>
-          <button type="button" data-redo hidden>Redo</button>
+          <button type="button" data-redo disabled>Redo</button>
           <button type="button" data-history-toggle disabled>Show History</button>
         </div>
 

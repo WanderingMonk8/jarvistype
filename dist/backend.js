@@ -2596,7 +2596,7 @@ function normalizeDeterministically(raw, glossary, options = {}) {
       text = next;
     }
   }
-  text = cleanupPunctuationSpacing(text);
+  text = spaceEmDashes(cleanupPunctuationSpacing(text));
   const capitalized = capitalizeMessageOpenings(
     text,
     [
@@ -2664,6 +2664,9 @@ function recoverHighConfidenceContextualCommands(input) {
 }
 function removeRedundantProviderTerminalMarks(input) {
   return input.replace(/([.?!…][”’"']?)\s+\.(?=\s|[”’"']|$)/gu, "$1");
+}
+function spaceEmDashes(input) {
+  return input.replace(/([^\s—])[ \t]*—[ \t]*(?=[^\s—])/gu, "$1 \u2014 ");
 }
 function removeRedundantProviderDashes(input) {
   return input.replace(/—\s*(?:em\s+)?dash\b[.,]?/giu, "\u2014").replace(/—\s*—/gu, "\u2014");

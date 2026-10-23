@@ -271,7 +271,7 @@ export function normalizeDeterministically(
     }
   }
 
-  text = cleanupPunctuationSpacing(text)
+  text = spaceEmDashes(cleanupPunctuationSpacing(text))
   const capitalized = capitalizeMessageOpenings(
     text,
     [
@@ -348,6 +348,11 @@ export function recoverHighConfidenceContextualCommands(input: string): Contextu
 
 function removeRedundantProviderTerminalMarks(input: string): string {
   return input.replace(/([.?!…][”’"']?)\s+\.(?=\s|[”’"']|$)/gu, '$1')
+}
+
+/** An em dash between words always has a space on each side, within its line. */
+function spaceEmDashes(input: string): string {
+  return input.replace(/([^\s—])[ \t]*—[ \t]*(?=[^\s—])/gu, '$1 — ')
 }
 
 /** A dash already rendered by the provider keeps its mark when the spoken “dash” follows it. */

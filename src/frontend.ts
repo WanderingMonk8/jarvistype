@@ -45,12 +45,12 @@ function getFloatingWidgetSize(): { width: number; height: number } {
   if (viewport.width < NARROW_COMPOSER_BREAKPOINT_PX) {
     return {
       width: Math.max(1, Math.min(430, viewport.width - 24)),
-      height: Math.max(1, Math.min(672, viewport.height - 24)),
+      height: Math.max(1, Math.min(720, viewport.height - 24)),
     }
   }
   return {
     width: Math.max(1, Math.min(960, viewport.width - 48)),
-    height: Math.max(1, Math.min(552, viewport.height - 48)),
+    height: Math.max(1, Math.min(600, viewport.height - 48)),
   }
 }
 

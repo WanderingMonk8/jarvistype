@@ -603,6 +603,8 @@ function setup(ctx) {
   const retryButton = requireElement(tab.root, "[data-retry-backend]");
   const switchDraftButton = requireElement(tab.root, "[data-switch-draft]");
   const editor = requireElement(tab.root, "[data-draft-editor]");
+  const draftFullToggle = requireElement(tab.root, "[data-draft-full-toggle]");
+  const draftFull = requireElement(tab.root, "[data-draft-full]");
   const draftMeta = requireElement(tab.root, "[data-draft-meta]");
   const paragraphList = requireElement(tab.root, "[data-paragraph-list]");
   const recordButton = requireElement(tab.root, "[data-record-message]");
@@ -900,7 +902,10 @@ function setup(ctx) {
     rejectEditButton.hidden = !editProposal;
     acceptProposalButton.hidden = !proposal;
     rejectProposalButton.hidden = !proposal;
-    decisionBar.hidden = !proposal && !editProposal;
+    const activeReview = proposal ? proposalPanel : editProposal ? editProposalPanel : null;
+    decisionBar.hidden = !activeReview;
+    if (activeReview && decisionBar.previousElementSibling !== activeReview)
+      activeReview.after(decisionBar);
     decisionSummary.textContent = editProposal ? `Review the edit: ${editProposal.explanation}` : proposal ? "Review the normalized transcript before it is appended." : "";
     const editCandidates = state.pendingEditCandidates;
     editCandidatesPanel.hidden = !editCandidates;
@@ -1982,6 +1987,13 @@ function setup(ctx) {
     state.historyExpanded = !state.historyExpanded;
     render();
   };
+  const handleDraftFullToggle = () => {
+    const opening = draftFull.hidden;
+    draftFull.hidden = !opening;
+    draftFullToggle.setAttribute("aria-expanded", String(opening));
+    draftFullToggle.textContent = opening ? "Hide the full draft text" : "Edit the full draft text";
+    if (opening) editor.focus();
+  };
   const handleUndoClick = () => void (state.snapshot?.canUndoRecording ? handleUndoRecording() : handleUndo());
   const handleRedoClick = () => void handleRedo();
   const handleRecordClick = () => void handleRecording("message");
@@ -2103,6 +2115,7 @@ function setup(ctx) {
   cancelEditRecordingButton.addEventListener("click", handleCancelEditRecordingClick);
   cancelRecordingButton.addEventListener("click", handleCancelRecordingClick);
   undoButton.addEventListener("click", handleUndoClick);
+  draftFullToggle.addEventListener("click", handleDraftFullToggle);
   redoButton.addEventListener("click", handleRedoClick);
   historyButton.addEventListener("click", handleHistoryToggle);
   sendButton.addEventListener("click", handleSendClick);
@@ -2166,6 +2179,7 @@ function setup(ctx) {
     cancelEditRecordingButton.removeEventListener("click", handleCancelEditRecordingClick);
     cancelRecordingButton.removeEventListener("click", handleCancelRecordingClick);
     undoButton.removeEventListener("click", handleUndoClick);
+    draftFullToggle.removeEventListener("click", handleDraftFullToggle);
     redoButton.removeEventListener("click", handleRedoClick);
     historyButton.removeEventListener("click", handleHistoryToggle);
     sendButton.removeEventListener("click", handleSendClick);
@@ -2507,9 +2521,8 @@ function shellMarkup() {
       .jt-paragraph-row { -webkit-touch-callout: none; touch-action: manipulation; cursor: text; border-radius: .35rem; }
       .jt-paragraph-row:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-paragraph-input { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; line-height: 1.5; padding: .35rem .5rem; border-radius: .4rem; resize: vertical; }
-      .jt-draft-details { margin-top: .6rem; }
-      .jt-draft-details summary { cursor: pointer; font-weight: 700; }
-      .jt-draft-details .jt-draft-editor { margin-top: .5rem; }
+      .jt-draft-full-toggle { margin-top: .6rem; }
+      .jt-draft-full .jt-draft-editor { margin-top: .5rem; }
       .jt-paragraph-number { text-align: right; opacity: .6; user-select: none; }
       .jt-paragraph-text { white-space: pre-wrap; overflow-wrap: anywhere; }
       .jt-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
@@ -2555,10 +2568,9 @@ function shellMarkup() {
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
       .jt-floating summary { cursor: pointer; font-weight: 700; }
       .jt-floating .jt-proposal pre { max-height: none; overflow: visible; }
-      .jt-decision { grid-column: 1 / -1; position: sticky; bottom: 0; z-index: 5; display: grid; gap: .5rem; margin-top: .5rem; padding: .65rem .75rem; border: 1px solid #d69e2e; border-radius: .6rem; background: var(--background, #171717); box-shadow: 0 -10px 24px rgb(0 0 0 / .32); }
-      .jt-decision__summary { margin: 0; font-size: .9rem; overflow-wrap: anywhere; }
-      .jt-decision__actions { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
-      .jt-decision__actions button { min-height: 2.75rem; font-weight: 700; }
+      .jt-decision { position: sticky; bottom: 0; z-index: 5; display: grid; gap: .4rem; margin: .4rem 0; padding: .5rem .6rem; border: 1px solid #d69e2e; border-radius: .6rem; background: var(--background, #171717); box-shadow: 0 -6px 16px rgb(0 0 0 / .3); }
+      .jt-decision__summary { margin: 0; font-size: .85rem; overflow-wrap: anywhere; }
+      .jt-decision__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
       .jt-decision__actions [data-proposal-accept], .jt-decision__actions [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
       .jt-command-list { display: grid; gap: .75rem; margin-top: .65rem; }
       .jt-command-list ul { display: grid; gap: .4rem; margin: .35rem 0 0; padding-left: 1.2rem; }
@@ -2569,7 +2581,7 @@ function shellMarkup() {
       @media (min-width: ${NARROW_COMPOSER_BREAKPOINT_PX}px) {
         .jt-floating__body { display: block; }
         .jt-floating [data-floating-composer-mount] { min-height: 0; }
-        .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: start; height: auto; overflow: visible; }
+        .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: stretch; height: auto; overflow: visible; }
         .jt-floating .jt-composer__pane { min-height: 0; overflow: visible; padding-right: .25rem; }
         .jt-floating .jt-draft-editor { min-height: 10rem; }
         .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
@@ -2618,13 +2630,24 @@ function shellMarkup() {
         <p class="jt-draft-meta" data-draft-meta>Draft not loaded</p>
 
         <div class="jt-paragraphs" data-paragraph-list role="region" aria-label="Numbered draft paragraphs" aria-live="polite"></div>
-        <details class="jt-draft-details">
-          <summary>Edit the full draft text</summary>
+        <button type="button" class="jt-draft-full-toggle" data-draft-full-toggle aria-expanded="false" aria-controls="jt-draft-full">Edit the full draft text</button>
+        <div class="jt-draft-full" id="jt-draft-full" data-draft-full hidden>
           <textarea class="jt-draft-editor" data-draft-editor maxlength="${MAX_DRAFT_CHARACTERS}" aria-describedby="jt-draft-help" aria-label="JarvisType private working draft" disabled></textarea>
-        </details>
+        </div>
         </div>
 
         <div class="jt-composer__pane jt-composer__action-pane">
+        <section class="jt-proposal" data-normalization-proposal hidden aria-labelledby="jt-proposal-title">
+          <h4 id="jt-proposal-title">Review normalized transcript</h4>
+          <p><strong>Proposed text</strong></p>
+          <pre data-proposal-candidate></pre>
+          <details class="jt-proposal__details">
+            <summary>Raw transcript and normalization details</summary>
+            <p><strong>Raw provider transcript</strong></p>
+            <pre data-proposal-raw></pre>
+            <p class="jt-draft-meta" data-proposal-meta></p>
+          </details>
+        </section>
         <section class="jt-voice" aria-labelledby="jt-voice-title">
           <h4 id="jt-voice-title">Voice message segment</h4>
           <p role="status" aria-live="polite" data-voice-status>Ready to record a message segment.</p>
@@ -2635,17 +2658,6 @@ function shellMarkup() {
           </div>
           <p class="jt-voice__transcript jt-voice__transcript--provisional" data-voice-provisional hidden></p>
           <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
-          <section class="jt-proposal" data-normalization-proposal hidden aria-labelledby="jt-proposal-title">
-            <h4 id="jt-proposal-title">Review normalized transcript</h4>
-            <p><strong>Proposed text</strong></p>
-            <pre data-proposal-candidate></pre>
-            <details class="jt-proposal__details">
-              <summary>Raw transcript and normalization details</summary>
-              <p><strong>Raw provider transcript</strong></p>
-              <pre data-proposal-raw></pre>
-              <p class="jt-draft-meta" data-proposal-meta></p>
-            </details>
-          </section>
           <div class="jt-actions" aria-label="Voice composition controls">
             <button type="button" data-record-message disabled>Record Message</button>
             <button type="button" data-cancel-recording hidden>Cancel Recording</button>

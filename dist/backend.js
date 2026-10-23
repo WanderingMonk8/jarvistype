@@ -5756,7 +5756,7 @@ function cachedConversationReferences(userId, chatId, messages) {
   const signature = JSON.stringify(messages);
   const cached = conversationReferenceCache.get(key);
   if (cached?.signature === signature) return cached.references;
-  const references = extractConversationReferences(messages);
+  const references = extractConversationReferences([...messages].reverse());
   conversationReferenceCache.set(key, { signature, references });
   while (conversationReferenceCache.size > MAX_CONVERSATION_REFERENCE_CACHES) {
     const oldest = conversationReferenceCache.keys().next().value;

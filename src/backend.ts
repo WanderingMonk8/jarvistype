@@ -3566,7 +3566,8 @@ function cachedConversationReferences(
   const signature = JSON.stringify(messages)
   const cached = conversationReferenceCache.get(key)
   if (cached?.signature === signature) return cached.references
-  const references = extractConversationReferences(messages)
+  // Newest first, so when the character cap is reached recent names are kept over older ones.
+  const references = extractConversationReferences([...messages].reverse())
   conversationReferenceCache.set(key, { signature, references })
   while (conversationReferenceCache.size > MAX_CONVERSATION_REFERENCE_CACHES) {
     const oldest = conversationReferenceCache.keys().next().value

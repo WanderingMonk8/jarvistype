@@ -182,6 +182,7 @@ function describeEditDestination(destination: EditTarget | undefined): string {
 }
 
 interface ActiveRecording {
+  chatId: string
   runId: string
   operationId: string
   session: SpindleSTTSession
@@ -193,6 +194,7 @@ interface ActiveRecording {
 
 interface ComposerState {
   activeChatId: string | null
+  voiceChatId: string | null
   snapshot: DraftSnapshot | null
   backendState: BackendState
   backendVersion: string | null
@@ -445,6 +447,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const state: ComposerState = {
     activeChatId: ctx.getActiveChat().chatId,
+    voiceChatId: null,
     snapshot: null,
     backendState: 'connecting',
     backendVersion: null,
@@ -514,6 +517,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   let recordingDeadline: ReturnType<typeof setTimeout> | null = null
   let recordingStartedAt = 0
   let editingGlossaryEntryId: string | undefined
+  const lastRecordingByChat = new Map<
+    string,
+    { text: string; provider: string | null; elapsedMs: number }
+  >()
   let drawerGlossaryQuery = ''
   let floatingGlossaryQuery = ''
   const disposers: Array<() => void> = []
@@ -836,6 +843,19 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const applySnapshot = (snapshot: DraftSnapshot, syncEditor: boolean) => {
     state.snapshot = snapshot
+    if (state.voiceChatId !== snapshot.chatId) {
+      const cachedRecording = lastRecordingByChat.get(snapshot.chatId)
+      const committedTranscript = snapshot.recordingSegments.at(-1)?.rawTranscript ?? ''
+      state.voiceChatId = snapshot.chatId
+      state.voicePhase = 'idle'
+      state.voiceElapsedMs = cachedRecording?.elapsedMs ?? 0
+      state.voiceProvider = cachedRecording?.provider ?? null
+      state.voiceProvisionalText = ''
+      state.voiceFinalText = cachedRecording?.text ?? committedTranscript
+      state.voiceMessage = state.voiceFinalText
+        ? 'Showing the last completed recording for this chat.'
+        : 'Ready to record a message segment.'
+    }
     if (syncEditor) {
       desiredText = snapshot.cleanText
       editor.value = snapshot.cleanText
@@ -917,6 +937,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const nextChatId = ctx.getActiveChat().chatId
     const changed = nextChatId !== state.activeChatId
     state.activeChatId = nextChatId
+    if (changed) {
+      state.voiceChatId = null
+      state.voicePhase = 'idle'
+      state.voiceElapsedMs = 0
+      state.voiceProvider = null
+      state.voiceProvisionalText = ''
+      state.voiceFinalText = ''
+      state.voiceMessage = nextChatId
+        ? 'Loading the last recording for this chat…'
+        : 'Ready to record a message segment.'
+    }
     const transitionId = changed ? ++chatTransitionId : chatTransitionId
     await refreshPermissions()
     if (!alive) return
@@ -950,6 +981,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (!nextChatId) {
       latestDraftLoadId += 1
       state.snapshot = null
+      state.voiceChatId = null
+      state.voicePhase = 'idle'
+      state.voiceElapsedMs = 0
+      state.voiceProvider = null
+      state.voiceProvisionalText = ''
+      state.voiceFinalText = ''
+      state.voiceMessage = 'Ready to record a message segment.'
       state.loading = false
       state.pendingProposal = null
       state.pendingEditProposal = null
@@ -1681,10 +1719,22 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (!recording || recording.runId !== runId) return
     activeRecording = null
     clearRecordingDeadline()
-    state.voiceElapsedMs = Math.max(0, Date.now() - recordingStartedAt)
+    const elapsedMs = Math.max(0, Date.now() - recordingStartedAt)
+    lastRecordingByChat.set(recording.chatId, {
+      text: transcript.text,
+      provider: transcript.provider,
+      elapsedMs,
+    })
+    if (state.activeChatId !== recording.chatId) {
+      clearRecordingTimers()
+      if (alive) render()
+      return
+    }
+    state.voiceElapsedMs = elapsedMs
     state.voiceProvisionalText = ''
     state.voiceFinalText = transcript.text
     state.voiceProvider = transcript.provider
+    state.voiceChatId = recording.chatId
     if (transcript.text.trim().length === 0) {
       state.voicePhase = 'error'
       state.voiceMessage = 'No usable speech was recognized. Nothing was appended.'
@@ -1778,6 +1828,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         },
       })
       activeRecording = {
+        chatId: snapshot.chatId,
         runId,
         operationId,
         session,

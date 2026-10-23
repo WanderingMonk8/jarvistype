@@ -2560,9 +2560,9 @@ function shellMarkup() {
       .jt-shell [data-record-message], .jt-shell [data-record-edit], .jt-shell [data-send], .jt-shell [data-proposal-accept], .jt-shell [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
       .jt-record-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; width: 100%; }
       .jt-record-slot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; min-width: 0; }
-      .jt-record-slot > button { grid-row: 1; width: 100%; min-width: 0; margin: 0; white-space: nowrap; text-align: center; font-size: 1.1rem; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
+      .jt-record-slot > button { grid-row: 1; width: 100%; min-width: 0; margin: 0; white-space: nowrap; text-align: center; transition: background-color .3s ease, border-color .3s ease, color .3s ease; }
       .jt-record-slot > [data-record-message], .jt-record-slot > [data-record-edit] { grid-column: 1 / -1; }
-      .jt-record-slot[data-live="true"] > [data-record-message], .jt-record-slot[data-live="true"] > [data-record-edit] { grid-column: 1; font-size: 1.1rem; }
+      .jt-record-slot[data-live="true"] > [data-record-message], .jt-record-slot[data-live="true"] > [data-record-edit] { grid-column: 1; }
       .jt-record-slot > [data-cancel-recording], .jt-record-slot > [data-cancel-edit-recording] { grid-column: 2; }
       .jt-actions > [data-send] { flex: 1 1 100%; }
       .jt-shell [data-recording-state="starting"] { border-color: #ecc94b; background: #ecc94b; color: #1a1a1a; font-weight: 700; }

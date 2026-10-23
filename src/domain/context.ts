@@ -275,6 +275,12 @@ function isReferenceTerm(term: string): boolean {
 
 function isHighConfidenceReferenceMatch(heard: string, reference: string): boolean {
   if (Math.abs(heard.length - reference.length) > 1) return false
+  if (
+    Math.max(heard.length, reference.length) <= 5 &&
+    referenceSoundKey(heard).length >= 3 &&
+    referenceSoundKey(heard) === referenceSoundKey(reference)
+  )
+    return true
   if (heard.charAt(0) !== reference.charAt(0)) {
     return (
       heard.length === 3 &&
@@ -289,6 +295,33 @@ function isHighConfidenceReferenceMatch(heard: string, reference: string): boole
     heard.slice(0, 4) === reference.slice(0, 4) &&
     editDistanceAtMost(heard, reference, 2)
   )
+}
+
+function referenceSoundKey(value: string): string {
+  const prepared = value
+    .normalize('NFKD')
+    .toLocaleLowerCase()
+    .replace(/\p{M}/gu, '')
+  let key = ''
+  for (const character of prepared) {
+    const sound = /[aeiouy]/u.test(character)
+      ? 'A'
+      : /[cgjkq]/u.test(character)
+        ? 'K'
+        : /[bp]/u.test(character)
+          ? 'B'
+          : /[fv]/u.test(character)
+            ? 'F'
+            : /[dt]/u.test(character)
+              ? 'T'
+              : /[sxz]/u.test(character)
+                ? 'S'
+                : /[lmnr]/u.test(character)
+                  ? character.toLocaleUpperCase()
+                  : ''
+    if (sound && sound !== key.at(-1)) key += sound
+  }
+  return key
 }
 
 function hardInitialsMatch(left: string, right: string): boolean {

@@ -139,6 +139,13 @@ test('corrects a unique short phonetic name and preserves its possessive apostro
   assert.equal(correctFromConversationReferences("Cat's coat", ['Kat', 'Qat']).text, "Cat's coat")
 })
 
+test('corrects a short phonetically equivalent card name', () => {
+  assert.deepEqual(correctFromConversationReferences('ICO', ['Aiko']), {
+    text: 'Aiko',
+    correctedTerms: [{ heard: 'ICO', canonical: 'Aiko' }],
+  })
+})
+
 test('leaves ambiguous, lowercase, and protected wording unchanged', () => {
   assert.equal(
     correctFromConversationReferences(

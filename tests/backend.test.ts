@@ -48,9 +48,10 @@ const spindleMock = {
     getFrontend: () => Promise.resolve('1.2.5'),
   },
   permissions: {
-    getGranted: () => Promise.resolve(['media', 'chats', 'chat_mutation', 'generation']),
+    getGranted: () =>
+      Promise.resolve(['media', 'chats', 'chat_mutation', 'generation', 'characters']),
     has: (permission: string) =>
-      ['media', 'chats', 'chat_mutation', 'generation'].includes(permission),
+      ['media', 'chats', 'chat_mutation', 'generation', 'characters'].includes(permission),
   },
   userStorage: {
     getJson: <T>(path: string, options?: { fallback?: T; userId?: string }) =>
@@ -65,6 +66,15 @@ const spindleMock = {
     },
   },
   chats: {
+    get: (chatId: string) =>
+      Promise.resolve({
+        id: chatId,
+        character_id: 'character-1',
+        name: 'Test',
+        metadata: {},
+        created_at: 0,
+        updated_at: 0,
+      }),
     getActive: () =>
       Promise.resolve(
         activeChatId
@@ -78,6 +88,9 @@ const spindleMock = {
             }
           : null,
       ),
+  },
+  characters: {
+    get: () => Promise.resolve({ id: 'character-1', name: 'Aiko' }),
   },
   chat: {
     getMessages: () => Promise.resolve(chatMessages),

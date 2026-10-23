@@ -1899,6 +1899,39 @@ function selectRecentContext(source, requestedCount, characterLimit = MAX_CONTEX
     truncated
   };
 }
+function selectRecentReferenceContext(source, requestedCount, characterLimit = MAX_CONTEXT_CHARACTERS) {
+  const count = clampContextMessageCount(requestedCount);
+  if (count === 0 || characterLimit <= 0) return selectRecentContext(source, 0, characterLimit);
+  const eligible = source.filter(isEligible);
+  const selectedCandidates = /* @__PURE__ */ new Set([
+    ...eligible.slice(-count),
+    ...eligible.filter((message) => message.role === "assistant").slice(-count)
+  ]);
+  const newest = eligible.filter((message) => selectedCandidates.has(message)).reverse();
+  const selectedNewestFirst = [];
+  let remaining = Math.max(0, Math.trunc(characterLimit));
+  let truncated = false;
+  for (const message of newest) {
+    if (remaining === 0) break;
+    const content = message.content.trim();
+    if (content.length <= remaining) {
+      selectedNewestFirst.push({ role: message.role, content });
+      remaining -= content.length;
+      continue;
+    }
+    selectedNewestFirst.push({ role: message.role, content: content.slice(-remaining) });
+    remaining = 0;
+    truncated = true;
+  }
+  const messages = selectedNewestFirst.reverse();
+  return {
+    messages,
+    selectedCount: messages.length,
+    omittedCount: eligible.length - messages.length,
+    characterCount: messages.reduce((total, message) => total + message.content.length, 0),
+    truncated
+  };
+}
 function extractConversationReferences(messages, characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS) {
   if (characterLimit <= 0) return [];
   const references = [];
@@ -2943,7 +2976,13 @@ function escapeRegExp(value) {
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
 var APP_VERSION = "1.6.7";
-var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
+var PHASE_FOUR_PERMISSIONS = [
+  "media",
+  "chats",
+  "chat_mutation",
+  "generation",
+  "characters"
+];
 
 // src/protocol/validation.ts
 function isFrontendRequest(value) {
@@ -3178,21 +3217,21 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       return { kind: "error", error: "permission", session: session2 };
     }
     const normalizedAgainstNewerDraft = session2.draftVersion !== request.expectedVersion;
-    const [settings2, glossary2, messages] = await Promise.all([
+    const [settings2, glossary2, messages, cardCharacterName] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
-      spindle.chat.getMessages(request.chatId)
+      spindle.chat.getMessages(request.chatId),
+      loadCardCharacterName(request.chatId, context.userId)
     ]);
     recordDebug(
       context.userId,
       "normalize.context",
       `messages=${messages.length} contextCount=${settings2.contextMessageCount} duration=${debugDuration(normalizeStartedAt)}`
     );
-    const referenceContext2 = selectRecentContext(messages, settings2.contextMessageCount);
-    const conversationReferences2 = cachedConversationReferences(
-      context.userId,
-      request.chatId,
-      referenceContext2.messages
+    const referenceContext2 = selectRecentReferenceContext(messages, settings2.contextMessageCount);
+    const conversationReferences2 = mergeConversationReferences(
+      cardCharacterName,
+      cachedConversationReferences(context.userId, request.chatId, referenceContext2.messages)
     );
     const capitalizeOpening2 = shouldCapitalizeRecordingOpening(session2.cleanText);
     const recoveredBoundary2 = applyQuotationBoundaryHint(
@@ -3562,18 +3601,22 @@ async function handleEditInterpretation(request, context, activeRequest) {
     if (session.draftVersion !== request.expectedVersion)
       return { error: "stale", session };
     if (!session.cleanText.trim()) return { error: "empty", session };
-    const [settings, glossary, messages] = await Promise.all([
+    const [settings, glossary, messages, cardCharacterName] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
-      spindle.chat.getMessages(request.chatId)
+      spindle.chat.getMessages(request.chatId),
+      loadCardCharacterName(request.chatId, context.userId)
     ]);
     recordDebug(
       context.userId,
       "edit.loaded",
       `messages=${messages.length} references=${settings.contextualNormalizationEnabled ? "on" : "off"} duration=${debugDuration(editStartedAt)}`
     );
-    const referenceContext = selectRecentContext(messages, settings.contextMessageCount);
-    const conversationReferences = settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : [];
+    const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount);
+    const conversationReferences = mergeConversationReferences(
+      cardCharacterName,
+      settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : []
+    );
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries);
     const interpretStartedAt = performance.now();
     recordDebug(context.userId, "edit.interpret", "start");
@@ -5753,6 +5796,25 @@ function parseContextualCommandDecisions(value, rawTranscript) {
 }
 function containsCaseInsensitive(haystack, needle) {
   return haystack.toLocaleLowerCase().includes(needle.toLocaleLowerCase());
+}
+async function loadCardCharacterName(chatId, userId) {
+  if (!spindle.permissions.has("characters")) return void 0;
+  try {
+    const chat = await spindle.chats.get(chatId, userId);
+    if (!chat?.character_id) return void 0;
+    const character = await spindle.characters.get(chat.character_id, userId);
+    return character?.name.trim() || void 0;
+  } catch {
+    return void 0;
+  }
+}
+function mergeConversationReferences(cardCharacterName, recentReferences) {
+  if (!cardCharacterName) return [...recentReferences];
+  const cardKey = cardCharacterName.toLocaleLowerCase();
+  return [
+    cardCharacterName,
+    ...recentReferences.filter((reference) => reference.toLocaleLowerCase() !== cardKey)
+  ];
 }
 function cachedConversationReferences(userId, chatId, messages) {
   const key = `${userId}\0${chatId}`;

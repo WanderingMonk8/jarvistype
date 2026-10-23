@@ -9,7 +9,13 @@ export const REQUEST_TIMEOUT_MS = 15_000
 export const NORMALIZATION_TIMEOUT_MS = 120_000
 export const SEND_TIMEOUT_MS = 120_000
 
-export const PHASE_FOUR_PERMISSIONS = ['media', 'chats', 'chat_mutation', 'generation'] as const
+export const PHASE_FOUR_PERMISSIONS = [
+  'media',
+  'chats',
+  'chat_mutation',
+  'generation',
+  'characters',
+] as const
 
 export type PermissionName = (typeof PHASE_FOUR_PERMISSIONS)[number]
 

@@ -51,7 +51,13 @@ var APP_VERSION = "1.6.7";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
-var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
+var PHASE_FOUR_PERMISSIONS = [
+  "media",
+  "chats",
+  "chat_mutation",
+  "generation",
+  "characters"
+];
 function createRequestId(prefix = "request") {
   return `${prefix}-${Date.now().toString(36)}-${crypto.randomUUID()}`;
 }
@@ -2849,7 +2855,7 @@ function shellMarkup() {
 
       <section class="jt-shell__card" aria-labelledby="jt-context-title">
         <h3 id="jt-context-title">Context and glossary</h3>
-        <p class="jt-shell__notice">The message count sets how many recent chat messages JarvisType scans for names and proper nouns, which help with spelling. After speech-to-text finishes, the normalization connection receives the current recording, the glossary, and only that list of names and proper nouns. It never receives the chat messages themselves, the working draft, or audio. Chat history cannot activate dictation commands; command detection stays local to the current recording. Lumiverse STT remains independently managed by the host and receives no added context. Set the count to 0 to exclude chat history.</p>
+        <p class="jt-shell__notice">The message count keeps that many recent assistant messages plus the ordinary recent-message window available for extracting names and proper nouns. The active card character's name is always included. After speech-to-text finishes, the normalization connection receives the current recording, the glossary, and only that list of names and proper nouns. It never receives the chat messages themselves, the working draft, or audio. Chat history cannot activate dictation commands; command detection stays local to the current recording. Lumiverse STT remains independently managed by the host and receives no added context. Set the count to 0 to exclude chat history; the card character remains available.</p>
         <div class="jt-form-grid">
           <label>Messages scanned for references (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>

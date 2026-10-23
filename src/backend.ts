@@ -38,7 +38,7 @@ import {
   clampContextMessageCount,
   correctFromConversationReferences,
   extractConversationReferences,
-  selectRecentContext,
+  selectRecentReferenceContext,
 } from './domain/context'
 import {
   createGlossaryState,
@@ -274,21 +274,21 @@ async function handleTranscriptNormalization(
     }
     const normalizedAgainstNewerDraft = session.draftVersion !== request.expectedVersion
 
-    const [settings, glossary, messages] = await Promise.all([
+    const [settings, glossary, messages, cardCharacterName] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
       spindle.chat.getMessages(request.chatId),
+      loadCardCharacterName(request.chatId, context.userId),
     ])
     recordDebug(
       context.userId,
       'normalize.context',
       `messages=${messages.length} contextCount=${settings.contextMessageCount} duration=${debugDuration(normalizeStartedAt)}`,
     )
-    const referenceContext = selectRecentContext(messages, settings.contextMessageCount)
-    const conversationReferences = cachedConversationReferences(
-      context.userId,
-      request.chatId,
-      referenceContext.messages,
+    const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount)
+    const conversationReferences = mergeConversationReferences(
+      cardCharacterName,
+      cachedConversationReferences(context.userId, request.chatId, referenceContext.messages),
     )
     const capitalizeOpening = shouldCapitalizeRecordingOpening(session.cleanText)
     const recoveredBoundary = applyQuotationBoundaryHint(
@@ -735,20 +735,24 @@ async function handleEditInterpretation(
       return { error: 'stale' as const, session }
     if (!session.cleanText.trim()) return { error: 'empty' as const, session }
 
-    const [settings, glossary, messages] = await Promise.all([
+    const [settings, glossary, messages, cardCharacterName] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
       spindle.chat.getMessages(request.chatId),
+      loadCardCharacterName(request.chatId, context.userId),
     ])
     recordDebug(
       context.userId,
       'edit.loaded',
       `messages=${messages.length} references=${settings.contextualNormalizationEnabled ? 'on' : 'off'} duration=${debugDuration(editStartedAt)}`,
     )
-    const referenceContext = selectRecentContext(messages, settings.contextMessageCount)
-    const conversationReferences = settings.contextualNormalizationEnabled
-      ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages)
-      : []
+    const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount)
+    const conversationReferences = mergeConversationReferences(
+      cardCharacterName,
+      settings.contextualNormalizationEnabled
+        ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages)
+        : [],
+    )
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries)
     const interpretStartedAt = performance.now()
     recordDebug(context.userId, 'edit.interpret', 'start')
@@ -3555,6 +3559,30 @@ function parseContextualCommandDecisions(
 
 function containsCaseInsensitive(haystack: string, needle: string): boolean {
   return haystack.toLocaleLowerCase().includes(needle.toLocaleLowerCase())
+}
+
+async function loadCardCharacterName(chatId: string, userId: string): Promise<string | undefined> {
+  if (!spindle.permissions.has('characters')) return undefined
+  try {
+    const chat = await spindle.chats.get(chatId, userId)
+    if (!chat?.character_id) return undefined
+    const character = await spindle.characters.get(chat.character_id, userId)
+    return character?.name.trim() || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function mergeConversationReferences(
+  cardCharacterName: string | undefined,
+  recentReferences: readonly string[],
+): string[] {
+  if (!cardCharacterName) return [...recentReferences]
+  const cardKey = cardCharacterName.toLocaleLowerCase()
+  return [
+    cardCharacterName,
+    ...recentReferences.filter((reference) => reference.toLocaleLowerCase() !== cardKey),
+  ]
 }
 
 function cachedConversationReferences(

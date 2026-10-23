@@ -80,6 +80,47 @@ export function selectRecentContext(
   }
 }
 
+export function selectRecentReferenceContext(
+  source: readonly ContextSourceMessage[],
+  requestedCount: number,
+  characterLimit = MAX_CONTEXT_CHARACTERS,
+): ContextSelection {
+  const count = clampContextMessageCount(requestedCount)
+  if (count === 0 || characterLimit <= 0) return selectRecentContext(source, 0, characterLimit)
+
+  const eligible = source.filter(isEligible)
+  const selectedCandidates = new Set([
+    ...eligible.slice(-count),
+    ...eligible.filter((message) => message.role === 'assistant').slice(-count),
+  ])
+  const newest = eligible.filter((message) => selectedCandidates.has(message)).reverse()
+  const selectedNewestFirst: ContextMessage[] = []
+  let remaining = Math.max(0, Math.trunc(characterLimit))
+  let truncated = false
+
+  for (const message of newest) {
+    if (remaining === 0) break
+    const content = message.content.trim()
+    if (content.length <= remaining) {
+      selectedNewestFirst.push({ role: message.role, content })
+      remaining -= content.length
+      continue
+    }
+    selectedNewestFirst.push({ role: message.role, content: content.slice(-remaining) })
+    remaining = 0
+    truncated = true
+  }
+
+  const messages = selectedNewestFirst.reverse()
+  return {
+    messages,
+    selectedCount: messages.length,
+    omittedCount: eligible.length - messages.length,
+    characterCount: messages.reduce((total, message) => total + message.content.length, 0),
+    truncated,
+  }
+}
+
 export function extractConversationReferences(
   messages: readonly ContextMessage[],
   characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS,

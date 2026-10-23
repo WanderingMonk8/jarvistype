@@ -6,6 +6,7 @@ import {
   correctFromConversationReferences,
   extractConversationReferences,
   selectRecentContext,
+  selectRecentReferenceContext,
 } from '../src/domain/context'
 
 test('defaults and bounds the user-configurable context count', () => {
@@ -39,6 +40,18 @@ test('zero excludes chat history entirely', () => {
   const result = selectRecentContext([{ role: 'user', content: 'hello' }], 0)
   assert.deepEqual(result.messages, [])
   assert.equal(result.omittedCount, 1)
+})
+
+test('reference context retains the configured number of recent assistant messages', () => {
+  const source = Array.from({ length: 6 }, (_, index) => [
+    { role: 'assistant' as const, content: index === 1 ? 'Aiko appears here.' : `Assistant ${index}` },
+    { role: 'user' as const, content: `User ${index}` },
+  ]).flat()
+
+  const result = selectRecentReferenceContext(source, 5)
+
+  assert.ok(result.messages.some((message) => message.content.includes('Aiko')))
+  assert.equal(result.messages.filter((message) => message.role === 'assistant').length, 5)
 })
 
 test('extracts compact proper-name and specialized-term references from conversation context', () => {

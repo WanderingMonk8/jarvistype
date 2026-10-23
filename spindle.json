@@ -6,7 +6,7 @@
   "github": "https://github.com/WanderingMonk8/jarvistype",
   "homepage": "https://github.com/WanderingMonk8/jarvistype",
   "description": "Private, review-first voice composition for Lumiverse.",
-  "permissions": ["media", "chats", "chat_mutation", "generation", "ui_panels"],
+  "permissions": ["media", "chats", "chat_mutation", "generation", "ui_panels", "characters"],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js"
 }

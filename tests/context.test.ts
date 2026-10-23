@@ -4,8 +4,10 @@ import test from 'node:test'
 import {
   clampContextMessageCount,
   correctFromConversationReferences,
+  extractCardCharacterReferences,
   extractConversationReferences,
   selectRecentContext,
+  selectRecentReferenceContext,
 } from '../src/domain/context'
 
 test('defaults and bounds the user-configurable context count', () => {
@@ -41,6 +43,18 @@ test('zero excludes chat history entirely', () => {
   assert.equal(result.omittedCount, 1)
 })
 
+test('reference context retains the configured number of recent assistant messages', () => {
+  const source = Array.from({ length: 6 }, (_, index) => [
+    { role: 'assistant' as const, content: index === 1 ? 'Aiko appears here.' : `Assistant ${index}` },
+    { role: 'user' as const, content: `User ${index}` },
+  ]).flat()
+
+  const result = selectRecentReferenceContext(source, 5)
+
+  assert.ok(result.messages.some((message) => message.content.includes('Aiko')))
+  assert.equal(result.messages.filter((message) => message.role === 'assistant').length, 5)
+})
+
 test('extracts compact proper-name and specialized-term references from conversation context', () => {
   assert.deepEqual(
     extractConversationReferences([
@@ -62,6 +76,53 @@ test('extracts compact proper-name and specialized-term references from conversa
     extractConversationReferences([{ role: 'user', content: 'Ordinary sentence.' }], 0),
     [],
   )
+})
+
+test('extracts the canonical name from a descriptive card title', () => {
+  assert.deepEqual(
+    extractConversationReferences([
+      { role: 'assistant', content: 'Aiko the tired worker' },
+    ]),
+    ['Aiko'],
+  )
+})
+
+test('extracts both first and full character names from the card', () => {
+  const references = extractCardCharacterReferences(
+    'Aiko - The Tired Worker',
+    'Aiko Tanaka has worked the late shift for three years.',
+  )
+  assert.ok(references.includes('Aiko'))
+  assert.ok(references.includes('Aiko Tanaka'))
+})
+
+test('extracts every named character from an ensemble card', () => {
+  const references = extractCardCharacterReferences(
+    'Night Shift Roommates',
+    'Aiko Tanaka works beside Hana Sato. Later, Marcus joins Aiko and Hana for dinner.',
+  )
+  for (const expected of ['Aiko Tanaka', 'Aiko', 'Hana Sato', 'Hana', 'Marcus']) {
+    assert.ok(references.includes(expected), `missing ${expected}`)
+  }
+})
+
+test('falls back to title names when the card body never mentions them', () => {
+  const references = extractCardCharacterReferences(
+    'Carrie Fishborn',
+    'A tired worker closes the pharmacy after the morning shift.',
+  )
+  for (const expected of ['Carrie Fishborn', 'Carrie', 'Fishborn']) {
+    assert.ok(references.includes(expected), `missing ${expected}`)
+  }
+})
+
+test('keeps only title references corroborated by the card body when available', () => {
+  const references = extractCardCharacterReferences(
+    'Aiko - The Tired Worker',
+    'Aiko Tanaka works the late shift.',
+  )
+  assert.ok(references.includes('Aiko'))
+  assert.equal(references.includes('Tired Worker'), false)
 })
 
 test('when the reference cap is reached, earlier input (the newest messages) keeps its terms', () => {
@@ -111,6 +172,13 @@ test('corrects a unique two-character name ending only after a stable prefix', (
   )
 })
 
+test('corrects a two-character length difference after a stable name prefix', () => {
+  assert.deepEqual(correctFromConversationReferences('Carrie Fishbourne', ['Fishborn']), {
+    text: 'Carrie Fishborn',
+    correctedTerms: [{ heard: 'Fishbourne', canonical: 'Fishborn' }],
+  })
+})
+
 test('corrects a unique short phonetic name and preserves its possessive apostrophe', () => {
   assert.deepEqual(
     correctFromConversationReferences("Cat's coat matched Cat’s boots.", ['Kat’s']),
@@ -124,6 +192,13 @@ test('corrects a unique short phonetic name and preserves its possessive apostro
   )
   assert.equal(correctFromConversationReferences("cat's coat", ['Kat']).text, "cat's coat")
   assert.equal(correctFromConversationReferences("Cat's coat", ['Kat', 'Qat']).text, "Cat's coat")
+})
+
+test('corrects a short phonetically equivalent card name', () => {
+  assert.deepEqual(correctFromConversationReferences('ICO', ['Aiko']), {
+    text: 'Aiko',
+    correctedTerms: [{ heard: 'ICO', canonical: 'Aiko' }],
+  })
 })
 
 test('leaves ambiguous, lowercase, and protected wording unchanged', () => {

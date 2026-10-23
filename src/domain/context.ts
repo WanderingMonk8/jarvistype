@@ -80,6 +80,47 @@ export function selectRecentContext(
   }
 }
 
+export function selectRecentReferenceContext(
+  source: readonly ContextSourceMessage[],
+  requestedCount: number,
+  characterLimit = MAX_CONTEXT_CHARACTERS,
+): ContextSelection {
+  const count = clampContextMessageCount(requestedCount)
+  if (count === 0 || characterLimit <= 0) return selectRecentContext(source, 0, characterLimit)
+
+  const eligible = source.filter(isEligible)
+  const selectedCandidates = new Set([
+    ...eligible.slice(-count),
+    ...eligible.filter((message) => message.role === 'assistant').slice(-count),
+  ])
+  const newest = eligible.filter((message) => selectedCandidates.has(message)).reverse()
+  const selectedNewestFirst: ContextMessage[] = []
+  let remaining = Math.max(0, Math.trunc(characterLimit))
+  let truncated = false
+
+  for (const message of newest) {
+    if (remaining === 0) break
+    const content = message.content.trim()
+    if (content.length <= remaining) {
+      selectedNewestFirst.push({ role: message.role, content })
+      remaining -= content.length
+      continue
+    }
+    selectedNewestFirst.push({ role: message.role, content: content.slice(-remaining) })
+    remaining = 0
+    truncated = true
+  }
+
+  const messages = selectedNewestFirst.reverse()
+  return {
+    messages,
+    selectedCount: messages.length,
+    omittedCount: eligible.length - messages.length,
+    characterCount: messages.reduce((total, message) => total + message.content.length, 0),
+    truncated,
+  }
+}
+
 export function extractConversationReferences(
   messages: readonly ContextMessage[],
   characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS,
@@ -118,6 +159,29 @@ export function extractConversationReferences(
   }
 
   return references
+}
+
+export function extractCardCharacterReferences(title: string, cardText: string): string[] {
+  const normalizedTitle = title.trim()
+  const titleReferences = normalizedTitle
+    ? extractConversationReferences([{ role: 'assistant', content: normalizedTitle }])
+    : []
+  const cardReferences = cardText.trim()
+    ? extractConversationReferences([{ role: 'assistant', content: cardText }])
+    : []
+  const cardKeys = new Set(cardReferences.map((reference) => reference.toLocaleLowerCase()))
+  const confirmedTitleReferences = titleReferences.filter((reference) =>
+    cardKeys.has(reference.toLocaleLowerCase()),
+  )
+  const selectedTitleReferences = confirmedTitleReferences.length
+    ? confirmedTitleReferences
+    : titleReferences
+  const references = new Map<string, string>()
+  for (const reference of [...selectedTitleReferences, ...cardReferences]) {
+    const key = reference.toLocaleLowerCase()
+    if (!references.has(key)) references.set(key, reference)
+  }
+  return [...references.values()]
 }
 
 export function correctFromConversationReferences(
@@ -233,7 +297,14 @@ function isReferenceTerm(term: string): boolean {
 }
 
 function isHighConfidenceReferenceMatch(heard: string, reference: string): boolean {
-  if (Math.abs(heard.length - reference.length) > 1) return false
+  const maximumLengthDifference = Math.min(heard.length, reference.length) >= 6 ? 2 : 1
+  if (Math.abs(heard.length - reference.length) > maximumLengthDifference) return false
+  if (
+    Math.max(heard.length, reference.length) <= 5 &&
+    referenceSoundKey(heard).length >= 3 &&
+    referenceSoundKey(heard) === referenceSoundKey(reference)
+  )
+    return true
   if (heard.charAt(0) !== reference.charAt(0)) {
     return (
       heard.length === 3 &&
@@ -248,6 +319,33 @@ function isHighConfidenceReferenceMatch(heard: string, reference: string): boole
     heard.slice(0, 4) === reference.slice(0, 4) &&
     editDistanceAtMost(heard, reference, 2)
   )
+}
+
+function referenceSoundKey(value: string): string {
+  const prepared = value
+    .normalize('NFKD')
+    .toLocaleLowerCase()
+    .replace(/\p{M}/gu, '')
+  let key = ''
+  for (const character of prepared) {
+    const sound = /[aeiouy]/u.test(character)
+      ? 'A'
+      : /[cgjkq]/u.test(character)
+        ? 'K'
+        : /[bp]/u.test(character)
+          ? 'B'
+          : /[fv]/u.test(character)
+            ? 'F'
+            : /[dt]/u.test(character)
+              ? 'T'
+              : /[sxz]/u.test(character)
+                ? 'S'
+                : /[lmnr]/u.test(character)
+                  ? character.toLocaleUpperCase()
+                  : ''
+    if (sound && sound !== key.at(-1)) key += sound
+  }
+  return key
 }
 
 function hardInitialsMatch(left: string, right: string): boolean {

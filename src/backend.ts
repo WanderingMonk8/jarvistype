@@ -37,8 +37,9 @@ import {
   DEFAULT_CONTEXT_MESSAGE_COUNT,
   clampContextMessageCount,
   correctFromConversationReferences,
+  extractCardCharacterReferences,
   extractConversationReferences,
-  selectRecentContext,
+  selectRecentReferenceContext,
 } from './domain/context'
 import {
   createGlossaryState,
@@ -106,6 +107,7 @@ const editCandidateContexts = new Map<
 const glossaryCache = new Map<string, GlossaryState>()
 const settingsCache = new Map<string, PhaseFourSettings>()
 const conversationReferenceCache = new Map<string, { signature: string; references: string[] }>()
+const cardCharacterReferenceCache = new Map<string, string[]>()
 const MAX_COMPLETED_SENDS = 100
 const MAX_CONVERSATION_REFERENCE_CACHES = 100
 const MAX_GLOSSARY_PROMPT_CHARACTERS = 8_000
@@ -274,21 +276,21 @@ async function handleTranscriptNormalization(
     }
     const normalizedAgainstNewerDraft = session.draftVersion !== request.expectedVersion
 
-    const [settings, glossary, messages] = await Promise.all([
+    const [settings, glossary, messages, cardCharacterReferences] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
       spindle.chat.getMessages(request.chatId),
+      loadCardCharacterReferences(request.chatId, context.userId),
     ])
     recordDebug(
       context.userId,
       'normalize.context',
       `messages=${messages.length} contextCount=${settings.contextMessageCount} duration=${debugDuration(normalizeStartedAt)}`,
     )
-    const referenceContext = selectRecentContext(messages, settings.contextMessageCount)
-    const conversationReferences = cachedConversationReferences(
-      context.userId,
-      request.chatId,
-      referenceContext.messages,
+    const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount)
+    const conversationReferences = mergeConversationReferences(
+      cardCharacterReferences,
+      cachedConversationReferences(context.userId, request.chatId, referenceContext.messages),
     )
     const capitalizeOpening = shouldCapitalizeRecordingOpening(session.cleanText)
     const recoveredBoundary = applyQuotationBoundaryHint(
@@ -319,6 +321,7 @@ async function handleTranscriptNormalization(
       settings,
       glossary,
       referenceContext,
+      cardCharacterReferences,
       conversationReferences,
       capitalizeOpening,
       recoveredBoundary,
@@ -346,6 +349,7 @@ async function handleTranscriptNormalization(
     settings,
     glossary,
     referenceContext,
+    cardCharacterReferences,
     conversationReferences,
     capitalizeOpening,
     recoveredBoundary,
@@ -411,13 +415,27 @@ async function handleTranscriptNormalization(
       }
     }
 
+    const protectedReferences = [
+      ...glossary.entries.map((entry) => entry.canonical),
+      ...deterministic.learningCandidates.map((candidate) => candidate.canonical),
+    ]
+    const cardReferenceCorrection = correctFromConversationReferences(
+      candidateText,
+      cardCharacterReferences,
+      protectedReferences,
+    )
+    if (cardReferenceCorrection.text !== candidateText) {
+      candidateText = cardReferenceCorrection.text
+      reasons.push(
+        ...cardReferenceCorrection.correctedTerms.map(
+          ({ heard, canonical }) => `character card spelling: ${heard} → ${canonical}`,
+        ),
+      )
+    }
     const referenceCorrection = correctFromConversationReferences(
       candidateText,
       conversationReferences,
-      [
-        ...glossary.entries.map((entry) => entry.canonical),
-        ...deterministic.learningCandidates.map((candidate) => candidate.canonical),
-      ],
+      protectedReferences,
     )
     if (referenceCorrection.text !== candidateText) {
       candidateText = referenceCorrection.text
@@ -735,20 +753,24 @@ async function handleEditInterpretation(
       return { error: 'stale' as const, session }
     if (!session.cleanText.trim()) return { error: 'empty' as const, session }
 
-    const [settings, glossary, messages] = await Promise.all([
+    const [settings, glossary, messages, cardCharacterReferences] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
       spindle.chat.getMessages(request.chatId),
+      loadCardCharacterReferences(request.chatId, context.userId),
     ])
     recordDebug(
       context.userId,
       'edit.loaded',
       `messages=${messages.length} references=${settings.contextualNormalizationEnabled ? 'on' : 'off'} duration=${debugDuration(editStartedAt)}`,
     )
-    const referenceContext = selectRecentContext(messages, settings.contextMessageCount)
-    const conversationReferences = settings.contextualNormalizationEnabled
-      ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages)
-      : []
+    const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount)
+    const conversationReferences = mergeConversationReferences(
+      cardCharacterReferences,
+      settings.contextualNormalizationEnabled
+        ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages)
+        : [],
+    )
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries)
     const interpretStartedAt = performance.now()
     recordDebug(context.userId, 'edit.interpret', 'start')
@@ -775,6 +797,7 @@ async function handleEditInterpretation(
         ),
       ),
       glossary,
+      cardCharacterReferences,
       conversationReferences,
       spelling.learningCandidates.map((candidate) => candidate.canonical),
     )
@@ -3218,6 +3241,7 @@ function stripQualifiedAsInEditPayloads(plan: EditPlan): EditPlan {
 function normalizeEditInputPayloads(
   plan: EditPlan,
   glossary: GlossaryState,
+  cardCharacterReferences: string[],
   conversationReferences: string[],
   protectedTerms: string[],
 ): EditPlan {
@@ -3228,10 +3252,20 @@ function normalizeEditInputPayloads(
       const deterministic = normalizeDeterministically(operation.text, glossary.entries, {
         capitalizeOpening: false,
       }).text
-      const normalized = correctFromConversationReferences(deterministic, conversationReferences, [
+      const protectedReferences = [
         ...glossary.entries.map((entry) => entry.canonical),
         ...protectedTerms,
-      ]).text
+      ]
+      const cardNormalized = correctFromConversationReferences(
+        deterministic,
+        cardCharacterReferences,
+        protectedReferences,
+      ).text
+      const normalized = correctFromConversationReferences(
+        cardNormalized,
+        conversationReferences,
+        protectedReferences,
+      ).text
       return normalized === operation.text ? operation : { ...operation, text: normalized }
     }),
   }
@@ -3555,6 +3589,55 @@ function parseContextualCommandDecisions(
 
 function containsCaseInsensitive(haystack: string, needle: string): boolean {
   return haystack.toLocaleLowerCase().includes(needle.toLocaleLowerCase())
+}
+
+async function loadCardCharacterReferences(chatId: string, userId: string): Promise<string[]> {
+  const cacheKey = `${userId}\u0000${chatId}`
+  const cached = cardCharacterReferenceCache.get(cacheKey)
+  if (cached) return cached
+  if (!spindle.permissions.has('characters')) return []
+  try {
+    const chat = await spindle.chats.get(chatId, userId)
+    if (!chat?.character_id) return []
+    const character = await spindle.characters.get(chat.character_id, userId)
+    if (!character) return []
+    const cardText = [
+      character.description,
+      character.personality,
+      character.scenario,
+      character.first_mes,
+      character.mes_example,
+      character.creator_notes,
+      character.system_prompt,
+      character.post_history_instructions,
+      ...(character.alternate_greetings ?? []),
+    ]
+      .filter(Boolean)
+      .join('\n')
+    const references = extractCardCharacterReferences(character.name, cardText)
+    cardCharacterReferenceCache.set(cacheKey, references)
+    while (cardCharacterReferenceCache.size > MAX_CONVERSATION_REFERENCE_CACHES) {
+      const oldest = cardCharacterReferenceCache.keys().next().value
+      if (typeof oldest !== 'string') break
+      cardCharacterReferenceCache.delete(oldest)
+    }
+    return references
+  } catch {
+    return []
+  }
+}
+
+function mergeConversationReferences(
+  cardReferences: readonly string[],
+  recentReferences: readonly string[],
+): string[] {
+  const prioritized = new Map<string, string>()
+  for (const reference of [...cardReferences, ...recentReferences]) {
+    const normalized = reference.trim()
+    const key = normalized.toLocaleLowerCase()
+    if (normalized && !prioritized.has(key)) prioritized.set(key, normalized)
+  }
+  return [...prioritized.values()]
 }
 
 function cachedConversationReferences(
@@ -3923,7 +4006,7 @@ async function handleDraftLoad(
   activeRequest: ActiveRequest,
 ): Promise<void> {
   const session = await withDraftLock(context.userId, request.chatId, () =>
-    loadDraft(context.userId, request.chatId),
+    loadDraft(context.userId, request.chatId, true),
   )
   if (activeRequest.cancelled) return
   send(
@@ -4208,10 +4291,14 @@ function sendDraftError(
   )
 }
 
-async function loadDraft(userId: string, chatId: string): Promise<PersistedDraftSession> {
+async function loadDraft(
+  userId: string,
+  chatId: string,
+  refreshFromStorage = false,
+): Promise<PersistedDraftSession> {
   const key = draftKey(userId, chatId)
   const cached = draftCache.get(key)
-  if (cached) {
+  if (cached && !refreshFromStorage) {
     recordDebug(userId, 'draft.load', `cache chat=${chatId}`)
     return cached
   }
@@ -4221,9 +4308,16 @@ async function loadDraft(userId: string, chatId: string): Promise<PersistedDraft
     fallback: null,
     userId,
   })
-  const session = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId)
+  const storedSession = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId)
+  // A just-persisted local session can briefly be newer than a cross-device
+  // storage read. Versions are monotonic, so never regress in that case.
+  const session = cached && cached.draftVersion > storedSession.draftVersion ? cached : storedSession
   draftCache.set(key, session)
-  recordDebug(userId, 'draft.load', `host chat=${chatId} duration=${debugDuration(startedAt)}`)
+  recordDebug(
+    userId,
+    'draft.load',
+    `host chat=${chatId} version=${session.draftVersion} duration=${debugDuration(startedAt)}`,
+  )
   return session
 }
 

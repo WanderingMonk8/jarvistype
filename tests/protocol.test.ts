@@ -63,7 +63,7 @@ test('accepts valid health responses and rejects malformed permission snapshots'
     frontendVersion: '1.2.5',
     serverTimestamp: '2026-10-13T08:00:00.000Z',
     permissions: {
-      declared: ['media', 'chats', 'chat_mutation', 'generation'],
+      declared: ['media', 'chats', 'chat_mutation', 'generation', 'characters'],
       granted: ['media'],
     },
   }
@@ -72,7 +72,7 @@ test('accepts valid health responses and rejects malformed permission snapshots'
     isBackendResponse({
       ...response,
       permissions: {
-        declared: ['media', 'chats', 'chat_mutation', 'generation'],
+        declared: ['media', 'chats', 'chat_mutation', 'generation', 'characters'],
         granted: ['credentials'],
       },
     }),
@@ -111,7 +111,7 @@ test('accepts bounded diagnostic references on errors', () => {
 
 test('permission snapshots expose only unique declared Phase 4 permissions', () => {
   assert.deepEqual(sanitizeGrantedPermissions(['generation', 'media', 'media', 'chat_mutation']), {
-    declared: ['media', 'chats', 'chat_mutation', 'generation'],
+    declared: ['media', 'chats', 'chat_mutation', 'generation', 'characters'],
     granted: ['media', 'chat_mutation', 'generation'],
   })
 })

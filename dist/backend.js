@@ -1899,6 +1899,39 @@ function selectRecentContext(source, requestedCount, characterLimit = MAX_CONTEX
     truncated
   };
 }
+function selectRecentReferenceContext(source, requestedCount, characterLimit = MAX_CONTEXT_CHARACTERS) {
+  const count = clampContextMessageCount(requestedCount);
+  if (count === 0 || characterLimit <= 0) return selectRecentContext(source, 0, characterLimit);
+  const eligible = source.filter(isEligible);
+  const selectedCandidates = /* @__PURE__ */ new Set([
+    ...eligible.slice(-count),
+    ...eligible.filter((message) => message.role === "assistant").slice(-count)
+  ]);
+  const newest = eligible.filter((message) => selectedCandidates.has(message)).reverse();
+  const selectedNewestFirst = [];
+  let remaining = Math.max(0, Math.trunc(characterLimit));
+  let truncated = false;
+  for (const message of newest) {
+    if (remaining === 0) break;
+    const content = message.content.trim();
+    if (content.length <= remaining) {
+      selectedNewestFirst.push({ role: message.role, content });
+      remaining -= content.length;
+      continue;
+    }
+    selectedNewestFirst.push({ role: message.role, content: content.slice(-remaining) });
+    remaining = 0;
+    truncated = true;
+  }
+  const messages = selectedNewestFirst.reverse();
+  return {
+    messages,
+    selectedCount: messages.length,
+    omittedCount: eligible.length - messages.length,
+    characterCount: messages.reduce((total, message) => total + message.content.length, 0),
+    truncated
+  };
+}
 function extractConversationReferences(messages, characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS) {
   if (characterLimit <= 0) return [];
   const references = [];
@@ -1930,6 +1963,22 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
     flushSequence();
   }
   return references;
+}
+function extractCardCharacterReferences(title, cardText) {
+  const normalizedTitle = title.trim();
+  const titleReferences = normalizedTitle ? extractConversationReferences([{ role: "assistant", content: normalizedTitle }]) : [];
+  const cardReferences = cardText.trim() ? extractConversationReferences([{ role: "assistant", content: cardText }]) : [];
+  const cardKeys = new Set(cardReferences.map((reference) => reference.toLocaleLowerCase()));
+  const confirmedTitleReferences = titleReferences.filter(
+    (reference) => cardKeys.has(reference.toLocaleLowerCase())
+  );
+  const selectedTitleReferences = confirmedTitleReferences.length ? confirmedTitleReferences : titleReferences;
+  const references = /* @__PURE__ */ new Map();
+  for (const reference of [...selectedTitleReferences, ...cardReferences]) {
+    const key = reference.toLocaleLowerCase();
+    if (!references.has(key)) references.set(key, reference);
+  }
+  return [...references.values()];
 }
 function correctFromConversationReferences(text, references, protectedTerms = []) {
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()));
@@ -2012,12 +2061,24 @@ function isReferenceTerm(term) {
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1));
 }
 function isHighConfidenceReferenceMatch(heard, reference) {
-  if (Math.abs(heard.length - reference.length) > 1) return false;
+  const maximumLengthDifference = Math.min(heard.length, reference.length) >= 6 ? 2 : 1;
+  if (Math.abs(heard.length - reference.length) > maximumLengthDifference) return false;
+  if (Math.max(heard.length, reference.length) <= 5 && referenceSoundKey(heard).length >= 3 && referenceSoundKey(heard) === referenceSoundKey(reference))
+    return true;
   if (heard.charAt(0) !== reference.charAt(0)) {
     return heard.length === 3 && reference.length === 3 && heard.slice(1) === reference.slice(1) && hardInitialsMatch(heard.charAt(0), reference.charAt(0));
   }
   if (editDistanceAtMost(heard, reference, 1)) return true;
   return Math.min(heard.length, reference.length) >= 6 && heard.slice(0, 4) === reference.slice(0, 4) && editDistanceAtMost(heard, reference, 2);
+}
+function referenceSoundKey(value) {
+  const prepared = value.normalize("NFKD").toLocaleLowerCase().replace(/\p{M}/gu, "");
+  let key = "";
+  for (const character of prepared) {
+    const sound = /[aeiouy]/u.test(character) ? "A" : /[cgjkq]/u.test(character) ? "K" : /[bp]/u.test(character) ? "B" : /[fv]/u.test(character) ? "F" : /[dt]/u.test(character) ? "T" : /[sxz]/u.test(character) ? "S" : /[lmnr]/u.test(character) ? character.toLocaleUpperCase() : "";
+    if (sound && sound !== key.at(-1)) key += sound;
+  }
+  return key;
 }
 function hardInitialsMatch(left, right) {
   const hardInitials = /* @__PURE__ */ new Set(["c", "k", "q"]);
@@ -2943,7 +3004,13 @@ function escapeRegExp(value) {
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
 var APP_VERSION = "1.6.7";
-var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
+var PHASE_FOUR_PERMISSIONS = [
+  "media",
+  "chats",
+  "chat_mutation",
+  "generation",
+  "characters"
+];
 
 // src/protocol/validation.ts
 function isFrontendRequest(value) {
@@ -3020,6 +3087,7 @@ var editCandidateContexts = /* @__PURE__ */ new Map();
 var glossaryCache = /* @__PURE__ */ new Map();
 var settingsCache = /* @__PURE__ */ new Map();
 var conversationReferenceCache = /* @__PURE__ */ new Map();
+var cardCharacterReferenceCache = /* @__PURE__ */ new Map();
 var MAX_COMPLETED_SENDS = 100;
 var MAX_CONVERSATION_REFERENCE_CACHES = 100;
 var MAX_GLOSSARY_PROMPT_CHARACTERS = 8e3;
@@ -3178,21 +3246,21 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       return { kind: "error", error: "permission", session: session2 };
     }
     const normalizedAgainstNewerDraft = session2.draftVersion !== request.expectedVersion;
-    const [settings2, glossary2, messages] = await Promise.all([
+    const [settings2, glossary2, messages, cardCharacterReferences2] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
-      spindle.chat.getMessages(request.chatId)
+      spindle.chat.getMessages(request.chatId),
+      loadCardCharacterReferences(request.chatId, context.userId)
     ]);
     recordDebug(
       context.userId,
       "normalize.context",
       `messages=${messages.length} contextCount=${settings2.contextMessageCount} duration=${debugDuration(normalizeStartedAt)}`
     );
-    const referenceContext2 = selectRecentContext(messages, settings2.contextMessageCount);
-    const conversationReferences2 = cachedConversationReferences(
-      context.userId,
-      request.chatId,
-      referenceContext2.messages
+    const referenceContext2 = selectRecentReferenceContext(messages, settings2.contextMessageCount);
+    const conversationReferences2 = mergeConversationReferences(
+      cardCharacterReferences2,
+      cachedConversationReferences(context.userId, request.chatId, referenceContext2.messages)
     );
     const capitalizeOpening2 = shouldCapitalizeRecordingOpening(session2.cleanText);
     const recoveredBoundary2 = applyQuotationBoundaryHint(
@@ -3223,6 +3291,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       settings: settings2,
       glossary: glossary2,
       referenceContext: referenceContext2,
+      cardCharacterReferences: cardCharacterReferences2,
       conversationReferences: conversationReferences2,
       capitalizeOpening: capitalizeOpening2,
       recoveredBoundary: recoveredBoundary2,
@@ -3250,6 +3319,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     settings,
     glossary,
     referenceContext,
+    cardCharacterReferences,
     conversationReferences,
     capitalizeOpening,
     recoveredBoundary,
@@ -3305,13 +3375,27 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
         reasons.push("bounded conversational context");
       }
     }
+    const protectedReferences = [
+      ...glossary.entries.map((entry) => entry.canonical),
+      ...deterministic.learningCandidates.map((candidate) => candidate.canonical)
+    ];
+    const cardReferenceCorrection = correctFromConversationReferences(
+      candidateText,
+      cardCharacterReferences,
+      protectedReferences
+    );
+    if (cardReferenceCorrection.text !== candidateText) {
+      candidateText = cardReferenceCorrection.text;
+      reasons.push(
+        ...cardReferenceCorrection.correctedTerms.map(
+          ({ heard, canonical }) => `character card spelling: ${heard} \u2192 ${canonical}`
+        )
+      );
+    }
     const referenceCorrection = correctFromConversationReferences(
       candidateText,
       conversationReferences,
-      [
-        ...glossary.entries.map((entry) => entry.canonical),
-        ...deterministic.learningCandidates.map((candidate) => candidate.canonical)
-      ]
+      protectedReferences
     );
     if (referenceCorrection.text !== candidateText) {
       candidateText = referenceCorrection.text;
@@ -3562,18 +3646,22 @@ async function handleEditInterpretation(request, context, activeRequest) {
     if (session.draftVersion !== request.expectedVersion)
       return { error: "stale", session };
     if (!session.cleanText.trim()) return { error: "empty", session };
-    const [settings, glossary, messages] = await Promise.all([
+    const [settings, glossary, messages, cardCharacterReferences] = await Promise.all([
       loadSettings(context.userId),
       loadGlossary(context.userId),
-      spindle.chat.getMessages(request.chatId)
+      spindle.chat.getMessages(request.chatId),
+      loadCardCharacterReferences(request.chatId, context.userId)
     ]);
     recordDebug(
       context.userId,
       "edit.loaded",
       `messages=${messages.length} references=${settings.contextualNormalizationEnabled ? "on" : "off"} duration=${debugDuration(editStartedAt)}`
     );
-    const referenceContext = selectRecentContext(messages, settings.contextMessageCount);
-    const conversationReferences = settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : [];
+    const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount);
+    const conversationReferences = mergeConversationReferences(
+      cardCharacterReferences,
+      settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : []
+    );
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries);
     const interpretStartedAt = performance.now();
     recordDebug(context.userId, "edit.interpret", "start");
@@ -3600,6 +3688,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
         )
       ),
       glossary,
+      cardCharacterReferences,
       conversationReferences,
       spelling.learningCandidates.map((candidate) => candidate.canonical)
     );
@@ -5503,7 +5592,7 @@ function stripQualifiedAsInEditPayloads(plan) {
     })
   };
 }
-function normalizeEditInputPayloads(plan, glossary, conversationReferences, protectedTerms) {
+function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, conversationReferences, protectedTerms) {
   return {
     ...plan,
     operations: plan.operations.map((operation) => {
@@ -5511,10 +5600,20 @@ function normalizeEditInputPayloads(plan, glossary, conversationReferences, prot
       const deterministic = normalizeDeterministically(operation.text, glossary.entries, {
         capitalizeOpening: false
       }).text;
-      const normalized = correctFromConversationReferences(deterministic, conversationReferences, [
+      const protectedReferences = [
         ...glossary.entries.map((entry) => entry.canonical),
         ...protectedTerms
-      ]).text;
+      ];
+      const cardNormalized = correctFromConversationReferences(
+        deterministic,
+        cardCharacterReferences,
+        protectedReferences
+      ).text;
+      const normalized = correctFromConversationReferences(
+        cardNormalized,
+        conversationReferences,
+        protectedReferences
+      ).text;
       return normalized === operation.text ? operation : { ...operation, text: normalized };
     })
   };
@@ -5753,6 +5852,48 @@ function parseContextualCommandDecisions(value, rawTranscript) {
 }
 function containsCaseInsensitive(haystack, needle) {
   return haystack.toLocaleLowerCase().includes(needle.toLocaleLowerCase());
+}
+async function loadCardCharacterReferences(chatId, userId) {
+  const cacheKey = `${userId}\0${chatId}`;
+  const cached = cardCharacterReferenceCache.get(cacheKey);
+  if (cached) return cached;
+  if (!spindle.permissions.has("characters")) return [];
+  try {
+    const chat = await spindle.chats.get(chatId, userId);
+    if (!chat?.character_id) return [];
+    const character = await spindle.characters.get(chat.character_id, userId);
+    if (!character) return [];
+    const cardText = [
+      character.description,
+      character.personality,
+      character.scenario,
+      character.first_mes,
+      character.mes_example,
+      character.creator_notes,
+      character.system_prompt,
+      character.post_history_instructions,
+      ...character.alternate_greetings ?? []
+    ].filter(Boolean).join("\n");
+    const references = extractCardCharacterReferences(character.name, cardText);
+    cardCharacterReferenceCache.set(cacheKey, references);
+    while (cardCharacterReferenceCache.size > MAX_CONVERSATION_REFERENCE_CACHES) {
+      const oldest = cardCharacterReferenceCache.keys().next().value;
+      if (typeof oldest !== "string") break;
+      cardCharacterReferenceCache.delete(oldest);
+    }
+    return references;
+  } catch {
+    return [];
+  }
+}
+function mergeConversationReferences(cardReferences, recentReferences) {
+  const prioritized = /* @__PURE__ */ new Map();
+  for (const reference of [...cardReferences, ...recentReferences]) {
+    const normalized = reference.trim();
+    const key = normalized.toLocaleLowerCase();
+    if (normalized && !prioritized.has(key)) prioritized.set(key, normalized);
+  }
+  return [...prioritized.values()];
 }
 function cachedConversationReferences(userId, chatId, messages) {
   const key = `${userId}\0${chatId}`;
@@ -6032,7 +6173,7 @@ async function handleDraftLoad(request, context, activeRequest) {
   const session = await withDraftLock(
     context.userId,
     request.chatId,
-    () => loadDraft(context.userId, request.chatId)
+    () => loadDraft(context.userId, request.chatId, true)
   );
   if (activeRequest.cancelled) return;
   send(
@@ -6263,10 +6404,10 @@ function sendDraftError(request, context, code, message, session, diagnosticId) 
     context
   );
 }
-async function loadDraft(userId, chatId) {
+async function loadDraft(userId, chatId, refreshFromStorage = false) {
   const key = draftKey(userId, chatId);
   const cached = draftCache.get(key);
-  if (cached) {
+  if (cached && !refreshFromStorage) {
     recordDebug(userId, "draft.load", `cache chat=${chatId}`);
     return cached;
   }
@@ -6275,9 +6416,14 @@ async function loadDraft(userId, chatId) {
     fallback: null,
     userId
   });
-  const session = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId);
+  const storedSession = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId);
+  const session = cached && cached.draftVersion > storedSession.draftVersion ? cached : storedSession;
   draftCache.set(key, session);
-  recordDebug(userId, "draft.load", `host chat=${chatId} duration=${debugDuration(startedAt2)}`);
+  recordDebug(
+    userId,
+    "draft.load",
+    `host chat=${chatId} version=${session.draftVersion} duration=${debugDuration(startedAt2)}`
+  );
   return session;
 }
 async function persistDraft(userId, session) {

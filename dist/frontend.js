@@ -51,7 +51,13 @@ var APP_VERSION = "1.6.7";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
-var PHASE_FOUR_PERMISSIONS = ["media", "chats", "chat_mutation", "generation"];
+var PHASE_FOUR_PERMISSIONS = [
+  "media",
+  "chats",
+  "chat_mutation",
+  "generation",
+  "characters"
+];
 function createRequestId(prefix = "request") {
   return `${prefix}-${Date.now().toString(36)}-${crypto.randomUUID()}`;
 }
@@ -382,12 +388,12 @@ function getFloatingWidgetSize() {
   if (viewport.width < NARROW_COMPOSER_BREAKPOINT_PX) {
     return {
       width: Math.max(1, Math.min(430, viewport.width - 24)),
-      height: Math.max(1, Math.min(720, viewport.height - 24))
+      height: Math.max(1, Math.min(714, viewport.height - 24))
     };
   }
   return {
     width: Math.max(1, Math.min(960, viewport.width - 48)),
-    height: Math.max(1, Math.min(600, viewport.height - 48))
+    height: Math.max(1, Math.min(624, viewport.height - 48))
   };
 }
 var JARVISTYPE_ICON_SVG = `
@@ -1053,7 +1059,16 @@ function setup(ctx) {
     state.activeChatId = nextChatId;
     const transitionId = changed ? ++chatTransitionId : chatTransitionId;
     await refreshPermissions();
-    if (!alive || !changed) return;
+    if (!alive) return;
+    if (!changed) {
+      if (!nextChatId || state.automatedBusy || state.sending || voiceBusy() || state.pendingProposal || state.pendingEditProposal || state.pendingEditCandidates)
+        return;
+      await drainMutations();
+      if (!alive || ctx.getActiveChat().chatId !== nextChatId || state.saving || state.snapshot !== null && desiredText !== state.snapshot.cleanText)
+        return;
+      await loadDraft(nextChatId);
+      return;
+    }
     await drainMutations();
     if (!alive || transitionId !== chatTransitionId || ctx.getActiveChat().chatId !== nextChatId)
       return;
@@ -1199,6 +1214,7 @@ function setup(ctx) {
       render();
       return;
     }
+    if (!trimmed && !originalLine.trim()) return;
     if (trimmed) {
       lines[lineIndex] = trimmed;
     } else {
@@ -1957,7 +1973,8 @@ function setup(ctx) {
     }
     resizeAndClampFloatingWidget();
     floatingWidget.setVisible(true);
-    void refreshHostState();
+    scheduleFloatingContentFit();
+    void refreshHostState().finally(scheduleFloatingContentFit);
     window.setTimeout(() => editor.focus(), 0);
   };
   function closeFloatingComposer() {
@@ -2117,19 +2134,54 @@ function setup(ctx) {
   };
   function resizeAndClampFloatingWidget() {
     const size = getFloatingWidgetSize();
+    setAndClampFloatingWidgetSize(size.width, size.height);
+  }
+  function setAndClampFloatingWidgetSize(width, height) {
     const viewport = getViewportSize();
-    floatingWidget.setSize(size.width, size.height);
+    floatingWidget.setSize(width, height);
     const position = floatingWidget.getPosition();
-    const marginX = viewport.width >= size.width + 24 ? 12 : 0;
-    const marginY = viewport.height >= size.height + 24 ? 12 : 0;
-    const maxX = Math.max(marginX, viewport.width - size.width - marginX);
-    const maxY = Math.max(marginY, viewport.height - size.height - marginY);
+    const marginX = viewport.width >= width + 24 ? 12 : 0;
+    const marginY = viewport.height >= height + 24 ? 12 : 0;
+    const maxX = Math.max(marginX, viewport.width - width - marginX);
+    const maxY = Math.max(marginY, viewport.height - height - marginY);
     floatingWidget.moveTo(
       Math.min(maxX, Math.max(marginX, position.x)),
       Math.min(maxY, Math.max(marginY, position.y))
     );
   }
-  const handleViewportResize = () => resizeAndClampFloatingWidget();
+  function scheduleFloatingContentFit() {
+    window.requestAnimationFrame(() => {
+      if (!floatingWidget.isVisible()) return;
+      const baseSize = getFloatingWidgetSize();
+      const viewport = getViewportSize();
+      const floatingShell = floatingWidget.root.querySelector(".jt-floating");
+      const floatingTools = floatingWidget.root.querySelector(".jt-floating__tools");
+      if (!floatingShell || !floatingTools) return;
+      const shellStyle2 = window.getComputedStyle(floatingShell);
+      const bottomInset = Number.parseFloat(shellStyle2.paddingBottom) + Number.parseFloat(shellStyle2.borderBottomWidth);
+      const contentBottom = floatingTools.getBoundingClientRect().bottom - floatingWidget.root.getBoundingClientRect().top;
+      const fittedHeight = Math.min(
+        Math.max(1, viewport.height - 24),
+        Math.ceil(contentBottom + bottomInset)
+      );
+      setAndClampFloatingWidgetSize(baseSize.width, fittedHeight);
+      window.requestAnimationFrame(() => {
+        if (!floatingWidget.isVisible()) return;
+        const overflow = Math.ceil(
+          floatingWidget.root.scrollHeight - floatingWidget.root.clientHeight
+        );
+        if (overflow <= 1) return;
+        setAndClampFloatingWidgetSize(
+          baseSize.width,
+          Math.min(Math.max(1, viewport.height - 24), fittedHeight + overflow + 2)
+        );
+      });
+    });
+  }
+  const handleViewportResize = () => {
+    resizeAndClampFloatingWidget();
+    scheduleFloatingContentFit();
+  };
   document.addEventListener("visibilitychange", handleVisibility);
   window.addEventListener("pagehide", handlePageHide);
   window.addEventListener("focus", handleFocus);
@@ -2307,7 +2359,7 @@ function renderGlossary(container, entries, query = "") {
     container.append(row);
   }
 }
-function attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit) {
+function attachParagraphEditing(row, text, lineIndex, line, editLabel, onEdit) {
   let pressTimer = null;
   let longPressed = false;
   const cancelPress = () => {
@@ -2321,7 +2373,7 @@ function attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit) {
     input.className = "jt-paragraph-input";
     input.value = line;
     input.rows = Math.min(6, Math.max(2, Math.ceil(line.length / 60)));
-    input.setAttribute("aria-label", `Edit paragraph ${ordinal}`);
+    input.setAttribute("aria-label", editLabel);
     let settled = false;
     const finish = (commit) => {
       if (settled) return;
@@ -2351,6 +2403,8 @@ function attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit) {
   });
   row.addEventListener("pointerdown", (event) => {
     if (event.pointerType === "mouse") return;
+    event.stopPropagation();
+    if (event.target instanceof HTMLTextAreaElement) return;
     longPressed = false;
     cancelPress();
     pressTimer = setTimeout(() => {
@@ -2361,18 +2415,32 @@ function attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit) {
   for (const type of ["pointerup", "pointercancel", "pointerleave"])
     row.addEventListener(type, cancelPress);
   row.addEventListener("contextmenu", (event) => {
-    if (!longPressed) return;
+    if (event.target instanceof HTMLTextAreaElement) {
+      event.stopPropagation();
+      return;
+    }
+    if (event.pointerType === "mouse" && !longPressed) return;
     event.preventDefault();
+    event.stopPropagation();
+    if (!longPressed) beginEdit();
     longPressed = false;
   });
 }
 function renderParagraphs(container, cleanText, onEdit) {
   container.replaceChildren();
   if (cleanText.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "jt-empty";
-    empty.textContent = "Empty draft. Record a message to start.";
-    container.append(empty);
+    const row = document.createElement("div");
+    row.className = "jt-paragraph-row jt-paragraph-row--separator";
+    row.setAttribute("aria-label", "Empty draft paragraph");
+    const number = document.createElement("span");
+    number.className = "jt-paragraph-number";
+    number.setAttribute("aria-hidden", "true");
+    const empty = document.createElement("span");
+    empty.className = "jt-empty jt-paragraph-text";
+    empty.textContent = "Empty draft. Double-click or long-press to type.";
+    row.append(number, empty);
+    if (onEdit) attachParagraphEditing(row, empty, 0, "", "Edit empty draft paragraph", onEdit);
+    container.append(row);
     return;
   }
   let ordinal = 0;
@@ -2382,6 +2450,21 @@ function renderParagraphs(container, cleanText, onEdit) {
     if (line.trim().length === 0) {
       row.classList.add("jt-paragraph-row--separator");
       row.setAttribute("aria-label", "Blank paragraph separator");
+      const number2 = document.createElement("span");
+      number2.className = "jt-paragraph-number";
+      number2.setAttribute("aria-hidden", "true");
+      const text2 = document.createElement("span");
+      text2.className = "jt-paragraph-text";
+      row.append(number2, text2);
+      if (onEdit)
+        attachParagraphEditing(
+          row,
+          text2,
+          lineIndex,
+          line,
+          `Edit blank draft line ${lineIndex + 1}`,
+          onEdit
+        );
       container.append(row);
       continue;
     }
@@ -2394,7 +2477,8 @@ function renderParagraphs(container, cleanText, onEdit) {
     text.className = "jt-paragraph-text";
     text.textContent = line;
     row.append(number, text);
-    if (onEdit) attachParagraphEditing(row, text, lineIndex, line, ordinal, onEdit);
+    if (onEdit)
+      attachParagraphEditing(row, text, lineIndex, line, `Edit paragraph ${ordinal}`, onEdit);
     container.append(row);
   }
 }
@@ -2502,26 +2586,28 @@ function floatingMarkup() {
       <div class="jt-floating__body">
         <div data-floating-composer-mount></div>
         <div class="jt-floating__tools">
-          <button type="button" data-command-toggle aria-expanded="false" aria-controls="jt-command-panel">Command list</button>
+          <div class="jt-tools-row">
+            <button type="button" data-command-toggle aria-expanded="false" aria-controls="jt-command-panel">Command list</button>
+            <details>
+              <summary>Glossary</summary>
+              <div class="jt-form-grid">
+                <label>Search glossary<input type="search" placeholder="Search spellings, variants, or hints" data-floating-glossary-search></label>
+                <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-floating-glossary-canonical></label>
+                <label>Heard-as variants<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-floating-glossary-variants></label>
+                <label>Optional hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-floating-glossary-hint></label>
+              </div>
+              <div class="jt-actions">
+                <button type="button" data-floating-glossary-save>Add entry</button>
+                <button type="button" data-floating-glossary-cancel hidden>Cancel edit</button>
+                <button type="button" data-floating-glossary-undo disabled>Undo change</button>
+              </div>
+              <div class="jt-glossary" data-floating-glossary-list></div>
+            </details>
+          </div>
           <section id="jt-command-panel" data-command-panel hidden aria-label="Available voice edit commands">
             <label class="jt-form-grid">Search commands<input type="search" placeholder="Search commands or examples" data-command-search></label>
             <div class="jt-command-list">${commands}</div>
           </section>
-          <details>
-            <summary>Glossary</summary>
-            <div class="jt-form-grid">
-              <label>Search glossary<input type="search" placeholder="Search spellings, variants, or hints" data-floating-glossary-search></label>
-              <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-floating-glossary-canonical></label>
-              <label>Heard-as variants<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-floating-glossary-variants></label>
-              <label>Optional hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-floating-glossary-hint></label>
-            </div>
-            <div class="jt-actions">
-              <button type="button" data-floating-glossary-save>Add entry</button>
-              <button type="button" data-floating-glossary-cancel hidden>Cancel edit</button>
-              <button type="button" data-floating-glossary-undo disabled>Undo change</button>
-            </div>
-            <div class="jt-glossary" data-floating-glossary-list></div>
-          </details>
         </div>
       </div>
     </aside>`;
@@ -2546,7 +2632,7 @@ function shellMarkup() {
       .jt-paragraphs:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-paragraph-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: .5rem; min-width: 0; min-height: 1.5rem; align-items: start; line-height: 1.5; }
       .jt-paragraph-row + .jt-paragraph-row { margin-top: .25rem; }
-      .jt-paragraph-row--separator { min-height: .8rem; }
+      .jt-paragraph-row--separator { min-height: 1.5rem; }
       .jt-paragraph-row { -webkit-touch-callout: none; touch-action: manipulation; cursor: text; border-radius: .35rem; }
       .jt-paragraph-row:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-paragraph-input { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; line-height: 1.5; padding: .35rem .5rem; border-radius: .4rem; resize: vertical; }
@@ -2601,9 +2687,15 @@ function shellMarkup() {
       .jt-floating__bar h2 { font-size: 1rem; }
       .jt-floating__body { min-height: 0; overflow: visible; }
       .jt-floating__body > .jt-shell__card { margin: .75rem; }
-      .jt-floating__tools { display: grid; gap: .65rem; padding: 0 .75rem .75rem; }
+      .jt-floating__tools { display: grid; gap: .65rem; margin-top: 1rem; padding: .55rem .7rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
+      .jt-tools-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; width: 100%; align-items: start; }
+      .jt-tools-row > button, .jt-tools-row > details { width: 100%; min-width: 0; min-height: 2.35rem; margin: 0; }
+      .jt-tools-row > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: start; border-color: color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; background: transparent; }
+      .jt-tools-row > button::before { content: '\u25B8 '; }
+      .jt-tools-row > button[aria-expanded="true"]::before { content: '\u25BE '; }
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
+      .jt-floating .jt-tools-row > details { padding: .48rem .75rem; }
       .jt-floating summary { cursor: pointer; font-weight: 700; }
       .jt-floating .jt-proposal pre { max-height: none; overflow: visible; }
       .jt-decision { position: sticky; bottom: 0; z-index: 5; display: grid; gap: .4rem; margin: .4rem 0; padding: .5rem .6rem; border: 1px solid #d69e2e; border-radius: .6rem; background: var(--background, #171717); box-shadow: 0 -6px 16px rgb(0 0 0 / .3); }
@@ -2622,8 +2714,7 @@ function shellMarkup() {
         .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: stretch; height: auto; overflow: visible; }
         .jt-floating .jt-composer__pane { min-height: 0; overflow: visible; padding-right: .25rem; }
         .jt-floating .jt-draft-editor { min-height: 10rem; }
-        .jt-floating__tools { grid-template-columns: minmax(10rem, auto) minmax(10rem, auto); justify-content: end; padding-top: .65rem; }
-        .jt-floating__tools > section, .jt-floating__tools > details { grid-column: 1 / -1; max-height: 24rem; overflow-y: auto; overscroll-behavior: contain; }
+        .jt-floating__tools > section, .jt-tools-row > details { max-height: 24rem; overflow-y: auto; overscroll-behavior: contain; }
       }
     </style>
     <main class="jt-shell" aria-labelledby="jt-title">
@@ -2764,7 +2855,7 @@ function shellMarkup() {
 
       <section class="jt-shell__card" aria-labelledby="jt-context-title">
         <h3 id="jt-context-title">Context and glossary</h3>
-        <p class="jt-shell__notice">The message count sets how many recent chat messages JarvisType scans for names and proper nouns, which help with spelling. After speech-to-text finishes, the normalization connection receives the current recording, the glossary, and only that list of names and proper nouns. It never receives the chat messages themselves, the working draft, or audio. Chat history cannot activate dictation commands; command detection stays local to the current recording. Lumiverse STT remains independently managed by the host and receives no added context. Set the count to 0 to exclude chat history.</p>
+        <p class="jt-shell__notice">The message count keeps that many recent assistant messages plus the ordinary recent-message window available for extracting names and proper nouns. Names and proper nouns extracted from the active character card are always included. Title names are corroborated against the card body when possible and used as a fallback when the body never names the character. After speech-to-text finishes, the normalization connection receives the current recording, the glossary, and only that list of names and proper nouns. It never receives the chat messages themselves, the working draft, the character card, or audio. Chat history cannot activate dictation commands; command detection stays local to the current recording. Lumiverse STT remains independently managed by the host and receives no added context. Set the count to 0 to exclude chat history; card-derived references remain available.</p>
         <div class="jt-form-grid">
           <label>Messages scanned for references (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>

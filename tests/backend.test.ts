@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { applyManualEdit, restoreDraftSession } from '../src/domain/draft-session'
 import { PROTOCOL_VERSION, type BackendResponse } from '../src/protocol/messages'
 
 type FrontendHandler = (payload: unknown, userId: string, frontendSessionId?: string) => void
@@ -47,9 +48,10 @@ const spindleMock = {
     getFrontend: () => Promise.resolve('1.2.5'),
   },
   permissions: {
-    getGranted: () => Promise.resolve(['media', 'chats', 'chat_mutation', 'generation']),
+    getGranted: () =>
+      Promise.resolve(['media', 'chats', 'chat_mutation', 'generation', 'characters']),
     has: (permission: string) =>
-      ['media', 'chats', 'chat_mutation', 'generation'].includes(permission),
+      ['media', 'chats', 'chat_mutation', 'generation', 'characters'].includes(permission),
   },
   userStorage: {
     getJson: <T>(path: string, options?: { fallback?: T; userId?: string }) =>
@@ -64,6 +66,15 @@ const spindleMock = {
     },
   },
   chats: {
+    get: (chatId: string) =>
+      Promise.resolve({
+        id: chatId,
+        character_id: 'character-1',
+        name: 'Test',
+        metadata: {},
+        created_at: 0,
+        updated_at: 0,
+      }),
     getActive: () =>
       Promise.resolve(
         activeChatId
@@ -77,6 +88,9 @@ const spindleMock = {
             }
           : null,
       ),
+  },
+  characters: {
+    get: () => Promise.resolve({ id: 'character-1', name: 'Aiko' }),
   },
   chat: {
     getMessages: () => Promise.resolve(chatMessages),
@@ -252,6 +266,40 @@ test('loads and persists a chat-owned draft', async () => {
     [...stored.keys()].some((key) => key.startsWith(`${userId}:draft-`)),
     true,
   )
+})
+
+test('an explicit load refreshes a draft changed through shared storage on another device', async () => {
+  const userId = 'cross-device-load-user'
+  const chatId = 'cross-device-load-chat'
+  await seedDraft(userId, chatId, 'Desktop draft')
+
+  const storageKey = `${userId}:draft-${encodeURIComponent(chatId)}.json`
+  const persisted = restoreDraftSession(stored.get(storageKey), chatId)
+  assert.ok(persisted)
+  const externalMutation = applyManualEdit(persisted, 'Mobile draft', {
+    expectedVersion: persisted.draftVersion,
+    editGroupId: 'mobile-edit-group',
+  })
+  assert.equal(externalMutation.applied, true)
+  stored.set(storageKey, structuredClone(externalMutation.session))
+
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'draft.load.request',
+      requestId: 'cross-device-refresh',
+      chatId,
+    },
+    userId,
+  )
+
+  const refreshed = responses.at(-1)?.payload
+  assert.equal(refreshed?.type, 'draft.snapshot.response')
+  if (refreshed?.type === 'draft.snapshot.response') {
+    assert.equal(refreshed.snapshot.cleanText, 'Mobile draft')
+    assert.equal(refreshed.snapshot.draftVersion, 2)
+  }
 })
 
 test('undoes and redoes a draft mutation through the backend protocol', async () => {

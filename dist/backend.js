@@ -5586,6 +5586,7 @@ async function measureProviderFloor(userId, settings) {
   recordDebug(userId, "provider.floor", "start");
   let timeout;
   let outcome = "ok";
+  const controller = new AbortController();
   try {
     const response = await Promise.race([
       spindle.generate.quiet({
@@ -5593,9 +5594,10 @@ async function measureProviderFloor(userId, settings) {
         userId,
         ...settings.normalizationConnectionId ? { connection_id: settings.normalizationConnectionId } : {},
         reasoning: { source: "off" },
+        signal: controller.signal,
         parameters: {
           temperature: 0,
-          max_tokens: 16,
+          max_tokens: contextualOutputTokenLimit(""),
           ...settings.normalizationModelOverride ? { model: settings.normalizationModelOverride } : {}
         },
         messages: [
@@ -5604,14 +5606,18 @@ async function measureProviderFloor(userId, settings) {
         ]
       }),
       new Promise((resolve) => {
-        timeout = setTimeout(() => resolve(null), FLOOR_PROBE_TIMEOUT_MS);
+        timeout = setTimeout(() => {
+          controller.abort();
+          resolve(null);
+        }, FLOOR_PROBE_TIMEOUT_MS);
       })
     ]);
     if (!response) outcome = "timed-out";
   } catch (error) {
     const status = isRecord5(error) && typeof error.status === "number" ? error.status : null;
     const name = error instanceof Error ? error.name.slice(0, 40) : typeof error;
-    outcome = `failed error=${name}${status === null ? "" : ` status=${status}`}`;
+    const message = error instanceof Error ? error.message.slice(0, 160) : "";
+    outcome = `failed error=${name}${status === null ? "" : ` status=${status}`}${message ? ` message=${message}` : ""}`;
   } finally {
     clearTimeout(timeout);
   }

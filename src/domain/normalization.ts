@@ -122,6 +122,61 @@ const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
   ),
 ]
 
+const COMMAND_SIGNAL_WORDS = [
+  'period',
+  'comma',
+  'colon',
+  'semicolon',
+  'question',
+  'exclamation',
+  'ellipsis',
+  'dash',
+  'hyphen',
+  'quotation',
+  'quote',
+  'paragraph',
+  'speech',
+  'apostrophe',
+  'parenthesis',
+  'bracket',
+]
+
+function withinEditDistance(left: string, right: string, maximum: number): boolean {
+  if (Math.abs(left.length - right.length) > maximum) return false
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index)
+  for (let row = 1; row <= left.length; row += 1) {
+    const current = [row]
+    for (let column = 1; column <= right.length; column += 1) {
+      current[column] = Math.min(
+        previous[column]! + 1,
+        current[column - 1]! + 1,
+        previous[column - 1]! + (left[row - 1] === right[column - 1] ? 0 : 1),
+      )
+    }
+    previous = current
+  }
+  return previous[right.length]! <= maximum
+}
+
+/**
+ * True when text still contains a word that looks like an unresolved spoken command,
+ * either exactly or with a small transcription error. Used to decide whether the
+ * contextual provider pass can add anything; false positives only cost time.
+ */
+export function hasUnresolvedCommandSignal(text: string): boolean {
+  // Known mishearing of “new paragraph”, which the provider prompt also documents.
+  if (/\bpair\s+of\s+graphs?\b/iu.test(text)) return true
+  for (const match of text.matchAll(/\p{L}+/gu)) {
+    const word = match[0].toLocaleLowerCase()
+    if (COMMAND_SIGNAL_WORDS.includes(word)) return true
+    if (word.length < 5) continue
+    const maximum = word.length >= 8 ? 2 : 1
+    if (COMMAND_SIGNAL_WORDS.some((command) => withinEditDistance(word, command, maximum)))
+      return true
+  }
+  return false
+}
+
 export function normalizeDeterministically(
   raw: string,
   glossary: readonly GlossaryEntry[],

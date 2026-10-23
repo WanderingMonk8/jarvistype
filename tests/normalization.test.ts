@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  hasUnresolvedCommandSignal,
   normalizeDeterministically,
   recoverHighConfidenceContextualCommands,
 } from '../src/domain/normalization'
@@ -135,6 +136,14 @@ test('preserves punctuation vocabulary in ordinary noun and verb contexts', () =
     normalizeDeterministically('A lone quotation remains literal.', []).text,
     'A lone quotation remains literal.',
   )
+})
+
+test('flags unresolved spoken command words without flagging ordinary prose', () => {
+  assert.equal(hasUnresolvedCommandSignal('We went to the store and bought milk.'), false)
+  assert.equal(hasUnresolvedCommandSignal('Coffee at the shop tomorrow.'), false)
+  assert.equal(hasUnresolvedCommandSignal('Begin the speach here.'), true)
+  assert.equal(hasUnresolvedCommandSignal('She said period.'), true)
+  assert.equal(hasUnresolvedCommandSignal('Another dash here'), true)
 })
 
 test('boundary punctuation commands replace the sentence punctuation before them', () => {

@@ -334,7 +334,7 @@ test('lists safe normalization connections and dispatches with selected connecti
   await seedDraft(userId, chatId, 'Existing draft')
   generationRequests.length = 0
   await dispatch(
-    recordingAppendRequest(chatId, 'selected-connection-segment', 1, 'Plain text'),
+    recordingAppendRequest(chatId, 'selected-connection-segment', 1, 'Plain speach text'),
     userId,
   )
 
@@ -356,7 +356,7 @@ test('uses local command context with compact conversational spelling references
   await seedDraft(userId, chatId, 'This draft content must not enter the normalization prompt.')
 
   await dispatch(
-    recordingAppendRequest(chatId, 'split-context-segment', 1, 'She reached the harbor period'),
+    recordingAppendRequest(chatId, 'split-context-segment', 1, 'She reached the harbor speach'),
     userId,
   )
 
@@ -1424,6 +1424,38 @@ test('does not append a second period after a punctuated spoken quotation', asyn
   if (response?.type === 'transcript.normalization.response') {
     assert.equal(response.proposal.candidateText, '“I am not going anywhere.”')
   }
+})
+
+test('skips the contextual provider for plain dictation and runs it for unresolved commands', async () => {
+  const userId = 'contextual-gate-user'
+  const chatId = 'contextual-gate-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier')
+  responses.length = 0
+  generationEditsOverride = [{ find: 'beta', replace: 'BETA' }]
+
+  generationRequests.length = 0
+  await dispatch(
+    recordingAppendRequest(chatId, 'contextual-gate-plain', 1, 'Alpha beta gamma delta.'),
+    userId,
+  )
+  let response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  assert.equal(generationRequests.length, 0)
+  if (response?.type === 'transcript.normalization.response')
+    assert.doesNotMatch(response.proposal.candidateText, /BETA/)
+
+  generationRequests.length = 0
+  await dispatch(
+    recordingAppendRequest(chatId, 'contextual-gate-signal', 2, 'Alpha beta gamma speach delta.'),
+    userId,
+  )
+  response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  assert.equal(generationRequests.length, 1)
+  if (response?.type === 'transcript.normalization.response')
+    assert.match(response.proposal.candidateText, /BETA/)
+  generationEditsOverride = null
 })
 
 test('rejects ambiguous or missing contextual edits and keeps the deterministic candidate', async () => {

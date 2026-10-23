@@ -170,7 +170,9 @@ export function executeEditPlan(
     const current = sorted[index]!
     if (
       current.end > previous.start ||
-      (current.start === previous.start && current.end === current.start)
+      (current.start === previous.start &&
+        current.end === current.start &&
+        previous.end === previous.start)
     )
       return { ok: false, reason: 'edit operations overlap' }
   }

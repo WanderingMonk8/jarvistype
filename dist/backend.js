@@ -716,7 +716,7 @@ function executeEditPlan(cleanText, paragraphs, currentVersion, plan, protectedC
   for (let index = 1; index < sorted.length; index += 1) {
     const previous = sorted[index - 1];
     const current = sorted[index];
-    if (current.end > previous.start || current.start === previous.start && current.end === current.start)
+    if (current.end > previous.start || current.start === previous.start && current.end === current.start && previous.end === previous.start)
       return { ok: false, reason: "edit operations overlap" };
   }
   let afterText = cleanText;
@@ -3947,7 +3947,7 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
 function canonicalEditInstruction(instructionTranscript) {
   return instructionTranscript.replace(/^\s*please\s+/iu, "").replace(/^\s*(?:remove|take\s+(?:off|out)|erase|cut)\b/iu, "delete").replace(/[\s,]*\bplease\s*([.!?]*)\s*$/iu, "$1");
 }
-async function interpretEditInstruction(instructionTranscript, session, settings, glossary, conversationReferences, userId) {
+function parseDeterministicEditPlan(instructionTranscript, session) {
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
     instructionTranscript,
     session.draftVersion
@@ -3998,6 +3998,36 @@ async function interpretEditInstruction(instructionTranscript, session, settings
     return finalizeInterpretedPlan(instructionTranscript, sentenceReplacement);
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session);
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement);
+  return null;
+}
+var EDIT_CLAUSE_VERB = "(?:replace|change|swap|substitute|delete|remove|take\\s+(?:off|out)|erase|cut|insert|add|place|put|append|prepend|tack|move|relocate|shift|split|break|divide|join|merge|combine|uppercase|lowercase|capitalize|make)";
+function splitEditClauses(instructionTranscript) {
+  if (/["“”‘’]/u.test(instructionTranscript)) return [instructionTranscript];
+  const separator = new RegExp(
+    `\\s*[,.]?\\s*\\b(?:and\\s+)?then\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)|\\s*,\\s*and\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)`,
+    "iu"
+  );
+  return instructionTranscript.split(separator).map((clause) => clause.trim()).filter(Boolean);
+}
+function parseDeterministicCompoundEditPlan(clauses, session) {
+  const plans = clauses.map((clause) => parseDeterministicEditPlan(clause, session));
+  if (plans.some((plan) => plan === null)) return null;
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: plans.map((plan) => plan.explanation).join(" "),
+    operations: plans.flatMap(
+      (plan, index) => plan.operations.map((operation) => ({
+        ...operation,
+        id: `clause-${index + 1}-${operation.id}`
+      }))
+    )
+  });
+}
+async function interpretEditInstruction(instructionTranscript, session, settings, glossary, conversationReferences, userId) {
+  const clauses = splitEditClauses(instructionTranscript);
+  const deterministicPlan = clauses.length > 1 ? parseDeterministicCompoundEditPlan(clauses, session) : parseDeterministicEditPlan(instructionTranscript, session);
+  if (deterministicPlan) return deterministicPlan;
   const qualifiedAsInReference = hasQualifiedAsInReference(instructionTranscript);
   const providerStartedAt = performance.now();
   recordDebug(userId, "provider.edit-interpretation", "start");

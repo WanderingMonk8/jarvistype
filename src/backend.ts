@@ -1215,14 +1215,10 @@ function canonicalEditInstruction(instructionTranscript: string): string {
     .replace(/[\s,]*\bplease\s*([.!?]*)\s*$/iu, '$1')
 }
 
-async function interpretEditInstruction(
+function parseDeterministicEditPlan(
   instructionTranscript: string,
   session: PersistedDraftSession,
-  settings: PhaseFourSettings,
-  glossary: GlossaryState,
-  conversationReferences: string[],
-  userId: string,
-) {
+): EditPlan | null {
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
     instructionTranscript,
     session.draftVersion,
@@ -1273,6 +1269,57 @@ async function interpretEditInstruction(
     return finalizeInterpretedPlan(instructionTranscript, sentenceReplacement)
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session)
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement)
+  return null
+}
+
+const EDIT_CLAUSE_VERB =
+  '(?:replace|change|swap|substitute|delete|remove|take\\s+(?:off|out)|erase|cut|insert|add|place|put|append|prepend|tack|move|relocate|shift|split|break|divide|join|merge|combine|uppercase|lowercase|capitalize|make)'
+
+function splitEditClauses(instructionTranscript: string): string[] {
+  if (/["“”‘’]/u.test(instructionTranscript)) return [instructionTranscript]
+  const separator = new RegExp(
+    `\\s*[,.]?\\s*\\b(?:and\\s+)?then\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)|\\s*,\\s*and\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)`,
+    'iu',
+  )
+  return instructionTranscript
+    .split(separator)
+    .map((clause) => clause.trim())
+    .filter(Boolean)
+}
+
+function parseDeterministicCompoundEditPlan(
+  clauses: readonly string[],
+  session: PersistedDraftSession,
+): EditPlan | null {
+  const plans = clauses.map((clause) => parseDeterministicEditPlan(clause, session))
+  if (plans.some((plan) => plan === null)) return null
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: plans.map((plan) => plan!.explanation).join(' '),
+    operations: plans.flatMap((plan, index) =>
+      plan!.operations.map((operation) => ({
+        ...operation,
+        id: `clause-${index + 1}-${operation.id}`,
+      })),
+    ),
+  })
+}
+
+async function interpretEditInstruction(
+  instructionTranscript: string,
+  session: PersistedDraftSession,
+  settings: PhaseFourSettings,
+  glossary: GlossaryState,
+  conversationReferences: string[],
+  userId: string,
+) {
+  const clauses = splitEditClauses(instructionTranscript)
+  const deterministicPlan =
+    clauses.length > 1
+      ? parseDeterministicCompoundEditPlan(clauses, session)
+      : parseDeterministicEditPlan(instructionTranscript, session)
+  if (deterministicPlan) return deterministicPlan
   const qualifiedAsInReference = hasQualifiedAsInReference(instructionTranscript)
   const providerStartedAt = performance.now()
   recordDebug(userId, 'provider.edit-interpretation', 'start')

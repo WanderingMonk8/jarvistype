@@ -1346,6 +1346,31 @@ test('rejects incompatible structural and inline operation groups atomically', (
   })
 })
 
+test('allows an insertion at the start of a replaced range but not two insertions at one point', () => {
+  const adjacent = executeEditPlan('Alpha beta gamma.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'insert before a replaced phrase',
+    operations: [
+      { id: 'open', type: 'insert_before', target: { exactText: 'Alpha' }, text: '“' },
+      { id: 'replace', type: 'replace', target: { exactText: 'Alpha' }, text: 'Omega' },
+    ],
+  })
+  assert.equal(adjacent.ok, true)
+  if (adjacent.ok) assert.equal(adjacent.afterText, '“Omega beta gamma.')
+
+  const tied = executeEditPlan('Alpha beta gamma.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'two insertions at one point',
+    operations: [
+      { id: 'open', type: 'insert_before', target: { exactText: 'Alpha' }, text: '“' },
+      { id: 'single', type: 'insert_before', target: { exactText: 'Alpha' }, text: '‘' },
+    ],
+  })
+  assert.deepEqual(tied, { ok: false, reason: 'edit operations overlap' })
+})
+
 test('never leaves a quotation mark floating outside paragraph text', () => {
   const floating = executeEditPlan('Alpha beta gamma.', [], 1, {
     schemaVersion: 2,

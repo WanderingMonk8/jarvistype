@@ -3647,6 +3647,46 @@ test('preserves sentence casing when replacing an opening phrase', async () => {
   assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
 })
 
+test('splits compound instructions into deterministic clauses without swallowing later commands', async () => {
+  const userId = 'compound-clause-user'
+  const chatId = 'compound-clause-chat'
+  activeChatId = chatId
+  const draft =
+    'I slide the cooked pancake onto a plate with my spatula. You know, what you said about the real people. Now, do you wanna give it a try? I will show you how to tilt the pan. You just use the spatula. What do you say? End speech.'
+  const cases: Array<readonly [string, string]> = [
+    [
+      'Remove the sentence and speech, and then put quotations from the phrase, you know to what do you say.',
+      'I slide the cooked pancake onto a plate with my spatula. “You know, what you said about the real people. Now, do you wanna give it a try? I will show you how to tilt the pan. You just use the spatula. What do you say?”',
+    ],
+    [
+      'Remove the sentence and speech, and then replace tilt with lift.',
+      'I slide the cooked pancake onto a plate with my spatula. You know, what you said about the real people. Now, do you wanna give it a try? I will show you how to lift the pan. You just use the spatula. What do you say?',
+    ],
+  ]
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `compound-clause-interpret-${index}`,
+        operationId: `compound-clause-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
 test('every replace alias works deterministically with and without polite wording', async () => {
   const userId = 'replace-alias-user'
   const chatId = 'replace-alias-chat'

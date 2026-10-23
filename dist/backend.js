@@ -5489,7 +5489,7 @@ function escapeRegularExpression(value) {
 function apostropheFlexiblePattern(value) {
   return escapeRegularExpression(value).replace(/['\u2019]/gu, "['\\u2019]");
 }
-var CONTEXTUAL_NORMALIZATION_TIMEOUT_MS = 8e3;
+var CONTEXTUAL_NORMALIZATION_TIMEOUT_MS = 12e3;
 async function normalizeWithContext(rawTranscript, deterministicCandidate, messages, conversationReferences, glossary, settings, userId, timeoutMs = CONTEXTUAL_NORMALIZATION_TIMEOUT_MS) {
   const startedAt2 = performance.now();
   recordDebug(

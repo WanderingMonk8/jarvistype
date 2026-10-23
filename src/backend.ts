@@ -3231,7 +3231,7 @@ function apostropheFlexiblePattern(value: string): string {
   return escapeRegularExpression(value).replace(/['\u2019]/gu, "['\\u2019]")
 }
 
-const CONTEXTUAL_NORMALIZATION_TIMEOUT_MS = 8_000
+const CONTEXTUAL_NORMALIZATION_TIMEOUT_MS = 12_000
 
 async function normalizeWithContext(
   rawTranscript: string,

@@ -2645,9 +2645,9 @@ function shellMarkup() {
       .jt-floating__bar h2 { font-size: 1rem; }
       .jt-floating__body { min-height: 0; overflow: visible; }
       .jt-floating__body > .jt-shell__card { margin: .75rem; }
-      .jt-floating__tools { display: grid; gap: .65rem; padding: 0 .75rem .75rem; }
+      .jt-floating__tools { display: grid; gap: .65rem; padding: .75rem; border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
       .jt-tools-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; width: 100%; align-items: start; }
-      .jt-tools-row > button, .jt-tools-row > details { width: 100%; min-width: 0; margin: 0; }
+      .jt-tools-row > button, .jt-tools-row > details { width: 100%; min-width: 0; min-height: 2.75rem; margin: 0; }
       .jt-tools-row > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
@@ -2669,7 +2669,6 @@ function shellMarkup() {
         .jt-floating [data-composer-surface] { grid-template-columns: minmax(0, 1.15fr) minmax(20rem, .85fr); align-items: stretch; height: auto; overflow: visible; }
         .jt-floating .jt-composer__pane { min-height: 0; overflow: visible; padding-right: .25rem; }
         .jt-floating .jt-draft-editor { min-height: 10rem; }
-        .jt-floating__tools { padding-top: .65rem; }
         .jt-floating__tools > section, .jt-tools-row > details { max-height: 24rem; overflow-y: auto; overscroll-behavior: contain; }
       }
     </style>

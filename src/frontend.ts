@@ -2241,22 +2241,40 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   function scheduleFloatingContentFit(): void {
     window.requestAnimationFrame(() => {
       if (!floatingWidget.isVisible()) return
-      const overflow = Math.ceil(
-        floatingWidget.root.scrollHeight - floatingWidget.root.clientHeight,
-      )
-      if (overflow <= 1) return
       const baseSize = getFloatingWidgetSize()
       const viewport = getViewportSize()
+      const floatingShell = floatingWidget.root.querySelector<HTMLElement>('.jt-floating')
+      const floatingTools = floatingWidget.root.querySelector<HTMLElement>('.jt-floating__tools')
+      if (!floatingShell || !floatingTools) return
+      const shellStyle = window.getComputedStyle(floatingShell)
+      const bottomInset =
+        Number.parseFloat(shellStyle.paddingBottom) +
+        Number.parseFloat(shellStyle.borderBottomWidth)
+      const contentBottom =
+        floatingTools.getBoundingClientRect().bottom -
+        floatingWidget.root.getBoundingClientRect().top
       const fittedHeight = Math.min(
         Math.max(1, viewport.height - 24),
-        baseSize.height + overflow + 2,
+        Math.ceil(contentBottom + bottomInset),
       )
-      if (fittedHeight > baseSize.height) {
-        setAndClampFloatingWidgetSize(baseSize.width, fittedHeight)
-      }
+      setAndClampFloatingWidgetSize(baseSize.width, fittedHeight)
+      window.requestAnimationFrame(() => {
+        if (!floatingWidget.isVisible()) return
+        const overflow = Math.ceil(
+          floatingWidget.root.scrollHeight - floatingWidget.root.clientHeight,
+        )
+        if (overflow <= 1) return
+        setAndClampFloatingWidgetSize(
+          baseSize.width,
+          Math.min(Math.max(1, viewport.height - 24), fittedHeight + overflow + 2),
+        )
+      })
     })
   }
-  const handleViewportResize = () => resizeAndClampFloatingWidget()
+  const handleViewportResize = () => {
+    resizeAndClampFloatingWidget()
+    scheduleFloatingContentFit()
+  }
   document.addEventListener('visibilitychange', handleVisibility)
   window.addEventListener('pagehide', handlePageHide)
   window.addEventListener('focus', handleFocus)

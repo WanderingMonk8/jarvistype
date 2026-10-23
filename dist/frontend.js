@@ -2676,22 +2676,6 @@ function shellMarkup() {
             <p class="jt-draft-meta" data-proposal-meta></p>
           </details>
         </section>
-        <section class="jt-voice" aria-labelledby="jt-voice-title">
-          <h4 id="jt-voice-title">Voice message segment</h4>
-          <p role="status" aria-live="polite" data-voice-status>Ready to record a message segment.</p>
-          <div class="jt-voice__meta">
-            <span data-voice-elapsed>Elapsed: 0:00</span>
-            <span data-voice-provider>Provider: Lumiverse selection</span>
-            <span data-voice-segment-count>Committed recording segments: 0</span>
-          </div>
-          <p class="jt-voice__transcript jt-voice__transcript--provisional" data-voice-provisional hidden></p>
-          <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
-          <div class="jt-actions" aria-label="Voice composition controls">
-            <button type="button" data-record-message disabled>Record Message</button>
-            <button type="button" data-cancel-recording hidden>Cancel Recording</button>
-          </div>
-        </section>
-
         <section class="jt-proposal" data-edit-candidates hidden aria-labelledby="jt-edit-candidates-title">
           <h4 id="jt-edit-candidates-title">Choose the intended edit target</h4>
           <p><strong>Spoken instruction</strong></p>
@@ -2714,6 +2698,21 @@ function shellMarkup() {
             <p><strong>Before</strong></p>
             <pre data-edit-before></pre>
           </details>
+        </section>
+        <section class="jt-voice" aria-labelledby="jt-voice-title">
+          <h4 id="jt-voice-title">Voice message segment</h4>
+          <p role="status" aria-live="polite" data-voice-status>Ready to record a message segment.</p>
+          <div class="jt-voice__meta">
+            <span data-voice-elapsed>Elapsed: 0:00</span>
+            <span data-voice-provider>Provider: Lumiverse selection</span>
+            <span data-voice-segment-count>Committed recording segments: 0</span>
+          </div>
+          <p class="jt-voice__transcript jt-voice__transcript--provisional" data-voice-provisional hidden></p>
+          <p class="jt-voice__transcript" data-voice-final>No completed recording yet.</p>
+          <div class="jt-actions" aria-label="Voice composition controls">
+            <button type="button" data-record-message disabled>Record Message</button>
+            <button type="button" data-cancel-recording hidden>Cancel Recording</button>
+          </div>
         </section>
         <div class="jt-actions" aria-label="Editing voice controls">
           <button type="button" data-record-edit disabled>Record Edit</button>

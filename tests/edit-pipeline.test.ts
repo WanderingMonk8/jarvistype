@@ -810,6 +810,36 @@ test('sentence deletion consumes adjacent terminal punctuation for short targets
   assert.equal(wordOnly.ok && wordOnly.afterText, '! Continue.')
 })
 
+test('deleting a whole sentence without a flag removes its period, but not a word inside a sentence', () => {
+  const paragraphs = [
+    { id: 'paragraph', ordinal: 1, lineIndex: 0, text: 'Keep this. End speech. Middle line.' },
+  ]
+  const whole = executeEditPlan('Keep this. End speech. Middle line.', paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete a whole sentence',
+    operations: [
+      { id: 'whole', type: 'delete', target: { paragraphOrdinal: 1, exactText: 'End speech' } },
+    ],
+  })
+  assert.equal(whole.ok && whole.afterText, 'Keep this. Middle line.')
+
+  const inside = executeEditPlan(
+    'I said end speech. Done.',
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text: 'I said end speech. Done.' }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete a phrase inside a sentence',
+      operations: [
+        { id: 'inside', type: 'delete', target: { paragraphOrdinal: 1, exactText: 'end speech' } },
+      ],
+    },
+  )
+  assert.equal(inside.ok && inside.afterText, 'I said . Done.')
+})
+
 test('splits and joins paragraphs with controlled whitespace', () => {
   const seeded = applyManualEdit(
     createDraftSession('structure-chat'),

@@ -3843,6 +3843,56 @@ test('resolves a misheard “delete and speech” deterministically', async () =
   assert.equal(generationRequests.length, 0)
 })
 
+test('choosing a provider delete candidate removes the whole sentence and its period', async () => {
+  const userId = 'provider-delete-candidate-user'
+  const chatId = 'provider-delete-candidate-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Keep this. End speech. Middle line. End speech.')
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete end speech.',
+    operations: [{ id: 'provider-delete', type: 'delete', target: { exactText: 'End speech' } }],
+  }
+  responses.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'provider-delete-candidate-interpret',
+      operationId: 'provider-delete-candidate-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Take out the closing speech line.',
+    },
+    userId,
+  )
+  editPlanResponse = null
+  const choice = responses.at(-1)?.payload
+  assert.equal(choice?.type, 'edit.candidates.response')
+  if (choice?.type !== 'edit.candidates.response') return
+  const expected = ['Keep this. Middle line. End speech.', 'Keep this. End speech. Middle line.']
+  for (const [index, candidate] of choice.candidateSet.candidates.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.candidate.select.request',
+        requestId: `provider-delete-candidate-select-${index}`,
+        operationId: 'provider-delete-candidate-operation',
+        chatId,
+        expectedVersion: 1,
+        candidateId: candidate.id,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response')
+    if (proposal?.type === 'edit.proposal.response')
+      assert.equal(proposal.proposal.afterText, expected[index], `candidate ${index}`)
+  }
+})
+
 test('asks for a choice without the provider when “delete and speech” matches twice', async () => {
   const userId = 'delete-and-speech-duplicate-user'
   const chatId = 'delete-and-speech-duplicate-chat'

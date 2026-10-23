@@ -522,8 +522,14 @@ function resolveOperation(
     }
   }
   if (operation.type === 'delete') {
-    if (operation.includeTrailingPunctuation)
+    if (operation.includeTrailingPunctuation) {
       end = extendThroughTerminalPunctuation(cleanText, end, range.end)
+    } else if (
+      isWholeSentenceSpan(cleanText, start, end, range.start) &&
+      /^\.(?!\.)/u.test(cleanText.slice(end, range.end))
+    ) {
+      end += 1
+    }
     if (formatText) {
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
       const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
@@ -747,6 +753,21 @@ function executeInlineMove(
       ...new Set([source.paragraphOrdinal, destination.paragraphOrdinal]),
     ].sort((left, right) => left - right),
   }
+}
+
+/**
+ * True when a span starts a sentence and ends a word, so removing it should also
+ * remove the sentence's own terminal mark instead of leaving it orphaned.
+ */
+function isWholeSentenceSpan(
+  text: string,
+  start: number,
+  end: number,
+  rangeStart: number,
+): boolean {
+  const before = text.slice(rangeStart, start)
+  const startsSentence = before.trim() === '' || /[.!?…]["'’”)\]]?\s*$/u.test(before)
+  return startsSentence && /[\p{L}\p{N}]$/u.test(text.slice(0, end))
 }
 
 function extendThroughTerminalPunctuation(text: string, end: number, limit: number): number {

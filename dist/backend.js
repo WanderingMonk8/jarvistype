@@ -961,8 +961,11 @@ ${formattedParagraph}`,
     };
   }
   if (operation.type === "delete") {
-    if (operation.includeTrailingPunctuation)
+    if (operation.includeTrailingPunctuation) {
       end = extendThroughTerminalPunctuation(cleanText, end, range.end);
+    } else if (isWholeSentenceSpan(cleanText, start, end, range.start) && /^\.(?!\.)/u.test(cleanText.slice(end, range.end))) {
+      end += 1;
+    }
     if (formatText) {
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? "");
       const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? "");
@@ -1076,6 +1079,11 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
       .../* @__PURE__ */ new Set([source.paragraphOrdinal, destination.paragraphOrdinal])
     ].sort((left, right) => left - right)
   };
+}
+function isWholeSentenceSpan(text, start, end, rangeStart) {
+  const before = text.slice(rangeStart, start);
+  const startsSentence = before.trim() === "" || /[.!?…]["'’”)\]]?\s*$/u.test(before);
+  return startsSentence && /[\p{L}\p{N}]$/u.test(text.slice(0, end));
 }
 function extendThroughTerminalPunctuation(text, end, limit) {
   const punctuation = text.slice(end, limit).match(/^(?:\.{3}|[.!?…])/u)?.[0];

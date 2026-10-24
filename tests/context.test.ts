@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   clampContextMessageCount,
+  correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
   extractCardCharacterReferences,
   extractConversationReferences,
@@ -154,6 +155,17 @@ test('corrects only a unique one-character proper-name match from conversation r
         { heard: 'Kensai', canonical: 'Kansai' },
       ],
     },
+  )
+})
+
+test('corrects lowercase edit targets from one unique proper-name reference', () => {
+  assert.deepEqual(correctEditTargetFromConversationReferences('herbode', ['Herbold']), {
+    text: 'Herbold',
+    correctedTerms: [{ heard: 'herbode', canonical: 'Herbold' }],
+  })
+  assert.equal(
+    correctEditTargetFromConversationReferences('herbode', ['Herbold', 'Herbode']).text,
+    'herbode',
   )
 })
 

@@ -36,6 +36,7 @@ import {
 import {
   DEFAULT_CONTEXT_MESSAGE_COUNT,
   clampContextMessageCount,
+  correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
   extractCardCharacterReferences,
   extractConversationReferences,
@@ -789,17 +790,22 @@ async function handleEditInterpretation(
     )
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
     if (!interpretedPlan) return { error: 'interpretation' as const, session }
-    const plan = normalizeEditInputPayloads(
-      stripQualifiedAsInEditPayloads(
-        enforceAuthoritativeEditSpellings(
-          normalizeParagraphBoundaryInsertions(interpretedPlan, request.instructionTranscript),
-          spelling.learningCandidates,
+    const plan = normalizeEditReferenceTargets(
+      normalizeEditInputPayloads(
+        stripQualifiedAsInEditPayloads(
+          enforceAuthoritativeEditSpellings(
+            normalizeParagraphBoundaryInsertions(interpretedPlan, request.instructionTranscript),
+            spelling.learningCandidates,
+          ),
         ),
+        glossary,
+        cardCharacterReferences,
+        conversationReferences,
+        spelling.learningCandidates.map((candidate) => candidate.canonical),
       ),
-      glossary,
+      session.cleanText,
       cardCharacterReferences,
       conversationReferences,
-      spelling.learningCandidates.map((candidate) => candidate.canonical),
     )
     const executeStartedAt = performance.now()
     const executed = executeEditPlan(
@@ -3264,6 +3270,55 @@ function normalizeEditInputPayloads(
       return normalized === operation.text ? operation : { ...operation, text: normalized }
     }),
   }
+}
+
+function normalizeEditReferenceTargets(
+  plan: EditPlan,
+  draftText: string,
+  cardCharacterReferences: string[],
+  conversationReferences: string[],
+): EditPlan {
+  const references = mergeConversationReferences(
+    cardCharacterReferences,
+    conversationReferences,
+  )
+  if (!references.length) return plan
+
+  const normalizeValue = (value: string | undefined): string | undefined => {
+    if (!value || editTargetTextExists(draftText, value)) return value
+    return correctEditTargetFromConversationReferences(value, references).text
+  }
+  const normalizeTarget = (target: EditTarget): EditTarget => {
+    const exactText = normalizeValue(target.exactText)
+    const approximateText = normalizeValue(target.approximateText)
+    const relativeToText = normalizeValue(target.relativeToText)
+    if (
+      exactText === target.exactText &&
+      approximateText === target.approximateText &&
+      relativeToText === target.relativeToText
+    )
+      return target
+    return { ...target, exactText, approximateText, relativeToText }
+  }
+
+  return {
+    ...plan,
+    operations: plan.operations.map((operation) => ({
+      ...operation,
+      target: normalizeTarget(operation.target),
+      ...(operation.destination
+        ? { destination: normalizeTarget(operation.destination) }
+        : {}),
+    })),
+  }
+}
+
+function editTargetTextExists(draftText: string, targetText: string): boolean {
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])${apostropheFlexiblePattern(targetText)}(?![\\p{L}\\p{N}])`,
+    'iu',
+  )
+  return pattern.test(draftText)
 }
 
 function escapeRegularExpression(value: string): string {

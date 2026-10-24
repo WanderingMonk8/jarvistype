@@ -193,6 +193,24 @@ export function correctFromConversationReferences(
   references: readonly string[],
   protectedTerms: readonly string[] = [],
 ): ConversationReferenceCorrection {
+  return correctReferenceTerms(text, references, protectedTerms, true)
+}
+
+/** Edit targets may be lowercased even when they name a proper noun. */
+export function correctEditTargetFromConversationReferences(
+  text: string,
+  references: readonly string[],
+  protectedTerms: readonly string[] = [],
+): ConversationReferenceCorrection {
+  return correctReferenceTerms(text, references, protectedTerms, false)
+}
+
+function correctReferenceTerms(
+  text: string,
+  references: readonly string[],
+  protectedTerms: readonly string[],
+  requireInitialUppercase: boolean,
+): ConversationReferenceCorrection {
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()))
   const referenceByKey = new Map<string, string>()
   for (const reference of references) {
@@ -209,7 +227,7 @@ export function correctFromConversationReferences(
     const baseKey = base.toLocaleLowerCase()
     if (
       base.length < 3 ||
-      !/^\p{Lu}/u.test(base) ||
+      (requireInitialUppercase && !/^\p{Lu}/u.test(base)) ||
       protectedKeys.has(baseKey) ||
       referenceByKey.has(baseKey)
     )

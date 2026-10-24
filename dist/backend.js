@@ -2002,6 +2002,12 @@ function extractCardCharacterReferences(title, cardText) {
   return [...references.values()];
 }
 function correctFromConversationReferences(text, references, protectedTerms = []) {
+  return correctReferenceTerms(text, references, protectedTerms, true);
+}
+function correctEditTargetFromConversationReferences(text, references, protectedTerms = []) {
+  return correctReferenceTerms(text, references, protectedTerms, false);
+}
+function correctReferenceTerms(text, references, protectedTerms, requireInitialUppercase) {
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()));
   const referenceByKey = /* @__PURE__ */ new Map();
   for (const reference of references) {
@@ -2015,7 +2021,7 @@ function correctFromConversationReferences(text, references, protectedTerms = []
     const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? "";
     const base = possessive ? heard.slice(0, -possessive.length) : heard;
     const baseKey = base.toLocaleLowerCase();
-    if (base.length < 3 || !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
+    if (base.length < 3 || requireInitialUppercase && !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
       return heard;
     const candidates = [...referenceByKey.values()].filter(
       (reference) => isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase())
@@ -3722,17 +3728,22 @@ async function handleEditInterpretation(request, context, activeRequest) {
     );
     if (activeRequest.cancelled) return { error: "cancelled", session };
     if (!interpretedPlan) return { error: "interpretation", session };
-    const plan = normalizeEditInputPayloads(
-      stripQualifiedAsInEditPayloads(
-        enforceAuthoritativeEditSpellings(
-          normalizeParagraphBoundaryInsertions(interpretedPlan, request.instructionTranscript),
-          spelling.learningCandidates
-        )
+    const plan = normalizeEditReferenceTargets(
+      normalizeEditInputPayloads(
+        stripQualifiedAsInEditPayloads(
+          enforceAuthoritativeEditSpellings(
+            normalizeParagraphBoundaryInsertions(interpretedPlan, request.instructionTranscript),
+            spelling.learningCandidates
+          )
+        ),
+        glossary,
+        cardCharacterReferences,
+        conversationReferences,
+        spelling.learningCandidates.map((candidate) => candidate.canonical)
       ),
-      glossary,
+      session.cleanText,
       cardCharacterReferences,
-      conversationReferences,
-      spelling.learningCandidates.map((candidate) => candidate.canonical)
+      conversationReferences
     );
     const executeStartedAt = performance.now();
     const executed = executeEditPlan(
@@ -5656,6 +5667,40 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
       return normalized === operation.text ? operation : { ...operation, text: normalized };
     })
   };
+}
+function normalizeEditReferenceTargets(plan, draftText, cardCharacterReferences, conversationReferences) {
+  const references = mergeConversationReferences(
+    cardCharacterReferences,
+    conversationReferences
+  );
+  if (!references.length) return plan;
+  const normalizeValue = (value) => {
+    if (!value || editTargetTextExists(draftText, value)) return value;
+    return correctEditTargetFromConversationReferences(value, references).text;
+  };
+  const normalizeTarget = (target) => {
+    const exactText = normalizeValue(target.exactText);
+    const approximateText = normalizeValue(target.approximateText);
+    const relativeToText = normalizeValue(target.relativeToText);
+    if (exactText === target.exactText && approximateText === target.approximateText && relativeToText === target.relativeToText)
+      return target;
+    return { ...target, exactText, approximateText, relativeToText };
+  };
+  return {
+    ...plan,
+    operations: plan.operations.map((operation) => ({
+      ...operation,
+      target: normalizeTarget(operation.target),
+      ...operation.destination ? { destination: normalizeTarget(operation.destination) } : {}
+    }))
+  };
+}
+function editTargetTextExists(draftText, targetText) {
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])${apostropheFlexiblePattern(targetText)}(?![\\p{L}\\p{N}])`,
+    "iu"
+  );
+  return pattern.test(draftText);
 }
 function escapeRegularExpression(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

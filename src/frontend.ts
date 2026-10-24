@@ -2929,6 +2929,8 @@ function shellMarkup(): string {
       .jt-tools-row > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: start; border-color: color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; background: transparent; }
       .jt-tools-row > button::before { content: '▸ '; }
       .jt-tools-row > button[aria-expanded="true"]::before { content: '▾ '; }
+      .jt-tools-row > details:not([open]):hover { background: color-mix(in srgb, currentColor 15%, transparent); border-color: color-mix(in srgb, currentColor 45%, transparent); }
+      .jt-tools-row > details > summary:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
       .jt-floating .jt-tools-row > details { padding: .48rem .75rem; }

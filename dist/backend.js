@@ -976,6 +976,8 @@ ${formattedParagraph}`,
     } else if (isSentenceOpeningAt(cleanText, start)) {
       const orphanedSeparator = cleanText.slice(end, range.end).match(/^[,;:](?=\s|$)/u)?.[0];
       if (orphanedSeparator) end += orphanedSeparator.length;
+    } else if (/[,;:][ \t]*$/u.test(cleanText.slice(range.start, start)) && /^[,;:](?=\s|$)/u.test(cleanText.slice(end, range.end))) {
+      end += 1;
     }
     if (formatText) {
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? "");

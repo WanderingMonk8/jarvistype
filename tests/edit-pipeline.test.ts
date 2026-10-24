@@ -813,6 +813,28 @@ test('deletion consumes one adjacent horizontal separator without touching other
     middlePhraseBeforeComma.ok && middlePhraseBeforeComma.afterText,
     'Everyday they are , despite the rain.',
   )
+
+  const delimitedMiddlePhrase = executeEditPlan(
+    'And I say to the sergeant, beginning speech, I have two full sheaves here.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete a complete comma-delimited middle phrase',
+      operations: [
+        {
+          id: 'delete-delimited-middle-phrase',
+          type: 'delete',
+          target: { exactText: 'beginning speech' },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    delimitedMiddlePhrase.ok && delimitedMiddlePhrase.afterText,
+    'And I say to the sergeant, I have two full sheaves here.',
+  )
 })
 
 test('sentence deletion consumes adjacent terminal punctuation for short targets only when requested', () => {

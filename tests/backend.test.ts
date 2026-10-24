@@ -4804,6 +4804,53 @@ test('removes an orphaned opening separator and capitalizes the remaining senten
   assert.equal(generationRequests.length, 0)
 })
 
+test('removes the duplicate trailing separator when deleting a delimited middle phrase', async () => {
+  const userId = 'middle-phrase-cleanup-user'
+  const chatId = 'middle-phrase-cleanup-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'And I say to the sergeant, beginning speech, I have two full sheaves here.',
+  )
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the comma-delimited middle phrase.',
+    operations: [
+      {
+        id: 'delete-delimited-middle-phrase',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'beginning speech' },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'middle-phrase-cleanup-interpret',
+      operationId: 'middle-phrase-cleanup-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the phrase beginning speech.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'And I say to the sergeant, I have two full sheaves here.',
+  )
+  assert.equal(generationRequests.length, 0)
+})
+
 test('does not clean sentences outside the edited sentence', async () => {
   const userId = 'universal-cleanup-scope-user'
   const chatId = 'universal-cleanup-scope-chat'

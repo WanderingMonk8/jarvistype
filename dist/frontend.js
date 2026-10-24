@@ -674,7 +674,6 @@ function setup(ctx) {
   const debugCopyButton = requireElement(tab.root, "[data-debug-copy]");
   const debugClearButton = requireElement(tab.root, "[data-debug-clear]");
   const debugStatus = requireElement(tab.root, "[data-debug-status]");
-  const saveSettingsButton = requireElement(tab.root, "[data-settings-save]");
   const normalizationConnectionSelect = requireElement(
     tab.root,
     "[data-normalization-connection]"
@@ -779,6 +778,7 @@ function setup(ctx) {
     browseHint: "Search models available through the selected Lumiverse connection.",
     onChange: (model) => {
       state.settings.normalizationModelOverride = model;
+      scheduleSettingsSave(0);
     }
   });
   let modelPickerConnectionId = null;
@@ -1591,14 +1591,25 @@ function setup(ctx) {
         debugLoggingEnabled: debugEnabledToggle.checked
       }
     });
-    if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
+    if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
       applyPhaseFourResponse(outcome.value);
-    else state.phaseFourMessage = "Settings were not saved. Try again.";
+      state.phaseFourMessage = "Settings saved.";
+    } else state.phaseFourMessage = "Settings were not saved. Try again.";
     render();
   };
+  let settingsSaveTimer = null;
+  const scheduleSettingsSave = (delay = 0) => {
+    if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
+    settingsSaveTimer = setTimeout(() => {
+      settingsSaveTimer = null;
+      void saveSettings();
+    }, delay);
+  };
+  const handleContextCountInput = () => scheduleSettingsSave(600);
+  const handleSettingToggleChange = () => scheduleSettingsSave(0);
   const refreshDebugLog = async (clear = false) => {
     if (state.settings.debugLoggingEnabled !== true) {
-      debugStatus.textContent = "Enable debug logging and save settings first.";
+      debugStatus.textContent = "Enable debug logging first.";
       return;
     }
     debugStatus.textContent = clear ? "Clearing the debug log\u2026" : "Loading the debug log\u2026";
@@ -2074,13 +2085,13 @@ function setup(ctx) {
     if (button?.dataset.editCandidateId) void selectEditCandidate(button.dataset.editCandidateId);
   };
   const handleCancelEditCandidatesClick = () => cancelEditCandidateSelection();
-  const handleSaveSettingsClick = () => void saveSettings();
   const handleGrammarRepairModeChange = () => {
     state.settings.grammarRepairMode = grammarRepairSelect.value === "always" ? "always" : grammarRepairSelect.value === "when_needed" ? "when_needed" : "off";
+    scheduleSettingsSave(0);
   };
   const handleDebugEnabledChange = () => {
     state.settings.debugLoggingEnabled = debugEnabledToggle.checked;
-    debugStatus.textContent = debugEnabledToggle.checked ? "Save settings to start collecting the debug log." : "Save settings to stop collecting the debug log.";
+    scheduleSettingsSave(0);
   };
   const handleDebugRefreshClick = () => void refreshDebugLog();
   const handleDebugCopyClick = () => void copyDebugLog();
@@ -2090,6 +2101,7 @@ function setup(ctx) {
     state.settings.normalizationModelOverride = "";
     render();
     normalizationModelPicker.refresh();
+    scheduleSettingsSave(0);
   };
   const handleSaveGlossaryClick = () => void saveGlossaryEntry("drawer");
   const handleFloatingSaveGlossaryClick = () => void saveGlossaryEntry("floating");
@@ -2247,9 +2259,10 @@ function setup(ctx) {
   rejectEditButton.addEventListener("click", handleRejectEditClick);
   editCandidatesList.addEventListener("click", handleEditCandidateClick);
   cancelEditCandidatesButton.addEventListener("click", handleCancelEditCandidatesClick);
-  saveSettingsButton.addEventListener("click", handleSaveSettingsClick);
   grammarRepairSelect.addEventListener("change", handleGrammarRepairModeChange);
   debugEnabledToggle.addEventListener("change", handleDebugEnabledChange);
+  contextCountInput.addEventListener("input", handleContextCountInput);
+  contextualToggle.addEventListener("change", handleSettingToggleChange);
   debugRefreshButton.addEventListener("click", handleDebugRefreshClick);
   debugCopyButton.addEventListener("click", handleDebugCopyClick);
   debugClearButton.addEventListener("click", handleDebugClearClick);
@@ -2311,7 +2324,9 @@ function setup(ctx) {
     rejectEditButton.removeEventListener("click", handleRejectEditClick);
     editCandidatesList.removeEventListener("click", handleEditCandidateClick);
     cancelEditCandidatesButton.removeEventListener("click", handleCancelEditCandidatesClick);
-    saveSettingsButton.removeEventListener("click", handleSaveSettingsClick);
+    if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
+    contextCountInput.removeEventListener("input", handleContextCountInput);
+    contextualToggle.removeEventListener("change", handleSettingToggleChange);
     grammarRepairSelect.removeEventListener("change", handleGrammarRepairModeChange);
     debugEnabledToggle.removeEventListener("change", handleDebugEnabledChange);
     debugRefreshButton.removeEventListener("click", handleDebugRefreshClick);
@@ -2917,7 +2932,6 @@ function shellMarkup() {
           <textarea class="jt-debug-output" readonly data-debug-output rows="14" spellcheck="false" aria-label="JarvisType debug timing log"></textarea>
           <p role="status" aria-live="polite" data-debug-status></p>
         </details>
-        <div class="jt-actions"><button type="button" data-settings-save>Save settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings\u2026</p>
 
         <h4>Personal glossary</h4>

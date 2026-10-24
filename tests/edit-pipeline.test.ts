@@ -765,6 +765,54 @@ test('deletion consumes one adjacent horizontal separator without touching other
     },
   )
   assert.equal(middleWord.ok && middleWord.afterText, 'Keep wording.')
+
+  const openingPhrase = executeEditPlan(
+    'Digging a hole, it can disrupt the bugs living there.',
+    [
+      {
+        id: 'opening-phrase-paragraph',
+        ordinal: 1,
+        lineIndex: 0,
+        text: 'Digging a hole, it can disrupt the bugs living there.',
+      },
+    ],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete an opening phrase and its orphaned separator',
+      operations: [
+        {
+          id: 'delete-opening-phrase',
+          type: 'delete',
+          target: { paragraphOrdinal: 1, exactText: 'Digging a hole' },
+        },
+      ],
+    },
+  )
+  assert.equal(openingPhrase.ok && openingPhrase.afterText, 'it can disrupt the bugs living there.')
+
+  const middlePhraseBeforeComma = executeEditPlan(
+    'Everyday they are digging a hole, despite the rain.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'preserve punctuation after a phrase within a sentence',
+      operations: [
+        {
+          id: 'delete-middle-phrase-before-comma',
+          type: 'delete',
+          target: { exactText: 'digging a hole' },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    middlePhraseBeforeComma.ok && middlePhraseBeforeComma.afterText,
+    'Everyday they are , despite the rain.',
+  )
 })
 
 test('sentence deletion consumes adjacent terminal punctuation for short targets only when requested', () => {

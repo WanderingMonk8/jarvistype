@@ -539,6 +539,9 @@ function resolveOperation(
       /^\.(?!\.)/u.test(cleanText.slice(end, range.end))
     ) {
       end += 1
+    } else if (isSentenceOpeningAt(cleanText, start)) {
+      const orphanedSeparator = cleanText.slice(end, range.end).match(/^[,;:](?=\s|$)/u)?.[0]
+      if (orphanedSeparator) end += orphanedSeparator.length
     }
     if (formatText) {
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')

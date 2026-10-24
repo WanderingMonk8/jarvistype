@@ -4712,6 +4712,46 @@ test('fixes errant punctuation and sentence casing left by an edit', async () =>
   assert.equal(generationRequests.length, 0)
 })
 
+test('removes an orphaned opening separator and capitalizes the remaining sentence locally', async () => {
+  const userId = 'opening-phrase-cleanup-user'
+  const chatId = 'opening-phrase-cleanup-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Digging a hole, it can disrupt the bugs living there.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the opening phrase.',
+    operations: [
+      {
+        id: 'delete-opening-phrase',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'Digging a hole' },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'opening-phrase-cleanup-interpret',
+      operationId: 'opening-phrase-cleanup-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the phrase digging a hole.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'It can disrupt the bugs living there.')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('does not clean sentences outside the edited sentence', async () => {
   const userId = 'universal-cleanup-scope-user'
   const chatId = 'universal-cleanup-scope-chat'

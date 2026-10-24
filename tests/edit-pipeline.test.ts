@@ -1573,6 +1573,23 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
   })
   assert.equal(prefixOfLongerWord.ok && prefixOfLongerWord.afterText, 'A precious jewels rests nearby.')
 
+  const deletedPrefixOfLongerWord = executeEditPlan('A precious sack rests nearby.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete a spoken near-match without leaving a word suffix behind',
+    operations: [
+      {
+        id: 'whole-word-delete-fuzzy-fallback',
+        type: 'delete',
+        target: { exactText: 'sac' },
+      },
+    ],
+  })
+  assert.equal(
+    deletedPrefixOfLongerWord.ok && deletedPrefixOfLongerWord.afterText,
+    'A precious rests nearby.',
+  )
+
   const ambiguous = executeEditPlan('Mao let one pass. Mao let two pass.', [], 1, {
     schemaVersion: 2,
     draftVersion: 1,

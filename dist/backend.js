@@ -1946,21 +1946,23 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
     size += normalized.length;
   };
   for (const message of messages) {
-    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
-    let sequence = [];
-    const flushSequence = () => {
-      if (sequence.length > 1) add(sequence.slice(0, 4).join(" "));
-      for (const term of sequence) add(term);
-      sequence = [];
-    };
-    for (const term of terms) {
-      if (isReferenceTerm(term)) {
-        sequence.push(term);
-      } else {
-        flushSequence();
+    for (const segment of message.content.split(/[.!?;:,\n\r]+/u)) {
+      const terms = segment.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
+      let sequence = [];
+      const flushSequence = () => {
+        if (sequence.length > 1) add(sequence.slice(0, 4).join(" "));
+        for (const term of sequence) add(term);
+        sequence = [];
+      };
+      for (const term of terms) {
+        if (isReferenceTerm(term)) {
+          sequence.push(term);
+        } else {
+          flushSequence();
+        }
       }
+      flushSequence();
     }
-    flushSequence();
   }
   return references;
 }

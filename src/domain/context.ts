@@ -140,22 +140,26 @@ export function extractConversationReferences(
   }
 
   for (const message of messages) {
-    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
-    let sequence: string[] = []
-    const flushSequence = () => {
-      if (sequence.length > 1) add(sequence.slice(0, 4).join(' '))
-      for (const term of sequence) add(term)
-      sequence = []
-    }
-
-    for (const term of terms) {
-      if (isReferenceTerm(term)) {
-        sequence.push(term)
-      } else {
-        flushSequence()
+    // Names never continue across sentence or clause punctuation, so “Hana Sato. Later, Marcus”
+    // yields “Hana Sato” and “Marcus”, not one combined phrase.
+    for (const segment of message.content.split(/[.!?;:,\n\r]+/u)) {
+      const terms = segment.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
+      let sequence: string[] = []
+      const flushSequence = () => {
+        if (sequence.length > 1) add(sequence.slice(0, 4).join(' '))
+        for (const term of sequence) add(term)
+        sequence = []
       }
+
+      for (const term of terms) {
+        if (isReferenceTerm(term)) {
+          sequence.push(term)
+        } else {
+          flushSequence()
+        }
+      }
+      flushSequence()
     }
-    flushSequence()
   }
 
   return references
@@ -322,10 +326,7 @@ function isHighConfidenceReferenceMatch(heard: string, reference: string): boole
 }
 
 function referenceSoundKey(value: string): string {
-  const prepared = value
-    .normalize('NFKD')
-    .toLocaleLowerCase()
-    .replace(/\p{M}/gu, '')
+  const prepared = value.normalize('NFKD').toLocaleLowerCase().replace(/\p{M}/gu, '')
   let key = ''
   for (const character of prepared) {
     const sound = /[aeiouy]/u.test(character)

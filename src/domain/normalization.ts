@@ -709,6 +709,28 @@ function replaceExplicitSpelling(
     },
   )
 
+  // Some transcription providers collapse a deliberately spelled sequence into
+  // one uppercase token (for example, "E R B O L D" becomes "ERBOLD"). Only
+  // treat that compact form as spelling when the speaker supplied an explicit
+  // casing cue; otherwise ordinary acronyms such as NASA must remain untouched.
+  const compactUppercasePattern =
+    /\b(all caps|uppercase|lowercase|capitalized?)\s+([A-Z]{3,})(?![A-Za-z])(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/g
+  text = text.replace(
+    compactUppercasePattern,
+    (
+      _whole,
+      casing: string,
+      spoken: string,
+      separator: string | undefined,
+      cue: string | undefined,
+    ) => {
+      const matchingCue = cueMatchesLetters(cue, spoken) ? cue : undefined
+      const canonical = applySpellingCasing(matchingCue ?? spoken, casing)
+      learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
+      return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`
+    },
+  )
+
   for (const candidate of learningCandidates) {
     text = text.replace(
       new RegExp(`\\b(write|type|spell)\\s*,\\s+(?=${escapeRegExp(candidate.canonical)}\\b)`, 'gi'),

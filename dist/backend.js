@@ -2992,6 +2992,16 @@ function replaceExplicitSpelling(input) {
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
     }
   );
+  const compactUppercasePattern = /\b(all caps|uppercase|lowercase|capitalized?)\s+([A-Z]{3,})(?![A-Za-z])(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/g;
+  text = text.replace(
+    compactUppercasePattern,
+    (_whole, casing, spoken, separator, cue) => {
+      const matchingCue = cueMatchesLetters(cue, spoken) ? cue : void 0;
+      const canonical = applySpellingCasing(matchingCue ?? spoken, casing);
+      learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
+      return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
+    }
+  );
   for (const candidate of learningCandidates) {
     text = text.replace(
       new RegExp(`\\b(write|type|spell)\\s*,\\s+(?=${escapeRegExp(candidate.canonical)}\\b)`, "gi"),

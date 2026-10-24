@@ -291,6 +291,14 @@ function parseOperation(value: unknown): EditOperation | null {
   }
 }
 
+/**
+ * A target names text the user spoke, never the punctuation that ends the previous sentence.
+ * Leading whitespace and sentence punctuation are dropped so a delete cannot take that mark.
+ */
+function trimTargetBoundary(text: string): string {
+  return text.replace(/^[\s.!?…,;:]+/u, '').trim()
+}
+
 function parseTarget(value: Record<string, unknown>): EditTarget | null {
   const allowed = new Set([
     'paragraphId',
@@ -323,7 +331,9 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
       value.exactText.length > MAX_EDIT_TEXT_LENGTH
     )
       return null
-    target.exactText = value.exactText
+    const exactText = trimTargetBoundary(value.exactText)
+    if (!exactText) return null
+    target.exactText = exactText
   }
   if (value.approximateText !== undefined) {
     if (

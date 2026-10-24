@@ -840,6 +840,30 @@ test('deleting a whole sentence without a flag removes its period, but not a wor
   assert.equal(inside.ok && inside.afterText, 'I said . Done.')
 })
 
+test('a target that begins with the previous sentence punctuation never deletes that punctuation', () => {
+  const text = 'I register those details. Begin speech. All right, there goes my first byte.'
+  const plan = parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the begin speech sentence',
+    operations: [
+      {
+        id: 'delete-begin',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: '. Begin speech' },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
+  assert.ok(plan)
+  if (!plan) return
+  const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, plan)
+  assert.equal(
+    result.ok && result.afterText,
+    'I register those details. All right, there goes my first byte.',
+  )
+})
+
 test('splits and joins paragraphs with controlled whitespace', () => {
   const seeded = applyManualEdit(
     createDraftSession('structure-chat'),

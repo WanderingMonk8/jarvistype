@@ -802,6 +802,9 @@ function parseOperation(value) {
     ...includeTrailingPunctuation === true ? { includeTrailingPunctuation: true } : {}
   };
 }
+function trimTargetBoundary(text) {
+  return text.replace(/^[\s.!?…,;:]+/u, "").trim();
+}
 function parseTarget(value) {
   const allowed = /* @__PURE__ */ new Set([
     "paragraphId",
@@ -830,7 +833,9 @@ function parseTarget(value) {
   if (value.exactText !== void 0) {
     if (typeof value.exactText !== "string" || value.exactText.length < 1 || value.exactText.length > MAX_EDIT_TEXT_LENGTH)
       return null;
-    target.exactText = value.exactText;
+    const exactText = trimTargetBoundary(value.exactText);
+    if (!exactText) return null;
+    target.exactText = exactText;
   }
   if (value.approximateText !== void 0) {
     if (typeof value.approximateText !== "string" || value.approximateText.length < 1 || value.approximateText.length > MAX_EDIT_TEXT_LENGTH)

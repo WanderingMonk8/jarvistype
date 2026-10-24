@@ -5669,9 +5669,12 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
   };
 }
 function normalizeEditReferenceTargets(plan, draftText, cardCharacterReferences, conversationReferences) {
+  const draftReferences = extractConversationReferences([
+    { role: "assistant", content: draftText }
+  ]);
   const references = mergeConversationReferences(
-    cardCharacterReferences,
-    conversationReferences
+    mergeConversationReferences(cardCharacterReferences, conversationReferences),
+    draftReferences
   );
   if (!references.length) return plan;
   const normalizeValue = (value) => {

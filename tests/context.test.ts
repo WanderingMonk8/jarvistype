@@ -169,6 +169,20 @@ test('corrects lowercase edit targets from one unique proper-name reference', ()
   )
 })
 
+test('draft-extracted proper nouns can correct lowercase edit targets', () => {
+  const references = extractConversationReferences([
+    {
+      role: 'assistant',
+      content: "Ten paces back. I'll sooner trust you, Herbold, than the captain.",
+    },
+  ])
+  assert.ok(references.includes('Herbold'))
+  assert.equal(
+    correctEditTargetFromConversationReferences('herbode', references).text,
+    'Herbold',
+  )
+})
+
 test('corrects a unique two-character name ending only after a stable prefix', () => {
   assert.deepEqual(correctFromConversationReferences('Willie carried the lamp.', ['Willum']), {
     text: 'Willum carried the lamp.',

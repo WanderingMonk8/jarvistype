@@ -3278,9 +3278,12 @@ function normalizeEditReferenceTargets(
   cardCharacterReferences: string[],
   conversationReferences: string[],
 ): EditPlan {
+  const draftReferences = extractConversationReferences([
+    { role: 'assistant', content: draftText },
+  ])
   const references = mergeConversationReferences(
-    cardCharacterReferences,
-    conversationReferences,
+    mergeConversationReferences(cardCharacterReferences, conversationReferences),
+    draftReferences,
   )
   if (!references.length) return plan
 

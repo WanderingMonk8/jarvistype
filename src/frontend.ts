@@ -819,6 +819,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.sendOutcomeUnknown ||
       sendFlowActive ||
       voiceBusy()
+    scheduleFloatingContentFit()
   }
 
   const send = (request: FrontendRequest) => {
@@ -2318,7 +2319,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         Number.parseFloat(shellStyle.borderBottomWidth)
       const contentBottom =
         floatingTools.getBoundingClientRect().bottom -
-        floatingWidget.root.getBoundingClientRect().top
+        floatingShell.getBoundingClientRect().top
       const fittedHeight = Math.min(
         Math.max(1, viewport.height - 24),
         Math.ceil(contentBottom + bottomInset),
@@ -2920,7 +2921,7 @@ function shellMarkup(): string {
       .jt-launch { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: center; padding: .8rem; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: .75rem; }
       .jt-launch button { font-weight: 700; }
       .jt-floating-host { scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; }
-      .jt-floating { box-sizing: border-box; display: grid; grid-template-rows: auto auto; width: 100%; min-width: 0; min-height: 100%; overflow: visible; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: .9rem; background: var(--background, #171717); color: var(--foreground, inherit); box-shadow: 0 18px 55px rgb(0 0 0 / .38); }
+      .jt-floating { box-sizing: border-box; display: grid; grid-template-rows: auto auto; align-content: start; width: 100%; min-width: 0; min-height: 100%; overflow: visible; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: .9rem; background: var(--background, #171717); color: var(--foreground, inherit); box-shadow: 0 18px 55px rgb(0 0 0 / .38); }
       .jt-floating__bar { position: sticky; z-index: 10; top: 0; display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .55rem .7rem; border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent); background: var(--background, #171717); cursor: move; }
       .jt-floating__bar h2 { font-size: 1rem; }
       .jt-floating__body { min-height: 0; overflow: visible; }

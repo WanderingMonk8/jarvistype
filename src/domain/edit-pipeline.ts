@@ -1405,6 +1405,24 @@ function findAll(text: string, search: string, start: number, end: number): numb
   return matches
 }
 
+function findLexicallyBoundedExactMatches(
+  text: string,
+  search: string,
+  start: number,
+  end: number,
+): number[] {
+  return findAll(text, search, start, end).filter((index) => {
+    const searchStartsLexically = /^[\p{L}\p{M}\p{N}]/u.test(search)
+    const searchEndsLexically = /[\p{L}\p{M}\p{N}]$/u.test(search)
+    const preceding = index > start ? text[index - 1] : undefined
+    const following = index + search.length < end ? text[index + search.length] : undefined
+    return (
+      (!searchStartsLexically || preceding === undefined || !/[\p{L}\p{M}\p{N}]/u.test(preceding)) &&
+      (!searchEndsLexically || following === undefined || !/[\p{L}\p{M}\p{N}]/u.test(following))
+    )
+  })
+}
+
 function findExactOrFuzzyMatch(
   text: string,
   search: string,
@@ -1412,7 +1430,7 @@ function findExactOrFuzzyMatch(
   end: number,
   occurrence?: number,
 ): { start: number; end: number } | string {
-  const exactMatches = findAll(text, search, start, end)
+  const exactMatches = findLexicallyBoundedExactMatches(text, search, start, end)
   if (occurrence !== undefined) {
     const match = exactMatches[occurrence - 1]
     return match === undefined

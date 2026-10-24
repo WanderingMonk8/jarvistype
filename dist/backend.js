@@ -1543,8 +1543,17 @@ function findAll(text, search, start, end) {
   }
   return matches;
 }
+function findLexicallyBoundedExactMatches(text, search, start, end) {
+  return findAll(text, search, start, end).filter((index) => {
+    const searchStartsLexically = /^[\p{L}\p{M}\p{N}]/u.test(search);
+    const searchEndsLexically = /[\p{L}\p{M}\p{N}]$/u.test(search);
+    const preceding = index > start ? text[index - 1] : void 0;
+    const following = index + search.length < end ? text[index + search.length] : void 0;
+    return (!searchStartsLexically || preceding === void 0 || !/[\p{L}\p{M}\p{N}]/u.test(preceding)) && (!searchEndsLexically || following === void 0 || !/[\p{L}\p{M}\p{N}]/u.test(following));
+  });
+}
 function findExactOrFuzzyMatch(text, search, start, end, occurrence) {
-  const exactMatches = findAll(text, search, start, end);
+  const exactMatches = findLexicallyBoundedExactMatches(text, search, start, end);
   if (occurrence !== void 0) {
     const match = exactMatches[occurrence - 1];
     return match === void 0 ? "text target occurrence was not found" : { start: match, end: match + search.length };

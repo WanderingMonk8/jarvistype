@@ -1565,10 +1565,10 @@ function parseDeterministicSentenceTextDeletion(
   if (/[\r\n;]/u.test(instructionTranscript)) return null
   // “delete and speech” is a misheard “delete end speech”: remove the speech-end sentence.
   if (
-    /^(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+(?:the\s+)?(?:and|end)\s+speech[.!?]*$/iu.test(
+    /^(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+(?:the\s+)?(?:and|end)\s+(?:(?:a|the)\s+)?speech[.!?]*$/iu.test(
       instructionTranscript.trim(),
     ) &&
-    !/\band\s+speech\b/iu.test(session.cleanText)
+    !/\band\s+(?:a\s+)?speech\b/iu.test(session.cleanText)
   ) {
     return parseEditPlan({
       schemaVersion: 2,
@@ -4311,7 +4311,8 @@ async function loadDraft(
   const storedSession = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId)
   // A just-persisted local session can briefly be newer than a cross-device
   // storage read. Versions are monotonic, so never regress in that case.
-  const session = cached && cached.draftVersion > storedSession.draftVersion ? cached : storedSession
+  const session =
+    cached && cached.draftVersion > storedSession.draftVersion ? cached : storedSession
   draftCache.set(key, session)
   recordDebug(
     userId,

@@ -326,6 +326,13 @@ test('accepts an article in the begin speech alias and keeps natural usage liter
   )
 })
 
+test('recovers a closing end speech alias misheard as and a speech', () => {
+  assert.equal(
+    normalizeDeterministically('Begin the speech. Well, you know. And a speech.', []).text,
+    '“Well, you know.”',
+  )
+})
+
 test('leaves and speech literal without an unmatched opening alias', () => {
   const literal = [
     'I made a toast and speech.',

@@ -2886,14 +2886,17 @@ function recoverMistranscribedClosingAlias(text, beginPhrase, endPhrase) {
   if (beginCount !== 1 || endCount !== 0) return null;
   const kind = endPhrase.slice(endPhrase.indexOf(" ") + 1);
   const closingAliasPattern = new RegExp(
-    `\\b(and)\\s+(${kind})\\b([.,;:!?\u2026\u2014\u2013-]*)(?=\\s*(?:(?:period|full stop)\\b\\s*)?$)`,
+    `\\b(and)(?:\\s+(?:a|the))?\\s+(${kind})\\b([.,;:!?\u2026\u2014\u2013-]*)(?=\\s*(?:(?:period|full stop)\\b\\s*)?$)`,
     "iu"
   );
   if (!closingAliasPattern.test(text)) return null;
-  return text.replace(closingAliasPattern, (match, conjunction) => {
-    const replacement = conjunction === "AND" ? "END" : conjunction[0] === "A" ? "End" : "end";
-    return `${replacement}${match.slice(conjunction.length)}`;
-  });
+  return text.replace(
+    closingAliasPattern,
+    (_match, conjunction, word, punctuation) => {
+      const replacement = conjunction === "AND" ? "END" : conjunction[0] === "A" ? "End" : "end";
+      return `${replacement} ${word}${punctuation}`;
+    }
+  );
 }
 function stripProviderRenderedQuotesBesidePairedCommands(input, reason) {
   const phrase = reason === "quote" ? "(?<!single\\s)(?:quote|quotation)" : "single\\s+(?:quote|quotation)";
@@ -4323,9 +4326,9 @@ function parseDeterministicSentenceDeletion(instructionTranscript, draftVersion)
 }
 function parseDeterministicSentenceTextDeletion(instructionTranscript, session) {
   if (/[\r\n;]/u.test(instructionTranscript)) return null;
-  if (/^(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+(?:the\s+)?(?:and|end)\s+speech[.!?]*$/iu.test(
+  if (/^(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+(?:the\s+)?(?:and|end)\s+(?:(?:a|the)\s+)?speech[.!?]*$/iu.test(
     instructionTranscript.trim()
-  ) && !/\band\s+speech\b/iu.test(session.cleanText)) {
+  ) && !/\band\s+(?:a\s+)?speech\b/iu.test(session.cleanText)) {
     return parseEditPlan({
       schemaVersion: 2,
       draftVersion: session.draftVersion,

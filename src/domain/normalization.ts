@@ -574,14 +574,17 @@ function recoverMistranscribedClosingAlias(
   if (beginCount !== 1 || endCount !== 0) return null
   const kind = endPhrase.slice(endPhrase.indexOf(' ') + 1)
   const closingAliasPattern = new RegExp(
-    `\\b(and)\\s+(${kind})\\b([.,;:!?…—–-]*)(?=\\s*(?:(?:period|full stop)\\b\\s*)?$)`,
+    `\\b(and)(?:\\s+(?:a|the))?\\s+(${kind})\\b([.,;:!?…—–-]*)(?=\\s*(?:(?:period|full stop)\\b\\s*)?$)`,
     'iu',
   )
   if (!closingAliasPattern.test(text)) return null
-  return text.replace(closingAliasPattern, (match: string, conjunction: string) => {
-    const replacement = conjunction === 'AND' ? 'END' : conjunction[0] === 'A' ? 'End' : 'end'
-    return `${replacement}${match.slice(conjunction.length)}`
-  })
+  return text.replace(
+    closingAliasPattern,
+    (_match: string, conjunction: string, word: string, punctuation: string) => {
+      const replacement = conjunction === 'AND' ? 'END' : conjunction[0] === 'A' ? 'End' : 'end'
+      return `${replacement} ${word}${punctuation}`
+    },
+  )
 }
 
 function stripProviderRenderedQuotesBesidePairedCommands(

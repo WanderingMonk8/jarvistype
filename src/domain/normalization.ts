@@ -59,6 +59,8 @@ export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   'single quotation',
   'begin speech',
   'end speech',
+  'beginning speech',
+  'ending speech',
   'begin single',
   'end single',
 ] as const
@@ -98,7 +100,7 @@ const TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
 )
 
 const SPOKEN_PUNCTUATION_TERM_SOURCE =
-  'open single quote|close single quote|open quote|close quote|single quotation|single quote|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe'
+  'open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe'
 
 const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
@@ -225,7 +227,7 @@ export function normalizeDeterministically(
   const quotation = replaceSpokenQuotationCommands(
     text,
     protectedLiterals.some((literal) =>
-      /\b(?:(?:single\s+)?(?:quote|quotation)|begin\s+(?:speech|single)|end\s+(?:speech|single))\b/iu.test(
+      /\b(?:(?:single\s+)?(?:quote|quotation)|begin(?:ning)?\s+speech|end(?:ing)?\s+speech|begin\s+single|end\s+single)\b/iu.test(
         literal,
       ),
     ),
@@ -505,7 +507,13 @@ function replaceSpokenQuotationCommands(
     )
   }
 
-  replaceGuardedAliasPair('begin(?:\\s+the)?\\s+speech', 'end speech', '“', '”', 'quote')
+  replaceGuardedAliasPair(
+    'begin(?:ning)?(?:\\s+the)?\\s+speech',
+    'end(?:ing)? speech',
+    '“',
+    '”',
+    'quote',
+  )
   replaceGuardedAliasPair('begin single', 'end single', '‘', '’', 'single quote')
 
   const replaceFixed = (pattern: RegExp, mark: string, reason: string, opening = false) => {
@@ -552,7 +560,7 @@ function replaceSpokenQuotationCommands(
 }
 
 function hasNaturalAliasUsage(text: string): boolean {
-  return /\b(?:begin|end)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
+  return /\b(?:begin(?:ning)?|end(?:ing)?)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
     text,
   )
 }

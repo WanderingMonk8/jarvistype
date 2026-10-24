@@ -592,15 +592,15 @@ function preservesAuthoritativePunctuationMarks(
 function didHandleExplicitQuotationAlias(rawTranscript: string, candidateText: string): boolean {
   return (
     [
-      ['begin speech', 'end speech'],
-      ['begin single', 'end single'],
+      [/\bbegin(?:ning)?(?:\s+the)?\s+speech\b/iu, /\bend(?:ing)?\s+speech\b/iu],
+      [/\bbegin\s+single\b/iu, /\bend\s+single\b/iu],
     ] as const
   ).some(
     ([begin, end]) =>
-      containsCaseInsensitive(rawTranscript, begin) &&
-      containsCaseInsensitive(rawTranscript, end) &&
-      !containsCaseInsensitive(candidateText, begin) &&
-      !containsCaseInsensitive(candidateText, end),
+      begin.test(rawTranscript) &&
+      end.test(rawTranscript) &&
+      !begin.test(candidateText) &&
+      !end.test(candidateText),
   )
 }
 

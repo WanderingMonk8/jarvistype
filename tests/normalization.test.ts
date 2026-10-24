@@ -268,6 +268,17 @@ test('supports guarded speech quotation aliases without consuming natural usage'
     '“Hello there”.',
   )
   assert.equal(
+    normalizeDeterministically(
+      'beginning speech I have two full sheaves here ending speech period',
+      [],
+    ).text,
+    '“I have two full sheaves here”.',
+  )
+  assert.equal(
+    normalizeDeterministically('beginning speech mixed aliases work end speech period', []).text,
+    '“Mixed aliases work”.',
+  )
+  assert.equal(
     normalizeDeterministically('begin single a private thought end single period', []).text,
     '‘A private thought’.',
   )
@@ -277,6 +288,13 @@ test('supports guarded speech quotation aliases without consuming natural usage'
       [],
     ).text,
     'We begin speech therapy today and end speech therapy next week.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'We are beginning speech therapy today and ending speech therapy next week.',
+      [],
+    ).text,
+    'We are beginning speech therapy today and ending speech therapy next week.',
   )
   assert.equal(
     normalizeDeterministically('A lone begin speech remains literal.', []).text,

@@ -1740,6 +1740,58 @@ test('keeps spoken edit instructions out of the draft until the structured propo
   }
 })
 
+test('commits a chat-owned edit when the host global active chat drifts before approval', async () => {
+  const userId = 'edit-global-active-drift-user'
+  const chatId = 'edit-global-active-drift-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Digging a hole, it can disrupt the bugs living there.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the opening phrase.',
+    operations: [
+      {
+        id: 'delete-opening-phrase-after-active-drift',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'Digging a hole' },
+      },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-global-active-drift-interpret',
+      operationId: 'edit-global-active-drift-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Remove the phrase digging a hole.',
+    },
+    userId,
+  )
+  assert.equal(responses.at(-1)?.payload.type, 'edit.proposal.response')
+
+  activeChatId = 'host-global-chat-from-another-client'
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'edit-global-active-drift-confirm',
+      operationId: 'edit-global-active-drift-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type !== 'edit.proposal.response') return
+  assert.equal(committed.outcome, 'committed')
+  assert.equal(committed.snapshot?.cleanText, 'It can disrupt the bugs living there.')
+})
+
 test('extends a sentence-targeted paragraph break through terminal punctuation', async () => {
   const userId = 'sentence-split-user'
   const chatId = 'sentence-split-chat'

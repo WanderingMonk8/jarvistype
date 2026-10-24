@@ -1441,7 +1441,7 @@ function setup(ctx) {
     await drainMutations();
     const proposal = state.pendingEditProposal;
     if (!proposal || state.automatedBusy) return;
-    if (!state.snapshot || desiredText !== state.snapshot.cleanText || proposal.chatId !== state.snapshot.chatId || proposal.expectedVersion !== state.snapshot.draftVersion) {
+    if (!state.snapshot || ctx.getActiveChat().chatId !== proposal.chatId || desiredText !== state.snapshot.cleanText || proposal.chatId !== state.snapshot.chatId || proposal.expectedVersion !== state.snapshot.draftVersion) {
       state.pendingEditProposal = null;
       state.voicePhase = "error";
       state.voiceMessage = "The draft changed after this proposal was created. The stale proposal was discarded.";
@@ -2021,6 +2021,8 @@ function setup(ctx) {
     flushParagraphPreview();
     cancelActiveRecording("Recording cancelled because the active chat changed.");
     if (state.pendingProposal) rejectNormalizationProposal();
+    state.pendingEditProposal = null;
+    state.pendingEditCandidates = null;
     void refreshHostState();
   };
   let floatingLaunchReturnTarget = null;

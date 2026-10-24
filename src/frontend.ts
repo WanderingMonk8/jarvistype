@@ -1387,6 +1387,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (!proposal || state.automatedBusy) return
     if (
       !state.snapshot ||
+      ctx.getActiveChat().chatId !== proposal.chatId ||
       desiredText !== state.snapshot.cleanText ||
       proposal.chatId !== state.snapshot.chatId ||
       proposal.expectedVersion !== state.snapshot.draftVersion
@@ -2071,6 +2072,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     flushParagraphPreview()
     cancelActiveRecording('Recording cancelled because the active chat changed.')
     if (state.pendingProposal) rejectNormalizationProposal()
+    state.pendingEditProposal = null
+    state.pendingEditCandidates = null
     void refreshHostState()
   }
   let floatingLaunchReturnTarget: HTMLElement | null = null

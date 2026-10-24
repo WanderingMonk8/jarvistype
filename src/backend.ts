@@ -1031,9 +1031,6 @@ async function handleEditConfirmation(
     const session = await loadDraft(context.userId, request.chatId)
     if (session.draftVersion !== proposal.expectedVersion)
       return { error: 'stale-version' as const, session }
-    const activeChat = await spindle.chats.getActive(context.userId)
-    if (!activeChat || activeChat.id !== request.chatId)
-      return { error: 'chat-mismatch' as const, session }
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
     if (session.cleanText !== proposal.beforeText)
       return { error: 'proposal-mismatch' as const, session }
@@ -1075,9 +1072,7 @@ async function handleEditConfirmation(
     const message =
       result.error === 'stale-version'
         ? `The draft advanced to version ${result.session!.draftVersion} before approval. The stale proposal was discarded.`
-        : result.error === 'chat-mismatch'
-          ? 'The active chat changed before approval. Nothing was edited.'
-          : 'The edit proposal no longer matched the current draft. Nothing was edited.'
+        : 'The edit proposal no longer matched the current draft. Nothing was edited.'
     sendDraftError(request, context, 'EDIT_PROPOSAL_EXPIRED', message, result.session!)
     return
   }

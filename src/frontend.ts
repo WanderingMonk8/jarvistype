@@ -661,17 +661,18 @@ export function setup(ctx: SpindleFrontendContext): () => void {
               : state.voicePhase === 'review'
                 ? 'Review required'
                 : 'Record'
-    const ownRecordingRunning =
+    const recordingInProgress =
       activeRecording !== null &&
       (state.voicePhase === 'starting' || state.voicePhase === 'recording')
     recordButton.disabled =
-      !ownRecordingRunning &&
-      (!hasNativeStt() ||
-        !recordingOwnerReady ||
-        (voiceBusy() && activeRecording?.mode !== 'message') ||
-        state.voicePhase === 'processing' ||
-        state.voicePhase === 'committing' ||
-        state.voicePhase === 'review')
+      recordingInProgress
+        ? activeRecording?.mode !== 'message'
+        : !hasNativeStt() ||
+          !recordingOwnerReady ||
+          voiceBusy() ||
+          state.voicePhase === 'processing' ||
+          state.voicePhase === 'committing' ||
+          state.voicePhase === 'review'
     const editLive = activeRecording?.mode === 'edit'
     recordEditButton.dataset.recordingState =
       editLive && state.voicePhase === 'starting'
@@ -694,14 +695,15 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             ? 'Review required'
             : 'Edit'
     recordEditButton.disabled =
-      !ownRecordingRunning &&
-      (!hasNativeStt() ||
-        !recordingOwnerReady ||
-        !desiredText.trim() ||
-        (voiceBusy() && activeRecording?.mode !== 'edit') ||
-        state.voicePhase === 'processing' ||
-        state.voicePhase === 'committing' ||
-        state.voicePhase === 'review')
+      recordingInProgress
+        ? activeRecording?.mode !== 'edit'
+        : !hasNativeStt() ||
+          !recordingOwnerReady ||
+          !desiredText.trim() ||
+          voiceBusy() ||
+          state.voicePhase === 'processing' ||
+          state.voicePhase === 'committing' ||
+          state.voicePhase === 'review'
     cancelRecordingButton.style.visibility = messageIsLive ? 'visible' : 'hidden'
     cancelRecordingButton.disabled = !messageIsLive
     cancelEditRecordingButton.style.visibility = editIsLive ? 'visible' : 'hidden'

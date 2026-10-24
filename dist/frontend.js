@@ -874,8 +874,8 @@ function setup(ctx) {
     const messageIsLive = state.voicePhase === "recording" && activeRecording?.mode === "message";
     const editIsLive = state.voicePhase === "recording" && activeRecording?.mode === "edit";
     recordButton.textContent = state.voicePhase === "starting" && activeRecording?.mode !== "edit" ? "Preparing" : messageIsLive ? "\u25A0" : state.voicePhase === "processing" ? "Transcribing\u2026" : state.voicePhase === "committing" ? "Normalizing\u2026" : state.voicePhase === "review" ? "Review required" : "Record";
-    const ownRecordingRunning = activeRecording !== null && (state.voicePhase === "starting" || state.voicePhase === "recording");
-    recordButton.disabled = !ownRecordingRunning && (!hasNativeStt() || !recordingOwnerReady || voiceBusy() && activeRecording?.mode !== "message" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review");
+    const recordingInProgress = activeRecording !== null && (state.voicePhase === "starting" || state.voicePhase === "recording");
+    recordButton.disabled = recordingInProgress ? activeRecording?.mode !== "message" : !hasNativeStt() || !recordingOwnerReady || voiceBusy() || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
     const editLive = activeRecording?.mode === "edit";
     recordEditButton.dataset.recordingState = editLive && state.voicePhase === "starting" ? "starting" : editLive && state.voicePhase === "recording" ? "recording" : "";
     recordButton.setAttribute("aria-label", messageIsLive ? "Stop recording" : "Record");
@@ -885,7 +885,7 @@ function setup(ctx) {
     recordEditButton.title = editIsLive ? "Stop edit recording" : "";
     recordEditButton.parentElement?.setAttribute("data-live", String(editIsLive));
     recordEditButton.textContent = state.voicePhase === "starting" && activeRecording?.mode === "edit" ? "Preparing" : editIsLive ? "\u25A0" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Edit";
-    recordEditButton.disabled = !ownRecordingRunning && (!hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() && activeRecording?.mode !== "edit" || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review");
+    recordEditButton.disabled = recordingInProgress ? activeRecording?.mode !== "edit" : !hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
     cancelRecordingButton.style.visibility = messageIsLive ? "visible" : "hidden";
     cancelRecordingButton.disabled = !messageIsLive;
     cancelEditRecordingButton.style.visibility = editIsLive ? "visible" : "hidden";

@@ -80,6 +80,15 @@ test('extracts compact proper-name and specialized-term references from conversa
   )
 })
 
+test('does not extract sentence-opening auxiliaries and question words as names', () => {
+  assert.deepEqual(
+    extractConversationReferences([
+      { role: 'assistant', content: 'Do you understand? What happens next? Have we finished?' },
+    ]),
+    [],
+  )
+})
+
 test('extracts the canonical name from a descriptive card title', () => {
   assert.deepEqual(
     extractConversationReferences([
@@ -186,6 +195,10 @@ test('canonicalizes exact lowercase payload references while preserving ordinary
   assert.equal(
     canonicalizeExactConversationReferences('one watt of power', ['Watt']).text,
     'one watt of power',
+  )
+  assert.equal(
+    canonicalizeExactConversationReferences('Erbold, what do you mean by this?', ['Do']).text,
+    'Erbold, what do you mean by this?',
   )
 })
 

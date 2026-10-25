@@ -2057,7 +2057,7 @@ function canonicalizeExactConversationReferences(text, references, protectedTerm
       const baseKey = base.toLocaleLowerCase();
       const canonical = referenceByKey.get(baseKey);
       if (!canonical || canonical === base || protectedKeys.has(baseKey)) return heard;
-      if (isLikelyOneSyllable(canonical) && (hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey) || hasPrecedingQuantity(text, offset)))
+      if ((isLikelyOneSyllable(canonical) || AUXILIARY_WORDS.has(baseKey)) && (hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey) || hasPrecedingQuantity(text, offset)))
         return heard;
       correctedTerms.push({ heard: base, canonical });
       return `${canonical}${possessive}`;
@@ -2103,6 +2103,22 @@ function referenceMap(references) {
   return referenceByKey;
 }
 var MODAL_WORDS = /* @__PURE__ */ new Set(["can", "could", "may", "might", "must", "shall", "should", "will", "would"]);
+var AUXILIARY_WORDS = /* @__PURE__ */ new Set([
+  "am",
+  "are",
+  "be",
+  "been",
+  "being",
+  "did",
+  "do",
+  "does",
+  "had",
+  "has",
+  "have",
+  "is",
+  "was",
+  "were"
+]);
 var DETERMINERS = /* @__PURE__ */ new Set([
   "a",
   "an",
@@ -2151,6 +2167,7 @@ function hasProtectedOrdinaryWordUsage(text, start, end, heard) {
   const next = adjacentWord(text, end, "after");
   if (previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous))) return false;
   if (MODAL_WORDS.has(heard)) return true;
+  if (AUXILIARY_WORDS.has(heard)) return true;
   if (previous && DETERMINERS.has(previous)) return true;
   if (heard === "then") return true;
   if (COMMON_VERB_CONFUSABLES.has(heard) && (previous === "to" || previous !== void 0 && SUBJECT_WORDS.has(previous)))
@@ -2196,11 +2213,18 @@ var COMMON_CAPITALIZED_WORDS = /* @__PURE__ */ new Set([
   "as",
   "at",
   "but",
+  "did",
+  "do",
+  "does",
   "for",
   "from",
+  "had",
+  "has",
+  "have",
   "he",
   "her",
   "his",
+  "how",
   "i",
   "if",
   "in",
@@ -2220,13 +2244,19 @@ var COMMON_CAPITALIZED_WORDS = /* @__PURE__ */ new Set([
   "this",
   "to",
   "we",
+  "what",
   "when",
+  "where",
+  "which",
+  "who",
+  "why",
   "with",
   "you",
   "your"
 ]);
 function isReferenceTerm(term) {
-  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(term.toLocaleLowerCase())) return false;
+  const key = term.toLocaleLowerCase();
+  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(key) || AUXILIARY_WORDS.has(key)) return false;
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1));
 }
 function isHighConfidenceReferenceMatch(heard, reference) {

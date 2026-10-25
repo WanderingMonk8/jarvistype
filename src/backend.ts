@@ -389,6 +389,13 @@ async function handleTranscriptNormalization(
     explicitQuotationAliasHandled,
   } = prepared
   let candidateText = prepared.candidateText
+  // The active draft is a temporary, deliberately broad source for fuzzy identity only.
+  // It must not enter the persistent rolling cache or gain casing authority merely by
+  // appearing capitalized once, but it still needs to recover names the user pasted or
+  // misspelled before they have appeared in chat history.
+  const draftIdentificationReferences = extractConversationReferences([
+    { role: 'assistant', content: session.cleanText },
+  ])
   let contextualModelUsed = false
   if (settings.contextualNormalizationEnabled) {
     const contextualStartedAt = performance.now()
@@ -459,6 +466,19 @@ async function handleTranscriptNormalization(
       reasons.push(
         ...cardReferenceCorrection.correctedTerms.map(
           ({ heard, canonical }) => `character card spelling: ${heard} → ${canonical}`,
+        ),
+      )
+    }
+    const draftReferenceCorrection = correctFromConversationReferences(
+      candidateText,
+      draftIdentificationReferences,
+      protectedReferences,
+    )
+    if (draftReferenceCorrection.text !== candidateText) {
+      candidateText = draftReferenceCorrection.text
+      reasons.push(
+        ...draftReferenceCorrection.correctedTerms.map(
+          ({ heard, canonical }) => `active draft spelling: ${heard} → ${canonical}`,
         ),
       )
     }
@@ -3541,9 +3561,14 @@ function normalizeEditInputPayloads(
         cardCharacterReferences,
         protectedReferences,
       ).text
-      const normalized = correctFromConversationReferences(
+      const conversationNormalized = correctFromConversationReferences(
         cardNormalized,
         conversationReferences,
+        protectedReferences,
+      ).text
+      const normalized = correctFromConversationReferences(
+        conversationNormalized,
+        draftIdentificationReferences,
         protectedReferences,
       ).text
       return normalized === operation.text ? operation : { ...operation, text: normalized }

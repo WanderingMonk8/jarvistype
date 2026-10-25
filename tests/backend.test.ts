@@ -5946,6 +5946,58 @@ test('uses phonetic character references for recording normalization and edit ta
   assert.equal(generationRequests.length, 0)
 })
 
+test('keeps broad active-draft references available for recording fuzzy identification', async () => {
+  const userId = 'draft-fuzzy-recording-user'
+  const chatId = 'draft-fuzzy-recording-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'The road remains quiet.' }]
+  generationNormalizedText = null
+  await seedDraft(userId, chatId, 'I turn toward Herbold with a question.')
+
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    recordingAppendRequest(chatId, 'draft-fuzzy-recording', 1, 'Ervode answers me.'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.candidateText, 'Herbold answers me.')
+    assert.ok(response.proposal.reasons.includes('active draft spelling: Ervode → Herbold'))
+  }
+})
+
+test('keeps broad active-draft references available for edit payload fuzzy identification', async () => {
+  const userId = 'draft-fuzzy-payload-user'
+  const chatId = 'draft-fuzzy-payload-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'The road remains quiet.' }]
+  await seedDraft(userId, chatId, 'I speak to Herbold and the captain.')
+
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'draft-fuzzy-payload-interpret',
+      operationId: 'draft-fuzzy-payload-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace the captain with Ervode.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response')
+    assert.equal(response.proposal.afterText, 'I speak to Herbold and Herbold.')
+  assert.equal(generationRequests.length, 0)
+})
+
 async function seedDraft(userId: string, chatId: string, cleanText: string): Promise<void> {
   await dispatch(
     {

@@ -3742,6 +3742,9 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     explicitQuotationAliasHandled
   } = prepared;
   let candidateText = prepared.candidateText;
+  const draftIdentificationReferences = extractConversationReferences([
+    { role: "assistant", content: session.cleanText }
+  ]);
   let contextualModelUsed = false;
   if (settings.contextualNormalizationEnabled) {
     const contextualStartedAt = performance.now();
@@ -3802,6 +3805,19 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       reasons.push(
         ...cardReferenceCorrection.correctedTerms.map(
           ({ heard, canonical }) => `character card spelling: ${heard} \u2192 ${canonical}`
+        )
+      );
+    }
+    const draftReferenceCorrection = correctFromConversationReferences(
+      candidateText,
+      draftIdentificationReferences,
+      protectedReferences
+    );
+    if (draftReferenceCorrection.text !== candidateText) {
+      candidateText = draftReferenceCorrection.text;
+      reasons.push(
+        ...draftReferenceCorrection.correctedTerms.map(
+          ({ heard, canonical }) => `active draft spelling: ${heard} \u2192 ${canonical}`
         )
       );
     }
@@ -6235,9 +6251,14 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
         cardCharacterReferences,
         protectedReferences
       ).text;
-      const normalized = correctFromConversationReferences(
+      const conversationNormalized = correctFromConversationReferences(
         cardNormalized,
         conversationReferences,
+        protectedReferences
+      ).text;
+      const normalized = correctFromConversationReferences(
+        conversationNormalized,
+        draftIdentificationReferences,
         protectedReferences
       ).text;
       return normalized === operation.text ? operation : { ...operation, text: normalized };

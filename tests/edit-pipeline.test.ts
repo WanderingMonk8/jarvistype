@@ -765,6 +765,76 @@ test('deletion consumes one adjacent horizontal separator without touching other
     },
   )
   assert.equal(middleWord.ok && middleWord.afterText, 'Keep wording.')
+
+  const openingPhrase = executeEditPlan(
+    'Digging a hole, it can disrupt the bugs living there.',
+    [
+      {
+        id: 'opening-phrase-paragraph',
+        ordinal: 1,
+        lineIndex: 0,
+        text: 'Digging a hole, it can disrupt the bugs living there.',
+      },
+    ],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete an opening phrase and its orphaned separator',
+      operations: [
+        {
+          id: 'delete-opening-phrase',
+          type: 'delete',
+          target: { paragraphOrdinal: 1, exactText: 'Digging a hole' },
+        },
+      ],
+    },
+  )
+  assert.equal(openingPhrase.ok && openingPhrase.afterText, 'it can disrupt the bugs living there.')
+
+  const middlePhraseBeforeComma = executeEditPlan(
+    'Everyday they are digging a hole, despite the rain.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'preserve punctuation after a phrase within a sentence',
+      operations: [
+        {
+          id: 'delete-middle-phrase-before-comma',
+          type: 'delete',
+          target: { exactText: 'digging a hole' },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    middlePhraseBeforeComma.ok && middlePhraseBeforeComma.afterText,
+    'Everyday they are , despite the rain.',
+  )
+
+  const delimitedMiddlePhrase = executeEditPlan(
+    'And I say to the sergeant, beginning speech, I have two full sheaves here.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete a complete comma-delimited middle phrase',
+      operations: [
+        {
+          id: 'delete-delimited-middle-phrase',
+          type: 'delete',
+          target: { exactText: 'beginning speech' },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    delimitedMiddlePhrase.ok && delimitedMiddlePhrase.afterText,
+    'And I say to the sergeant, I have two full sheaves here.',
+  )
 })
 
 test('sentence deletion consumes adjacent terminal punctuation for short targets only when requested', () => {
@@ -838,6 +908,30 @@ test('deleting a whole sentence without a flag removes its period, but not a wor
     },
   )
   assert.equal(inside.ok && inside.afterText, 'I said . Done.')
+})
+
+test('a target that begins with the previous sentence punctuation never deletes that punctuation', () => {
+  const text = 'I register those details. Begin speech. All right, there goes my first byte.'
+  const plan = parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete the begin speech sentence',
+    operations: [
+      {
+        id: 'delete-begin',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: '. Begin speech' },
+        includeTrailingPunctuation: true,
+      },
+    ],
+  })
+  assert.ok(plan)
+  if (!plan) return
+  const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, plan)
+  assert.equal(
+    result.ok && result.afterText,
+    'I register those details. All right, there goes my first byte.',
+  )
 })
 
 test('splits and joins paragraphs with controlled whitespace', () => {
@@ -1534,6 +1628,38 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
   })
   assert.equal(shortWord.ok && shortWord.afterText, 'The document is ready.')
 
+  const prefixOfLongerWord = executeEditPlan('A precious sack rests nearby.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'replace a spoken near-match without leaving a word suffix behind',
+    operations: [
+      {
+        id: 'whole-word-fuzzy-fallback',
+        type: 'replace',
+        target: { exactText: 'sac' },
+        text: 'jewels',
+      },
+    ],
+  })
+  assert.equal(prefixOfLongerWord.ok && prefixOfLongerWord.afterText, 'A precious jewels rests nearby.')
+
+  const deletedPrefixOfLongerWord = executeEditPlan('A precious sack rests nearby.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'delete a spoken near-match without leaving a word suffix behind',
+    operations: [
+      {
+        id: 'whole-word-delete-fuzzy-fallback',
+        type: 'delete',
+        target: { exactText: 'sac' },
+      },
+    ],
+  })
+  assert.equal(
+    deletedPrefixOfLongerWord.ok && deletedPrefixOfLongerWord.afterText,
+    'A precious rests nearby.',
+  )
+
   const ambiguous = executeEditPlan('Mao let one pass. Mao let two pass.', [], 1, {
     schemaVersion: 2,
     draftVersion: 1,
@@ -1646,5 +1772,28 @@ test('matches an expanded contraction against contracted draft text', () => {
   assert.equal(
     contracted.ok && contracted.afterText,
     'Before turning on the light, reviewing an apartment.',
+  )
+
+  const colloquial = executeEditPlan(
+    'We gotta wait until most of those are trapped in the funnel before they let loose the arrows.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'match a colloquial contraction against its expanded target',
+      operations: [
+        {
+          id: 'expanded-colloquial-contraction',
+          type: 'replace',
+          target: { exactText: 'we got to wait' },
+          text: 'they are gonna wait',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    colloquial.ok && colloquial.afterText,
+    'They are gonna wait until most of those are trapped in the funnel before they let loose the arrows.',
   )
 })

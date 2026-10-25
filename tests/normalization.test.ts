@@ -268,6 +268,17 @@ test('supports guarded speech quotation aliases without consuming natural usage'
     '“Hello there”.',
   )
   assert.equal(
+    normalizeDeterministically(
+      'beginning speech I have two full sheaves here ending speech period',
+      [],
+    ).text,
+    '“I have two full sheaves here”.',
+  )
+  assert.equal(
+    normalizeDeterministically('beginning speech mixed aliases work end speech period', []).text,
+    '“Mixed aliases work”.',
+  )
+  assert.equal(
     normalizeDeterministically('begin single a private thought end single period', []).text,
     '‘A private thought’.',
   )
@@ -277,6 +288,13 @@ test('supports guarded speech quotation aliases without consuming natural usage'
       [],
     ).text,
     'We begin speech therapy today and end speech therapy next week.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'We are beginning speech therapy today and ending speech therapy next week.',
+      [],
+    ).text,
+    'We are beginning speech therapy today and ending speech therapy next week.',
   )
   assert.equal(
     normalizeDeterministically('A lone begin speech remains literal.', []).text,
@@ -323,6 +341,13 @@ test('accepts an article in the begin speech alias and keeps natural usage liter
       [],
     ).text,
     'We begin the speech therapy today and end speech therapy next week.',
+  )
+})
+
+test('recovers a closing end speech alias misheard as and a speech', () => {
+  assert.equal(
+    normalizeDeterministically('Begin the speech. Well, you know. And a speech.', []).text,
+    '“Well, you know.”',
   )
 })
 
@@ -474,6 +499,22 @@ test('collapses explicit spelling, obeys casing, and creates a learning candidat
   assert.equal(
     normalizeDeterministically('Use lowercase C-O-O-L-E-Y period', []).text,
     'Use cooley.',
+  )
+  assert.equal(
+    normalizeDeterministically('Use capitalized ERBOLD period', []).text,
+    'Use Erbold.',
+  )
+  assert.equal(
+    normalizeDeterministically('Use lowercase ERBOLD period', []).text,
+    'Use erbold.',
+  )
+  assert.equal(
+    normalizeDeterministically('Use uppercase ERBOLD period', []).text,
+    'Use ERBOLD.',
+  )
+  assert.equal(
+    normalizeDeterministically('NASA launched capitalized ERBOLD period', []).text,
+    'NASA launched Erbold.',
   )
   assert.equal(normalizeDeterministically('Use C-O-O-L-E-Y, Cooley period', []).text, 'Use Cooley.')
 

@@ -291,6 +291,14 @@ function parseOperation(value: unknown): EditOperation | null {
   }
 }
 
+/**
+ * A target names text the user spoke, never the punctuation that ends the previous sentence.
+ * Leading whitespace and sentence punctuation are dropped so a delete cannot take that mark.
+ */
+function trimTargetBoundary(text: string): string {
+  return text.replace(/^[\s.!?…,;:]+/u, '').trim()
+}
+
 function parseTarget(value: Record<string, unknown>): EditTarget | null {
   const allowed = new Set([
     'paragraphId',
@@ -323,7 +331,9 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
       value.exactText.length > MAX_EDIT_TEXT_LENGTH
     )
       return null
-    target.exactText = value.exactText
+    const exactText = trimTargetBoundary(value.exactText)
+    if (!exactText) return null
+    target.exactText = exactText
   }
   if (value.approximateText !== undefined) {
     if (
@@ -528,6 +538,16 @@ function resolveOperation(
       isWholeSentenceSpan(cleanText, start, end, range.start) &&
       /^\.(?!\.)/u.test(cleanText.slice(end, range.end))
     ) {
+      end += 1
+    } else if (isSentenceOpeningAt(cleanText, start)) {
+      const orphanedSeparator = cleanText.slice(end, range.end).match(/^[,;:](?=\s|$)/u)?.[0]
+      if (orphanedSeparator) end += orphanedSeparator.length
+    } else if (
+      /[,;:][ \t]*$/u.test(cleanText.slice(range.start, start)) &&
+      /^[,;:](?=\s|$)/u.test(cleanText.slice(end, range.end))
+    ) {
+      // A complete middle phrase has a separator on each side. Preserve the
+      // leading separator and consume the now-duplicate trailing one.
       end += 1
     }
     if (formatText) {
@@ -1395,6 +1415,24 @@ function findAll(text: string, search: string, start: number, end: number): numb
   return matches
 }
 
+function findLexicallyBoundedExactMatches(
+  text: string,
+  search: string,
+  start: number,
+  end: number,
+): number[] {
+  return findAll(text, search, start, end).filter((index) => {
+    const searchStartsLexically = /^[\p{L}\p{M}\p{N}]/u.test(search)
+    const searchEndsLexically = /[\p{L}\p{M}\p{N}]$/u.test(search)
+    const preceding = index > start ? text[index - 1] : undefined
+    const following = index + search.length < end ? text[index + search.length] : undefined
+    return (
+      (!searchStartsLexically || preceding === undefined || !/[\p{L}\p{M}\p{N}]/u.test(preceding)) &&
+      (!searchEndsLexically || following === undefined || !/[\p{L}\p{M}\p{N}]/u.test(following))
+    )
+  })
+}
+
 function findExactOrFuzzyMatch(
   text: string,
   search: string,
@@ -1402,7 +1440,7 @@ function findExactOrFuzzyMatch(
   end: number,
   occurrence?: number,
 ): { start: number; end: number } | string {
-  const exactMatches = findAll(text, search, start, end)
+  const exactMatches = findLexicallyBoundedExactMatches(text, search, start, end)
   if (occurrence !== undefined) {
     const match = exactMatches[occurrence - 1]
     return match === undefined
@@ -1425,6 +1463,13 @@ function findExactOrFuzzyMatch(
 }
 
 const CONTRACTIONS: Readonly<Record<string, readonly string[]>> = {
+  gotta: ['got', 'to'],
+  gonna: ['going', 'to'],
+  wanna: ['want', 'to'],
+  hafta: ['have', 'to'],
+  kinda: ['kind', 'of'],
+  sorta: ['sort', 'of'],
+  lemme: ['let', 'me'],
   "i'm": ['i', 'am'],
   "i've": ['i', 'have'],
   "i'll": ['i', 'will'],

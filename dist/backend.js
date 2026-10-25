@@ -802,6 +802,9 @@ function parseOperation(value) {
     ...includeTrailingPunctuation === true ? { includeTrailingPunctuation: true } : {}
   };
 }
+function trimTargetBoundary(text) {
+  return text.replace(/^[\s.!?…,;:]+/u, "").trim();
+}
 function parseTarget(value) {
   const allowed = /* @__PURE__ */ new Set([
     "paragraphId",
@@ -830,7 +833,9 @@ function parseTarget(value) {
   if (value.exactText !== void 0) {
     if (typeof value.exactText !== "string" || value.exactText.length < 1 || value.exactText.length > MAX_EDIT_TEXT_LENGTH)
       return null;
-    target.exactText = value.exactText;
+    const exactText = trimTargetBoundary(value.exactText);
+    if (!exactText) return null;
+    target.exactText = exactText;
   }
   if (value.approximateText !== void 0) {
     if (typeof value.approximateText !== "string" || value.approximateText.length < 1 || value.approximateText.length > MAX_EDIT_TEXT_LENGTH)
@@ -967,6 +972,11 @@ ${formattedParagraph}`,
     if (operation.includeTrailingPunctuation) {
       end = extendThroughTerminalPunctuation(cleanText, end, range.end);
     } else if (isWholeSentenceSpan(cleanText, start, end, range.start) && /^\.(?!\.)/u.test(cleanText.slice(end, range.end))) {
+      end += 1;
+    } else if (isSentenceOpeningAt(cleanText, start)) {
+      const orphanedSeparator = cleanText.slice(end, range.end).match(/^[,;:](?=\s|$)/u)?.[0];
+      if (orphanedSeparator) end += orphanedSeparator.length;
+    } else if (/[,;:][ \t]*$/u.test(cleanText.slice(range.start, start)) && /^[,;:](?=\s|$)/u.test(cleanText.slice(end, range.end))) {
       end += 1;
     }
     if (formatText) {
@@ -1538,8 +1548,17 @@ function findAll(text, search, start, end) {
   }
   return matches;
 }
+function findLexicallyBoundedExactMatches(text, search, start, end) {
+  return findAll(text, search, start, end).filter((index) => {
+    const searchStartsLexically = /^[\p{L}\p{M}\p{N}]/u.test(search);
+    const searchEndsLexically = /[\p{L}\p{M}\p{N}]$/u.test(search);
+    const preceding = index > start ? text[index - 1] : void 0;
+    const following = index + search.length < end ? text[index + search.length] : void 0;
+    return (!searchStartsLexically || preceding === void 0 || !/[\p{L}\p{M}\p{N}]/u.test(preceding)) && (!searchEndsLexically || following === void 0 || !/[\p{L}\p{M}\p{N}]/u.test(following));
+  });
+}
 function findExactOrFuzzyMatch(text, search, start, end, occurrence) {
-  const exactMatches = findAll(text, search, start, end);
+  const exactMatches = findLexicallyBoundedExactMatches(text, search, start, end);
   if (occurrence !== void 0) {
     const match = exactMatches[occurrence - 1];
     return match === void 0 ? "text target occurrence was not found" : { start: match, end: match + search.length };
@@ -1555,6 +1574,13 @@ function findExactOrFuzzyMatch(text, search, start, end, occurrence) {
   return approximate.includes("ambiguous") ? "fuzzy text target is ambiguous" : "text target was not found";
 }
 var CONTRACTIONS = {
+  gotta: ["got", "to"],
+  gonna: ["going", "to"],
+  wanna: ["want", "to"],
+  hafta: ["have", "to"],
+  kinda: ["kind", "of"],
+  sorta: ["sort", "of"],
+  lemme: ["let", "me"],
   "i'm": ["i", "am"],
   "i've": ["i", "have"],
   "i'll": ["i", "will"],
@@ -1946,21 +1972,23 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
     size += normalized.length;
   };
   for (const message of messages) {
-    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
-    let sequence = [];
-    const flushSequence = () => {
-      if (sequence.length > 1) add(sequence.slice(0, 4).join(" "));
-      for (const term of sequence) add(term);
-      sequence = [];
-    };
-    for (const term of terms) {
-      if (isReferenceTerm(term)) {
-        sequence.push(term);
-      } else {
-        flushSequence();
+    for (const segment of message.content.split(/[.!?;:,\n\r]+/u)) {
+      const terms = segment.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
+      let sequence = [];
+      const flushSequence = () => {
+        if (sequence.length > 1) add(sequence.slice(0, 4).join(" "));
+        for (const term of sequence) add(term);
+        sequence = [];
+      };
+      for (const term of terms) {
+        if (isReferenceTerm(term)) {
+          sequence.push(term);
+        } else {
+          flushSequence();
+        }
       }
+      flushSequence();
     }
-    flushSequence();
   }
   return references;
 }
@@ -1981,6 +2009,12 @@ function extractCardCharacterReferences(title, cardText) {
   return [...references.values()];
 }
 function correctFromConversationReferences(text, references, protectedTerms = []) {
+  return correctReferenceTerms(text, references, protectedTerms, true);
+}
+function correctEditTargetFromConversationReferences(text, references, protectedTerms = []) {
+  return correctReferenceTerms(text, references, protectedTerms, false);
+}
+function correctReferenceTerms(text, references, protectedTerms, requireInitialUppercase) {
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()));
   const referenceByKey = /* @__PURE__ */ new Map();
   for (const reference of references) {
@@ -1990,15 +2024,17 @@ function correctFromConversationReferences(text, references, protectedTerms = []
     referenceByKey.set(canonical.toLocaleLowerCase(), canonical);
   }
   const correctedTerms = [];
-  const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard) => {
+  const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard, offset) => {
     const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? "";
     const base = possessive ? heard.slice(0, -possessive.length) : heard;
     const baseKey = base.toLocaleLowerCase();
-    if (base.length < 3 || !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
+    if (base.length < 3 || requireInitialUppercase && !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
       return heard;
-    const candidates = [...referenceByKey.values()].filter(
-      (reference) => isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase())
-    );
+    const candidates = [...referenceByKey.values()].filter((reference) => {
+      if (requireInitialUppercase && !possessive && isLikelyOneSyllable(reference) && hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey))
+        return false;
+      return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase());
+    });
     const uniqueCandidates = [
       ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values()
     ];
@@ -2008,6 +2044,73 @@ function correctFromConversationReferences(text, references, protectedTerms = []
     return `${canonical}${possessive}`;
   });
   return { text: correctedText, correctedTerms };
+}
+var MODAL_WORDS = /* @__PURE__ */ new Set(["can", "could", "may", "might", "must", "shall", "should", "will", "would"]);
+var DETERMINERS = /* @__PURE__ */ new Set([
+  "a",
+  "an",
+  "the",
+  "this",
+  "that",
+  "these",
+  "those",
+  "my",
+  "your",
+  "his",
+  "her",
+  "its",
+  "our",
+  "their",
+  "each",
+  "every",
+  "some",
+  "any",
+  "no"
+]);
+var SUBJECT_WORDS = /* @__PURE__ */ new Set(["i", "you", "he", "she", "it", "we", "they", "who"]);
+var COMMON_VERB_CONFUSABLES = /* @__PURE__ */ new Set(["bill", "grant", "jack", "mark", "rose"]);
+var NAME_SIGNAL_WORDS = /* @__PURE__ */ new Set([
+  "ask",
+  "asked",
+  "call",
+  "called",
+  "greet",
+  "greeted",
+  "meet",
+  "met",
+  "named",
+  "thank",
+  "thanked",
+  "tell",
+  "told"
+]);
+var NAME_TITLES = /* @__PURE__ */ new Set(["captain", "doctor", "dr", "miss", "mister", "mr", "mrs", "ms", "professor"]);
+function hasProtectedOrdinaryWordUsage(text, start, end, heard) {
+  const previous = adjacentWord(text, start, "before");
+  const next = adjacentWord(text, end, "after");
+  if (previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous))) return false;
+  if (MODAL_WORDS.has(heard)) return true;
+  if (previous && DETERMINERS.has(previous)) return true;
+  if (heard === "then") return true;
+  if (COMMON_VERB_CONFUSABLES.has(heard) && (previous === "to" || previous !== void 0 && SUBJECT_WORDS.has(previous)))
+    return true;
+  if (heard === "mark" && next === "my") return true;
+  if (heard === "bill" && next === "of") return true;
+  if (heard === "jack" && next === "up") return true;
+  return false;
+}
+function adjacentWord(text, offset, direction) {
+  const source = direction === "before" ? text.slice(0, offset) : text.slice(offset);
+  const match = direction === "before" ? source.match(/([\p{L}\p{M}]+)[^\p{L}\p{M}]*$/u) : source.match(/^[^\p{L}\p{M}]*([\p{L}\p{M}]+)/u);
+  return match?.[1]?.toLocaleLowerCase();
+}
+function isLikelyOneSyllable(value) {
+  const normalized = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/[^a-z]/gu, "");
+  if (!normalized) return false;
+  let vowelGroups = normalized.match(/[aeiouy]+/gu)?.length ?? 0;
+  if (vowelGroups > 1 && /[^aeiou]e$/u.test(normalized) && !/[^aeiou]le$/u.test(normalized))
+    vowelGroups -= 1;
+  return vowelGroups <= 1;
 }
 function eligibleCount(source) {
   return source.filter(isEligible).length;
@@ -2524,6 +2627,8 @@ var SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   "single quotation",
   "begin speech",
   "end speech",
+  "beginning speech",
+  "ending speech",
   "begin single",
   "end single"
 ];
@@ -2554,7 +2659,7 @@ var TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
   "\\.+(?=\\s*\\b(?:question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)",
   "giu"
 );
-var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
+var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
 var LITERAL_PUNCTUATION_CONTEXTS = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
   /\btime\s+period\b/gi,
@@ -2619,7 +2724,7 @@ function normalizeDeterministically(raw, glossary, options = {}) {
   const quotation = replaceSpokenQuotationCommands(
     text,
     protectedLiterals.some(
-      (literal) => /\b(?:(?:single\s+)?(?:quote|quotation)|begin\s+(?:speech|single)|end\s+(?:speech|single))\b/iu.test(
+      (literal) => /\b(?:(?:single\s+)?(?:quote|quotation)|begin(?:ning)?\s+speech|end(?:ing)?\s+speech|begin\s+single|end\s+single)\b/iu.test(
         literal
       )
     )
@@ -2838,7 +2943,13 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
       }
     );
   };
-  replaceGuardedAliasPair("begin(?:\\s+the)?\\s+speech", "end speech", "\u201C", "\u201D", "quote");
+  replaceGuardedAliasPair(
+    "begin(?:ning)?(?:\\s+the)?\\s+speech",
+    "end(?:ing)? speech",
+    "\u201C",
+    "\u201D",
+    "quote"
+  );
   replaceGuardedAliasPair("begin single", "end single", "\u2018", "\u2019", "single quote");
   const replaceFixed = (pattern, mark, reason, opening = false) => {
     text = text.replace(pattern, (_whole, attachedPunctuation, offset) => {
@@ -2873,7 +2984,7 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
   return { text, marks, reasons };
 }
 function hasNaturalAliasUsage(text) {
-  return /\b(?:begin|end)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
+  return /\b(?:begin(?:ning)?|end(?:ing)?)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
     text
   );
 }
@@ -2884,14 +2995,17 @@ function recoverMistranscribedClosingAlias(text, beginPhrase, endPhrase) {
   if (beginCount !== 1 || endCount !== 0) return null;
   const kind = endPhrase.slice(endPhrase.indexOf(" ") + 1);
   const closingAliasPattern = new RegExp(
-    `\\b(and)\\s+(${kind})\\b([.,;:!?\u2026\u2014\u2013-]*)(?=\\s*(?:(?:period|full stop)\\b\\s*)?$)`,
+    `\\b(and)(?:\\s+(?:a|the))?\\s+(${kind})\\b([.,;:!?\u2026\u2014\u2013-]*)(?=\\s*(?:(?:period|full stop)\\b\\s*)?$)`,
     "iu"
   );
   if (!closingAliasPattern.test(text)) return null;
-  return text.replace(closingAliasPattern, (match, conjunction) => {
-    const replacement = conjunction === "AND" ? "END" : conjunction[0] === "A" ? "End" : "end";
-    return `${replacement}${match.slice(conjunction.length)}`;
-  });
+  return text.replace(
+    closingAliasPattern,
+    (_match, conjunction, word, punctuation) => {
+      const replacement = conjunction === "AND" ? "END" : conjunction[0] === "A" ? "End" : "end";
+      return `${replacement} ${word}${punctuation}`;
+    }
+  );
 }
 function stripProviderRenderedQuotesBesidePairedCommands(input, reason) {
   const phrase = reason === "quote" ? "(?<!single\\s)(?:quote|quotation)" : "single\\s+(?:quote|quotation)";
@@ -2956,6 +3070,16 @@ function replaceExplicitSpelling(input) {
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : void 0;
       if (!/[A-Z]{2,}/.test(spoken) || !casing && !matchingCue) return whole;
       const canonical = matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? spoken, casing);
+      learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
+      return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
+    }
+  );
+  const compactUppercasePattern = /\b(all caps|uppercase|lowercase|capitalized?)\s+([A-Z]{3,})(?![A-Za-z])(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/g;
+  text = text.replace(
+    compactUppercasePattern,
+    (_whole, casing, spoken, separator, cue) => {
+      const matchingCue = cueMatchesLetters(cue, spoken) ? cue : void 0;
+      const canonical = applySpellingCasing(matchingCue ?? spoken, casing);
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
     }
@@ -3517,10 +3641,10 @@ function preservesAuthoritativePunctuationMarks(deterministicCandidate, contextu
 }
 function didHandleExplicitQuotationAlias(rawTranscript, candidateText) {
   return [
-    ["begin speech", "end speech"],
-    ["begin single", "end single"]
+    [/\bbegin(?:ning)?(?:\s+the)?\s+speech\b/iu, /\bend(?:ing)?\s+speech\b/iu],
+    [/\bbegin\s+single\b/iu, /\bend\s+single\b/iu]
   ].some(
-    ([begin, end]) => containsCaseInsensitive(rawTranscript, begin) && containsCaseInsensitive(rawTranscript, end) && !containsCaseInsensitive(candidateText, begin) && !containsCaseInsensitive(candidateText, end)
+    ([begin, end]) => begin.test(rawTranscript) && end.test(rawTranscript) && !begin.test(candidateText) && !end.test(candidateText)
   );
 }
 function countCaseInsensitiveOccurrences(value, search) {
@@ -3680,17 +3804,22 @@ async function handleEditInterpretation(request, context, activeRequest) {
     );
     if (activeRequest.cancelled) return { error: "cancelled", session };
     if (!interpretedPlan) return { error: "interpretation", session };
-    const plan = normalizeEditInputPayloads(
-      stripQualifiedAsInEditPayloads(
-        enforceAuthoritativeEditSpellings(
-          normalizeParagraphBoundaryInsertions(interpretedPlan, request.instructionTranscript),
-          spelling.learningCandidates
-        )
+    const plan = normalizeEditReferenceTargets(
+      normalizeEditInputPayloads(
+        stripQualifiedAsInEditPayloads(
+          enforceAuthoritativeEditSpellings(
+            normalizeParagraphBoundaryInsertions(interpretedPlan, request.instructionTranscript),
+            spelling.learningCandidates
+          )
+        ),
+        glossary,
+        cardCharacterReferences,
+        conversationReferences,
+        spelling.learningCandidates.map((candidate) => candidate.canonical)
       ),
-      glossary,
+      session.cleanText,
       cardCharacterReferences,
-      conversationReferences,
-      spelling.learningCandidates.map((candidate) => candidate.canonical)
+      conversationReferences
     );
     const executeStartedAt = performance.now();
     const executed = executeEditPlan(
@@ -3886,9 +4015,6 @@ async function handleEditConfirmation(request, context, activeRequest) {
     const session = await loadDraft(context.userId, request.chatId);
     if (session.draftVersion !== proposal.expectedVersion)
       return { error: "stale-version", session };
-    const activeChat = await spindle.chats.getActive(context.userId);
-    if (!activeChat || activeChat.id !== request.chatId)
-      return { error: "chat-mismatch", session };
     if (activeRequest.cancelled) return { error: "cancelled", session };
     if (session.cleanText !== proposal.beforeText)
       return { error: "proposal-mismatch", session };
@@ -3925,7 +4051,7 @@ async function handleEditConfirmation(request, context, activeRequest) {
   });
   if (activeRequest.cancelled) return;
   if ("error" in result) {
-    const message = result.error === "stale-version" ? `The draft advanced to version ${result.session.draftVersion} before approval. The stale proposal was discarded.` : result.error === "chat-mismatch" ? "The active chat changed before approval. Nothing was edited." : "The edit proposal no longer matched the current draft. Nothing was edited.";
+    const message = result.error === "stale-version" ? `The draft advanced to version ${result.session.draftVersion} before approval. The stale proposal was discarded.` : "The edit proposal no longer matched the current draft. Nothing was edited.";
     sendDraftError(request, context, "EDIT_PROPOSAL_EXPIRED", message, result.session);
     return;
   }
@@ -4321,9 +4447,9 @@ function parseDeterministicSentenceDeletion(instructionTranscript, draftVersion)
 }
 function parseDeterministicSentenceTextDeletion(instructionTranscript, session) {
   if (/[\r\n;]/u.test(instructionTranscript)) return null;
-  if (/^(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+(?:the\s+)?(?:and|end)\s+speech[.!?]*$/iu.test(
+  if (/^(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+(?:the\s+)?(?:and|end)\s+(?:(?:a|the)\s+)?speech[.!?]*$/iu.test(
     instructionTranscript.trim()
-  ) && !/\band\s+speech\b/iu.test(session.cleanText)) {
+  ) && !/\band\s+(?:a\s+)?speech\b/iu.test(session.cleanText)) {
     return parseEditPlan({
       schemaVersion: 2,
       draftVersion: session.draftVersion,
@@ -5617,6 +5743,43 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
       return normalized === operation.text ? operation : { ...operation, text: normalized };
     })
   };
+}
+function normalizeEditReferenceTargets(plan, draftText, cardCharacterReferences, conversationReferences) {
+  const draftReferences = extractConversationReferences([
+    { role: "assistant", content: draftText }
+  ]);
+  const references = mergeConversationReferences(
+    mergeConversationReferences(cardCharacterReferences, conversationReferences),
+    draftReferences
+  );
+  if (!references.length) return plan;
+  const normalizeValue = (value) => {
+    if (!value || editTargetTextExists(draftText, value)) return value;
+    return correctEditTargetFromConversationReferences(value, references).text;
+  };
+  const normalizeTarget = (target) => {
+    const exactText = normalizeValue(target.exactText);
+    const approximateText = normalizeValue(target.approximateText);
+    const relativeToText = normalizeValue(target.relativeToText);
+    if (exactText === target.exactText && approximateText === target.approximateText && relativeToText === target.relativeToText)
+      return target;
+    return { ...target, exactText, approximateText, relativeToText };
+  };
+  return {
+    ...plan,
+    operations: plan.operations.map((operation) => ({
+      ...operation,
+      target: normalizeTarget(operation.target),
+      ...operation.destination ? { destination: normalizeTarget(operation.destination) } : {}
+    }))
+  };
+}
+function editTargetTextExists(draftText, targetText) {
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])${apostropheFlexiblePattern(targetText)}(?![\\p{L}\\p{N}])`,
+    "iu"
+  );
+  return pattern.test(draftText);
 }
 function escapeRegularExpression(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

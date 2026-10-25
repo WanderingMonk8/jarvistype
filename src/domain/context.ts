@@ -140,22 +140,26 @@ export function extractConversationReferences(
   }
 
   for (const message of messages) {
-    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
-    let sequence: string[] = []
-    const flushSequence = () => {
-      if (sequence.length > 1) add(sequence.slice(0, 4).join(' '))
-      for (const term of sequence) add(term)
-      sequence = []
-    }
-
-    for (const term of terms) {
-      if (isReferenceTerm(term)) {
-        sequence.push(term)
-      } else {
-        flushSequence()
+    // Names never continue across sentence or clause punctuation, so “Hana Sato. Later, Marcus”
+    // yields “Hana Sato” and “Marcus”, not one combined phrase.
+    for (const segment of message.content.split(/[.!?;:,\n\r]+/u)) {
+      const terms = segment.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
+      let sequence: string[] = []
+      const flushSequence = () => {
+        if (sequence.length > 1) add(sequence.slice(0, 4).join(' '))
+        for (const term of sequence) add(term)
+        sequence = []
       }
+
+      for (const term of terms) {
+        if (isReferenceTerm(term)) {
+          sequence.push(term)
+        } else {
+          flushSequence()
+        }
+      }
+      flushSequence()
     }
-    flushSequence()
   }
 
   return references
@@ -189,6 +193,24 @@ export function correctFromConversationReferences(
   references: readonly string[],
   protectedTerms: readonly string[] = [],
 ): ConversationReferenceCorrection {
+  return correctReferenceTerms(text, references, protectedTerms, true)
+}
+
+/** Edit targets may be lowercased even when they name a proper noun. */
+export function correctEditTargetFromConversationReferences(
+  text: string,
+  references: readonly string[],
+  protectedTerms: readonly string[] = [],
+): ConversationReferenceCorrection {
+  return correctReferenceTerms(text, references, protectedTerms, false)
+}
+
+function correctReferenceTerms(
+  text: string,
+  references: readonly string[],
+  protectedTerms: readonly string[],
+  requireInitialUppercase: boolean,
+): ConversationReferenceCorrection {
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()))
   const referenceByKey = new Map<string, string>()
   for (const reference of references) {
@@ -199,21 +221,28 @@ export function correctFromConversationReferences(
   }
 
   const correctedTerms: Array<{ heard: string; canonical: string }> = []
-  const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard) => {
+  const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard, offset: number) => {
     const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
     const base = possessive ? heard.slice(0, -possessive.length) : heard
     const baseKey = base.toLocaleLowerCase()
     if (
       base.length < 3 ||
-      !/^\p{Lu}/u.test(base) ||
+      (requireInitialUppercase && !/^\p{Lu}/u.test(base)) ||
       protectedKeys.has(baseKey) ||
       referenceByKey.has(baseKey)
     )
       return heard
 
-    const candidates = [...referenceByKey.values()].filter((reference) =>
-      isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase()),
-    )
+    const candidates = [...referenceByKey.values()].filter((reference) => {
+      if (
+        requireInitialUppercase &&
+        !possessive &&
+        isLikelyOneSyllable(reference) &&
+        hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey)
+      )
+        return false
+      return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase())
+    })
     const uniqueCandidates = [
       ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values(),
     ]
@@ -225,6 +254,97 @@ export function correctFromConversationReferences(
   })
 
   return { text: correctedText, correctedTerms }
+}
+
+const MODAL_WORDS = new Set(['can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would'])
+const DETERMINERS = new Set([
+  'a',
+  'an',
+  'the',
+  'this',
+  'that',
+  'these',
+  'those',
+  'my',
+  'your',
+  'his',
+  'her',
+  'its',
+  'our',
+  'their',
+  'each',
+  'every',
+  'some',
+  'any',
+  'no',
+])
+const SUBJECT_WORDS = new Set(['i', 'you', 'he', 'she', 'it', 'we', 'they', 'who'])
+const COMMON_VERB_CONFUSABLES = new Set(['bill', 'grant', 'jack', 'mark', 'rose'])
+const NAME_SIGNAL_WORDS = new Set([
+  'ask',
+  'asked',
+  'call',
+  'called',
+  'greet',
+  'greeted',
+  'meet',
+  'met',
+  'named',
+  'thank',
+  'thanked',
+  'tell',
+  'told',
+])
+const NAME_TITLES = new Set(['captain', 'doctor', 'dr', 'miss', 'mister', 'mr', 'mrs', 'ms', 'professor'])
+
+function hasProtectedOrdinaryWordUsage(
+  text: string,
+  start: number,
+  end: number,
+  heard: string,
+): boolean {
+  const previous = adjacentWord(text, start, 'before')
+  const next = adjacentWord(text, end, 'after')
+  if (previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous))) return false
+
+  if (MODAL_WORDS.has(heard)) return true
+  if (previous && DETERMINERS.has(previous)) return true
+  if (heard === 'then') return true
+  if (
+    COMMON_VERB_CONFUSABLES.has(heard) &&
+    (previous === 'to' || (previous !== undefined && SUBJECT_WORDS.has(previous)))
+  )
+    return true
+  if (heard === 'mark' && next === 'my') return true
+  if (heard === 'bill' && next === 'of') return true
+  if (heard === 'jack' && next === 'up') return true
+  return false
+}
+
+function adjacentWord(
+  text: string,
+  offset: number,
+  direction: 'before' | 'after',
+): string | undefined {
+  const source = direction === 'before' ? text.slice(0, offset) : text.slice(offset)
+  const match =
+    direction === 'before'
+      ? source.match(/([\p{L}\p{M}]+)[^\p{L}\p{M}]*$/u)
+      : source.match(/^[^\p{L}\p{M}]*([\p{L}\p{M}]+)/u)
+  return match?.[1]?.toLocaleLowerCase()
+}
+
+function isLikelyOneSyllable(value: string): boolean {
+  const normalized = value
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase()
+    .replace(/[^a-z]/gu, '')
+  if (!normalized) return false
+  let vowelGroups = normalized.match(/[aeiouy]+/gu)?.length ?? 0
+  if (vowelGroups > 1 && /[^aeiou]e$/u.test(normalized) && !/[^aeiou]le$/u.test(normalized))
+    vowelGroups -= 1
+  return vowelGroups <= 1
 }
 
 function eligibleCount(source: readonly ContextSourceMessage[]): number {
@@ -322,10 +442,7 @@ function isHighConfidenceReferenceMatch(heard: string, reference: string): boole
 }
 
 function referenceSoundKey(value: string): string {
-  const prepared = value
-    .normalize('NFKD')
-    .toLocaleLowerCase()
-    .replace(/\p{M}/gu, '')
+  const prepared = value.normalize('NFKD').toLocaleLowerCase().replace(/\p{M}/gu, '')
   let key = ''
   for (const character of prepared) {
     const sound = /[aeiouy]/u.test(character)

@@ -1740,6 +1740,58 @@ test('keeps spoken edit instructions out of the draft until the structured propo
   }
 })
 
+test('commits a chat-owned edit when the host global active chat drifts before approval', async () => {
+  const userId = 'edit-global-active-drift-user'
+  const chatId = 'edit-global-active-drift-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Digging a hole, it can disrupt the bugs living there.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the opening phrase.',
+    operations: [
+      {
+        id: 'delete-opening-phrase-after-active-drift',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'Digging a hole' },
+      },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'edit-global-active-drift-interpret',
+      operationId: 'edit-global-active-drift-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Remove the phrase digging a hole.',
+    },
+    userId,
+  )
+  assert.equal(responses.at(-1)?.payload.type, 'edit.proposal.response')
+
+  activeChatId = 'host-global-chat-from-another-client'
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.confirm.request',
+      requestId: 'edit-global-active-drift-confirm',
+      operationId: 'edit-global-active-drift-operation',
+      chatId,
+      expectedVersion: 1,
+    },
+    userId,
+  )
+
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type !== 'edit.proposal.response') return
+  assert.equal(committed.outcome, 'committed')
+  assert.equal(committed.snapshot?.cleanText, 'It can disrupt the bugs living there.')
+})
+
 test('extends a sentence-targeted paragraph break through terminal punctuation', async () => {
   const userId = 'sentence-split-user'
   const chatId = 'sentence-split-chat'
@@ -4709,6 +4761,93 @@ test('fixes errant punctuation and sentence casing left by an edit', async () =>
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'First sentence. Second sentence.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('removes an orphaned opening separator and capitalizes the remaining sentence locally', async () => {
+  const userId = 'opening-phrase-cleanup-user'
+  const chatId = 'opening-phrase-cleanup-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Digging a hole, it can disrupt the bugs living there.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the opening phrase.',
+    operations: [
+      {
+        id: 'delete-opening-phrase',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'Digging a hole' },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'opening-phrase-cleanup-interpret',
+      operationId: 'opening-phrase-cleanup-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the phrase digging a hole.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'It can disrupt the bugs living there.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('removes the duplicate trailing separator when deleting a delimited middle phrase', async () => {
+  const userId = 'middle-phrase-cleanup-user'
+  const chatId = 'middle-phrase-cleanup-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    'And I say to the sergeant, beginning speech, I have two full sheaves here.',
+  )
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the comma-delimited middle phrase.',
+    operations: [
+      {
+        id: 'delete-delimited-middle-phrase',
+        type: 'delete',
+        target: { paragraphOrdinal: 1, exactText: 'beginning speech' },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'middle-phrase-cleanup-interpret',
+      operationId: 'middle-phrase-cleanup-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Delete the phrase beginning speech.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    'And I say to the sergeant, I have two full sheaves here.',
+  )
   assert.equal(generationRequests.length, 0)
 })
 

@@ -77,7 +77,7 @@ export const COMMAND_GROUPS = [
       ],
       [
         'Quotations',
-        'Say “quote” or “quotation” at both ends of a quotation, or “begin speech” and “end speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”',
+        'Say “quote” or “quotation” at both ends of a quotation; use “begin speech” and “end speech,” or “beginning speech” and “ending speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”',
       ],
       ['Explicit punctuation', 'Say “insert period,” “punctuation colon,” or “command new line.”'],
       [
@@ -182,6 +182,7 @@ function describeEditDestination(destination: EditTarget | undefined): string {
 }
 
 interface ActiveRecording {
+  chatId: string
   runId: string
   operationId: string
   session: SpindleSTTSession
@@ -193,6 +194,7 @@ interface ActiveRecording {
 
 interface ComposerState {
   activeChatId: string | null
+  voiceChatId: string | null
   snapshot: DraftSnapshot | null
   backendState: BackendState
   backendVersion: string | null
@@ -384,7 +386,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const debugCopyButton = requireElement<HTMLButtonElement>(tab.root, '[data-debug-copy]')
   const debugClearButton = requireElement<HTMLButtonElement>(tab.root, '[data-debug-clear]')
   const debugStatus = requireElement<HTMLElement>(tab.root, '[data-debug-status]')
-  const saveSettingsButton = requireElement<HTMLButtonElement>(tab.root, '[data-settings-save]')
   const normalizationConnectionSelect = requireElement<HTMLSelectElement>(
     tab.root,
     '[data-normalization-connection]',
@@ -445,6 +446,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const state: ComposerState = {
     activeChatId: ctx.getActiveChat().chatId,
+    voiceChatId: null,
     snapshot: null,
     backendState: 'connecting',
     backendVersion: null,
@@ -493,6 +495,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     browseHint: 'Search models available through the selected Lumiverse connection.',
     onChange: (model) => {
       state.settings.normalizationModelOverride = model
+      scheduleSettingsSave(0)
     },
   })
   let modelPickerConnectionId: string | null = null
@@ -514,6 +517,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   let recordingDeadline: ReturnType<typeof setTimeout> | null = null
   let recordingStartedAt = 0
   let editingGlossaryEntryId: string | undefined
+  const lastRecordingByChat = new Map<
+    string,
+    { text: string; provider: string | null; elapsedMs: number }
+  >()
   let drawerGlossaryQuery = ''
   let floatingGlossaryQuery = ''
   const disposers: Array<() => void> = []
@@ -654,17 +661,18 @@ export function setup(ctx: SpindleFrontendContext): () => void {
               : state.voicePhase === 'review'
                 ? 'Review required'
                 : 'Record'
-    const ownRecordingRunning =
+    const recordingInProgress =
       activeRecording !== null &&
       (state.voicePhase === 'starting' || state.voicePhase === 'recording')
     recordButton.disabled =
-      !ownRecordingRunning &&
-      (!hasNativeStt() ||
-        !recordingOwnerReady ||
-        (voiceBusy() && activeRecording?.mode !== 'message') ||
-        state.voicePhase === 'processing' ||
-        state.voicePhase === 'committing' ||
-        state.voicePhase === 'review')
+      recordingInProgress
+        ? activeRecording?.mode !== 'message'
+        : !hasNativeStt() ||
+          !recordingOwnerReady ||
+          voiceBusy() ||
+          state.voicePhase === 'processing' ||
+          state.voicePhase === 'committing' ||
+          state.voicePhase === 'review'
     const editLive = activeRecording?.mode === 'edit'
     recordEditButton.dataset.recordingState =
       editLive && state.voicePhase === 'starting'
@@ -687,14 +695,15 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             ? 'Review required'
             : 'Edit'
     recordEditButton.disabled =
-      !ownRecordingRunning &&
-      (!hasNativeStt() ||
-        !recordingOwnerReady ||
-        !desiredText.trim() ||
-        (voiceBusy() && activeRecording?.mode !== 'edit') ||
-        state.voicePhase === 'processing' ||
-        state.voicePhase === 'committing' ||
-        state.voicePhase === 'review')
+      recordingInProgress
+        ? activeRecording?.mode !== 'edit'
+        : !hasNativeStt() ||
+          !recordingOwnerReady ||
+          !desiredText.trim() ||
+          voiceBusy() ||
+          state.voicePhase === 'processing' ||
+          state.voicePhase === 'committing' ||
+          state.voicePhase === 'review'
     cancelRecordingButton.style.visibility = messageIsLive ? 'visible' : 'hidden'
     cancelRecordingButton.disabled = !messageIsLive
     cancelEditRecordingButton.style.visibility = editIsLive ? 'visible' : 'hidden'
@@ -810,6 +819,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.sendOutcomeUnknown ||
       sendFlowActive ||
       voiceBusy()
+    scheduleFloatingContentFit()
   }
 
   const send = (request: FrontendRequest) => {
@@ -836,6 +846,19 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const applySnapshot = (snapshot: DraftSnapshot, syncEditor: boolean) => {
     state.snapshot = snapshot
+    if (state.voiceChatId !== snapshot.chatId) {
+      const cachedRecording = lastRecordingByChat.get(snapshot.chatId)
+      const committedTranscript = snapshot.recordingSegments.at(-1)?.rawTranscript ?? ''
+      state.voiceChatId = snapshot.chatId
+      state.voicePhase = 'idle'
+      state.voiceElapsedMs = cachedRecording?.elapsedMs ?? 0
+      state.voiceProvider = cachedRecording?.provider ?? null
+      state.voiceProvisionalText = ''
+      state.voiceFinalText = cachedRecording?.text ?? committedTranscript
+      state.voiceMessage = state.voiceFinalText
+        ? 'Showing the last completed recording for this chat.'
+        : 'Ready to record a message segment.'
+    }
     if (syncEditor) {
       desiredText = snapshot.cleanText
       editor.value = snapshot.cleanText
@@ -917,6 +940,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const nextChatId = ctx.getActiveChat().chatId
     const changed = nextChatId !== state.activeChatId
     state.activeChatId = nextChatId
+    if (changed) {
+      state.voiceChatId = null
+      state.voicePhase = 'idle'
+      state.voiceElapsedMs = 0
+      state.voiceProvider = null
+      state.voiceProvisionalText = ''
+      state.voiceFinalText = ''
+      state.voiceMessage = nextChatId
+        ? 'Loading the last recording for this chat…'
+        : 'Ready to record a message segment.'
+    }
     const transitionId = changed ? ++chatTransitionId : chatTransitionId
     await refreshPermissions()
     if (!alive) return
@@ -950,6 +984,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (!nextChatId) {
       latestDraftLoadId += 1
       state.snapshot = null
+      state.voiceChatId = null
+      state.voicePhase = 'idle'
+      state.voiceElapsedMs = 0
+      state.voiceProvider = null
+      state.voiceProvisionalText = ''
+      state.voiceFinalText = ''
+      state.voiceMessage = 'Ready to record a message segment.'
       state.loading = false
       state.pendingProposal = null
       state.pendingEditProposal = null
@@ -1349,6 +1390,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (!proposal || state.automatedBusy) return
     if (
       !state.snapshot ||
+      ctx.getActiveChat().chatId !== proposal.chatId ||
       desiredText !== state.snapshot.cleanText ||
       proposal.chatId !== state.snapshot.chatId ||
       proposal.expectedVersion !== state.snapshot.draftVersion
@@ -1545,15 +1587,26 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         debugLoggingEnabled: debugEnabledToggle.checked,
       },
     })
-    if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
+    if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response') {
       applyPhaseFourResponse(outcome.value)
-    else state.phaseFourMessage = 'Settings were not saved. Try again.'
+      state.phaseFourMessage = 'Settings saved.'
+    } else state.phaseFourMessage = 'Settings were not saved. Try again.'
     render()
   }
+  let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null
+  const scheduleSettingsSave = (delay = 0) => {
+    if (settingsSaveTimer) clearTimeout(settingsSaveTimer)
+    settingsSaveTimer = setTimeout(() => {
+      settingsSaveTimer = null
+      void saveSettings()
+    }, delay)
+  }
+  const handleContextCountInput = () => scheduleSettingsSave(600)
+  const handleSettingToggleChange = () => scheduleSettingsSave(0)
 
   const refreshDebugLog = async (clear = false): Promise<void> => {
     if (state.settings.debugLoggingEnabled !== true) {
-      debugStatus.textContent = 'Enable debug logging and save settings first.'
+      debugStatus.textContent = 'Enable debug logging first.'
       return
     }
     debugStatus.textContent = clear ? 'Clearing the debug log…' : 'Loading the debug log…'
@@ -1681,10 +1734,22 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (!recording || recording.runId !== runId) return
     activeRecording = null
     clearRecordingDeadline()
-    state.voiceElapsedMs = Math.max(0, Date.now() - recordingStartedAt)
+    const elapsedMs = Math.max(0, Date.now() - recordingStartedAt)
+    lastRecordingByChat.set(recording.chatId, {
+      text: transcript.text,
+      provider: transcript.provider,
+      elapsedMs,
+    })
+    if (state.activeChatId !== recording.chatId) {
+      clearRecordingTimers()
+      if (alive) render()
+      return
+    }
+    state.voiceElapsedMs = elapsedMs
     state.voiceProvisionalText = ''
     state.voiceFinalText = transcript.text
     state.voiceProvider = transcript.provider
+    state.voiceChatId = recording.chatId
     if (transcript.text.trim().length === 0) {
       state.voicePhase = 'error'
       state.voiceMessage = 'No usable speech was recognized. Nothing was appended.'
@@ -1778,6 +1843,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         },
       })
       activeRecording = {
+        chatId: snapshot.chatId,
         runId,
         operationId,
         session,
@@ -2009,6 +2075,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     flushParagraphPreview()
     cancelActiveRecording('Recording cancelled because the active chat changed.')
     if (state.pendingProposal) rejectNormalizationProposal()
+    state.pendingEditProposal = null
+    state.pendingEditCandidates = null
     void refreshHostState()
   }
   let floatingLaunchReturnTarget: HTMLElement | null = null
@@ -2088,7 +2156,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (button?.dataset.editCandidateId) void selectEditCandidate(button.dataset.editCandidateId)
   }
   const handleCancelEditCandidatesClick = () => cancelEditCandidateSelection()
-  const handleSaveSettingsClick = () => void saveSettings()
   const handleGrammarRepairModeChange = () => {
     state.settings.grammarRepairMode =
       grammarRepairSelect.value === 'always'
@@ -2096,12 +2163,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         : grammarRepairSelect.value === 'when_needed'
           ? 'when_needed'
           : 'off'
+    scheduleSettingsSave(0)
   }
   const handleDebugEnabledChange = () => {
     state.settings.debugLoggingEnabled = debugEnabledToggle.checked
-    debugStatus.textContent = debugEnabledToggle.checked
-      ? 'Save settings to start collecting the debug log.'
-      : 'Save settings to stop collecting the debug log.'
+    scheduleSettingsSave(0)
   }
   const handleDebugRefreshClick = () => void refreshDebugLog()
   const handleDebugCopyClick = () => void copyDebugLog()
@@ -2111,6 +2177,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.settings.normalizationModelOverride = ''
     render()
     normalizationModelPicker.refresh()
+    scheduleSettingsSave(0)
   }
   const handleSaveGlossaryClick = () => void saveGlossaryEntry('drawer')
   const handleFloatingSaveGlossaryClick = () => void saveGlossaryEntry('floating')
@@ -2252,7 +2319,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         Number.parseFloat(shellStyle.borderBottomWidth)
       const contentBottom =
         floatingTools.getBoundingClientRect().bottom -
-        floatingWidget.root.getBoundingClientRect().top
+        floatingShell.getBoundingClientRect().top
       const fittedHeight = Math.min(
         Math.max(1, viewport.height - 24),
         Math.ceil(contentBottom + bottomInset),
@@ -2298,9 +2365,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   rejectEditButton.addEventListener('click', handleRejectEditClick)
   editCandidatesList.addEventListener('click', handleEditCandidateClick)
   cancelEditCandidatesButton.addEventListener('click', handleCancelEditCandidatesClick)
-  saveSettingsButton.addEventListener('click', handleSaveSettingsClick)
   grammarRepairSelect.addEventListener('change', handleGrammarRepairModeChange)
   debugEnabledToggle.addEventListener('change', handleDebugEnabledChange)
+  contextCountInput.addEventListener('input', handleContextCountInput)
+  contextualToggle.addEventListener('change', handleSettingToggleChange)
   debugRefreshButton.addEventListener('click', handleDebugRefreshClick)
   debugCopyButton.addEventListener('click', handleDebugCopyClick)
   debugClearButton.addEventListener('click', handleDebugClearClick)
@@ -2364,7 +2432,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     rejectEditButton.removeEventListener('click', handleRejectEditClick)
     editCandidatesList.removeEventListener('click', handleEditCandidateClick)
     cancelEditCandidatesButton.removeEventListener('click', handleCancelEditCandidatesClick)
-    saveSettingsButton.removeEventListener('click', handleSaveSettingsClick)
+    if (settingsSaveTimer) clearTimeout(settingsSaveTimer)
+    contextCountInput.removeEventListener('input', handleContextCountInput)
+    contextualToggle.removeEventListener('change', handleSettingToggleChange)
     grammarRepairSelect.removeEventListener('change', handleGrammarRepairModeChange)
     debugEnabledToggle.removeEventListener('change', handleDebugEnabledChange)
     debugRefreshButton.removeEventListener('click', handleDebugRefreshClick)
@@ -2657,7 +2727,12 @@ function joinTranscriptUpdates(finalSegments: string[], interimText: string): st
 function detectQuotationBoundaryHint(input: string): 'double' | 'single' | null {
   const trimmed = input.trim()
   if (/^begin\s+single\b[\s\S]*\bend\s+single[.,;:!?]*$/iu.test(trimmed)) return 'single'
-  if (/^begin\s+speech\b[\s\S]*\bend\s+speech[.,;:!?]*$/iu.test(trimmed)) return 'double'
+  if (
+    /^begin(?:ning)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing)?\s+speech[.,;:!?]*$/iu.test(
+      trimmed,
+    )
+  )
+    return 'double'
   const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu
   const doubleClosing = /\b(?:close\s+)?(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu
   const singleOpening = /^(?:open\s+)?single\s+(?:quote|quotation)(?:\s+marks?)?\b/iu
@@ -2851,7 +2926,7 @@ function shellMarkup(): string {
       .jt-launch { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: center; padding: .8rem; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: .75rem; }
       .jt-launch button { font-weight: 700; }
       .jt-floating-host { scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; }
-      .jt-floating { box-sizing: border-box; display: grid; grid-template-rows: auto auto; width: 100%; min-width: 0; min-height: 100%; overflow: visible; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: .9rem; background: var(--background, #171717); color: var(--foreground, inherit); box-shadow: 0 18px 55px rgb(0 0 0 / .38); }
+      .jt-floating { box-sizing: border-box; display: grid; grid-template-rows: auto auto; align-content: start; width: 100%; min-width: 0; min-height: 100%; overflow: visible; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: .9rem; background: var(--background, #171717); color: var(--foreground, inherit); box-shadow: 0 18px 55px rgb(0 0 0 / .38); }
       .jt-floating__bar { position: sticky; z-index: 10; top: 0; display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .55rem .7rem; border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent); background: var(--background, #171717); cursor: move; }
       .jt-floating__bar h2 { font-size: 1rem; }
       .jt-floating__body { min-height: 0; overflow: visible; }
@@ -2862,6 +2937,8 @@ function shellMarkup(): string {
       .jt-tools-row > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: start; border-color: color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; background: transparent; }
       .jt-tools-row > button::before { content: '▸ '; }
       .jt-tools-row > button[aria-expanded="true"]::before { content: '▾ '; }
+      .jt-tools-row > details:not([open]):hover { background: color-mix(in srgb, currentColor 15%, transparent); border-color: color-mix(in srgb, currentColor 45%, transparent); }
+      .jt-tools-row > details > summary:focus-visible { outline: 2px solid #d69e2e; outline-offset: 2px; }
       .jt-composer__pane { display: grid; align-content: start; gap: .7rem; min-width: 0; }
       .jt-floating details { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: .6rem; padding: .6rem; }
       .jt-floating .jt-tools-row > details { padding: .48rem .75rem; }
@@ -3044,7 +3121,6 @@ function shellMarkup(): string {
           <textarea class="jt-debug-output" readonly data-debug-output rows="14" spellcheck="false" aria-label="JarvisType debug timing log"></textarea>
           <p role="status" aria-live="polite" data-debug-status></p>
         </details>
-        <div class="jt-actions"><button type="button" data-settings-save>Save settings</button></div>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings…</p>
 
         <h4>Personal glossary</h4>

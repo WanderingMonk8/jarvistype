@@ -36,6 +36,7 @@ import {
 import {
   DEFAULT_CONTEXT_MESSAGE_COUNT,
   clampContextMessageCount,
+  correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
   extractCardCharacterReferences,
   extractConversationReferences,
@@ -592,15 +593,15 @@ function preservesAuthoritativePunctuationMarks(
 function didHandleExplicitQuotationAlias(rawTranscript: string, candidateText: string): boolean {
   return (
     [
-      ['begin speech', 'end speech'],
-      ['begin single', 'end single'],
+      [/\bbegin(?:ning)?(?:\s+the)?\s+speech\b/iu, /\bend(?:ing)?\s+speech\b/iu],
+      [/\bbegin\s+single\b/iu, /\bend\s+single\b/iu],
     ] as const
   ).some(
     ([begin, end]) =>
-      containsCaseInsensitive(rawTranscript, begin) &&
-      containsCaseInsensitive(rawTranscript, end) &&
-      !containsCaseInsensitive(candidateText, begin) &&
-      !containsCaseInsensitive(candidateText, end),
+      begin.test(rawTranscript) &&
+      end.test(rawTranscript) &&
+      !begin.test(candidateText) &&
+      !end.test(candidateText),
   )
 }
 
@@ -789,17 +790,22 @@ async function handleEditInterpretation(
     )
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
     if (!interpretedPlan) return { error: 'interpretation' as const, session }
-    const plan = normalizeEditInputPayloads(
-      stripQualifiedAsInEditPayloads(
-        enforceAuthoritativeEditSpellings(
-          normalizeParagraphBoundaryInsertions(interpretedPlan, request.instructionTranscript),
-          spelling.learningCandidates,
+    const plan = normalizeEditReferenceTargets(
+      normalizeEditInputPayloads(
+        stripQualifiedAsInEditPayloads(
+          enforceAuthoritativeEditSpellings(
+            normalizeParagraphBoundaryInsertions(interpretedPlan, request.instructionTranscript),
+            spelling.learningCandidates,
+          ),
         ),
+        glossary,
+        cardCharacterReferences,
+        conversationReferences,
+        spelling.learningCandidates.map((candidate) => candidate.canonical),
       ),
-      glossary,
+      session.cleanText,
       cardCharacterReferences,
       conversationReferences,
-      spelling.learningCandidates.map((candidate) => candidate.canonical),
     )
     const executeStartedAt = performance.now()
     const executed = executeEditPlan(
@@ -1031,9 +1037,6 @@ async function handleEditConfirmation(
     const session = await loadDraft(context.userId, request.chatId)
     if (session.draftVersion !== proposal.expectedVersion)
       return { error: 'stale-version' as const, session }
-    const activeChat = await spindle.chats.getActive(context.userId)
-    if (!activeChat || activeChat.id !== request.chatId)
-      return { error: 'chat-mismatch' as const, session }
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
     if (session.cleanText !== proposal.beforeText)
       return { error: 'proposal-mismatch' as const, session }
@@ -1075,9 +1078,7 @@ async function handleEditConfirmation(
     const message =
       result.error === 'stale-version'
         ? `The draft advanced to version ${result.session!.draftVersion} before approval. The stale proposal was discarded.`
-        : result.error === 'chat-mismatch'
-          ? 'The active chat changed before approval. Nothing was edited.'
-          : 'The edit proposal no longer matched the current draft. Nothing was edited.'
+        : 'The edit proposal no longer matched the current draft. Nothing was edited.'
     sendDraftError(request, context, 'EDIT_PROPOSAL_EXPIRED', message, result.session!)
     return
   }
@@ -1565,10 +1566,10 @@ function parseDeterministicSentenceTextDeletion(
   if (/[\r\n;]/u.test(instructionTranscript)) return null
   // “delete and speech” is a misheard “delete end speech”: remove the speech-end sentence.
   if (
-    /^(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+(?:the\s+)?(?:and|end)\s+speech[.!?]*$/iu.test(
+    /^(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+(?:the\s+)?(?:and|end)\s+(?:(?:a|the)\s+)?speech[.!?]*$/iu.test(
       instructionTranscript.trim(),
     ) &&
-    !/\band\s+speech\b/iu.test(session.cleanText)
+    !/\band\s+(?:a\s+)?speech\b/iu.test(session.cleanText)
   ) {
     return parseEditPlan({
       schemaVersion: 2,
@@ -3271,6 +3272,58 @@ function normalizeEditInputPayloads(
   }
 }
 
+function normalizeEditReferenceTargets(
+  plan: EditPlan,
+  draftText: string,
+  cardCharacterReferences: string[],
+  conversationReferences: string[],
+): EditPlan {
+  const draftReferences = extractConversationReferences([
+    { role: 'assistant', content: draftText },
+  ])
+  const references = mergeConversationReferences(
+    mergeConversationReferences(cardCharacterReferences, conversationReferences),
+    draftReferences,
+  )
+  if (!references.length) return plan
+
+  const normalizeValue = (value: string | undefined): string | undefined => {
+    if (!value || editTargetTextExists(draftText, value)) return value
+    return correctEditTargetFromConversationReferences(value, references).text
+  }
+  const normalizeTarget = (target: EditTarget): EditTarget => {
+    const exactText = normalizeValue(target.exactText)
+    const approximateText = normalizeValue(target.approximateText)
+    const relativeToText = normalizeValue(target.relativeToText)
+    if (
+      exactText === target.exactText &&
+      approximateText === target.approximateText &&
+      relativeToText === target.relativeToText
+    )
+      return target
+    return { ...target, exactText, approximateText, relativeToText }
+  }
+
+  return {
+    ...plan,
+    operations: plan.operations.map((operation) => ({
+      ...operation,
+      target: normalizeTarget(operation.target),
+      ...(operation.destination
+        ? { destination: normalizeTarget(operation.destination) }
+        : {}),
+    })),
+  }
+}
+
+function editTargetTextExists(draftText: string, targetText: string): boolean {
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])${apostropheFlexiblePattern(targetText)}(?![\\p{L}\\p{N}])`,
+    'iu',
+  )
+  return pattern.test(draftText)
+}
+
 function escapeRegularExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -4311,7 +4364,8 @@ async function loadDraft(
   const storedSession = restoreDraftSession(raw, chatId) ?? createDraftSession(chatId)
   // A just-persisted local session can briefly be newer than a cross-device
   // storage read. Versions are monotonic, so never regress in that case.
-  const session = cached && cached.draftVersion > storedSession.draftVersion ? cached : storedSession
+  const session =
+    cached && cached.draftVersion > storedSession.draftVersion ? cached : storedSession
   draftCache.set(key, session)
   recordDebug(
     userId,

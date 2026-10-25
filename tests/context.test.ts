@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   clampContextMessageCount,
+  correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
   extractCardCharacterReferences,
   extractConversationReferences,
@@ -157,6 +158,31 @@ test('corrects only a unique one-character proper-name match from conversation r
   )
 })
 
+test('corrects lowercase edit targets from one unique proper-name reference', () => {
+  assert.deepEqual(correctEditTargetFromConversationReferences('herbode', ['Herbold']), {
+    text: 'Herbold',
+    correctedTerms: [{ heard: 'herbode', canonical: 'Herbold' }],
+  })
+  assert.equal(
+    correctEditTargetFromConversationReferences('herbode', ['Herbold', 'Herbode']).text,
+    'herbode',
+  )
+})
+
+test('draft-extracted proper nouns can correct lowercase edit targets', () => {
+  const references = extractConversationReferences([
+    {
+      role: 'assistant',
+      content: "Ten paces back. I'll sooner trust you, Herbold, than the captain.",
+    },
+  ])
+  assert.ok(references.includes('Herbold'))
+  assert.equal(
+    correctEditTargetFromConversationReferences('herbode', references).text,
+    'Herbold',
+  )
+})
+
 test('corrects a unique two-character name ending only after a stable prefix', () => {
   assert.deepEqual(correctFromConversationReferences('Willie carried the lamp.', ['Willum']), {
     text: 'Willum carried the lamp.',
@@ -192,6 +218,45 @@ test('corrects a unique short phonetic name and preserves its possessive apostro
   )
   assert.equal(correctFromConversationReferences("cat's coat", ['Kat']).text, "cat's coat")
   assert.equal(correctFromConversationReferences("Cat's coat", ['Kat', 'Qat']).text, "Cat's coat")
+})
+
+test('uses grammatical context to protect ordinary words from one-syllable names', () => {
+  assert.equal(
+    correctFromConversationReferences('Can you understand me?', ['Ken']).text,
+    'Can you understand me?',
+  )
+  assert.equal(
+    correctFromConversationReferences('She asked, “Can you understand me?”', ['Ken']).text,
+    'She asked, “Can you understand me?”',
+  )
+  assert.equal(
+    correctFromConversationReferences('Then we should leave.', ['Dan']).text,
+    'Then we should leave.',
+  )
+  assert.equal(
+    correctFromConversationReferences('We waited, and Then we left.', ['Dan']).text,
+    'We waited, and Then we left.',
+  )
+  assert.equal(
+    correctFromConversationReferences('The Cat slept inside the Den.', ['Kat', 'Dan']).text,
+    'The Cat slept inside the Den.',
+  )
+  assert.equal(
+    correctFromConversationReferences('I Mark each completed page.', ['Marc']).text,
+    'I Mark each completed page.',
+  )
+  assert.equal(
+    correctFromConversationReferences('I know that can work.', ['Ken']).text,
+    'I know that can work.',
+  )
+  assert.equal(
+    correctFromConversationReferences('Please ask Can tomorrow.', ['Ken']).text,
+    'Please ask Ken tomorrow.',
+  )
+  assert.equal(
+    correctFromConversationReferences('Please ask Mark tomorrow.', ['Marc']).text,
+    'Please ask Marc tomorrow.',
+  )
 })
 
 test('corrects a short phonetically equivalent card name', () => {

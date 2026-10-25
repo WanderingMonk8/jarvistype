@@ -489,6 +489,11 @@ async function handleTranscriptNormalization(
       ),
     )
   }
+  recordDebug(
+    context.userId,
+    'normalize.spelling',
+    `spelled=${spelledKeys.size} draftNames=${draftSpellingReferences.length} references=${spellingReferences.length} restored=${referenceRestoration.correctedTerms.length}`,
+  )
   const recoveredCommands = recoverHighConfidenceContextualCommands(candidateText)
   if (recoveredCommands.text !== candidateText) {
     candidateText = recoveredCommands.text

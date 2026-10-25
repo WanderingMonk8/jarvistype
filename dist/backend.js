@@ -1574,6 +1574,13 @@ function findExactOrFuzzyMatch(text, search, start, end, occurrence) {
   return approximate.includes("ambiguous") ? "fuzzy text target is ambiguous" : "text target was not found";
 }
 var CONTRACTIONS = {
+  gotta: ["got", "to"],
+  gonna: ["going", "to"],
+  wanna: ["want", "to"],
+  hafta: ["have", "to"],
+  kinda: ["kind", "of"],
+  sorta: ["sort", "of"],
+  lemme: ["let", "me"],
   "i'm": ["i", "am"],
   "i've": ["i", "have"],
   "i'll": ["i", "will"],

@@ -1773,4 +1773,27 @@ test('matches an expanded contraction against contracted draft text', () => {
     contracted.ok && contracted.afterText,
     'Before turning on the light, reviewing an apartment.',
   )
+
+  const colloquial = executeEditPlan(
+    'We gotta wait until most of those are trapped in the funnel before they let loose the arrows.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'match a colloquial contraction against its expanded target',
+      operations: [
+        {
+          id: 'expanded-colloquial-contraction',
+          type: 'replace',
+          target: { exactText: 'we got to wait' },
+          text: 'they are gonna wait',
+        },
+      ],
+    },
+  )
+  assert.equal(
+    colloquial.ok && colloquial.afterText,
+    'They are gonna wait until most of those are trapped in the funnel before they let loose the arrows.',
+  )
 })

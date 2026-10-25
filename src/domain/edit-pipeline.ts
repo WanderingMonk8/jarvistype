@@ -1463,6 +1463,13 @@ function findExactOrFuzzyMatch(
 }
 
 const CONTRACTIONS: Readonly<Record<string, readonly string[]>> = {
+  gotta: ['got', 'to'],
+  gonna: ['going', 'to'],
+  wanna: ['want', 'to'],
+  hafta: ['have', 'to'],
+  kinda: ['kind', 'of'],
+  sorta: ['sort', 'of'],
+  lemme: ['let', 'me'],
   "i'm": ['i', 'am'],
   "i've": ['i', 'have'],
   "i'll": ['i', 'will'],

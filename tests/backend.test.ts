@@ -5545,6 +5545,41 @@ test('defaults collapsed uppercase edit spellings to lowercase and honors an exp
   }
 })
 
+test('restores a known proper noun when a compact uppercase edit spelling defaults to lowercase', async () => {
+  const draft =
+    "Brenner's voice comes up the lane raw and thin, and it is not an order. It is a report, and Erdl hears it, and his jaw sets."
+  const cases: Array<readonly [Array<{ role: 'assistant' | 'user'; content: string }>, string]> = [
+    [[{ role: 'assistant', content: 'Erbold hears it, and his jaw sets.' }], 'Erbold'],
+    [[], 'erbold'],
+  ]
+  for (const [index, [chat, expectedName]] of cases.entries()) {
+    const userId = `proper-noun-casing-${index}`
+    const chatId = `proper-noun-casing-chat-${index}`
+    activeChatId = chatId
+    chatMessages = chat
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `proper-noun-casing-interpret-${index}`,
+        operationId: `proper-noun-casing-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript: 'Replace ERDL with ERBOLD.',
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response')
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.match(proposal.proposal.afterText, new RegExp(`and ${expectedName} hears it`))
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
 async function seedDraft(userId: string, chatId: string, cleanText: string): Promise<void> {
   await dispatch(
     {

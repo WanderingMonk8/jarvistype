@@ -5872,10 +5872,17 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
         ...glossary.entries.map((entry) => entry.canonical),
         ...protectedTerms
       ];
+      const exactProtectedReferences = protectedReferences.filter((term) => {
+        if (!/^\p{Ll}/u.test(term)) return true;
+        const key = term.toLocaleLowerCase();
+        return !exactReferences.some(
+          (reference) => /^\p{Lu}\p{Ll}/u.test(reference) && reference.toLocaleLowerCase() === key
+        );
+      });
       const exactNormalized = canonicalizeExactConversationReferences(
         deterministic,
         exactReferences,
-        protectedReferences
+        exactProtectedReferences
       ).text;
       const cardNormalized = correctFromConversationReferences(
         exactNormalized,

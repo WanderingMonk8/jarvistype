@@ -220,6 +220,25 @@ test('corrects a unique short phonetic name and preserves its possessive apostro
   assert.equal(correctFromConversationReferences("Cat's coat", ['Kat', 'Qat']).text, "Cat's coat")
 })
 
+test('does not fuzzy-correct sentence-opening words into one-syllable names', () => {
+  assert.equal(
+    correctFromConversationReferences('Can you understand me?', ['Ken']).text,
+    'Can you understand me?',
+  )
+  assert.equal(
+    correctFromConversationReferences('She asked, “Can you understand me?”', ['Ken']).text,
+    'She asked, “Can you understand me?”',
+  )
+  assert.equal(
+    correctFromConversationReferences('I know that can work.', ['Ken']).text,
+    'I know that can work.',
+  )
+  assert.equal(
+    correctFromConversationReferences('Please ask Can tomorrow.', ['Ken']).text,
+    'Please ask Ken tomorrow.',
+  )
+})
+
 test('corrects a short phonetically equivalent card name', () => {
   assert.deepEqual(correctFromConversationReferences('ICO', ['Aiko']), {
     text: 'Aiko',

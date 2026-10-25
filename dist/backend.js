@@ -1318,10 +1318,10 @@ function addBoundarySpacing(text, point, insertion) {
 }
 function capitalizeReplacementAtSentenceOpening(text, start, replacement) {
   const before = text.slice(0, start);
-  const isSentenceOpening = /(?:^|\n{2,}|[.?!…][”’"']?(?:[ \t]+|$))[ \t]*[“‘"'([{]*[ \t]*$/u.test(
+  const isSentenceOpening2 = /(?:^|\n{2,}|[.?!…][”’"']?(?:[ \t]+|$))[ \t]*[“‘"'([{]*[ \t]*$/u.test(
     before
   );
-  if (!isSentenceOpening) return replacement;
+  if (!isSentenceOpening2) return replacement;
   return replacement.replace(
     /^([ \t]*[“‘"'([{]*[ \t]*)([\p{Ll}][\p{L}\p{M}'’-]*)/u,
     (whole, prefix, word) => {
@@ -2024,15 +2024,17 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
     referenceByKey.set(canonical.toLocaleLowerCase(), canonical);
   }
   const correctedTerms = [];
-  const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard) => {
+  const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard, offset) => {
     const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? "";
     const base = possessive ? heard.slice(0, -possessive.length) : heard;
     const baseKey = base.toLocaleLowerCase();
     if (base.length < 3 || requireInitialUppercase && !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
       return heard;
-    const candidates = [...referenceByKey.values()].filter(
-      (reference) => isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase())
-    );
+    const candidates = [...referenceByKey.values()].filter((reference) => {
+      if (requireInitialUppercase && !possessive && isLikelyOneSyllable(reference) && isSentenceOpening(text, offset))
+        return false;
+      return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase());
+    });
     const uniqueCandidates = [
       ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values()
     ];
@@ -2042,6 +2044,18 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
     return `${canonical}${possessive}`;
   });
   return { text: correctedText, correctedTerms };
+}
+function isSentenceOpening(text, offset) {
+  const prefix = text.slice(0, offset).trimEnd();
+  return !prefix || /^["'“‘([{]+$/u.test(prefix) || /[.!?]["'”’)}\]]*\s*["'“‘([{]*$/u.test(prefix);
+}
+function isLikelyOneSyllable(value) {
+  const normalized = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/[^a-z]/gu, "");
+  if (!normalized) return false;
+  let vowelGroups = normalized.match(/[aeiouy]+/gu)?.length ?? 0;
+  if (vowelGroups > 1 && /[^aeiou]e$/u.test(normalized) && !/[^aeiou]le$/u.test(normalized))
+    vowelGroups -= 1;
+  return vowelGroups <= 1;
 }
 function eligibleCount(source) {
   return source.filter(isEligible).length;

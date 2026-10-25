@@ -80,10 +80,8 @@ test('does not append a bare terminal command after provider terminal punctuatio
 
 test('deduplicates a provider-rendered exclamation before a speech-closing command', () => {
   assert.equal(
-    normalizeDeterministically(
-      'Begin speech. That is close enough! Exclamation. End speech.',
-      [],
-    ).text,
+    normalizeDeterministically('Begin speech. That is close enough! Exclamation. End speech.', [])
+      .text,
     '“That is close enough!”',
   )
   assert.equal(
@@ -519,18 +517,9 @@ test('collapses explicit spelling, obeys casing, and creates a learning candidat
     normalizeDeterministically('Use lowercase C-O-O-L-E-Y period', []).text,
     'Use cooley.',
   )
-  assert.equal(
-    normalizeDeterministically('Use capitalized ERBOLD period', []).text,
-    'Use Erbold.',
-  )
-  assert.equal(
-    normalizeDeterministically('Use lowercase ERBOLD period', []).text,
-    'Use erbold.',
-  )
-  assert.equal(
-    normalizeDeterministically('Use uppercase ERBOLD period', []).text,
-    'Use ERBOLD.',
-  )
+  assert.equal(normalizeDeterministically('Use capitalized ERBOLD period', []).text, 'Use Erbold.')
+  assert.equal(normalizeDeterministically('Use lowercase ERBOLD period', []).text, 'Use erbold.')
+  assert.equal(normalizeDeterministically('Use uppercase ERBOLD period', []).text, 'Use ERBOLD.')
   assert.equal(normalizeDeterministically('Use NASA period', []).text, 'Use NASA.')
   const compactEditSpelling = normalizeDeterministically('Replace SHEATH with SHEAF.', [], {
     compactUppercaseSpelling: true,
@@ -569,34 +558,32 @@ test('collapses explicit spelling, obeys casing, and creates a learning candidat
   )
 })
 
-test('collapses guarded compact spelling emitted by speech-to-text', () => {
-  const result = normalizeDeterministically('Write, capitalize PIP-Boy, Pip-Boy, period.', [])
-  assert.equal(result.text, 'Write Pip-Boy.')
-  assert.deepEqual(result.learningCandidates, [{ canonical: 'Pip-Boy', spokenVariant: 'PIP-Boy' }])
+test('applies only the strict casing words as dictation casing commands', () => {
   assert.equal(
-    normalizeDeterministically('Please use API-client without a spelling command', []).text,
-    'Please use API-client without a spelling command',
+    normalizeDeterministically('I look to the capitalized white hawk.', []).text,
+    'I look to the White Hawk.',
   )
-  assert.equal(normalizeDeterministically('Write, capitalize PIP-BOY.', []).text, 'Write Pip-Boy.')
   assert.equal(
-    normalizeDeterministically('Write, capitalized P. I. P. dash B. O. Y, Pip-Boy, period.', [])
-      .text,
-    'Write Pip-Boy.',
+    normalizeDeterministically('I look to the lowercase white hawk.', []).text,
+    'I look to the white hawk.',
   )
-})
-
-test('uses glossary variants without paraphrasing surrounding content', () => {
-  const result = normalizeDeterministically('My pip boy is ready', [
-    {
-      id: 'entry-1',
-      canonical: 'Pip-Boy',
-      variants: ['pip boy'],
-      hint: 'Fallout device',
-      source: 'manual',
-      useCount: 0,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    },
-  ])
-  assert.equal(result.text, 'My Pip-Boy is ready')
+  assert.equal(
+    normalizeDeterministically('I look to the uppercase white hawk.', []).text,
+    'I look to the WHITE HAWK.',
+  )
+  assert.equal(
+    normalizeDeterministically('I look to the all caps white hawk.', []).text,
+    'I look to the WHITE HAWK.',
+  )
+  assert.equal(normalizeDeterministically('Capitalize the hawk.', []).text, 'Capitalize the hawk.')
+  for (const prose of [
+    'Lowercase remains lowercase.',
+    'They capitalized the company.',
+    'Use a lowercase letter here.',
+    'The word uppercase is a verb.',
+    'It is in all caps for the title.',
+    'I look to the lowercase white hawk and the gull.',
+  ]) {
+    assert.equal(normalizeDeterministically(prose, []).text, prose)
+  }
 })

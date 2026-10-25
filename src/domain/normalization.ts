@@ -180,6 +180,109 @@ export function hasUnresolvedCommandSignal(text: string): boolean {
   return false
 }
 
+// Only these four casing words are dictation casing commands. The phrase after the word is the
+// target: "I look to the capitalized white hawk" → "I look to the White Hawk".
+const CASING_COMMAND_PATTERN =
+  /\b(capitalized|lowercase|uppercase|all caps)[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu
+
+function titleCaseWords(value: string): string {
+  return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {
+    const index = word.search(/\p{L}/u)
+    return `${word.slice(0, index)}${word[index]!.toLocaleUpperCase()}${word.slice(index + 1)}`
+  })
+}
+
+// Words that make a casing word prose rather than a command: "a lowercase letter", "in all caps",
+// "the word uppercase", "they capitalized the company".
+const CASING_PROSE_PRECEDERS = new Set([
+  'a',
+  'an',
+  'in',
+  'of',
+  'as',
+  'word',
+  'words',
+  'phrase',
+  'term',
+  'command',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'i',
+  'you',
+  'he',
+  'she',
+  'we',
+  'they',
+  'it',
+])
+// Function words that cannot appear in a casing target phrase; their presence means the phrase
+// runs into the rest of a sentence.
+const CASING_TARGET_STOPWORDS = new Set([
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'and',
+  'or',
+  'but',
+  'so',
+  'if',
+  'then',
+  'that',
+  'which',
+  'who',
+  'when',
+  'where',
+  'while',
+  'because',
+  'to',
+  'of',
+  'in',
+  'on',
+  'at',
+  'for',
+  'with',
+  'by',
+  'from',
+  'as',
+  'it',
+  'they',
+  'them',
+  'he',
+  'she',
+  'we',
+  'us',
+  'you',
+  'i',
+  'me',
+])
+
+function applySpokenCasingCommands(text: string): string {
+  return text.replace(
+    CASING_COMMAND_PATTERN,
+    (whole: string, cue: string, phrase: string, offset: number, source: string) => {
+      const before = source.slice(0, offset)
+      // A casing word that opens a sentence is ordinary prose ("Lowercase remains lowercase").
+      if (/(?:^|[.!?]["'”’]?|\n)\s*$/u.test(before)) return whole
+      const previous = before.match(/(\p{L}[\p{L}\p{M}'’-]*)[ \t]*$/u)?.[1]?.toLocaleLowerCase()
+      if (previous && CASING_PROSE_PRECEDERS.has(previous)) return whole
+      const target = phrase.trim()
+      const words = target.split(/\s+/u).map((word) => word.toLocaleLowerCase())
+      if (words.some((word) => CASING_TARGET_STOPWORDS.has(word))) return whole
+      const command = cue.toLocaleLowerCase()
+      if (command === 'uppercase' || command === 'all caps') return target.toLocaleUpperCase()
+      if (command === 'lowercase') return target.toLocaleLowerCase()
+      return titleCaseWords(target)
+    },
+  )
+}
 export function normalizeDeterministically(
   raw: string,
   glossary: readonly GlossaryEntry[],
@@ -274,7 +377,7 @@ export function normalizeDeterministically(
     }
   }
 
-  text = spaceEmDashes(cleanupPunctuationSpacing(text))
+  text = spaceEmDashes(cleanupPunctuationSpacing(applySpokenCasingCommands(text)))
   const capitalized = capitalizeMessageOpenings(
     text,
     [

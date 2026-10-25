@@ -2951,6 +2951,98 @@ var LITERAL_PUNCTUATION_CONTEXTS = [
     "gi"
   )
 ];
+var CASING_COMMAND_PATTERN = /\b(capitalized|lowercase|uppercase|all caps)[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu;
+function titleCaseWords(value) {
+  return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {
+    const index = word.search(/\p{L}/u);
+    return `${word.slice(0, index)}${word[index].toLocaleUpperCase()}${word.slice(index + 1)}`;
+  });
+}
+var CASING_PROSE_PRECEDERS = /* @__PURE__ */ new Set([
+  "a",
+  "an",
+  "in",
+  "of",
+  "as",
+  "word",
+  "words",
+  "phrase",
+  "term",
+  "command",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "i",
+  "you",
+  "he",
+  "she",
+  "we",
+  "they",
+  "it"
+]);
+var CASING_TARGET_STOPWORDS = /* @__PURE__ */ new Set([
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "and",
+  "or",
+  "but",
+  "so",
+  "if",
+  "then",
+  "that",
+  "which",
+  "who",
+  "when",
+  "where",
+  "while",
+  "because",
+  "to",
+  "of",
+  "in",
+  "on",
+  "at",
+  "for",
+  "with",
+  "by",
+  "from",
+  "as",
+  "it",
+  "they",
+  "them",
+  "he",
+  "she",
+  "we",
+  "us",
+  "you",
+  "i",
+  "me"
+]);
+function applySpokenCasingCommands(text) {
+  return text.replace(
+    CASING_COMMAND_PATTERN,
+    (whole, cue, phrase, offset, source) => {
+      const before = source.slice(0, offset);
+      if (/(?:^|[.!?]["'”’]?|\n)\s*$/u.test(before)) return whole;
+      const previous = before.match(/(\p{L}[\p{L}\p{M}'’-]*)[ \t]*$/u)?.[1]?.toLocaleLowerCase();
+      if (previous && CASING_PROSE_PRECEDERS.has(previous)) return whole;
+      const target = phrase.trim();
+      const words = target.split(/\s+/u).map((word) => word.toLocaleLowerCase());
+      if (words.some((word) => CASING_TARGET_STOPWORDS.has(word))) return whole;
+      const command = cue.toLocaleLowerCase();
+      if (command === "uppercase" || command === "all caps") return target.toLocaleUpperCase();
+      if (command === "lowercase") return target.toLocaleLowerCase();
+      return titleCaseWords(target);
+    }
+  );
+}
 function normalizeDeterministically(raw, glossary, options = {}) {
   const protectedLiterals = [];
   let text = raw.replace(
@@ -3032,7 +3124,7 @@ function normalizeDeterministically(raw, glossary, options = {}) {
       text = next;
     }
   }
-  text = spaceEmDashes(cleanupPunctuationSpacing(text));
+  text = spaceEmDashes(cleanupPunctuationSpacing(applySpokenCasingCommands(text)));
   const capitalized = capitalizeMessageOpenings(
     text,
     [
@@ -3401,7 +3493,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.12";
+var APP_VERSION = "1.6.13";
 var PHASE_FOUR_PERMISSIONS = [
   "media",
   "chats",

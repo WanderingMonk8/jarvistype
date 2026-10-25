@@ -565,17 +565,15 @@ test('persists strict references in a bounded per-chat rolling cache', async () 
   chatMessages = [{ role: 'assistant', content: 'I spoke with Gamma beside it.' }]
   await dispatch(recordingAppendRequest(chatId, 'rolling-gamma', 0, 'Ready.'), userId)
 
-  const storedCache = stored.get(
-    `${userId}:reference-cache-${encodeURIComponent(chatId)}.json`,
-  ) as { entries?: string[] } | undefined
+  const storedCache = stored.get(`${userId}:reference-cache-${encodeURIComponent(chatId)}.json`) as
+    { entries?: string[] } | undefined
   assert.deepEqual(storedCache?.entries, ['Beta', 'Gamma'])
   assert.equal(storedCache?.entries?.includes('Building'), false)
 
   chatMessages = [{ role: 'assistant', content: 'The beta release remains unstable.' }]
   await dispatch(recordingAppendRequest(chatId, 'rolling-lowercase-beta', 0, 'Ready.'), userId)
-  const prunedCache = stored.get(
-    `${userId}:reference-cache-${encodeURIComponent(chatId)}.json`,
-  ) as { entries?: string[] } | undefined
+  const prunedCache = stored.get(`${userId}:reference-cache-${encodeURIComponent(chatId)}.json`) as
+    { entries?: string[] } | undefined
   assert.deepEqual(prunedCache?.entries, ['Gamma'])
 })
 
@@ -611,7 +609,12 @@ test('does not grant casing authority to a sentence-initial reference candidate'
   chatMessages = [{ role: 'assistant', content: 'Building stands beside us.' }]
 
   await dispatch(
-    recordingAppendRequest(chatId, 'non-authoritative-building-segment', 0, 'I look at the building next to us.'),
+    recordingAppendRequest(
+      chatId,
+      'non-authoritative-building-segment',
+      0,
+      'I look at the building next to us.',
+    ),
     userId,
   )
 
@@ -5719,6 +5722,30 @@ test('a learned glossary spelling does not keep a known proper noun lowercase', 
     assert.equal(response?.type, 'transcript.normalization.response', `case ${index}`)
     if (response?.type !== 'transcript.normalization.response') return
     assert.equal(response.proposal.candidateText, 'I turn towards Erbold.', `case ${index}`)
+  }
+})
+
+test('applies the strict casing words in a recording', async () => {
+  const cases: Array<readonly [string, string]> = [
+    ['I look to the capitalized white hawk.', 'I look to the White Hawk.'],
+    ['I look to the lowercase white hawk.', 'I look to the white hawk.'],
+    ['I look to the uppercase white hawk.', 'I look to the WHITE HAWK.'],
+    ['I look to the all caps white hawk.', 'I look to the WHITE HAWK.'],
+  ]
+  for (const [index, [rawTranscript, expected]] of cases.entries()) {
+    const userId = `recording-casing-${index}`
+    const chatId = `recording-casing-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, 'Earlier')
+    responses.length = 0
+    await dispatch(
+      recordingAppendRequest(chatId, `recording-casing-segment-${index}`, 1, rawTranscript),
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response', rawTranscript)
+    if (response?.type !== 'transcript.normalization.response') return
+    assert.equal(response.proposal.candidateText, expected, rawTranscript)
   }
 })
 

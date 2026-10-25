@@ -52,12 +52,10 @@ import {
   upsertGlossaryEntry,
   type GlossaryState,
 } from './domain/glossary'
-import {
-  opensInsideDoubleQuote,
-  repairDeterministicGrammar,
-} from './domain/grammar'
+import { opensInsideDoubleQuote, repairDeterministicGrammar } from './domain/grammar'
 import type { DeterministicGrammarOptions } from './domain/grammar'
 import {
+  applySpellingCasing,
   normalizeDeterministically,
   recoverHighConfidenceContextualCommands,
   SPOKEN_PUNCTUATION_COMMAND_PHRASES,
@@ -772,7 +770,9 @@ async function handleEditInterpretation(
         ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages)
         : [],
     )
-    const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries)
+    const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries, {
+      compactUppercaseSpelling: true,
+    })
     const interpretStartedAt = performance.now()
     recordDebug(context.userId, 'edit.interpret', 'start')
     const interpretedPlan = await interpretEditInstruction(
@@ -1523,7 +1523,10 @@ function parseDeterministicTextDeletion(
   session: PersistedDraftSession,
 ): EditPlan | null {
   if (/[\r\n;]/u.test(instructionTranscript)) return null
-  const command = instructionTranscript.trim().replace(/[.!?]+$/u, '').trim()
+  const command = instructionTranscript
+    .trim()
+    .replace(/[.!?]+$/u, '')
+    .trim()
   const match = command.match(
     /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+((?:the\s+)?(?:word|words|phrase|text)\b\s*[,:]?\s*.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu,
   )
@@ -1778,17 +1781,10 @@ async function maybeRepairEditGrammar(
     (sum, segment) => sum + (deterministicTexts.get(segment.id) ?? segment.text).length,
     0,
   )
-  const canEvaluateOrRepair =
-    hasLetters && providerCharacters <= MAX_GRAMMAR_SEGMENT_CHARACTERS
+  const canEvaluateOrRepair = hasLetters && providerCharacters <= MAX_GRAMMAR_SEGMENT_CHARACTERS
   const jevProbability =
     settings.grammarRepairMode === 'when_needed' && canEvaluateOrRepair
-      ? await evaluateEditGrammarWithJev(
-          segments,
-          deterministicTexts,
-          operations,
-          userId,
-          signal,
-        )
+      ? await evaluateEditGrammarWithJev(segments, deterministicTexts, operations, userId, signal)
       : null
   if (signal.aborted) return fallback
   const needsProvider =
@@ -3295,10 +3291,23 @@ function enforceAuthoritativeEditSpellings(
       let text = operation.text
       for (const candidate of candidates) {
         const spellingPayload = `${escapeRegularExpression(candidate.spokenVariant)}(?:\\s*[,;:]\\s*[A-Za-z][A-Za-z'-]*)?`
-        const wholePayloadPattern = new RegExp(
-          `^\\s*(?:(?:capitalized|uppercase|lowercase)\\s+)?${spellingPayload}[.!?]?\\s*$`,
+        // An explicit casing cue is authoritative: the payload normalizer must still see it,
+        // otherwise the default spelling casing would overwrite the requested case.
+        const cuedPayloadPattern = new RegExp(
+          `^\\s*(?<casing>capitalized|uppercase|lowercase|all caps)\\s+${spellingPayload}[.!?]?\\s*$`,
           'i',
         )
+        const cuedPayload = text.match(cuedPayloadPattern)
+        if (cuedPayload) {
+          const casing = cuedPayload.groups?.casing ?? ''
+          const normalizedCasing = casing.toLocaleLowerCase()
+          text =
+            normalizedCasing === 'uppercase' || normalizedCasing === 'all caps'
+              ? `${casing} ${candidate.canonical.toUpperCase()}`
+              : applySpellingCasing(candidate.canonical, casing)
+          break
+        }
+        const wholePayloadPattern = new RegExp(`^\\s*${spellingPayload}[.!?]?\\s*$`, 'i')
         if (wholePayloadPattern.test(text)) {
           text = candidate.canonical
           continue
@@ -3369,9 +3378,7 @@ function normalizeEditInputPayloads(
   protectedTerms: string[],
   draftText: string,
 ): EditPlan {
-  const draftReferences = extractConversationReferences([
-    { role: 'assistant', content: draftText },
-  ])
+  const draftReferences = extractConversationReferences([{ role: 'assistant', content: draftText }])
   const exactReferences = mergeConversationReferences(
     mergeConversationReferences(cardCharacterReferences, conversationReferences),
     draftReferences,
@@ -3382,6 +3389,7 @@ function normalizeEditInputPayloads(
       if (typeof operation.text !== 'string') return operation
       const deterministic = normalizeDeterministically(operation.text, glossary.entries, {
         capitalizeOpening: false,
+        compactUppercaseSpelling: true,
       }).text
       const protectedReferences = [
         ...glossary.entries.map((entry) => entry.canonical),
@@ -3413,9 +3421,7 @@ function normalizeEditReferenceTargets(
   cardCharacterReferences: string[],
   conversationReferences: string[],
 ): EditPlan {
-  const draftReferences = extractConversationReferences([
-    { role: 'assistant', content: draftText },
-  ])
+  const draftReferences = extractConversationReferences([{ role: 'assistant', content: draftText }])
   const references = mergeConversationReferences(
     mergeConversationReferences(cardCharacterReferences, conversationReferences),
     draftReferences,
@@ -3444,9 +3450,7 @@ function normalizeEditReferenceTargets(
     operations: plan.operations.map((operation) => ({
       ...operation,
       target: normalizeTarget(operation.target),
-      ...(operation.destination
-        ? { destination: normalizeTarget(operation.destination) }
-        : {}),
+      ...(operation.destination ? { destination: normalizeTarget(operation.destination) } : {}),
     })),
   }
 }

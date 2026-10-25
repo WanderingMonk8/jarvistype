@@ -5452,6 +5452,50 @@ test('rejects malformed messages without replying', async () => {
   assert.equal(warnings.length, 1)
 })
 
+test('defaults collapsed uppercase edit spellings to lowercase and honors an explicit casing cue', async () => {
+  const cases: Array<readonly [string, string, string]> = [
+    [
+      'I slide the arrow into the sheath.',
+      'Replace SHEATH with SHEAF.',
+      'I slide the arrow into the sheaf.',
+    ],
+    [
+      'I slide the arrow into the sheath.',
+      'Replace sheath with sheaf.',
+      'I slide the arrow into the sheaf.',
+    ],
+    ['She said erbold.', 'Replace ERBOLD with uppercase ERBOLD.', 'She said ERBOLD.'],
+    ['She said erbold.', 'Replace ERBOLD with capitalized ERBOLD.', 'She said Erbold.'],
+    ['She said ERBOLD.', 'Replace ERBOLD with lowercase ERBOLD.', 'She said erbold.'],
+    ['She said erbold.', 'Replace ERBOLD with all caps ERBOLD.', 'She said ERBOLD.'],
+  ]
+  for (const [index, [draft, instructionTranscript, expected]] of cases.entries()) {
+    const userId = `compact-edit-spelling-${index}`
+    const chatId = `compact-edit-spelling-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `compact-edit-spelling-interpret-${index}`,
+        operationId: `compact-edit-spelling-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
 async function seedDraft(userId: string, chatId: string, cleanText: string): Promise<void> {
   await dispatch(
     {

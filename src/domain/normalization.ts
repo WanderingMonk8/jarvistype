@@ -182,7 +182,7 @@ export function hasUnresolvedCommandSignal(text: string): boolean {
 export function normalizeDeterministically(
   raw: string,
   glossary: readonly GlossaryEntry[],
-  options: { capitalizeOpening?: boolean } = {},
+  options: { capitalizeOpening?: boolean; compactUppercaseSpelling?: boolean } = {},
 ): DeterministicNormalization {
   const protectedLiterals: string[] = []
   let text = raw.replace(
@@ -219,7 +219,7 @@ export function normalizeDeterministically(
     })
   }
   const learningCandidates: SpellingLearningCandidate[] = []
-  const spelling = replaceExplicitSpelling(text)
+  const spelling = replaceExplicitSpelling(text, options.compactUppercaseSpelling === true)
   text = spelling.text
   if (spelling.learningCandidates.length) reasons.push('explicit spelling')
   learningCandidates.push(...spelling.learningCandidates)
@@ -664,6 +664,7 @@ function formatGeneratedQuotationOpenings(input: string, marker: string): string
 
 function replaceExplicitSpelling(
   input: string,
+  compactUppercaseSpelling = false,
 ): Pick<DeterministicNormalization, 'text' | 'learningCandidates' | 'ambiguities'> {
   const learningCandidates: SpellingLearningCandidate[] = []
   const ambiguities: string[] = []
@@ -710,20 +711,21 @@ function replaceExplicitSpelling(
   )
 
   // Some transcription providers collapse a deliberately spelled sequence into
-  // one uppercase token (for example, "E R B O L D" becomes "ERBOLD"). Only
-  // treat that compact form as spelling when the speaker supplied an explicit
-  // casing cue; otherwise ordinary acronyms such as NASA must remain untouched.
+  // one uppercase token (for example, "S H E A F" becomes "SHEAF"). Ordinary
+  // dictation still requires a casing cue; edit payloads can opt into treating
+  // compact uppercase tokens as explicit spelling, defaulting them to lowercase.
   const compactUppercasePattern =
-    /\b(all caps|uppercase|lowercase|capitalized?)\s+([A-Z]{3,})(?![A-Za-z])(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/g
+    /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?([A-Z]{3,})(?![A-Za-z])(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/g
   text = text.replace(
     compactUppercasePattern,
     (
-      _whole,
-      casing: string,
+      whole,
+      casing: string | undefined,
       spoken: string,
       separator: string | undefined,
       cue: string | undefined,
     ) => {
+      if (!casing && !compactUppercaseSpelling) return whole
       const matchingCue = cueMatchesLetters(cue, spoken) ? cue : undefined
       const canonical = applySpellingCasing(matchingCue ?? spoken, casing)
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
@@ -776,7 +778,7 @@ function cueMatchesLetters(cue: string | undefined, letters: string): cue is str
   )
 }
 
-function applySpellingCasing(value: string, casing: string | undefined): string {
+export function applySpellingCasing(value: string, casing: string | undefined): string {
   if (!casing) return value.toLowerCase()
   const normalized = casing.toLowerCase()
   if (normalized === 'all caps' || normalized === 'uppercase') return value.toUpperCase()

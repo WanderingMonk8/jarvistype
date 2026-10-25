@@ -2742,7 +2742,7 @@ function normalizeDeterministically(raw, glossary, options = {}) {
     });
   }
   const learningCandidates = [];
-  const spelling = replaceExplicitSpelling(text);
+  const spelling = replaceExplicitSpelling(text, options.compactUppercaseSpelling === true);
   text = spelling.text;
   if (spelling.learningCandidates.length) reasons.push("explicit spelling");
   learningCandidates.push(...spelling.learningCandidates);
@@ -3072,7 +3072,7 @@ function formatGeneratedQuotationOpenings(input, marker) {
     return `${quote}${formattedWord}`;
   }).replaceAll(marker, "");
 }
-function replaceExplicitSpelling(input) {
+function replaceExplicitSpelling(input, compactUppercaseSpelling = false) {
   const learningCandidates = [];
   const ambiguities = [];
   const separatedPattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash|[.,](?:\s+dash)?|['\u2019])\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/gi;
@@ -3099,10 +3099,11 @@ function replaceExplicitSpelling(input) {
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
     }
   );
-  const compactUppercasePattern = /\b(all caps|uppercase|lowercase|capitalized?)\s+([A-Z]{3,})(?![A-Za-z])(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/g;
+  const compactUppercasePattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?([A-Z]{3,})(?![A-Za-z])(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/g;
   text = text.replace(
     compactUppercasePattern,
-    (_whole, casing, spoken, separator, cue) => {
+    (whole, casing, spoken, separator, cue) => {
+      if (!casing && !compactUppercaseSpelling) return whole;
       const matchingCue = cueMatchesLetters(cue, spoken) ? cue : void 0;
       const canonical = applySpellingCasing(matchingCue ?? spoken, casing);
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
@@ -3811,7 +3812,9 @@ async function handleEditInterpretation(request, context, activeRequest) {
       cardCharacterReferences,
       settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : []
     );
-    const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries);
+    const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries, {
+      compactUppercaseSpelling: true
+    });
     const interpretStartedAt = performance.now();
     recordDebug(context.userId, "edit.interpret", "start");
     const interpretedPlan = await interpretEditInstruction(
@@ -4616,13 +4619,7 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
     0
   );
   const canEvaluateOrRepair = hasLetters && providerCharacters <= MAX_GRAMMAR_SEGMENT_CHARACTERS;
-  const jevProbability = settings.grammarRepairMode === "when_needed" && canEvaluateOrRepair ? await evaluateEditGrammarWithJev(
-    segments,
-    deterministicTexts,
-    operations,
-    userId,
-    signal
-  ) : null;
+  const jevProbability = settings.grammarRepairMode === "when_needed" && canEvaluateOrRepair ? await evaluateEditGrammarWithJev(segments, deterministicTexts, operations, userId, signal) : null;
   if (signal.aborted) return fallback;
   const needsProvider = canEvaluateOrRepair && (settings.grammarRepairMode === "always" || settings.grammarRepairMode === "when_needed" && jevProbability !== null && jevProbability >= JEV_GRAMMAR_REPAIR_THRESHOLD);
   if (!needsProvider) return fallback;
@@ -5793,10 +5790,18 @@ function enforceAuthoritativeEditSpellings(plan, candidates) {
       let text = operation.text;
       for (const candidate of candidates) {
         const spellingPayload = `${escapeRegularExpression(candidate.spokenVariant)}(?:\\s*[,;:]\\s*[A-Za-z][A-Za-z'-]*)?`;
-        const wholePayloadPattern = new RegExp(
-          `^\\s*(?:(?:capitalized|uppercase|lowercase)\\s+)?${spellingPayload}[.!?]?\\s*$`,
+        const cuedPayloadPattern = new RegExp(
+          `^\\s*(?<casing>capitalized|uppercase|lowercase|all caps)\\s+${spellingPayload}[.!?]?\\s*$`,
           "i"
         );
+        const cuedPayload = text.match(cuedPayloadPattern);
+        if (cuedPayload) {
+          const casing = cuedPayload.groups?.casing ?? "";
+          const normalizedCasing = casing.toLocaleLowerCase();
+          text = normalizedCasing === "uppercase" || normalizedCasing === "all caps" ? `${casing} ${candidate.canonical.toUpperCase()}` : applySpellingCasing(candidate.canonical, casing);
+          break;
+        }
+        const wholePayloadPattern = new RegExp(`^\\s*${spellingPayload}[.!?]?\\s*$`, "i");
         if (wholePayloadPattern.test(text)) {
           text = candidate.canonical;
           continue;
@@ -5850,9 +5855,7 @@ function stripQualifiedAsInEditPayloads(plan) {
   };
 }
 function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, conversationReferences, protectedTerms, draftText) {
-  const draftReferences = extractConversationReferences([
-    { role: "assistant", content: draftText }
-  ]);
+  const draftReferences = extractConversationReferences([{ role: "assistant", content: draftText }]);
   const exactReferences = mergeConversationReferences(
     mergeConversationReferences(cardCharacterReferences, conversationReferences),
     draftReferences
@@ -5862,7 +5865,8 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
     operations: plan.operations.map((operation) => {
       if (typeof operation.text !== "string") return operation;
       const deterministic = normalizeDeterministically(operation.text, glossary.entries, {
-        capitalizeOpening: false
+        capitalizeOpening: false,
+        compactUppercaseSpelling: true
       }).text;
       const protectedReferences = [
         ...glossary.entries.map((entry) => entry.canonical),
@@ -5888,9 +5892,7 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
   };
 }
 function normalizeEditReferenceTargets(plan, draftText, cardCharacterReferences, conversationReferences) {
-  const draftReferences = extractConversationReferences([
-    { role: "assistant", content: draftText }
-  ]);
+  const draftReferences = extractConversationReferences([{ role: "assistant", content: draftText }]);
   const references = mergeConversationReferences(
     mergeConversationReferences(cardCharacterReferences, conversationReferences),
     draftReferences

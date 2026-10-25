@@ -286,6 +286,17 @@ test('corrects a short phonetically equivalent card name', () => {
   })
 })
 
+test('corrects provider consonant substitutions in recording and edit reference paths', () => {
+  assert.deepEqual(correctFromConversationReferences('Ervode turns around.', ['Erbold']), {
+    text: 'Erbold turns around.',
+    correctedTerms: [{ heard: 'Ervode', canonical: 'Erbold' }],
+  })
+  assert.deepEqual(correctEditTargetFromConversationReferences('ervode', ['Erbold']), {
+    text: 'Erbold',
+    correctedTerms: [{ heard: 'ervode', canonical: 'Erbold' }],
+  })
+})
+
 test('leaves ambiguous, lowercase, and protected wording unchanged', () => {
   assert.equal(
     correctFromConversationReferences(

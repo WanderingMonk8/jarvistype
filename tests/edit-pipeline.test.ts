@@ -1691,6 +1691,29 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
   assert.deepEqual(ambiguous, { ok: false, reason: 'fuzzy text target is ambiguous' })
 })
 
+test('fuzzy target matching tolerates similar-sounding consonants', () => {
+  const result = executeEditPlan(
+    'Erbold checks the road.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'replace a provider-misheard name',
+      operations: [
+        {
+          id: 'phonetic-consonants',
+          type: 'replace',
+          target: { exactText: 'Ervode' },
+          text: 'the captain',
+        },
+      ],
+    },
+  )
+  assert.equal(result.ok, true)
+  if (result.ok) assert.equal(result.afterText, 'The captain checks the road.')
+})
+
 test('ignores punctuation for unique text targets and uses it only to resolve lexical ties', () => {
   const unique = executeEditPlan('She answered, “So, yeah.”', [], 1, {
     schemaVersion: 2,

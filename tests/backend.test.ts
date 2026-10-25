@@ -5775,6 +5775,46 @@ test('restores a known proper noun when a compact uppercase edit spelling defaul
   }
 })
 
+test('uses phonetic character references for recording normalization and edit targets', async () => {
+  const userId = 'phonetic-character-reference-user'
+  const chatId = 'phonetic-character-reference-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'Erbold watches the road.' }]
+  generationNormalizedText = null
+  await seedDraft(userId, chatId, 'Erbold checks the road.')
+
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    recordingAppendRequest(chatId, 'phonetic-character-recording', 1, 'Ervode turns around.'),
+    userId,
+  )
+  const recording = responses.at(-1)?.payload
+  assert.equal(recording?.type, 'transcript.normalization.response')
+  if (recording?.type === 'transcript.normalization.response')
+    assert.equal(recording.proposal.candidateText, 'Erbold turns around.')
+
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'phonetic-character-edit',
+      operationId: 'phonetic-character-edit-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace Ervode with the captain.',
+    },
+    userId,
+  )
+  const edit = responses.at(-1)?.payload
+  assert.equal(edit?.type, 'edit.proposal.response')
+  if (edit?.type === 'edit.proposal.response')
+    assert.equal(edit.proposal.afterText, 'The captain checks the road.')
+  assert.equal(generationRequests.length, 0)
+})
+
 async function seedDraft(userId: string, chatId: string, cleanText: string): Promise<void> {
   await dispatch(
     {

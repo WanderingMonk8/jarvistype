@@ -1,3 +1,5 @@
+import { areSpeechPhoneticNeighbors, speechPhoneticKey } from './phonetics'
+
 export const DEFAULT_CONTEXT_MESSAGE_COUNT = 5
 export const MAX_CONTEXT_MESSAGE_COUNT = 20
 export const MAX_CONTEXT_CHARACTERS = 12_000
@@ -478,8 +480,8 @@ function isHighConfidenceReferenceMatch(heard: string, reference: string): boole
   if (Math.abs(heard.length - reference.length) > maximumLengthDifference) return false
   if (
     Math.max(heard.length, reference.length) <= 5 &&
-    referenceSoundKey(heard).length >= 3 &&
-    referenceSoundKey(heard) === referenceSoundKey(reference)
+    speechPhoneticKey(heard).length >= 3 &&
+    speechPhoneticKey(heard) === speechPhoneticKey(reference)
   )
     return true
   if (heard.charAt(0) !== reference.charAt(0)) {
@@ -491,35 +493,12 @@ function isHighConfidenceReferenceMatch(heard: string, reference: string): boole
     )
   }
   if (editDistanceAtMost(heard, reference, 1)) return true
+  if (areSpeechPhoneticNeighbors(heard, reference)) return true
   return (
     Math.min(heard.length, reference.length) >= 6 &&
     heard.slice(0, 4) === reference.slice(0, 4) &&
     editDistanceAtMost(heard, reference, 2)
   )
-}
-
-function referenceSoundKey(value: string): string {
-  const prepared = value.normalize('NFKD').toLocaleLowerCase().replace(/\p{M}/gu, '')
-  let key = ''
-  for (const character of prepared) {
-    const sound = /[aeiouy]/u.test(character)
-      ? 'A'
-      : /[cgjkq]/u.test(character)
-        ? 'K'
-        : /[bp]/u.test(character)
-          ? 'B'
-          : /[fv]/u.test(character)
-            ? 'F'
-            : /[dt]/u.test(character)
-              ? 'T'
-              : /[sxz]/u.test(character)
-                ? 'S'
-                : /[lmnr]/u.test(character)
-                  ? character.toLocaleUpperCase()
-                  : ''
-    if (sound && sound !== key.at(-1)) key += sound
-  }
-  return key
 }
 
 function hardInitialsMatch(left: string, right: string): boolean {

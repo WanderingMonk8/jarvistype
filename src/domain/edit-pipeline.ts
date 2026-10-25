@@ -1,4 +1,5 @@
 import { MAX_DRAFT_CHARACTERS, type DraftParagraph } from './draft-session'
+import { speechPhoneticKey } from './phonetics'
 
 export const EDIT_SCHEMA_VERSION = 2 as const
 export const MAX_EDIT_OPERATIONS = 8
@@ -1622,7 +1623,7 @@ function findApproximateMatch(
   if (!available.length) return 'approximate text target was not found'
   const wantedText = wanted.map(({ value }) => value).join(' ')
   const wantedCompact = wantedText.replace(/\s+/gu, '')
-  const wantedPhonetic = phoneticKey(wantedCompact)
+  const wantedPhonetic = speechPhoneticKey(wantedCompact)
   const availableValues = available.map(({ value }) => value)
   const availableText = availableValues.join(' ')
   const availableCompact = availableValues.join('')
@@ -1674,7 +1675,7 @@ function findApproximateMatch(
       let scores = scoreCache.get(candidateText)
       if (!scores) {
         const compactScore = stringSimilarity(wantedCompact, candidateCompact)
-        const candidatePhonetic = phoneticKey(candidateCompact)
+        const candidatePhonetic = speechPhoneticKey(candidateCompact)
         scores = {
           compactScore,
           text: candidateText,
@@ -1837,41 +1838,6 @@ function stringSimilarity(left: string, right: string): number {
     }
   }
   return 1 - distances[columns.length]! / Math.max(left.length, right.length, 1)
-}
-
-function phoneticKey(value: string): string {
-  const prepared = value
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .toLocaleLowerCase()
-    .replace(/ph/gu, 'f')
-    .replace(/ght/gu, 't')
-    .replace(/gh/gu, '')
-    .replace(/ck/gu, 'k')
-    .replace(/kn/gu, 'n')
-    .replace(/wr/gu, 'r')
-    .replace(/qu/gu, 'kw')
-  let key = ''
-  for (const character of prepared) {
-    const sound = phoneticSoundGroup(character)
-    if (sound && sound !== key.at(-1)) key += sound
-  }
-  return key
-}
-
-function phoneticSoundGroup(character: string): string {
-  if (/[aeiou]/u.test(character)) return 'A'
-  if (/[bp]/u.test(character)) return 'B'
-  if (/[fv]/u.test(character)) return 'F'
-  if (/[cgjkq]/u.test(character)) return 'K'
-  if (/[dt]/u.test(character)) return 'T'
-  if (/[sxz]/u.test(character)) return 'S'
-  if (character === 'l') return 'L'
-  if (character === 'm') return 'M'
-  if (character === 'n') return 'N'
-  if (character === 'r') return 'R'
-  if (/[hwy]/u.test(character)) return ''
-  return /[\p{L}\p{N}]/u.test(character) ? character : ''
 }
 
 function applyCase(value: string, mode: NonNullable<EditOperation['caseMode']>): string {

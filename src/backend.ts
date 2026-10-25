@@ -466,15 +466,16 @@ async function handleTranscriptNormalization(
     draftSpellingReferences,
   )
   const titleReferences = spellingReferences.filter((reference) => /^\p{Lu}\p{Ll}/u.test(reference))
-  // A lowercase canonical spelling (often learned from an earlier recording) must not keep a
-  // known proper noun lowercase; a capitalized reference wins for the same word.
+  // A canonical spelling (often learned from an earlier recording) must not keep a known
+  // proper noun lowercase. Only an explicitly uppercase canonical spelling stays protected;
+  // otherwise the known name's casing wins for the same word.
   const spellingProtectedReferences = [
     ...glossary.entries.map((entry) => entry.canonical),
     ...deterministic.learningCandidates.map((candidate) => candidate.canonical),
   ].filter((term) => {
-    if (!/^\p{Ll}/u.test(term)) return true
     const key = term.toLocaleLowerCase()
-    return !titleReferences.some((reference) => reference.toLocaleLowerCase() === key)
+    if (!titleReferences.some((reference) => reference.toLocaleLowerCase() === key)) return true
+    return /\p{Lu}{2,}/u.test(term) && term === term.toUpperCase()
   })
   const referenceRestoration = canonicalizeExactConversationReferences(
     candidateText,

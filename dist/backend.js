@@ -3155,7 +3155,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.10";
+var APP_VERSION = "1.6.11";
 var PHASE_FOUR_PERMISSIONS = [
   "media",
   "chats",
@@ -3578,9 +3578,9 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     ...glossary.entries.map((entry) => entry.canonical),
     ...deterministic.learningCandidates.map((candidate) => candidate.canonical)
   ].filter((term) => {
-    if (!/^\p{Ll}/u.test(term)) return true;
     const key = term.toLocaleLowerCase();
-    return !titleReferences.some((reference) => reference.toLocaleLowerCase() === key);
+    if (!titleReferences.some((reference) => reference.toLocaleLowerCase() === key)) return true;
+    return /\p{Lu}{2,}/u.test(term) && term === term.toUpperCase();
   });
   const referenceRestoration = canonicalizeExactConversationReferences(
     candidateText,

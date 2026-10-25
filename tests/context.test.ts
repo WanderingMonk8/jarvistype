@@ -80,7 +80,7 @@ test('extracts compact proper-name and specialized-term references from conversa
   )
 })
 
-test('normalizes all-uppercase reference names to capitalized casing', () => {
+test('normalizes all-uppercase reference names from recent chat or an active draft', () => {
   assert.deepEqual(
     extractConversationReferences([
       { role: 'assistant', content: 'ERBOLD meets MARA VELIN beside VAULT-TEC.' },
@@ -91,6 +91,17 @@ test('normalizes all-uppercase reference names to capitalized casing', () => {
     text: 'Erbold turns around.',
     correctedTerms: [{ heard: 'Ervode', canonical: 'Erbold' }],
   })
+})
+
+test('normalizes all-uppercase character-card names to capitalized casing', () => {
+  const references = extractCardCharacterReferences(
+    'ERBOLD - THE SENTINEL',
+    'ERBOLD VENN watches the road beside MARA.',
+  )
+  for (const expected of ['Erbold', 'Erbold Venn', 'Venn', 'Mara']) {
+    assert.ok(references.includes(expected), `missing ${expected}`)
+  }
+  assert.equal(references.some((reference) => /\p{Lu}{2}/u.test(reference)), false)
 })
 
 test('does not extract sentence-opening auxiliaries and question words as names', () => {

@@ -233,6 +233,14 @@ function correctReferenceTerms(
     )
       return heard
 
+    if (
+      requireInitialUppercase &&
+      !possessive &&
+      (MODAL_WORDS.has(baseKey) || baseKey === 'then') &&
+      !hasPositiveNameSignal(text, offset)
+    )
+      return heard
+
     const candidates = [...referenceByKey.values()].filter((reference) => {
       if (
         requireInitialUppercase &&
@@ -296,6 +304,11 @@ const NAME_SIGNAL_WORDS = new Set([
   'told',
 ])
 const NAME_TITLES = new Set(['captain', 'doctor', 'dr', 'miss', 'mister', 'mr', 'mrs', 'ms', 'professor'])
+
+function hasPositiveNameSignal(text: string, start: number): boolean {
+  const previous = adjacentWord(text, start, 'before')
+  return Boolean(previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous)))
+}
 
 function hasProtectedOrdinaryWordUsage(
   text: string,

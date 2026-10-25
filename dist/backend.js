@@ -2030,6 +2030,8 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
     const baseKey = base.toLocaleLowerCase();
     if (base.length < 3 || requireInitialUppercase && !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
       return heard;
+    if (requireInitialUppercase && !possessive && (MODAL_WORDS.has(baseKey) || baseKey === "then") && !hasPositiveNameSignal(text, offset))
+      return heard;
     const candidates = [...referenceByKey.values()].filter((reference) => {
       if (requireInitialUppercase && !possessive && isLikelyOneSyllable(reference) && hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey))
         return false;
@@ -2085,6 +2087,10 @@ var NAME_SIGNAL_WORDS = /* @__PURE__ */ new Set([
   "told"
 ]);
 var NAME_TITLES = /* @__PURE__ */ new Set(["captain", "doctor", "dr", "miss", "mister", "mr", "mrs", "ms", "professor"]);
+function hasPositiveNameSignal(text, start) {
+  const previous = adjacentWord(text, start, "before");
+  return Boolean(previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous)));
+}
 function hasProtectedOrdinaryWordUsage(text, start, end, heard) {
   const previous = adjacentWord(text, start, "before");
   const next = adjacentWord(text, end, "after");
@@ -4232,6 +4238,8 @@ function parseDeterministicEditPlan(instructionTranscript, session) {
   );
   if (sentenceTextDeletion)
     return finalizeInterpretedPlan(instructionTranscript, sentenceTextDeletion);
+  const textDeletion = parseDeterministicTextDeletion(instructionTranscript, session);
+  if (textDeletion) return finalizeInterpretedPlan(instructionTranscript, textDeletion);
   const paragraphDeletion = parseDeterministicParagraphDeletion(instructionTranscript, session);
   if (paragraphDeletion) return paragraphDeletion;
   const paragraphQuotation = parseDeterministicParagraphQuotation(
@@ -4409,6 +4417,37 @@ function parseDeterministicParagraphDeletion(instructionTranscript, session) {
         id: "deterministic-delete-paragraph",
         type: "delete",
         target: { paragraphOrdinal }
+      }
+    ]
+  });
+}
+function parseDeterministicTextDeletion(instructionTranscript, session) {
+  if (/[\r\n;]/u.test(instructionTranscript)) return null;
+  const command = instructionTranscript.trim().replace(/[.!?]+$/u, "").trim();
+  const match = command.match(
+    /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+((?:the\s+)?(?:word|words|phrase|text)\b\s*[,:]?\s*.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu
+  );
+  if (!match) return null;
+  const leadingParagraph = match[1] === void 0 ? void 0 : Number(match[1]);
+  const trailingParagraph = match[3] === void 0 ? void 0 : Number(match[3]);
+  if (leadingParagraph !== void 0 && (!Number.isSafeInteger(leadingParagraph) || leadingParagraph < 1) || trailingParagraph !== void 0 && (!Number.isSafeInteger(trailingParagraph) || trailingParagraph < 1) || leadingParagraph !== void 0 && trailingParagraph !== void 0 && leadingParagraph !== trailingParagraph)
+    return null;
+  const spokenTarget = unwrapEditArgument(stripUnquotedEditArgumentLabel(match[2] ?? ""));
+  if (!spokenTarget || isSemanticReplacementTarget(spokenTarget)) return null;
+  const paragraphOrdinal = leadingParagraph ?? trailingParagraph;
+  const targetText = adoptUnambiguousDraftCasing(session, spokenTarget, paragraphOrdinal);
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: `Delete \u201C${targetText}\u201D.`,
+    operations: [
+      {
+        id: "deterministic-delete-text",
+        type: "delete",
+        target: {
+          ...paragraphOrdinal === void 0 ? {} : { paragraphOrdinal },
+          exactText: targetText
+        }
       }
     ]
   });

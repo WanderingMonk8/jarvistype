@@ -1284,6 +1284,8 @@ function parseDeterministicEditPlan(
   )
   if (sentenceTextDeletion)
     return finalizeInterpretedPlan(instructionTranscript, sentenceTextDeletion)
+  const textDeletion = parseDeterministicTextDeletion(instructionTranscript, session)
+  if (textDeletion) return finalizeInterpretedPlan(instructionTranscript, textDeletion)
   const paragraphDeletion = parseDeterministicParagraphDeletion(instructionTranscript, session)
   if (paragraphDeletion) return paragraphDeletion
   const paragraphQuotation = parseDeterministicParagraphQuotation(
@@ -1510,6 +1512,50 @@ function parseDeterministicParagraphDeletion(
         id: 'deterministic-delete-paragraph',
         type: 'delete',
         target: { paragraphOrdinal },
+      },
+    ],
+  })
+}
+
+function parseDeterministicTextDeletion(
+  instructionTranscript: string,
+  session: PersistedDraftSession,
+): EditPlan | null {
+  if (/[\r\n;]/u.test(instructionTranscript)) return null
+  const command = instructionTranscript.trim().replace(/[.!?]+$/u, '').trim()
+  const match = command.match(
+    /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:delete|remove|take\s+(?:off|out)|erase|cut)\s+((?:the\s+)?(?:word|words|phrase|text)\b\s*[,:]?\s*.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu,
+  )
+  if (!match) return null
+  const leadingParagraph = match[1] === undefined ? undefined : Number(match[1])
+  const trailingParagraph = match[3] === undefined ? undefined : Number(match[3])
+  if (
+    (leadingParagraph !== undefined &&
+      (!Number.isSafeInteger(leadingParagraph) || leadingParagraph < 1)) ||
+    (trailingParagraph !== undefined &&
+      (!Number.isSafeInteger(trailingParagraph) || trailingParagraph < 1)) ||
+    (leadingParagraph !== undefined &&
+      trailingParagraph !== undefined &&
+      leadingParagraph !== trailingParagraph)
+  )
+    return null
+
+  const spokenTarget = unwrapEditArgument(stripUnquotedEditArgumentLabel(match[2] ?? ''))
+  if (!spokenTarget || isSemanticReplacementTarget(spokenTarget)) return null
+  const paragraphOrdinal = leadingParagraph ?? trailingParagraph
+  const targetText = adoptUnambiguousDraftCasing(session, spokenTarget, paragraphOrdinal)
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: `Delete “${targetText}”.`,
+    operations: [
+      {
+        id: 'deterministic-delete-text',
+        type: 'delete',
+        target: {
+          ...(paragraphOrdinal === undefined ? {} : { paragraphOrdinal }),
+          exactText: targetText,
+        },
       },
     ],
   })

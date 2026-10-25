@@ -1993,10 +1993,18 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
   if (characterLimit <= 0) return [];
   const references = [];
   const seen = /* @__PURE__ */ new Set();
+  const lowercaseEvidence = /* @__PURE__ */ new Set();
+  for (const message of messages) {
+    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
+    for (const term of terms) {
+      if (/^\p{Ll}/u.test(term)) lowercaseEvidence.add(referenceEvidenceKey(term));
+    }
+  }
   let size = 0;
   const add = (value) => {
     const normalized = normalizeReferenceCasing(value.trim());
-    const key = normalized.toLocaleLowerCase();
+    const key = referenceEvidenceKey(normalized);
+    if (!/\s/u.test(normalized) && lowercaseEvidence.has(key)) return;
     if (!normalized || seen.has(key) || size + normalized.length > characterLimit) return;
     seen.add(key);
     references.push(normalized);
@@ -2007,8 +2015,11 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
       const terms = segment.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
       let sequence = [];
       const flushSequence = () => {
-        if (sequence.length > 1) add(sequence.slice(0, 4).join(" "));
-        for (const term of sequence) add(term);
+        const supported = sequence.filter(
+          (term) => !lowercaseEvidence.has(referenceEvidenceKey(term))
+        );
+        if (supported.length > 1) add(supported.slice(0, 4).join(" "));
+        for (const term of supported) add(term);
         sequence = [];
       };
       for (const term of terms) {
@@ -2115,6 +2126,9 @@ function normalizeReferenceCasing(value) {
       return lower.replace(/(^|-)\p{Ll}/gu, (opening) => opening.toLocaleUpperCase());
     }
   );
+}
+function referenceEvidenceKey(value) {
+  return value.toLocaleLowerCase().replace(/\u2019/gu, "'");
 }
 var MODAL_WORDS = /* @__PURE__ */ new Set(["can", "could", "may", "might", "must", "shall", "should", "will", "would"]);
 var AUXILIARY_WORDS = /* @__PURE__ */ new Set([

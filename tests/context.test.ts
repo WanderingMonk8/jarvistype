@@ -104,6 +104,19 @@ test('normalizes all-uppercase character-card names to capitalized casing', () =
   assert.equal(references.some((reference) => /\p{Lu}{2}/u.test(reference)), false)
 })
 
+test('requires consistent casing evidence before treating a single word as a name', () => {
+  assert.deepEqual(
+    extractConversationReferences([
+      {
+        role: 'assistant',
+        content:
+          "Make the turn. We can make it work. Loved the view. I loved it. Don’t wait, but don't run. Okay? It is okay. That works; I know that. Zorlin waits nearby.",
+      },
+    ]),
+    ['Zorlin'],
+  )
+})
+
 test('does not extract sentence-opening auxiliaries and question words as names', () => {
   assert.deepEqual(
     extractConversationReferences([

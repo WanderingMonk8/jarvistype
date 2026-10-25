@@ -130,11 +130,22 @@ export function extractConversationReferences(
   if (characterLimit <= 0) return []
   const references: string[] = []
   const seen = new Set<string>()
+  // A capitalized occurrence alone is weak evidence: it may only begin a sentence.
+  // If the selected source also uses the same token lowercase, treat it as ordinary
+  // vocabulary and never promote that single token into a casing reference.
+  const lowercaseEvidence = new Set<string>()
+  for (const message of messages) {
+    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
+    for (const term of terms) {
+      if (/^\p{Ll}/u.test(term)) lowercaseEvidence.add(referenceEvidenceKey(term))
+    }
+  }
   let size = 0
 
   const add = (value: string) => {
     const normalized = normalizeReferenceCasing(value.trim())
-    const key = normalized.toLocaleLowerCase()
+    const key = referenceEvidenceKey(normalized)
+    if (!/\s/u.test(normalized) && lowercaseEvidence.has(key)) return
     if (!normalized || seen.has(key) || size + normalized.length > characterLimit) return
     seen.add(key)
     references.push(normalized)
@@ -148,8 +159,11 @@ export function extractConversationReferences(
       const terms = segment.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
       let sequence: string[] = []
       const flushSequence = () => {
-        if (sequence.length > 1) add(sequence.slice(0, 4).join(' '))
-        for (const term of sequence) add(term)
+        const supported = sequence.filter(
+          (term) => !lowercaseEvidence.has(referenceEvidenceKey(term)),
+        )
+        if (supported.length > 1) add(supported.slice(0, 4).join(' '))
+        for (const term of supported) add(term)
         sequence = []
       }
 
@@ -320,6 +334,10 @@ function normalizeReferenceCasing(value: string): string {
       return lower.replace(/(^|-)\p{Ll}/gu, (opening) => opening.toLocaleUpperCase())
     },
   )
+}
+
+function referenceEvidenceKey(value: string): string {
+  return value.toLocaleLowerCase().replace(/\u2019/gu, "'")
 }
 
 const MODAL_WORDS = new Set(['can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would'])

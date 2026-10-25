@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  canonicalizeExactConversationReferences,
   clampContextMessageCount,
   correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
@@ -166,6 +167,25 @@ test('corrects lowercase edit targets from one unique proper-name reference', ()
   assert.equal(
     correctEditTargetFromConversationReferences('herbode', ['Herbold', 'Herbode']).text,
     'herbode',
+  )
+})
+
+test('canonicalizes exact lowercase payload references while preserving ordinary grammar', () => {
+  assert.deepEqual(canonicalizeExactConversationReferences('to watt', ['Watt']), {
+    text: 'to Watt',
+    correctedTerms: [{ heard: 'watt', canonical: 'Watt' }],
+  })
+  assert.equal(
+    canonicalizeExactConversationReferences('I will wait.', ['Will']).text,
+    'I will wait.',
+  )
+  assert.equal(
+    canonicalizeExactConversationReferences('a watt of power', ['Watt']).text,
+    'a watt of power',
+  )
+  assert.equal(
+    canonicalizeExactConversationReferences('one watt of power', ['Watt']).text,
+    'one watt of power',
   )
 })
 

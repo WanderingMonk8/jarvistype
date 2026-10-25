@@ -5154,6 +5154,35 @@ test('recovers a referential homophone when speech-to-text collapses target and 
   assert.equal(generationRequests.length, 0)
 })
 
+test('uses an active-draft name to canonicalize exact replacement casing', async () => {
+  const userId = 'draft-reference-payload-user'
+  const chatId = 'draft-reference-payload-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'I turned to Watt. I call out to watch.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'draft-reference-payload-interpret',
+      operationId: 'draft-reference-payload-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace to watch with to watt.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, 'I turned to Watt. I call out to Watt.')
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
 test('rejects an as in reference without an exact repetition or clear inflection', async () => {
   const userId = 'guarded-reference-user'
   const chatId = 'guarded-reference-chat'

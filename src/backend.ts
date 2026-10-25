@@ -35,6 +35,7 @@ import {
 } from './domain/edit-pipeline'
 import {
   DEFAULT_CONTEXT_MESSAGE_COUNT,
+  canonicalizeExactConversationReferences,
   clampContextMessageCount,
   correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
@@ -802,6 +803,7 @@ async function handleEditInterpretation(
         cardCharacterReferences,
         conversationReferences,
         spelling.learningCandidates.map((candidate) => candidate.canonical),
+        session.cleanText,
       ),
       session.cleanText,
       cardCharacterReferences,
@@ -3291,7 +3293,15 @@ function normalizeEditInputPayloads(
   cardCharacterReferences: string[],
   conversationReferences: string[],
   protectedTerms: string[],
+  draftText: string,
 ): EditPlan {
+  const draftReferences = extractConversationReferences([
+    { role: 'assistant', content: draftText },
+  ])
+  const exactReferences = mergeConversationReferences(
+    mergeConversationReferences(cardCharacterReferences, conversationReferences),
+    draftReferences,
+  )
   return {
     ...plan,
     operations: plan.operations.map((operation) => {
@@ -3303,8 +3313,13 @@ function normalizeEditInputPayloads(
         ...glossary.entries.map((entry) => entry.canonical),
         ...protectedTerms,
       ]
-      const cardNormalized = correctFromConversationReferences(
+      const exactNormalized = canonicalizeExactConversationReferences(
         deterministic,
+        exactReferences,
+        protectedReferences,
+      ).text
+      const cardNormalized = correctFromConversationReferences(
+        exactNormalized,
         cardCharacterReferences,
         protectedReferences,
       ).text

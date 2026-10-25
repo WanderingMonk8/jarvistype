@@ -2014,15 +2014,29 @@ function correctFromConversationReferences(text, references, protectedTerms = []
 function correctEditTargetFromConversationReferences(text, references, protectedTerms = []) {
   return correctReferenceTerms(text, references, protectedTerms, false);
 }
+function canonicalizeExactConversationReferences(text, references, protectedTerms = []) {
+  const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()));
+  const referenceByKey = referenceMap(references);
+  const correctedTerms = [];
+  const correctedText = text.replace(
+    /\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu,
+    (heard, offset) => {
+      const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? "";
+      const base = possessive ? heard.slice(0, -possessive.length) : heard;
+      const baseKey = base.toLocaleLowerCase();
+      const canonical = referenceByKey.get(baseKey);
+      if (!canonical || canonical === base || protectedKeys.has(baseKey)) return heard;
+      if (isLikelyOneSyllable(canonical) && (hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey) || hasPrecedingQuantity(text, offset)))
+        return heard;
+      correctedTerms.push({ heard: base, canonical });
+      return `${canonical}${possessive}`;
+    }
+  );
+  return { text: correctedText, correctedTerms };
+}
 function correctReferenceTerms(text, references, protectedTerms, requireInitialUppercase) {
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()));
-  const referenceByKey = /* @__PURE__ */ new Map();
-  for (const reference of references) {
-    const possessive = reference.match(/(['’]s)$/iu)?.[0] ?? "";
-    const canonical = possessive ? reference.slice(0, -possessive.length) : reference;
-    if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(canonical)) continue;
-    referenceByKey.set(canonical.toLocaleLowerCase(), canonical);
-  }
+  const referenceByKey = referenceMap(references);
   const correctedTerms = [];
   const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard, offset) => {
     const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? "";
@@ -2046,6 +2060,16 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
     return `${canonical}${possessive}`;
   });
   return { text: correctedText, correctedTerms };
+}
+function referenceMap(references) {
+  const referenceByKey = /* @__PURE__ */ new Map();
+  for (const reference of references) {
+    const possessive = reference.match(/(['’]s)$/iu)?.[0] ?? "";
+    const canonical = possessive ? reference.slice(0, -possessive.length) : reference;
+    if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(canonical)) continue;
+    referenceByKey.set(canonical.toLocaleLowerCase(), canonical);
+  }
+  return referenceByKey;
 }
 var MODAL_WORDS = /* @__PURE__ */ new Set(["can", "could", "may", "might", "must", "shall", "should", "will", "would"]);
 var DETERMINERS = /* @__PURE__ */ new Set([
@@ -2109,6 +2133,11 @@ function adjacentWord(text, offset, direction) {
   const source = direction === "before" ? text.slice(0, offset) : text.slice(offset);
   const match = direction === "before" ? source.match(/([\p{L}\p{M}]+)[^\p{L}\p{M}]*$/u) : source.match(/^[^\p{L}\p{M}]*([\p{L}\p{M}]+)/u);
   return match?.[1]?.toLocaleLowerCase();
+}
+function hasPrecedingQuantity(text, offset) {
+  return /(?:\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand)|\d+(?:[.,]\d+)?)\s*$/iu.test(
+    text.slice(0, offset)
+  );
 }
 function isLikelyOneSyllable(value) {
   const normalized = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/[^a-z]/gu, "");
@@ -3821,7 +3850,8 @@ async function handleEditInterpretation(request, context, activeRequest) {
         glossary,
         cardCharacterReferences,
         conversationReferences,
-        spelling.learningCandidates.map((candidate) => candidate.canonical)
+        spelling.learningCandidates.map((candidate) => candidate.canonical),
+        session.cleanText
       ),
       session.cleanText,
       cardCharacterReferences,
@@ -5757,7 +5787,14 @@ function stripQualifiedAsInEditPayloads(plan) {
     })
   };
 }
-function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, conversationReferences, protectedTerms) {
+function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, conversationReferences, protectedTerms, draftText) {
+  const draftReferences = extractConversationReferences([
+    { role: "assistant", content: draftText }
+  ]);
+  const exactReferences = mergeConversationReferences(
+    mergeConversationReferences(cardCharacterReferences, conversationReferences),
+    draftReferences
+  );
   return {
     ...plan,
     operations: plan.operations.map((operation) => {
@@ -5769,8 +5806,13 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
         ...glossary.entries.map((entry) => entry.canonical),
         ...protectedTerms
       ];
-      const cardNormalized = correctFromConversationReferences(
+      const exactNormalized = canonicalizeExactConversationReferences(
         deterministic,
+        exactReferences,
+        protectedReferences
+      ).text;
+      const cardNormalized = correctFromConversationReferences(
+        exactNormalized,
         cardCharacterReferences,
         protectedReferences
       ).text;

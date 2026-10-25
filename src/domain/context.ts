@@ -205,6 +205,39 @@ export function correctEditTargetFromConversationReferences(
   return correctReferenceTerms(text, references, protectedTerms, false)
 }
 
+/**
+ * Adopts canonical casing only when a payload token already matches a known
+ * reference case-insensitively. This does not perform fuzzy substitution.
+ */
+export function canonicalizeExactConversationReferences(
+  text: string,
+  references: readonly string[],
+  protectedTerms: readonly string[] = [],
+): ConversationReferenceCorrection {
+  const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()))
+  const referenceByKey = referenceMap(references)
+  const correctedTerms: Array<{ heard: string; canonical: string }> = []
+  const correctedText = text.replace(
+    /\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu,
+    (heard, offset: number) => {
+      const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
+      const base = possessive ? heard.slice(0, -possessive.length) : heard
+      const baseKey = base.toLocaleLowerCase()
+      const canonical = referenceByKey.get(baseKey)
+      if (!canonical || canonical === base || protectedKeys.has(baseKey)) return heard
+      if (
+        isLikelyOneSyllable(canonical) &&
+        (hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey) ||
+          hasPrecedingQuantity(text, offset))
+      )
+        return heard
+      correctedTerms.push({ heard: base, canonical })
+      return `${canonical}${possessive}`
+    },
+  )
+  return { text: correctedText, correctedTerms }
+}
+
 function correctReferenceTerms(
   text: string,
   references: readonly string[],
@@ -212,15 +245,9 @@ function correctReferenceTerms(
   requireInitialUppercase: boolean,
 ): ConversationReferenceCorrection {
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()))
-  const referenceByKey = new Map<string, string>()
-  for (const reference of references) {
-    const possessive = reference.match(/(['’]s)$/iu)?.[0] ?? ''
-    const canonical = possessive ? reference.slice(0, -possessive.length) : reference
-    if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(canonical)) continue
-    referenceByKey.set(canonical.toLocaleLowerCase(), canonical)
-  }
-
+  const referenceByKey = referenceMap(references)
   const correctedTerms: Array<{ heard: string; canonical: string }> = []
+
   const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard, offset: number) => {
     const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
     const base = possessive ? heard.slice(0, -possessive.length) : heard
@@ -262,6 +289,17 @@ function correctReferenceTerms(
   })
 
   return { text: correctedText, correctedTerms }
+}
+
+function referenceMap(references: readonly string[]): Map<string, string> {
+  const referenceByKey = new Map<string, string>()
+  for (const reference of references) {
+    const possessive = reference.match(/(['’]s)$/iu)?.[0] ?? ''
+    const canonical = possessive ? reference.slice(0, -possessive.length) : reference
+    if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(canonical)) continue
+    referenceByKey.set(canonical.toLocaleLowerCase(), canonical)
+  }
+  return referenceByKey
 }
 
 const MODAL_WORDS = new Set(['can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would'])
@@ -345,6 +383,12 @@ function adjacentWord(
       ? source.match(/([\p{L}\p{M}]+)[^\p{L}\p{M}]*$/u)
       : source.match(/^[^\p{L}\p{M}]*([\p{L}\p{M}]+)/u)
   return match?.[1]?.toLocaleLowerCase()
+}
+
+function hasPrecedingQuantity(text: string, offset: number): boolean {
+  return /(?:\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand)|\d+(?:[.,]\d+)?)\s*$/iu.test(
+    text.slice(0, offset),
+  )
 }
 
 function isLikelyOneSyllable(value: string): boolean {

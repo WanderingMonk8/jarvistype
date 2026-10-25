@@ -179,13 +179,60 @@ export function hasUnresolvedCommandSignal(text: string): boolean {
   return false
 }
 
+/** Calendar words that keep their capital letter when a compact uppercase token is expanded. */
+export const KNOWN_CAPITALIZED_TERMS = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const
+
+/**
+ * Provider text sometimes arrives with whole words in uppercase, including a spelled
+ * word collapsed into one token. Those words default to lowercase; normal casing is
+ * left alone, and an immediately preceding casing command still decides the result.
+ */
+export function lowercaseProviderCaps(
+  text: string,
+  knownCapitalizedTerms: readonly string[] = [],
+): string {
+  const byKey = new Map(
+    knownCapitalizedTerms.map((term) => [term.toLocaleLowerCase(), term.trim()]),
+  )
+  const casingCue = /\b(?:capitali[sz]e[sd]?|uppercase|lowercase|all caps)\s+$/iu
+  return text.replace(/[\p{L}\p{M}\d'’-]+/gu, (token: string, offset: number) => {
+    // Leave normal casing, mixed case, and single letters untouched.
+    if (token !== token.toUpperCase() || !/\p{Lu}{2,}/u.test(token)) return token
+    if (casingCue.test(text.slice(0, offset))) return token
+    return byKey.get(token.toLocaleLowerCase()) ?? token.toLocaleLowerCase()
+  })
+}
+
 export function normalizeDeterministically(
   raw: string,
   glossary: readonly GlossaryEntry[],
-  options: { capitalizeOpening?: boolean; compactUppercaseSpelling?: boolean } = {},
+  options: {
+    capitalizeOpening?: boolean
+    knownCapitalizedTerms?: readonly string[]
+  } = {},
 ): DeterministicNormalization {
   const protectedLiterals: string[] = []
-  let text = raw.replace(
+  let text = lowercaseProviderCaps(raw, options.knownCapitalizedTerms).replace(
     new RegExp(
       `\\b(?:literal|the\\s+(?:word|words|phrase))\\s+(${SPOKEN_PUNCTUATION_TERM_SOURCE})\\b`,
       'gi',
@@ -219,7 +266,7 @@ export function normalizeDeterministically(
     })
   }
   const learningCandidates: SpellingLearningCandidate[] = []
-  const spelling = replaceExplicitSpelling(text, options.compactUppercaseSpelling === true)
+  const spelling = replaceExplicitSpelling(text, options.knownCapitalizedTerms)
   text = spelling.text
   if (spelling.learningCandidates.length) reasons.push('explicit spelling')
   learningCandidates.push(...spelling.learningCandidates)
@@ -664,8 +711,12 @@ function formatGeneratedQuotationOpenings(input: string, marker: string): string
 
 function replaceExplicitSpelling(
   input: string,
-  compactUppercaseSpelling = false,
+  knownCapitalizedTerms: readonly string[] = [],
 ): Pick<DeterministicNormalization, 'text' | 'learningCandidates' | 'ambiguities'> {
+  const knownCapitalTerm = (word: string): string | undefined => {
+    const key = word.toLocaleLowerCase()
+    return knownCapitalizedTerms.find((term) => term.toLocaleLowerCase() === key)
+  }
   const learningCandidates: SpellingLearningCandidate[] = []
   const ambiguities: string[] = []
   const separatedPattern =
@@ -683,7 +734,8 @@ function replaceExplicitSpelling(
       if (letters.length < 3) return whole
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : undefined
       const canonical =
-        matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? letters, casing)
+        (casing || matchingCue ? undefined : knownCapitalTerm(letters)) ??
+        (matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? letters, casing))
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`
     },
@@ -704,7 +756,8 @@ function replaceExplicitSpelling(
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : undefined
       if (!/[A-Z]{2,}/.test(spoken) || (!casing && !matchingCue)) return whole
       const canonical =
-        matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? spoken, casing)
+        (casing || matchingCue ? undefined : knownCapitalTerm(letters)) ??
+        (matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? spoken, casing))
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`
     },
@@ -725,9 +778,11 @@ function replaceExplicitSpelling(
       separator: string | undefined,
       cue: string | undefined,
     ) => {
-      if (!casing && !compactUppercaseSpelling) return whole
+      if (!casing) return whole
       const matchingCue = cueMatchesLetters(cue, spoken) ? cue : undefined
-      const canonical = applySpellingCasing(matchingCue ?? spoken, casing)
+      const canonical = casing
+        ? applySpellingCasing(matchingCue ?? spoken, casing)
+        : (knownCapitalTerm(spoken) ?? applySpellingCasing(matchingCue ?? spoken, casing))
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`
     },

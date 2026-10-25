@@ -2706,9 +2706,41 @@ var LITERAL_PUNCTUATION_CONTEXTS = [
     "gi"
   )
 ];
+var KNOWN_CAPITALIZED_TERMS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December"
+];
+function lowercaseProviderCaps(text, knownCapitalizedTerms = []) {
+  const byKey = new Map(
+    knownCapitalizedTerms.map((term) => [term.toLocaleLowerCase(), term.trim()])
+  );
+  const casingCue = /\b(?:capitali[sz]e[sd]?|uppercase|lowercase|all caps)\s+$/iu;
+  return text.replace(/[\p{L}\p{M}\d'’-]+/gu, (token, offset) => {
+    if (token !== token.toUpperCase() || !/\p{Lu}{2,}/u.test(token)) return token;
+    if (casingCue.test(text.slice(0, offset))) return token;
+    return byKey.get(token.toLocaleLowerCase()) ?? token.toLocaleLowerCase();
+  });
+}
 function normalizeDeterministically(raw, glossary, options = {}) {
   const protectedLiterals = [];
-  let text = raw.replace(
+  let text = lowercaseProviderCaps(raw, options.knownCapitalizedTerms).replace(
     new RegExp(
       `\\b(?:literal|the\\s+(?:word|words|phrase))\\s+(${SPOKEN_PUNCTUATION_TERM_SOURCE})\\b`,
       "gi"
@@ -2742,7 +2774,7 @@ function normalizeDeterministically(raw, glossary, options = {}) {
     });
   }
   const learningCandidates = [];
-  const spelling = replaceExplicitSpelling(text, options.compactUppercaseSpelling === true);
+  const spelling = replaceExplicitSpelling(text, options.knownCapitalizedTerms);
   text = spelling.text;
   if (spelling.learningCandidates.length) reasons.push("explicit spelling");
   learningCandidates.push(...spelling.learningCandidates);
@@ -3072,7 +3104,11 @@ function formatGeneratedQuotationOpenings(input, marker) {
     return `${quote}${formattedWord}`;
   }).replaceAll(marker, "");
 }
-function replaceExplicitSpelling(input, compactUppercaseSpelling = false) {
+function replaceExplicitSpelling(input, knownCapitalizedTerms = []) {
+  const knownCapitalTerm = (word) => {
+    const key = word.toLocaleLowerCase();
+    return knownCapitalizedTerms.find((term) => term.toLocaleLowerCase() === key);
+  };
   const learningCandidates = [];
   const ambiguities = [];
   const separatedPattern = /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?((?:(?:[A-Za-z]\s*(?:-|dash|[.,](?:\s+dash)?|['\u2019])\s*){2,}[A-Za-z](?![A-Za-z]))|(?:(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])))(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/gi;
@@ -3082,7 +3118,7 @@ function replaceExplicitSpelling(input, compactUppercaseSpelling = false) {
       const letters = extractLetters(spoken);
       if (letters.length < 3) return whole;
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : void 0;
-      const canonical = matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? letters, casing);
+      const canonical = (casing || matchingCue ? void 0 : knownCapitalTerm(letters)) ?? (matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? letters, casing));
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
     }
@@ -3094,7 +3130,7 @@ function replaceExplicitSpelling(input, compactUppercaseSpelling = false) {
       const letters = extractLetters(spoken);
       const matchingCue = cueMatchesLetters(cue, letters) ? cue : void 0;
       if (!/[A-Z]{2,}/.test(spoken) || !casing && !matchingCue) return whole;
-      const canonical = matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? spoken, casing);
+      const canonical = (casing || matchingCue ? void 0 : knownCapitalTerm(letters)) ?? (matchingCue && !casing ? matchingCue : applySpellingCasing(matchingCue ?? spoken, casing));
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
     }
@@ -3103,9 +3139,9 @@ function replaceExplicitSpelling(input, compactUppercaseSpelling = false) {
   text = text.replace(
     compactUppercasePattern,
     (whole, casing, spoken, separator, cue) => {
-      if (!casing && !compactUppercaseSpelling) return whole;
+      if (!casing) return whole;
       const matchingCue = cueMatchesLetters(cue, spoken) ? cue : void 0;
-      const canonical = applySpellingCasing(matchingCue ?? spoken, casing);
+      const canonical = casing ? applySpellingCasing(matchingCue ?? spoken, casing) : knownCapitalTerm(spoken) ?? applySpellingCasing(matchingCue ?? spoken, casing);
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() });
       return `${canonical}${unmatchedCueSuffix(separator, cue, matchingCue)}`;
     }
@@ -3417,8 +3453,13 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       request.rawTranscript,
       request.quotationBoundaryHint
     );
+    const knownCapitalizedTerms2 = mergeConversationReferences(
+      conversationReferences2,
+      KNOWN_CAPITALIZED_TERMS
+    );
     const deterministic2 = normalizeDeterministically(recoveredBoundary2.text, glossary2.entries, {
-      capitalizeOpening: capitalizeOpening2
+      capitalizeOpening: capitalizeOpening2,
+      knownCapitalizedTerms: knownCapitalizedTerms2
     });
     const candidateText2 = deterministic2.text;
     const reasons2 = [...deterministic2.reasons];
@@ -3444,6 +3485,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       cardCharacterReferences: cardCharacterReferences2,
       conversationReferences: conversationReferences2,
       capitalizeOpening: capitalizeOpening2,
+      knownCapitalizedTerms: knownCapitalizedTerms2,
       recoveredBoundary: recoveredBoundary2,
       deterministic: deterministic2,
       candidateText: candidateText2,
@@ -3472,6 +3514,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     cardCharacterReferences,
     conversationReferences,
     capitalizeOpening,
+    knownCapitalizedTerms,
     recoveredBoundary,
     deterministic,
     reasons,
@@ -3513,7 +3556,8 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       deterministic.authoritativePunctuationMarks
     ) && preservesLiteralAsIn(candidateText, contextual.text)) {
       const enforced = normalizeDeterministically(contextual.text, glossary.entries, {
-        capitalizeOpening
+        capitalizeOpening,
+        knownCapitalizedTerms
       });
       candidateText = enforced.text;
       reasons.push(...contextual.reasons);
@@ -3813,7 +3857,10 @@ async function handleEditInterpretation(request, context, activeRequest) {
       settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : []
     );
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries, {
-      compactUppercaseSpelling: true
+      knownCapitalizedTerms: mergeConversationReferences(
+        conversationReferences,
+        KNOWN_CAPITALIZED_TERMS
+      )
     });
     const interpretStartedAt = performance.now();
     recordDebug(context.userId, "edit.interpret", "start");
@@ -5860,13 +5907,17 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
     mergeConversationReferences(cardCharacterReferences, conversationReferences),
     draftReferences
   );
+  const knownCapitalizedTerms = mergeConversationReferences(
+    exactReferences,
+    KNOWN_CAPITALIZED_TERMS
+  );
   return {
     ...plan,
     operations: plan.operations.map((operation) => {
       if (typeof operation.text !== "string") return operation;
       const deterministic = normalizeDeterministically(operation.text, glossary.entries, {
         capitalizeOpening: false,
-        compactUppercaseSpelling: true
+        knownCapitalizedTerms
       }).text;
       const protectedReferences = [
         ...glossary.entries.map((entry) => entry.canonical),

@@ -57,6 +57,7 @@ import type { DeterministicGrammarOptions } from './domain/grammar'
 import {
   applySpellingCasing,
   normalizeDeterministically,
+  KNOWN_CAPITALIZED_TERMS,
   recoverHighConfidenceContextualCommands,
   SPOKEN_PUNCTUATION_COMMAND_PHRASES,
   type SpellingLearningCandidate,
@@ -296,8 +297,13 @@ async function handleTranscriptNormalization(
       request.rawTranscript,
       request.quotationBoundaryHint,
     )
+    const knownCapitalizedTerms = mergeConversationReferences(
+      conversationReferences,
+      KNOWN_CAPITALIZED_TERMS,
+    )
     const deterministic = normalizeDeterministically(recoveredBoundary.text, glossary.entries, {
       capitalizeOpening,
+      knownCapitalizedTerms,
     })
     const candidateText = deterministic.text
     const reasons = [...deterministic.reasons]
@@ -323,6 +329,7 @@ async function handleTranscriptNormalization(
       cardCharacterReferences,
       conversationReferences,
       capitalizeOpening,
+      knownCapitalizedTerms,
       recoveredBoundary,
       deterministic,
       candidateText,
@@ -351,6 +358,7 @@ async function handleTranscriptNormalization(
     cardCharacterReferences,
     conversationReferences,
     capitalizeOpening,
+    knownCapitalizedTerms,
     recoveredBoundary,
     deterministic,
     reasons,
@@ -402,6 +410,7 @@ async function handleTranscriptNormalization(
     ) {
       const enforced = normalizeDeterministically(contextual.text, glossary.entries, {
         capitalizeOpening,
+        knownCapitalizedTerms,
       })
       candidateText = enforced.text
       reasons.push(...contextual.reasons)
@@ -771,7 +780,10 @@ async function handleEditInterpretation(
         : [],
     )
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries, {
-      compactUppercaseSpelling: true,
+      knownCapitalizedTerms: mergeConversationReferences(
+        conversationReferences,
+        KNOWN_CAPITALIZED_TERMS,
+      ),
     })
     const interpretStartedAt = performance.now()
     recordDebug(context.userId, 'edit.interpret', 'start')
@@ -3383,13 +3395,17 @@ function normalizeEditInputPayloads(
     mergeConversationReferences(cardCharacterReferences, conversationReferences),
     draftReferences,
   )
+  const knownCapitalizedTerms = mergeConversationReferences(
+    exactReferences,
+    KNOWN_CAPITALIZED_TERMS,
+  )
   return {
     ...plan,
     operations: plan.operations.map((operation) => {
       if (typeof operation.text !== 'string') return operation
       const deterministic = normalizeDeterministically(operation.text, glossary.entries, {
         capitalizeOpening: false,
-        compactUppercaseSpelling: true,
+        knownCapitalizedTerms,
       }).text
       const protectedReferences = [
         ...glossary.entries.map((entry) => entry.canonical),

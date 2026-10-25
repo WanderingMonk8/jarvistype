@@ -500,30 +500,23 @@ test('collapses explicit spelling, obeys casing, and creates a learning candidat
     normalizeDeterministically('Use lowercase C-O-O-L-E-Y period', []).text,
     'Use cooley.',
   )
+  assert.equal(normalizeDeterministically('Use capitalized ERBOLD period', []).text, 'Use Erbold.')
+  assert.equal(normalizeDeterministically('Use lowercase ERBOLD period', []).text, 'Use erbold.')
+  assert.equal(normalizeDeterministically('Use uppercase ERBOLD period', []).text, 'Use ERBOLD.')
+  assert.equal(normalizeDeterministically('Use NASA period', []).text, 'Use nasa.')
   assert.equal(
-    normalizeDeterministically('Use capitalized ERBOLD period', []).text,
-    'Use Erbold.',
+    normalizeDeterministically('Replace SHEATH with SHEAF.', []).text,
+    'Replace sheath with sheaf.',
   )
-  assert.equal(
-    normalizeDeterministically('Use lowercase ERBOLD period', []).text,
-    'Use erbold.',
-  )
-  assert.equal(
-    normalizeDeterministically('Use uppercase ERBOLD period', []).text,
-    'Use ERBOLD.',
-  )
-  assert.equal(normalizeDeterministically('Use NASA period', []).text, 'Use NASA.')
-  const compactEditSpelling = normalizeDeterministically('Replace SHEATH with SHEAF.', [], {
-    compactUppercaseSpelling: true,
-  })
-  assert.equal(compactEditSpelling.text, 'Replace sheath with sheaf.')
-  assert.deepEqual(compactEditSpelling.learningCandidates, [
-    { canonical: 'sheath', spokenVariant: 'SHEATH' },
-    { canonical: 'sheaf', spokenVariant: 'SHEAF' },
-  ])
   assert.equal(
     normalizeDeterministically('NASA launched capitalized ERBOLD period', []).text,
-    'NASA launched Erbold.',
+    'Nasa launched Erbold.',
+  )
+  assert.equal(
+    normalizeDeterministically('Call me on MONDAY and in JANUARY.', [], {
+      knownCapitalizedTerms: ['Monday', 'January'],
+    }).text,
+    'Call me on Monday and in January.',
   )
   assert.equal(normalizeDeterministically('Use C-O-O-L-E-Y, Cooley period', []).text, 'Use Cooley.')
 

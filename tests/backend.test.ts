@@ -1552,7 +1552,7 @@ test('calls the contextual provider for every recording outside the quotation fa
   activeChatId = chatId
   await seedDraft(userId, chatId, 'Earlier')
   responses.length = 0
-  generationEditsOverride = [{ find: 'beta', replace: 'BETA' }]
+  generationEditsOverride = [{ find: 'beta', replace: 'omega' }]
 
   generationRequests.length = 0
   await dispatch(
@@ -1563,7 +1563,7 @@ test('calls the contextual provider for every recording outside the quotation fa
   assert.equal(response?.type, 'transcript.normalization.response')
   assert.equal(generationRequests.length, 1)
   if (response?.type === 'transcript.normalization.response')
-    assert.match(response.proposal.candidateText, /BETA/)
+    assert.match(response.proposal.candidateText, /omega/)
 
   generationRequests.length = 0
   await dispatch(
@@ -5542,6 +5542,34 @@ test('defaults collapsed uppercase edit spellings to lowercase and honors an exp
     if (proposal?.type !== 'edit.proposal.response') return
     assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
     assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
+test('lowercases provider-collapsed uppercase dictation but keeps casing commands, references, and calendar words', async () => {
+  const cases: Array<readonly [string, string]> = [
+    ['Enter TELEPHONE.', 'Enter telephone.'],
+    ['Call me on MONDAY.', 'Call me on Monday.'],
+    ['It happened in JANUARY.', 'It happened in January.'],
+    ['Use uppercase TELEPHONE.', 'Use TELEPHONE.'],
+    ['Use lowercase TELEPHONE.', 'Use telephone.'],
+    ['Use capitalized TELEPHONE.', 'Use Telephone.'],
+    ['Erbold hears it.', 'Erbold hears it.'],
+  ]
+  for (const [index, [rawTranscript, expected]] of cases.entries()) {
+    const userId = `uppercase-dictation-${index}`
+    const chatId = `uppercase-dictation-chat-${index}`
+    activeChatId = chatId
+    chatMessages = [{ role: 'assistant', content: 'Erbold hears it, and his jaw sets.' }]
+    await seedDraft(userId, chatId, 'Earlier')
+    responses.length = 0
+    await dispatch(
+      recordingAppendRequest(chatId, `uppercase-dictation-segment-${index}`, 1, rawTranscript),
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response', rawTranscript)
+    if (response?.type !== 'transcript.normalization.response') return
+    assert.equal(response.proposal.candidateText, expected, rawTranscript)
   }
 })
 

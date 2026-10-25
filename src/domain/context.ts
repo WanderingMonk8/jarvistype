@@ -2,6 +2,8 @@ import { areSpeechPhoneticNeighbors, speechPhoneticKey } from './phonetics'
 
 export const DEFAULT_CONTEXT_MESSAGE_COUNT = 5
 export const MAX_CONTEXT_MESSAGE_COUNT = 20
+export const DEFAULT_REFERENCE_CACHE_LIMIT = 30
+export const MAX_REFERENCE_CACHE_LIMIT = 200
 export const MAX_CONTEXT_CHARACTERS = 12_000
 export const NORMALIZATION_RECENT_MESSAGE_COUNT = 2
 export const NORMALIZATION_RECENT_CONTEXT_CHARACTERS = 4_000
@@ -35,6 +37,11 @@ export interface ConversationReferenceCorrection {
 export function clampContextMessageCount(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_CONTEXT_MESSAGE_COUNT
   return Math.min(MAX_CONTEXT_MESSAGE_COUNT, Math.max(0, Math.trunc(value)))
+}
+
+export function clampReferenceCacheLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_REFERENCE_CACHE_LIMIT
+  return Math.min(MAX_REFERENCE_CACHE_LIMIT, Math.max(0, Math.floor(value)))
 }
 
 export function selectRecentContext(

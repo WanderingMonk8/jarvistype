@@ -526,6 +526,52 @@ test('uses an unambiguous recent-chat proper name when the model leaves the STT 
   }
 })
 
+test('persists strict references in a bounded per-chat rolling cache', async () => {
+  const userId = 'rolling-reference-cache-user'
+  const chatId = 'rolling-reference-cache-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'rolling-reference-cache-settings',
+      settings: {
+        contextMessageCount: 1,
+        referenceCacheLimit: 2,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'off',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+
+  chatMessages = [{ role: 'assistant', content: 'I spoke with Alpha beside the gate.' }]
+  await dispatch(recordingAppendRequest(chatId, 'rolling-alpha', 0, 'Ready.'), userId)
+
+  chatMessages = [{ role: 'assistant', content: 'An ordinary sentence.' }]
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'rolling-alpha-recall', 0, 'Alfa arrives.'), userId)
+  const recalled = responses.at(-1)?.payload
+  assert.equal(recalled?.type, 'transcript.normalization.response')
+  if (recalled?.type === 'transcript.normalization.response')
+    assert.equal(recalled.proposal.candidateText, 'Alpha arrives.')
+
+  chatMessages = [
+    { role: 'assistant', content: 'Building stands nearby. I spoke with Beta beside it.' },
+  ]
+  await dispatch(recordingAppendRequest(chatId, 'rolling-beta', 0, 'Ready.'), userId)
+  chatMessages = [{ role: 'assistant', content: 'I spoke with Gamma beside it.' }]
+  await dispatch(recordingAppendRequest(chatId, 'rolling-gamma', 0, 'Ready.'), userId)
+
+  const storedCache = stored.get(
+    `${userId}:reference-cache-${encodeURIComponent(chatId)}.json`,
+  ) as { entries?: string[] } | undefined
+  assert.deepEqual(storedCache?.entries, ['Beta', 'Gamma'])
+  assert.equal(storedCache?.entries?.includes('Building'), false)
+})
+
 test('uses a reference name when the provider splits its possessive pronunciation', async () => {
   const userId = 'split-possessive-reference-user'
   const chatId = 'split-possessive-reference-chat'

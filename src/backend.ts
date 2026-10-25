@@ -35,8 +35,10 @@ import {
 } from './domain/edit-pipeline'
 import {
   DEFAULT_CONTEXT_MESSAGE_COUNT,
+  DEFAULT_REFERENCE_CACHE_LIMIT,
   canonicalizeExactConversationReferences,
   clampContextMessageCount,
+  clampReferenceCacheLimit,
   correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
   extractAuthoritativeCasingReferences,
@@ -108,6 +110,7 @@ const editCandidateContexts = new Map<
 const glossaryCache = new Map<string, GlossaryState>()
 const settingsCache = new Map<string, PhaseFourSettings>()
 const conversationReferenceCache = new Map<string, { signature: string; references: string[] }>()
+const rollingReferenceCache = new Map<string, { schemaVersion: 1; entries: string[] }>()
 const cardCharacterReferenceCache = new Map<
   string,
   { identification: string[]; casing: string[] }
@@ -136,6 +139,7 @@ const DEBUG_LOGGED_REQUEST_TYPES = new Set<FrontendRequest['type']>([
 ])
 const DEFAULT_SETTINGS: PhaseFourSettings = {
   contextMessageCount: DEFAULT_CONTEXT_MESSAGE_COUNT,
+  referenceCacheLimit: DEFAULT_REFERENCE_CACHE_LIMIT,
   contextualNormalizationEnabled: true,
   grammarRepairMode: 'off',
   normalizationConnectionId: null,
@@ -299,13 +303,20 @@ async function handleTranscriptNormalization(
       request.chatId,
       referenceContext.messages,
     )
+    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext.messages)
+    const rollingReferences = await updateRollingReferenceCache(
+      context.userId,
+      request.chatId,
+      strictRecentReferences,
+      settings.referenceCacheLimit,
+    )
     const conversationReferences = mergeConversationReferences(
       cardCharacterReferences,
-      recentConversationReferences,
+      mergeConversationReferences(rollingReferences, recentConversationReferences),
     )
     const authoritativeConversationReferences = mergeConversationReferences(
       cardCasingReferences,
-      extractAuthoritativeCasingReferences(referenceContext.messages),
+      mergeConversationReferences(rollingReferences, strictRecentReferences),
     )
     const capitalizeOpening = shouldCapitalizeRecordingOpening(session.cleanText)
     const recoveredBoundary = applyQuotationBoundaryHint(
@@ -851,15 +862,22 @@ async function handleEditInterpretation(
     const recentConversationReferences = settings.contextualNormalizationEnabled
       ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages)
       : []
+    const strictRecentReferences = settings.contextualNormalizationEnabled
+      ? extractAuthoritativeCasingReferences(referenceContext.messages)
+      : []
+    const rollingReferences = await updateRollingReferenceCache(
+      context.userId,
+      request.chatId,
+      strictRecentReferences,
+      settings.referenceCacheLimit,
+    )
     const conversationReferences = mergeConversationReferences(
       cardCharacterReferences,
-      recentConversationReferences,
+      mergeConversationReferences(rollingReferences, recentConversationReferences),
     )
     const authoritativeConversationReferences = mergeConversationReferences(
       cardCasingReferences,
-      settings.contextualNormalizationEnabled
-        ? extractAuthoritativeCasingReferences(referenceContext.messages)
-        : [],
+      mergeConversationReferences(rollingReferences, strictRecentReferences),
     )
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries, {
       compactUppercaseSpelling: true,
@@ -3979,6 +3997,63 @@ function cachedConversationReferences(
   return references
 }
 
+async function updateRollingReferenceCache(
+  userId: string,
+  chatId: string,
+  additions: readonly string[],
+  requestedLimit: unknown,
+): Promise<string[]> {
+  const limit = clampReferenceCacheLimit(requestedLimit)
+  const key = `${userId}\u0000${chatId}`
+  let state = rollingReferenceCache.get(key)
+  if (!state) {
+    const raw = await spindle.userStorage.getJson<unknown>(referenceCachePath(chatId), {
+      fallback: null,
+      userId,
+    })
+    state = restoreRollingReferenceCache(raw)
+    rollingReferenceCache.set(key, state)
+  }
+
+  const next = new Map<string, string>()
+  for (const reference of [...state.entries, ...additions]) {
+    const normalized = reference.trim()
+    const referenceKey = normalized.toLocaleLowerCase().replace(/\u2019/gu, "'")
+    if (normalized && !next.has(referenceKey)) next.set(referenceKey, normalized)
+  }
+  const entries = limit === 0 ? [] : [...next.values()].slice(-limit)
+  if (
+    entries.length !== state.entries.length ||
+    entries.some((entry, index) => entry !== state!.entries[index])
+  ) {
+    state = { schemaVersion: 1, entries }
+    rollingReferenceCache.set(key, state)
+    await spindle.userStorage.setJson(referenceCachePath(chatId), state, { userId })
+  }
+  return entries
+}
+
+function restoreRollingReferenceCache(raw: unknown): { schemaVersion: 1; entries: string[] } {
+  if (!isRecord(raw) || raw.schemaVersion !== 1 || !Array.isArray(raw.entries))
+    return { schemaVersion: 1, entries: [] }
+  const entries: string[] = []
+  const seen = new Set<string>()
+  for (const value of raw.entries) {
+    if (typeof value !== 'string') continue
+    const normalized = value.trim().slice(0, 200)
+    const key = normalized.toLocaleLowerCase().replace(/\u2019/gu, "'")
+    if (!normalized || seen.has(key)) continue
+    seen.add(key)
+    entries.push(normalized)
+    if (entries.length >= 200) break
+  }
+  return { schemaVersion: 1, entries }
+}
+
+function referenceCachePath(chatId: string): string {
+  return `reference-cache-${encodeURIComponent(chatId)}.json`
+}
+
 function glossaryForPrompt(glossary: GlossaryState): Array<{
   canonical: string
   variants: string[]
@@ -4074,6 +4149,7 @@ async function handleSettingsUpdate(
 ): Promise<void> {
   const settings = {
     contextMessageCount: clampContextMessageCount(request.settings.contextMessageCount),
+    referenceCacheLimit: clampReferenceCacheLimit(request.settings.referenceCacheLimit),
     contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled,
     grammarRepairMode: request.settings.grammarRepairMode,
     normalizationConnectionId: request.settings.normalizationConnectionId,
@@ -4680,6 +4756,7 @@ async function loadSettings(userId: string): Promise<PhaseFourSettings> {
     isRecord(raw) && typeof raw.contextualNormalizationEnabled === 'boolean'
       ? {
           contextMessageCount: clampContextMessageCount(raw.contextMessageCount),
+          referenceCacheLimit: clampReferenceCacheLimit(raw.referenceCacheLimit),
           contextualNormalizationEnabled: raw.contextualNormalizationEnabled,
           grammarRepairMode:
             raw.grammarRepairMode === 'when_needed' || raw.grammarRepairMode === 'always'

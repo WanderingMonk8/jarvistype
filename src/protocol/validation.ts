@@ -345,6 +345,8 @@ function isPhaseFourSettings(value: unknown): boolean {
     isRecord(value) &&
     isNonNegativeInteger(value.contextMessageCount) &&
     value.contextMessageCount <= 20 &&
+    (value.referenceCacheLimit === undefined ||
+      (isNonNegativeInteger(value.referenceCacheLimit) && value.referenceCacheLimit <= 200)) &&
     typeof value.contextualNormalizationEnabled === 'boolean' &&
     (value.grammarRepairMode === 'off' ||
       value.grammarRepairMode === 'when_needed' ||

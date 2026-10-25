@@ -21,6 +21,7 @@ export type PermissionName = (typeof PHASE_FOUR_PERMISSIONS)[number]
 
 export interface PhaseFourSettings {
   contextMessageCount: number
+  referenceCacheLimit?: number
   contextualNormalizationEnabled: boolean
   grammarRepairMode: 'off' | 'when_needed' | 'always'
   normalizationConnectionId: string | null

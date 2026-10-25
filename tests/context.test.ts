@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   canonicalizeExactConversationReferences,
   clampContextMessageCount,
+  clampReferenceCacheLimit,
   correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
   extractAuthoritativeCasingReferences,
@@ -19,6 +20,13 @@ test('defaults and bounds the user-configurable context count', () => {
   assert.equal(clampContextMessageCount(-4), 0)
   assert.equal(clampContextMessageCount(99), 20)
   assert.equal(clampContextMessageCount(7.8), 7)
+})
+
+test('defaults and bounds the rolling reference cache limit', () => {
+  assert.equal(clampReferenceCacheLimit(undefined), 30)
+  assert.equal(clampReferenceCacheLimit(-4), 0)
+  assert.equal(clampReferenceCacheLimit(999), 200)
+  assert.equal(clampReferenceCacheLimit(42.8), 42)
 })
 
 test('selects newest eligible visible user and assistant text within a hard ceiling', () => {

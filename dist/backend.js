@@ -1913,11 +1913,17 @@ function isPositiveInteger2(value) {
 // src/domain/context.ts
 var DEFAULT_CONTEXT_MESSAGE_COUNT = 5;
 var MAX_CONTEXT_MESSAGE_COUNT = 20;
+var DEFAULT_REFERENCE_CACHE_LIMIT = 30;
+var MAX_REFERENCE_CACHE_LIMIT = 200;
 var MAX_CONTEXT_CHARACTERS = 12e3;
 var MAX_CONVERSATION_REFERENCE_CHARACTERS = 2e3;
 function clampContextMessageCount(value) {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_CONTEXT_MESSAGE_COUNT;
   return Math.min(MAX_CONTEXT_MESSAGE_COUNT, Math.max(0, Math.trunc(value)));
+}
+function clampReferenceCacheLimit(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_REFERENCE_CACHE_LIMIT;
+  return Math.min(MAX_REFERENCE_CACHE_LIMIT, Math.max(0, Math.floor(value)));
 }
 function selectRecentContext(source, requestedCount, characterLimit = MAX_CONTEXT_CHARACTERS) {
   const count = clampContextMessageCount(requestedCount);
@@ -3441,7 +3447,7 @@ function sanitizeGrantedPermissions(granted) {
   };
 }
 function isPhaseFourSettings(value) {
-  return isRecord4(value) && isNonNegativeInteger3(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
+  return isRecord4(value) && isNonNegativeInteger3(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger3(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function hasEnvelope(value) {
   return isRecord4(value) && value.protocolVersion === PROTOCOL_VERSION && isBoundedString(value.type, 1, 128) && isIdentifier2(value.requestId);
@@ -3470,6 +3476,7 @@ var editCandidateContexts = /* @__PURE__ */ new Map();
 var glossaryCache = /* @__PURE__ */ new Map();
 var settingsCache = /* @__PURE__ */ new Map();
 var conversationReferenceCache = /* @__PURE__ */ new Map();
+var rollingReferenceCache = /* @__PURE__ */ new Map();
 var cardCharacterReferenceCache = /* @__PURE__ */ new Map();
 var MAX_COMPLETED_SENDS = 100;
 var MAX_CONVERSATION_REFERENCE_CACHES = 100;
@@ -3495,6 +3502,7 @@ var DEBUG_LOGGED_REQUEST_TYPES = /* @__PURE__ */ new Set([
 ]);
 var DEFAULT_SETTINGS = {
   contextMessageCount: DEFAULT_CONTEXT_MESSAGE_COUNT,
+  referenceCacheLimit: DEFAULT_REFERENCE_CACHE_LIMIT,
   contextualNormalizationEnabled: true,
   grammarRepairMode: "off",
   normalizationConnectionId: null,
@@ -3648,13 +3656,20 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       request.chatId,
       referenceContext2.messages
     );
+    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext2.messages);
+    const rollingReferences = await updateRollingReferenceCache(
+      context.userId,
+      request.chatId,
+      strictRecentReferences,
+      settings2.referenceCacheLimit
+    );
     const conversationReferences2 = mergeConversationReferences(
       cardCharacterReferences2,
-      recentConversationReferences
+      mergeConversationReferences(rollingReferences, recentConversationReferences)
     );
     const authoritativeConversationReferences2 = mergeConversationReferences(
       cardCasingReferences,
-      extractAuthoritativeCasingReferences(referenceContext2.messages)
+      mergeConversationReferences(rollingReferences, strictRecentReferences)
     );
     const capitalizeOpening2 = shouldCapitalizeRecordingOpening(session2.cleanText);
     const recoveredBoundary2 = applyQuotationBoundaryHint(
@@ -4112,13 +4127,20 @@ async function handleEditInterpretation(request, context, activeRequest) {
     );
     const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount);
     const recentConversationReferences = settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : [];
+    const strictRecentReferences = settings.contextualNormalizationEnabled ? extractAuthoritativeCasingReferences(referenceContext.messages) : [];
+    const rollingReferences = await updateRollingReferenceCache(
+      context.userId,
+      request.chatId,
+      strictRecentReferences,
+      settings.referenceCacheLimit
+    );
     const conversationReferences = mergeConversationReferences(
       cardCharacterReferences,
-      recentConversationReferences
+      mergeConversationReferences(rollingReferences, recentConversationReferences)
     );
     const authoritativeConversationReferences = mergeConversationReferences(
       cardCasingReferences,
-      settings.contextualNormalizationEnabled ? extractAuthoritativeCasingReferences(referenceContext.messages) : []
+      mergeConversationReferences(rollingReferences, strictRecentReferences)
     );
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries, {
       compactUppercaseSpelling: true
@@ -6553,6 +6575,51 @@ function cachedConversationReferences(userId, chatId, messages) {
   }
   return references;
 }
+async function updateRollingReferenceCache(userId, chatId, additions, requestedLimit) {
+  const limit = clampReferenceCacheLimit(requestedLimit);
+  const key = `${userId}\0${chatId}`;
+  let state = rollingReferenceCache.get(key);
+  if (!state) {
+    const raw = await spindle.userStorage.getJson(referenceCachePath(chatId), {
+      fallback: null,
+      userId
+    });
+    state = restoreRollingReferenceCache(raw);
+    rollingReferenceCache.set(key, state);
+  }
+  const next = /* @__PURE__ */ new Map();
+  for (const reference of [...state.entries, ...additions]) {
+    const normalized = reference.trim();
+    const referenceKey = normalized.toLocaleLowerCase().replace(/\u2019/gu, "'");
+    if (normalized && !next.has(referenceKey)) next.set(referenceKey, normalized);
+  }
+  const entries = limit === 0 ? [] : [...next.values()].slice(-limit);
+  if (entries.length !== state.entries.length || entries.some((entry, index) => entry !== state.entries[index])) {
+    state = { schemaVersion: 1, entries };
+    rollingReferenceCache.set(key, state);
+    await spindle.userStorage.setJson(referenceCachePath(chatId), state, { userId });
+  }
+  return entries;
+}
+function restoreRollingReferenceCache(raw) {
+  if (!isRecord5(raw) || raw.schemaVersion !== 1 || !Array.isArray(raw.entries))
+    return { schemaVersion: 1, entries: [] };
+  const entries = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const value of raw.entries) {
+    if (typeof value !== "string") continue;
+    const normalized = value.trim().slice(0, 200);
+    const key = normalized.toLocaleLowerCase().replace(/\u2019/gu, "'");
+    if (!normalized || seen.has(key)) continue;
+    seen.add(key);
+    entries.push(normalized);
+    if (entries.length >= 200) break;
+  }
+  return { schemaVersion: 1, entries };
+}
+function referenceCachePath(chatId) {
+  return `reference-cache-${encodeURIComponent(chatId)}.json`;
+}
 function glossaryForPrompt(glossary) {
   const selected = [];
   let size = 0;
@@ -6615,6 +6682,7 @@ async function handlePhaseFourLoad(request, context, activeRequest) {
 async function handleSettingsUpdate(request, context, activeRequest) {
   const settings = {
     contextMessageCount: clampContextMessageCount(request.settings.contextMessageCount),
+    referenceCacheLimit: clampReferenceCacheLimit(request.settings.referenceCacheLimit),
     contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled,
     grammarRepairMode: request.settings.grammarRepairMode,
     normalizationConnectionId: request.settings.normalizationConnectionId,
@@ -7104,6 +7172,7 @@ async function loadSettings(userId) {
   });
   const settings = isRecord5(raw) && typeof raw.contextualNormalizationEnabled === "boolean" ? {
     contextMessageCount: clampContextMessageCount(raw.contextMessageCount),
+    referenceCacheLimit: clampReferenceCacheLimit(raw.referenceCacheLimit),
     contextualNormalizationEnabled: raw.contextualNormalizationEnabled,
     grammarRepairMode: raw.grammarRepairMode === "when_needed" || raw.grammarRepairMode === "always" ? raw.grammarRepairMode : "off",
     normalizationConnectionId: typeof raw.normalizationConnectionId === "string" && raw.normalizationConnectionId.length > 0 ? raw.normalizationConnectionId.slice(0, 256) : null,

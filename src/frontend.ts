@@ -376,6 +376,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const decisionBar = requireElement<HTMLElement>(tab.root, '[data-decision-bar]')
   const decisionSummary = requireElement<HTMLElement>(tab.root, '[data-decision-summary]')
   const contextCountInput = requireElement<HTMLInputElement>(tab.root, '[data-context-count]')
+  const referenceCacheLimitInput = requireElement<HTMLInputElement>(
+    tab.root,
+    '[data-reference-cache-limit]',
+  )
   const contextualToggle = requireElement<HTMLInputElement>(tab.root, '[data-context-enabled]')
   const grammarRepairWarning = requireElement<HTMLElement>(
     tab.root,
@@ -478,6 +482,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     pendingEditCandidates: null,
     settings: {
       contextMessageCount: 5,
+      referenceCacheLimit: 30,
       contextualNormalizationEnabled: true,
       grammarRepairMode: 'off',
       normalizationConnectionId: null,
@@ -783,6 +788,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
     cancelEditCandidatesButton.disabled = !editCandidates || state.automatedBusy
     contextCountInput.value = String(state.settings.contextMessageCount)
+    referenceCacheLimitInput.value = String(state.settings.referenceCacheLimit ?? 30)
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
     grammarRepairSelect.value = state.settings.grammarRepairMode
     grammarRepairWarning.hidden =
@@ -1570,6 +1576,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       20,
       Math.max(0, Number.parseInt(contextCountInput.value, 10) || 0),
     )
+    const referenceCacheLimit = Math.min(
+      200,
+      Math.max(0, Number.parseInt(referenceCacheLimitInput.value, 10) || 0),
+    )
     const grammarRepairMode =
       grammarRepairSelect.value === 'always'
         ? 'always'
@@ -1577,6 +1587,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           ? 'when_needed'
           : 'off'
     state.settings.contextMessageCount = contextMessageCount
+    state.settings.referenceCacheLimit = referenceCacheLimit
     state.settings.contextualNormalizationEnabled = contextualToggle.checked
     state.settings.grammarRepairMode = grammarRepairMode
     state.settings.debugLoggingEnabled = debugEnabledToggle.checked
@@ -1587,6 +1598,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       requestId: createRequestId('settings-update'),
       settings: {
         contextMessageCount,
+        referenceCacheLimit,
         contextualNormalizationEnabled: contextualToggle.checked,
         grammarRepairMode,
         normalizationConnectionId: state.settings.normalizationConnectionId,
@@ -1609,6 +1621,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }, delay)
   }
   const handleContextCountInput = () => scheduleSettingsSave(600)
+  const handleReferenceCacheLimitInput = () => scheduleSettingsSave(600)
   const handleSettingToggleChange = () => scheduleSettingsSave(0)
 
   const refreshDebugLog = async (clear = false): Promise<void> => {
@@ -2375,6 +2388,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   grammarRepairSelect.addEventListener('change', handleGrammarRepairModeChange)
   debugEnabledToggle.addEventListener('change', handleDebugEnabledChange)
   contextCountInput.addEventListener('input', handleContextCountInput)
+  referenceCacheLimitInput.addEventListener('input', handleReferenceCacheLimitInput)
   contextualToggle.addEventListener('change', handleSettingToggleChange)
   debugRefreshButton.addEventListener('click', handleDebugRefreshClick)
   debugCopyButton.addEventListener('click', handleDebugCopyClick)
@@ -2441,6 +2455,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     cancelEditCandidatesButton.removeEventListener('click', handleCancelEditCandidatesClick)
     if (settingsSaveTimer) clearTimeout(settingsSaveTimer)
     contextCountInput.removeEventListener('input', handleContextCountInput)
+    referenceCacheLimitInput.removeEventListener('input', handleReferenceCacheLimitInput)
     contextualToggle.removeEventListener('change', handleSettingToggleChange)
     grammarRepairSelect.removeEventListener('change', handleGrammarRepairModeChange)
     debugEnabledToggle.removeEventListener('change', handleDebugEnabledChange)
@@ -3107,9 +3122,10 @@ function shellMarkup(): string {
 
       <section class="jt-shell__card" aria-labelledby="jt-context-title">
         <h3 id="jt-context-title">Context and glossary</h3>
-        <p class="jt-shell__notice">The message count keeps that many recent assistant messages plus the ordinary recent-message window available for extracting names and proper nouns. Names and proper nouns extracted from the active character card are always included. Title names are corroborated against the card body when possible and used as a fallback when the body never names the character. After speech-to-text finishes, the normalization connection receives the current recording, the glossary, and only that list of names and proper nouns. It never receives the chat messages themselves, the working draft, the character card, or audio. Chat history cannot activate dictation commands; command detection stays local to the current recording. Lumiverse STT remains independently managed by the host and receives no added context. Set the count to 0 to exclude chat history; card-derived references remain available.</p>
+        <p class="jt-shell__notice">The message count controls the recent window scanned for names and proper nouns. Strictly qualified names from that window enter a per-chat rolling cache, so they remain available after their source messages leave the window. Card names are always included without consuming cache slots, while active-draft references remain temporary. After speech-to-text finishes, the normalization connection receives the current recording, glossary, and reference lists—not chat messages, the draft, card text, or audio. Set the message count to 0 to stop scanning new history; set the cache limit to 0 to disable retained references.</p>
         <div class="jt-form-grid">
           <label>Messages scanned for references (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
+          <label>Rolling name cache (0–200, default 30)<input type="number" min="0" max="200" step="1" value="30" data-reference-cache-limit></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. “When needed” needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose “Always” to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>

@@ -2854,6 +2854,7 @@ var SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   "begin bracket",
   "end bracket",
   "question mark",
+  "exclamation",
   "exclamation mark",
   "exclamation point",
   "semicolon",
@@ -2896,7 +2897,7 @@ var PUNCTUATION = [
   [/\bbegin bracket\b([.,;:!?…—–-]*)/gi, "<", "begin bracket"],
   [/\bend bracket\b([.,;:!?…—–-]*)/gi, ">", "end bracket"],
   [/\bquestion mark\b([.,;:!?…—–-]*)/gi, "?", "question mark"],
-  [/\bexclamation (?:mark|point)\b([.,;:!?…—–-]*)/gi, "!", "exclamation mark"],
+  [/\bexclamation(?: (?:mark|point))?\b([.,;:!?…—–-]*)/gi, "!", "exclamation mark"],
   [/\bsemi[ -]?colon\b([.,;:!?…—–-]*)/gi, ";", "semicolon"],
   [/\bcolon\b([.,;:!?…—–-]*)/gi, ":", "colon"],
   [/\bcomma\b([.,;:!?…—–-]*)/gi, ",", "comma"],
@@ -2910,10 +2911,10 @@ var PUNCTUATION = [
   [/\bapostrophe\b([.,;:!?…—–-]*)/gi, "\u2019", "apostrophe"]
 ];
 var TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
-  "\\.+(?=\\s*\\b(?:question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)",
+  "\\.+(?=\\s*\\b(?:question mark|exclamation(?: (?:mark|point))?|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)",
   "giu"
 );
-var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
+var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
 var LITERAL_PUNCTUATION_CONTEXTS = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
   /\btime\s+period\b/gi,
@@ -2927,7 +2928,7 @@ var LITERAL_PUNCTUATION_CONTEXTS = [
   /\b(?:Oxford|serial)\s+comma\b/gi,
   /\bpossessive\s+apostrophe\b/gi,
   new RegExp(
-    `\\b(?:a|an|the|this|that|these|those|my|your|our|its|another|each|every)\\s+(?:${SPOKEN_PUNCTUATION_TERM_SOURCE})\\b`,
+    `\\b(?:a|an|the|this|that|these|those|my|your|his|her|our|their|its|another|each|every)\\s+(?:${SPOKEN_PUNCTUATION_TERM_SOURCE})\\b`,
     "gi"
   ),
   new RegExp(
@@ -3092,7 +3093,10 @@ function removeRedundantProviderDashes(input) {
   return input.replace(/—\s*(?:em\s+)?dash\b[.,]?/giu, "\u2014").replace(/—\s*—/gu, "\u2014");
 }
 function removeRedundantTerminalPunctuationCommands(input) {
-  return input.replace(/([.?!…][”’"']?)\s+(?:period|full stop)\b[.,]?/giu, "$1").replace(/(\?[”’"']?)\s+question mark\b[.,]?/giu, "$1").replace(/(![”’"']?)\s+exclamation (?:mark|point)\b[.,]?/giu, "$1").replace(/(…[”’"']?)\s+(?:ellipsis|dot dot dot|three dots)\b[.,]?/giu, "$1");
+  return input.replace(/([.?!…][”’"']?)\s+(?:period|full stop)\b[.,]?/giu, "$1").replace(/(\?[”’"']?)\s+question mark\b[.,]?/giu, "$1").replace(/(![”’"']?)\s+exclamation (?:mark|point)\b[.,]?/giu, "$1").replace(
+    /(![”’"']?)\s+exclamation\b[.,]?(?=\s*(?:end(?:ing)?\s+speech|end\s+single|[”’"']|$))/giu,
+    "$1"
+  ).replace(/(…[”’"']?)\s+(?:ellipsis|dot dot dot|three dots)\b[.,]?/giu, "$1");
 }
 function replaceExplicitPunctuationCommands(input) {
   const marks = [];
@@ -3135,7 +3139,7 @@ function punctuationCommand(phrase) {
   if (normalized === "begin bracket") return { mark: "<", reason: "begin bracket" };
   if (normalized === "end bracket") return { mark: ">", reason: "end bracket" };
   if (normalized === "question mark") return { mark: "?", reason: "question mark" };
-  if (normalized === "exclamation mark" || normalized === "exclamation point")
+  if (normalized === "exclamation" || normalized === "exclamation mark" || normalized === "exclamation point")
     return { mark: "!", reason: "exclamation mark" };
   if (normalized === "semicolon") return { mark: ";", reason: "semicolon" };
   if (normalized === "colon") return { mark: ":", reason: "colon" };
@@ -3284,7 +3288,7 @@ function punctuationAfterSpokenCommand(source, commandOffset, commandReason, att
   const terminalPunctuation = attachedPunctuation.replace(/[^.?!…]/gu, "");
   if (!terminalPunctuation) return "";
   const contentBeforeCommand = source.slice(0, commandOffset).trimEnd();
-  const contentAlreadyEndsSentence = /[.?!…]$/u.test(contentBeforeCommand) || /\b(?:period|full stop|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots)$/iu.test(
+  const contentAlreadyEndsSentence = /[.?!…]$/u.test(contentBeforeCommand) || /\b(?:period|full stop|question mark|exclamation(?: (?:mark|point))?|ellipsis|dot dot dot|three dots)$/iu.test(
     contentBeforeCommand
   );
   const quotedContentAlreadyEndsWithPunctuation = (commandReason === "quote" || commandReason === "single quote") && (/[,;:—–-]$/u.test(contentBeforeCommand) || /\b(?:comma|semicolon|semi[ -]?colon|colon|em dash|en dash|hyphen|dash)$/iu.test(

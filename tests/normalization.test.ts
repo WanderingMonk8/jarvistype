@@ -64,6 +64,7 @@ test('does not append a bare terminal command after provider terminal punctuatio
   assert.equal(normalizeDeterministically('How is that? ."', []).text, 'How is that?"')
   assert.equal(normalizeDeterministically('Really? question mark', []).text, 'Really?')
   assert.equal(normalizeDeterministically('Really! exclamation mark', []).text, 'Really!')
+  assert.equal(normalizeDeterministically('Really! exclamation', []).text, 'Really!')
   assert.equal(normalizeDeterministically('Wait… ellipsis', []).text, 'Wait…')
   assert.equal(normalizeDeterministically('Really? exclamation mark', []).text, 'Really?!')
   assert.equal(normalizeDeterministically('Really! question mark', []).text, 'Really!?')
@@ -74,6 +75,24 @@ test('does not append a bare terminal command after provider terminal punctuatio
   assert.equal(
     normalizeDeterministically('Is this working? insert period', []).text,
     'Is this working?.',
+  )
+})
+
+test('deduplicates a provider-rendered exclamation before a speech-closing command', () => {
+  assert.equal(
+    normalizeDeterministically(
+      'Begin speech. That is close enough! Exclamation. End speech.',
+      [],
+    ).text,
+    '“That is close enough!”',
+  )
+  assert.equal(
+    normalizeDeterministically('Begin speech that is close enough exclamation end speech', []).text,
+    '“That is close enough!”',
+  )
+  assert.equal(
+    normalizeDeterministically('His exclamation startled everyone period', []).text,
+    'His exclamation startled everyone.',
   )
 })
 

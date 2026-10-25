@@ -228,7 +228,9 @@ export function canonicalizeExactConversationReferences(
       const canonical = referenceByKey.get(baseKey)
       if (!canonical || canonical === base || protectedKeys.has(baseKey)) return heard
       if (
-        (isLikelyOneSyllable(canonical) || AUXILIARY_WORDS.has(baseKey)) &&
+        (isLikelyOneSyllable(canonical) ||
+          AUXILIARY_WORDS.has(baseKey) ||
+          PARTICLE_WORDS.has(baseKey)) &&
         (hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey) ||
           hasPrecedingQuantity(text, offset))
       )
@@ -274,7 +276,8 @@ function correctReferenceTerms(
       if (
         requireInitialUppercase &&
         !possessive &&
-        isLikelyOneSyllable(reference) &&
+        (isLikelyOneSyllable(reference) ||
+          PARTICLE_WORDS.has(reference.toLocaleLowerCase())) &&
         hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey)
       )
         return false
@@ -320,6 +323,18 @@ const AUXILIARY_WORDS = new Set([
   'is',
   'was',
   'were',
+])
+const PARTICLE_WORDS = new Set([
+  'away',
+  'back',
+  'down',
+  'in',
+  'off',
+  'on',
+  'out',
+  'over',
+  'through',
+  'up',
 ])
 const DETERMINERS = new Set([
   'a',
@@ -378,6 +393,7 @@ function hasProtectedOrdinaryWordUsage(
 
   if (MODAL_WORDS.has(heard)) return true
   if (AUXILIARY_WORDS.has(heard)) return true
+  if (PARTICLE_WORDS.has(heard)) return true
   if (previous && DETERMINERS.has(previous)) return true
   if (heard === 'then') return true
   if (
@@ -501,7 +517,13 @@ const COMMON_CAPITALIZED_WORDS = new Set([
 
 function isReferenceTerm(term: string): boolean {
   const key = term.toLocaleLowerCase()
-  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(key) || AUXILIARY_WORDS.has(key)) return false
+  if (
+    term.length < 2 ||
+    COMMON_CAPITALIZED_WORDS.has(key) ||
+    AUXILIARY_WORDS.has(key) ||
+    PARTICLE_WORDS.has(key)
+  )
+    return false
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1))
 }
 

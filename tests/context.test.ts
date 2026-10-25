@@ -89,6 +89,15 @@ test('does not extract sentence-opening auxiliaries and question words as names'
   )
 })
 
+test('does not extract sentence-opening directional particles as names', () => {
+  assert.deepEqual(
+    extractConversationReferences([
+      { role: 'assistant', content: 'Up they climb. Down they fall. Back they go.' },
+    ]),
+    [],
+  )
+})
+
 test('extracts the canonical name from a descriptive card title', () => {
   assert.deepEqual(
     extractConversationReferences([
@@ -199,6 +208,17 @@ test('canonicalizes exact lowercase payload references while preserving ordinary
   assert.equal(
     canonicalizeExactConversationReferences('Erbold, what do you mean by this?', ['Do']).text,
     'Erbold, what do you mean by this?',
+  )
+  assert.equal(
+    canonicalizeExactConversationReferences('The pole goes up and comes down on the gravel.', [
+      'Up',
+      'DOWN',
+    ]).text,
+    'The pole goes up and comes down on the gravel.',
+  )
+  assert.equal(
+    canonicalizeExactConversationReferences('Please ask Down.', ['Down']).text,
+    'Please ask Down.',
   )
 })
 

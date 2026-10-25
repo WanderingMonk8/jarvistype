@@ -2057,7 +2057,7 @@ function canonicalizeExactConversationReferences(text, references, protectedTerm
       const baseKey = base.toLocaleLowerCase();
       const canonical = referenceByKey.get(baseKey);
       if (!canonical || canonical === base || protectedKeys.has(baseKey)) return heard;
-      if ((isLikelyOneSyllable(canonical) || AUXILIARY_WORDS.has(baseKey)) && (hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey) || hasPrecedingQuantity(text, offset)))
+      if ((isLikelyOneSyllable(canonical) || AUXILIARY_WORDS.has(baseKey) || PARTICLE_WORDS.has(baseKey)) && (hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey) || hasPrecedingQuantity(text, offset)))
         return heard;
       correctedTerms.push({ heard: base, canonical });
       return `${canonical}${possessive}`;
@@ -2078,7 +2078,7 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
     if (requireInitialUppercase && !possessive && (MODAL_WORDS.has(baseKey) || baseKey === "then") && !hasPositiveNameSignal(text, offset))
       return heard;
     const candidates = [...referenceByKey.values()].filter((reference) => {
-      if (requireInitialUppercase && !possessive && isLikelyOneSyllable(reference) && hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey))
+      if (requireInitialUppercase && !possessive && (isLikelyOneSyllable(reference) || PARTICLE_WORDS.has(reference.toLocaleLowerCase())) && hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey))
         return false;
       return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase());
     });
@@ -2118,6 +2118,18 @@ var AUXILIARY_WORDS = /* @__PURE__ */ new Set([
   "is",
   "was",
   "were"
+]);
+var PARTICLE_WORDS = /* @__PURE__ */ new Set([
+  "away",
+  "back",
+  "down",
+  "in",
+  "off",
+  "on",
+  "out",
+  "over",
+  "through",
+  "up"
 ]);
 var DETERMINERS = /* @__PURE__ */ new Set([
   "a",
@@ -2168,6 +2180,7 @@ function hasProtectedOrdinaryWordUsage(text, start, end, heard) {
   if (previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous))) return false;
   if (MODAL_WORDS.has(heard)) return true;
   if (AUXILIARY_WORDS.has(heard)) return true;
+  if (PARTICLE_WORDS.has(heard)) return true;
   if (previous && DETERMINERS.has(previous)) return true;
   if (heard === "then") return true;
   if (COMMON_VERB_CONFUSABLES.has(heard) && (previous === "to" || previous !== void 0 && SUBJECT_WORDS.has(previous)))
@@ -2256,7 +2269,8 @@ var COMMON_CAPITALIZED_WORDS = /* @__PURE__ */ new Set([
 ]);
 function isReferenceTerm(term) {
   const key = term.toLocaleLowerCase();
-  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(key) || AUXILIARY_WORDS.has(key)) return false;
+  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(key) || AUXILIARY_WORDS.has(key) || PARTICLE_WORDS.has(key))
+    return false;
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1));
 }
 function isHighConfidenceReferenceMatch(heard, reference) {

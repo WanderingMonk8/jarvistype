@@ -570,6 +570,13 @@ test('persists strict references in a bounded per-chat rolling cache', async () 
   ) as { entries?: string[] } | undefined
   assert.deepEqual(storedCache?.entries, ['Beta', 'Gamma'])
   assert.equal(storedCache?.entries?.includes('Building'), false)
+
+  chatMessages = [{ role: 'assistant', content: 'The beta release remains unstable.' }]
+  await dispatch(recordingAppendRequest(chatId, 'rolling-lowercase-beta', 0, 'Ready.'), userId)
+  const prunedCache = stored.get(
+    `${userId}:reference-cache-${encodeURIComponent(chatId)}.json`,
+  ) as { entries?: string[] } | undefined
+  assert.deepEqual(prunedCache?.entries, ['Gamma'])
 })
 
 test('uses a reference name when the provider splits its possessive pronunciation', async () => {

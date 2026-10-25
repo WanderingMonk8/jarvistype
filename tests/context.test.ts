@@ -145,12 +145,48 @@ test('separates fuzzy identification references from casing authority', () => {
   assert.deepEqual(extractAuthoritativeCasingReferences(messages), ['Erbold'])
 })
 
-test('grants casing authority from name context, multiword names, and repeated evidence', () => {
+test('admits mid-sentence capitalization immediately but requires two sentence openings', () => {
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant', content: 'I saw Zorlin.' },
+    ]),
+    ['Zorlin'],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([{ role: 'assistant', content: 'Zorlin waits.' }]),
+    [],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant', content: 'Zorlin waits. Zorlin returns.' },
+    ]),
+    ['Zorlin'],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant', content: 'The road bends. The gate opens.' },
+    ]),
+    [],
+  )
+})
+
+test('lowercase history rejects a casing reference unless the term is in the glossary', () => {
+  const messages = [
+    { role: 'assistant' as const, content: 'I saw Zorlin. Later, zorlin leaves.' },
+  ]
+  assert.deepEqual(extractAuthoritativeCasingReferences(messages), [])
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences(messages, { lowercaseExemptions: ['Zorlin'] }),
+    ['Zorlin'],
+  )
+})
+
+test('grants casing authority to multiword names and repeated sentence openings', () => {
   assert.deepEqual(
     extractAuthoritativeCasingReferences([
       { role: 'assistant', content: 'Erbold, listen. Aiko Tanaka waits nearby.' },
     ]),
-    ['Erbold', 'Aiko Tanaka'],
+    ['Aiko Tanaka'],
   )
   assert.deepEqual(
     extractAuthoritativeCasingReferences([
@@ -168,7 +204,7 @@ test('grants casing authority from name context, multiword names, and repeated e
   )
 })
 
-test('uses contextual mid-sentence evidence only for temporary active-draft casing', () => {
+test('uses immediate mid-sentence evidence for temporary active-draft casing', () => {
   const references = extractAuthoritativeCasingReferences(
     [
       {
@@ -178,7 +214,7 @@ test('uses contextual mid-sentence evidence only for temporary active-draft casi
     ],
     { allowRepeatedWithinSource: true, allowMidSentenceCapitalized: true },
   )
-  assert.deepEqual(references, ['Erbold'])
+  assert.deepEqual(references, ['Building', 'Erbold'])
 })
 
 test('keeps multiword casing authority scoped to the complete phrase', () => {

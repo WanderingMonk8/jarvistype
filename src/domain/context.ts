@@ -133,6 +133,7 @@ export function selectRecentReferenceContext(
 export function extractConversationReferences(
   messages: readonly ContextMessage[],
   characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS,
+  lowercaseExemptions: readonly string[] = [],
 ): string[] {
   if (characterLimit <= 0) return []
   const references: string[] = []
@@ -141,10 +142,14 @@ export function extractConversationReferences(
   // If the selected source also uses the same token lowercase, treat it as ordinary
   // vocabulary and never promote that single token into a casing reference.
   const lowercaseEvidence = new Set<string>()
+  const exemptLowercaseKeys = new Set(lowercaseExemptions.map(referenceEvidenceKey))
   for (const message of messages) {
     const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
     for (const term of terms) {
-      if (/^\p{Ll}/u.test(term)) lowercaseEvidence.add(referenceEvidenceKey(term))
+      if (/^\p{Ll}/u.test(term)) {
+        const key = referenceEvidenceKey(stripPossessiveSuffix(term))
+        if (!exemptLowercaseKeys.has(key)) lowercaseEvidence.add(key)
+      }
     }
   }
   let size = 0
@@ -197,9 +202,14 @@ export function extractAuthoritativeCasingReferences(
   options: {
     allowRepeatedWithinSource?: boolean
     allowMidSentenceCapitalized?: boolean
+    lowercaseExemptions?: readonly string[]
   } = {},
 ): string[] {
-  const extracted = extractConversationReferences(messages)
+  const extracted = extractConversationReferences(
+    messages,
+    MAX_CONVERSATION_REFERENCE_CHARACTERS,
+    options.lowercaseExemptions,
+  )
   const phraseCandidates = extracted.filter((reference) => /\s/u.test(reference))
   const candidates = extracted.filter((reference) => !/\s/u.test(reference))
   const candidateByKey = new Map(candidates.map((candidate) => [referenceCanonicalKey(candidate), candidate]))
@@ -224,7 +234,6 @@ export function extractAuthoritativeCasingReferences(
       if (!candidateByKey.has(key)) return
       const previous = tokens[tokenIndex - 1]
       const next = tokens[tokenIndex + 1]
-      const previousKey = previous ? referenceEvidenceKey(previous.value) : undefined
       const adjacentCapitalizedCandidate = [previous, next].some((neighbor) => {
         if (!neighbor || !/^\p{Lu}/u.test(neighbor.value)) return false
         const between = message.content.slice(
@@ -233,28 +242,14 @@ export function extractAuthoritativeCasingReferences(
         )
         return /^\s*$/u.test(between) && candidateByKey.has(referenceCanonicalKey(neighbor.value))
       })
-      const followedByVocativeComma = /^\s*,/u.test(message.content.slice(token.end))
-      const precededByNameCue =
-        previousKey !== undefined &&
-        (NAME_SIGNAL_WORDS.has(previousKey) ||
-          NAME_TITLES.has(previousKey) ||
-          NAME_RELATION_WORDS.has(previousKey))
       const supportedMidSentenceUse =
-        options.allowMidSentenceCapitalized === true &&
-        !isSentenceOpeningAt(message.content, token.start) &&
-        !adjacentCapitalizedCandidate &&
-        (previousKey === undefined || !DETERMINERS.has(previousKey))
+        !isSentenceOpeningAt(message.content, token.start) && !adjacentCapitalizedCandidate
       const current = evidence.get(key) ?? {
         strong: false,
         occurrences: 0,
         messageIndexes: new Set<number>(),
       }
-      current.strong ||= Boolean(
-        possessive ||
-          followedByVocativeComma ||
-          precededByNameCue ||
-          supportedMidSentenceUse,
-      )
+      current.strong ||= supportedMidSentenceUse
       current.occurrences += 1
       current.messageIndexes.add(messageIndex)
       evidence.set(key, current)
@@ -266,12 +261,23 @@ export function extractAuthoritativeCasingReferences(
     if (!item) return false
     return (
       item.strong ||
-      item.messageIndexes.size >= 2 ||
-      (options.allowRepeatedWithinSource === true && item.occurrences >= 2)
+      item.occurrences >= 2
     )
   })
   const supportedKeys = new Set([...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey))
   return extracted.filter((reference) => supportedKeys.has(referenceEvidenceKey(reference)))
+}
+
+export function extractLowercaseReferenceKeys(messages: readonly ContextSourceMessage[]): string[] {
+  const keys = new Set<string>()
+  for (const message of messages) {
+    if (!isEligible(message)) continue
+    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
+    for (const term of terms) {
+      if (/^\p{Ll}/u.test(term)) keys.add(referenceEvidenceKey(stripPossessiveSuffix(term)))
+    }
+  }
+  return [...keys]
 }
 
 export function extractCardCasingReferences(title: string, cardText: string): string[] {
@@ -511,6 +517,11 @@ function referenceEvidenceKey(value: string): string {
   return value.toLocaleLowerCase().replace(/\u2019/gu, "'")
 }
 
+function stripPossessiveSuffix(value: string): string {
+  const possessive = value.match(/(['’]s)$/iu)?.[0] ?? ''
+  return possessive ? value.slice(0, -possessive.length) : value
+}
+
 function referenceCanonicalKey(value: string): string {
   const possessive = value.match(/(['’]s)$/iu)?.[0] ?? ''
   return referenceEvidenceKey(
@@ -595,18 +606,6 @@ const NAME_SIGNAL_WORDS = new Set([
   'told',
 ])
 const NAME_TITLES = new Set(['captain', 'doctor', 'dr', 'miss', 'mister', 'mr', 'mrs', 'ms', 'professor'])
-const NAME_RELATION_WORDS = new Set([
-  'about',
-  'alongside',
-  'beside',
-  'from',
-  'near',
-  'to',
-  'toward',
-  'towards',
-  'with',
-])
-
 function hasPositiveNameSignal(text: string, start: number): boolean {
   const previous = adjacentWord(text, start, 'before')
   return Boolean(previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous)))

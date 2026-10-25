@@ -45,6 +45,7 @@ import {
   extractCardCasingReferences,
   extractCardCharacterReferences,
   extractConversationReferences,
+  extractLowercaseReferenceKeys,
   selectRecentReferenceContext,
 } from './domain/context'
 import {
@@ -303,11 +304,23 @@ async function handleTranscriptNormalization(
       request.chatId,
       referenceContext.messages,
     )
-    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext.messages)
+    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
+    const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey))
+    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext.messages, {
+      lowercaseExemptions: glossaryReferenceExemptions,
+    })
+    const lowercaseReferenceKeys = extractLowercaseReferenceKeys(messages).filter(
+      (key) => !glossaryReferenceKeys.has(key),
+    )
+    const admittedRecentReferences = rejectLowercaseReferences(
+      strictRecentReferences,
+      lowercaseReferenceKeys,
+    )
     const rollingReferences = await updateRollingReferenceCache(
       context.userId,
       request.chatId,
-      strictRecentReferences,
+      admittedRecentReferences,
+      lowercaseReferenceKeys,
       settings.referenceCacheLimit,
     )
     const conversationReferences = mergeConversationReferences(
@@ -316,7 +329,7 @@ async function handleTranscriptNormalization(
     )
     const authoritativeConversationReferences = mergeConversationReferences(
       cardCasingReferences,
-      mergeConversationReferences(rollingReferences, strictRecentReferences),
+      mergeConversationReferences(rollingReferences, admittedRecentReferences),
     )
     const capitalizeOpening = shouldCapitalizeRecordingOpening(session.cleanText)
     const recoveredBoundary = applyQuotationBoundaryHint(
@@ -882,13 +895,25 @@ async function handleEditInterpretation(
     const recentConversationReferences = settings.contextualNormalizationEnabled
       ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages)
       : []
+    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
+    const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey))
     const strictRecentReferences = settings.contextualNormalizationEnabled
-      ? extractAuthoritativeCasingReferences(referenceContext.messages)
+      ? extractAuthoritativeCasingReferences(referenceContext.messages, {
+          lowercaseExemptions: glossaryReferenceExemptions,
+        })
       : []
+    const lowercaseReferenceKeys = settings.contextualNormalizationEnabled
+      ? extractLowercaseReferenceKeys(messages).filter((key) => !glossaryReferenceKeys.has(key))
+      : []
+    const admittedRecentReferences = rejectLowercaseReferences(
+      strictRecentReferences,
+      lowercaseReferenceKeys,
+    )
     const rollingReferences = await updateRollingReferenceCache(
       context.userId,
       request.chatId,
-      strictRecentReferences,
+      admittedRecentReferences,
+      lowercaseReferenceKeys,
       settings.referenceCacheLimit,
     )
     const conversationReferences = mergeConversationReferences(
@@ -897,7 +922,7 @@ async function handleEditInterpretation(
     )
     const authoritativeConversationReferences = mergeConversationReferences(
       cardCasingReferences,
-      mergeConversationReferences(rollingReferences, strictRecentReferences),
+      mergeConversationReferences(rollingReferences, admittedRecentReferences),
     )
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries, {
       compactUppercaseSpelling: true,
@@ -4026,6 +4051,7 @@ async function updateRollingReferenceCache(
   userId: string,
   chatId: string,
   additions: readonly string[],
+  lowercaseReferenceKeys: readonly string[],
   requestedLimit: unknown,
 ): Promise<string[]> {
   const limit = clampReferenceCacheLimit(requestedLimit)
@@ -4041,10 +4067,18 @@ async function updateRollingReferenceCache(
   }
 
   const next = new Map<string, string>()
+  const rejectedKeys = new Set(lowercaseReferenceKeys)
   for (const reference of [...state.entries, ...additions]) {
     const normalized = reference.trim()
-    const referenceKey = normalized.toLocaleLowerCase().replace(/\u2019/gu, "'")
-    if (normalized && !next.has(referenceKey)) next.set(referenceKey, normalized)
+    const referenceKey = referenceCacheKey(normalized)
+    const componentKeys = normalized.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
+    if (
+      normalized &&
+      !rejectedKeys.has(referenceKey) &&
+      !componentKeys.some((component) => rejectedKeys.has(referenceCacheKey(component))) &&
+      !next.has(referenceKey)
+    )
+      next.set(referenceKey, normalized)
   }
   const entries = limit === 0 ? [] : [...next.values()].slice(-limit)
   if (
@@ -4056,6 +4090,35 @@ async function updateRollingReferenceCache(
     await spindle.userStorage.setJson(referenceCachePath(chatId), state, { userId })
   }
   return entries
+}
+
+function glossaryReferenceTerms(glossary: GlossaryState): string[] {
+  const terms = new Set<string>()
+  for (const entry of glossary.entries) {
+    for (const value of [entry.canonical, ...entry.variants]) {
+      if (value.trim()) terms.add(value.trim())
+      for (const component of value.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [])
+        terms.add(component)
+    }
+  }
+  return [...terms]
+}
+
+function referenceCacheKey(value: string): string {
+  return value.toLocaleLowerCase().replace(/\u2019/gu, "'").replace(/(['’]s)$/iu, '')
+}
+
+function rejectLowercaseReferences(
+  references: readonly string[],
+  lowercaseReferenceKeys: readonly string[],
+): string[] {
+  const rejectedKeys = new Set(lowercaseReferenceKeys)
+  return references.filter((reference) => {
+    if (rejectedKeys.has(referenceCacheKey(reference))) return false
+    const components =
+      reference.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
+    return !components.some((component) => rejectedKeys.has(referenceCacheKey(component)))
+  })
 }
 
 function restoreRollingReferenceCache(raw: unknown): { schemaVersion: 1; entries: string[] } {

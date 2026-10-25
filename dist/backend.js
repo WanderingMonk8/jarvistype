@@ -1995,15 +1995,19 @@ function selectRecentReferenceContext(source, requestedCount, characterLimit = M
     truncated
   };
 }
-function extractConversationReferences(messages, characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS) {
+function extractConversationReferences(messages, characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS, lowercaseExemptions = []) {
   if (characterLimit <= 0) return [];
   const references = [];
   const seen = /* @__PURE__ */ new Set();
   const lowercaseEvidence = /* @__PURE__ */ new Set();
+  const exemptLowercaseKeys = new Set(lowercaseExemptions.map(referenceEvidenceKey));
   for (const message of messages) {
     const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
     for (const term of terms) {
-      if (/^\p{Ll}/u.test(term)) lowercaseEvidence.add(referenceEvidenceKey(term));
+      if (/^\p{Ll}/u.test(term)) {
+        const key = referenceEvidenceKey(stripPossessiveSuffix(term));
+        if (!exemptLowercaseKeys.has(key)) lowercaseEvidence.add(key);
+      }
     }
   }
   let size = 0;
@@ -2041,7 +2045,11 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
   return references;
 }
 function extractAuthoritativeCasingReferences(messages, options = {}) {
-  const extracted = extractConversationReferences(messages);
+  const extracted = extractConversationReferences(
+    messages,
+    MAX_CONVERSATION_REFERENCE_CHARACTERS,
+    options.lowercaseExemptions
+  );
   const phraseCandidates = extracted.filter((reference) => /\s/u.test(reference));
   const candidates = extracted.filter((reference) => !/\s/u.test(reference));
   const candidateByKey = new Map(candidates.map((candidate) => [referenceCanonicalKey(candidate), candidate]));
@@ -2062,7 +2070,6 @@ function extractAuthoritativeCasingReferences(messages, options = {}) {
       if (!candidateByKey.has(key)) return;
       const previous = tokens[tokenIndex - 1];
       const next = tokens[tokenIndex + 1];
-      const previousKey = previous ? referenceEvidenceKey(previous.value) : void 0;
       const adjacentCapitalizedCandidate = [previous, next].some((neighbor) => {
         if (!neighbor || !/^\p{Lu}/u.test(neighbor.value)) return false;
         const between = message.content.slice(
@@ -2071,17 +2078,13 @@ function extractAuthoritativeCasingReferences(messages, options = {}) {
         );
         return /^\s*$/u.test(between) && candidateByKey.has(referenceCanonicalKey(neighbor.value));
       });
-      const followedByVocativeComma = /^\s*,/u.test(message.content.slice(token.end));
-      const precededByNameCue = previousKey !== void 0 && (NAME_SIGNAL_WORDS.has(previousKey) || NAME_TITLES.has(previousKey) || NAME_RELATION_WORDS.has(previousKey));
-      const supportedMidSentenceUse = options.allowMidSentenceCapitalized === true && !isSentenceOpeningAt2(message.content, token.start) && !adjacentCapitalizedCandidate && (previousKey === void 0 || !DETERMINERS.has(previousKey));
+      const supportedMidSentenceUse = !isSentenceOpeningAt2(message.content, token.start) && !adjacentCapitalizedCandidate;
       const current = evidence.get(key) ?? {
         strong: false,
         occurrences: 0,
         messageIndexes: /* @__PURE__ */ new Set()
       };
-      current.strong ||= Boolean(
-        possessive || followedByVocativeComma || precededByNameCue || supportedMidSentenceUse
-      );
+      current.strong ||= supportedMidSentenceUse;
       current.occurrences += 1;
       current.messageIndexes.add(messageIndex);
       evidence.set(key, current);
@@ -2090,10 +2093,21 @@ function extractAuthoritativeCasingReferences(messages, options = {}) {
   const supportedSingles = candidates.filter((candidate) => {
     const item = evidence.get(referenceCanonicalKey(candidate));
     if (!item) return false;
-    return item.strong || item.messageIndexes.size >= 2 || options.allowRepeatedWithinSource === true && item.occurrences >= 2;
+    return item.strong || item.occurrences >= 2;
   });
   const supportedKeys = new Set([...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey));
   return extracted.filter((reference) => supportedKeys.has(referenceEvidenceKey(reference)));
+}
+function extractLowercaseReferenceKeys(messages) {
+  const keys = /* @__PURE__ */ new Set();
+  for (const message of messages) {
+    if (!isEligible(message)) continue;
+    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
+    for (const term of terms) {
+      if (/^\p{Ll}/u.test(term)) keys.add(referenceEvidenceKey(stripPossessiveSuffix(term)));
+    }
+  }
+  return [...keys];
 }
 function extractCardCasingReferences(title, cardText) {
   const titleReferences = title.trim() ? extractConversationReferences([{ role: "assistant", content: title }]) : [];
@@ -2250,6 +2264,10 @@ function normalizeReferenceCasing(value) {
 function referenceEvidenceKey(value) {
   return value.toLocaleLowerCase().replace(/\u2019/gu, "'");
 }
+function stripPossessiveSuffix(value) {
+  const possessive = value.match(/(['’]s)$/iu)?.[0] ?? "";
+  return possessive ? value.slice(0, -possessive.length) : value;
+}
 function referenceCanonicalKey(value) {
   const possessive = value.match(/(['’]s)$/iu)?.[0] ?? "";
   return referenceEvidenceKey(
@@ -2331,17 +2349,6 @@ var NAME_SIGNAL_WORDS = /* @__PURE__ */ new Set([
   "told"
 ]);
 var NAME_TITLES = /* @__PURE__ */ new Set(["captain", "doctor", "dr", "miss", "mister", "mr", "mrs", "ms", "professor"]);
-var NAME_RELATION_WORDS = /* @__PURE__ */ new Set([
-  "about",
-  "alongside",
-  "beside",
-  "from",
-  "near",
-  "to",
-  "toward",
-  "towards",
-  "with"
-]);
 function hasPositiveNameSignal(text, start) {
   const previous = adjacentWord(text, start, "before");
   return Boolean(previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous)));
@@ -3656,11 +3663,23 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       request.chatId,
       referenceContext2.messages
     );
-    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext2.messages);
+    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary2);
+    const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey));
+    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext2.messages, {
+      lowercaseExemptions: glossaryReferenceExemptions
+    });
+    const lowercaseReferenceKeys = extractLowercaseReferenceKeys(messages).filter(
+      (key) => !glossaryReferenceKeys.has(key)
+    );
+    const admittedRecentReferences = rejectLowercaseReferences(
+      strictRecentReferences,
+      lowercaseReferenceKeys
+    );
     const rollingReferences = await updateRollingReferenceCache(
       context.userId,
       request.chatId,
-      strictRecentReferences,
+      admittedRecentReferences,
+      lowercaseReferenceKeys,
       settings2.referenceCacheLimit
     );
     const conversationReferences2 = mergeConversationReferences(
@@ -3669,7 +3688,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     );
     const authoritativeConversationReferences2 = mergeConversationReferences(
       cardCasingReferences,
-      mergeConversationReferences(rollingReferences, strictRecentReferences)
+      mergeConversationReferences(rollingReferences, admittedRecentReferences)
     );
     const capitalizeOpening2 = shouldCapitalizeRecordingOpening(session2.cleanText);
     const recoveredBoundary2 = applyQuotationBoundaryHint(
@@ -4143,11 +4162,21 @@ async function handleEditInterpretation(request, context, activeRequest) {
     );
     const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount);
     const recentConversationReferences = settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : [];
-    const strictRecentReferences = settings.contextualNormalizationEnabled ? extractAuthoritativeCasingReferences(referenceContext.messages) : [];
+    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary);
+    const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey));
+    const strictRecentReferences = settings.contextualNormalizationEnabled ? extractAuthoritativeCasingReferences(referenceContext.messages, {
+      lowercaseExemptions: glossaryReferenceExemptions
+    }) : [];
+    const lowercaseReferenceKeys = settings.contextualNormalizationEnabled ? extractLowercaseReferenceKeys(messages).filter((key) => !glossaryReferenceKeys.has(key)) : [];
+    const admittedRecentReferences = rejectLowercaseReferences(
+      strictRecentReferences,
+      lowercaseReferenceKeys
+    );
     const rollingReferences = await updateRollingReferenceCache(
       context.userId,
       request.chatId,
-      strictRecentReferences,
+      admittedRecentReferences,
+      lowercaseReferenceKeys,
       settings.referenceCacheLimit
     );
     const conversationReferences = mergeConversationReferences(
@@ -4156,7 +4185,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
     );
     const authoritativeConversationReferences = mergeConversationReferences(
       cardCasingReferences,
-      mergeConversationReferences(rollingReferences, strictRecentReferences)
+      mergeConversationReferences(rollingReferences, admittedRecentReferences)
     );
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries, {
       compactUppercaseSpelling: true
@@ -6596,7 +6625,7 @@ function cachedConversationReferences(userId, chatId, messages) {
   }
   return references;
 }
-async function updateRollingReferenceCache(userId, chatId, additions, requestedLimit) {
+async function updateRollingReferenceCache(userId, chatId, additions, lowercaseReferenceKeys, requestedLimit) {
   const limit = clampReferenceCacheLimit(requestedLimit);
   const key = `${userId}\0${chatId}`;
   let state = rollingReferenceCache.get(key);
@@ -6609,10 +6638,13 @@ async function updateRollingReferenceCache(userId, chatId, additions, requestedL
     rollingReferenceCache.set(key, state);
   }
   const next = /* @__PURE__ */ new Map();
+  const rejectedKeys = new Set(lowercaseReferenceKeys);
   for (const reference of [...state.entries, ...additions]) {
     const normalized = reference.trim();
-    const referenceKey = normalized.toLocaleLowerCase().replace(/\u2019/gu, "'");
-    if (normalized && !next.has(referenceKey)) next.set(referenceKey, normalized);
+    const referenceKey = referenceCacheKey(normalized);
+    const componentKeys = normalized.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
+    if (normalized && !rejectedKeys.has(referenceKey) && !componentKeys.some((component) => rejectedKeys.has(referenceCacheKey(component))) && !next.has(referenceKey))
+      next.set(referenceKey, normalized);
   }
   const entries = limit === 0 ? [] : [...next.values()].slice(-limit);
   if (entries.length !== state.entries.length || entries.some((entry, index) => entry !== state.entries[index])) {
@@ -6621,6 +6653,28 @@ async function updateRollingReferenceCache(userId, chatId, additions, requestedL
     await spindle.userStorage.setJson(referenceCachePath(chatId), state, { userId });
   }
   return entries;
+}
+function glossaryReferenceTerms(glossary) {
+  const terms = /* @__PURE__ */ new Set();
+  for (const entry of glossary.entries) {
+    for (const value of [entry.canonical, ...entry.variants]) {
+      if (value.trim()) terms.add(value.trim());
+      for (const component of value.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [])
+        terms.add(component);
+    }
+  }
+  return [...terms];
+}
+function referenceCacheKey(value) {
+  return value.toLocaleLowerCase().replace(/\u2019/gu, "'").replace(/(['’]s)$/iu, "");
+}
+function rejectLowercaseReferences(references, lowercaseReferenceKeys) {
+  const rejectedKeys = new Set(lowercaseReferenceKeys);
+  return references.filter((reference) => {
+    if (rejectedKeys.has(referenceCacheKey(reference))) return false;
+    const components = reference.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
+    return !components.some((component) => rejectedKeys.has(referenceCacheKey(component)));
+  });
 }
 function restoreRollingReferenceCache(raw) {
   if (!isRecord5(raw) || raw.schemaVersion !== 1 || !Array.isArray(raw.entries))

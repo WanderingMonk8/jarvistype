@@ -133,7 +133,7 @@ export function extractConversationReferences(
   let size = 0
 
   const add = (value: string) => {
-    const normalized = value.trim()
+    const normalized = normalizeReferenceCasing(value.trim())
     const key = normalized.toLocaleLowerCase()
     if (!normalized || seen.has(key) || size + normalized.length > characterLimit) return
     seen.add(key)
@@ -300,11 +300,26 @@ function referenceMap(references: readonly string[]): Map<string, string> {
   const referenceByKey = new Map<string, string>()
   for (const reference of references) {
     const possessive = reference.match(/(['’]s)$/iu)?.[0] ?? ''
-    const canonical = possessive ? reference.slice(0, -possessive.length) : reference
+    const canonical = normalizeReferenceCasing(
+      possessive ? reference.slice(0, -possessive.length) : reference,
+    )
     if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(canonical)) continue
     referenceByKey.set(canonical.toLocaleLowerCase(), canonical)
   }
   return referenceByKey
+}
+
+function normalizeReferenceCasing(value: string): string {
+  return value.replace(
+    /\p{L}[\p{L}\p{M}]*(?:[-'’][\p{L}\p{M}]+)*/gu,
+    (token) => {
+      const letters = token.match(/\p{L}/gu) ?? []
+      if (letters.length < 2 || letters.some((letter) => letter !== letter.toLocaleUpperCase()))
+        return token
+      const lower = token.toLocaleLowerCase()
+      return lower.replace(/(^|-)\p{Ll}/gu, (opening) => opening.toLocaleUpperCase())
+    },
+  )
 }
 
 const MODAL_WORDS = new Set(['can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would'])

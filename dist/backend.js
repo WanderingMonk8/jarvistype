@@ -1995,7 +1995,7 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
   const seen = /* @__PURE__ */ new Set();
   let size = 0;
   const add = (value) => {
-    const normalized = value.trim();
+    const normalized = normalizeReferenceCasing(value.trim());
     const key = normalized.toLocaleLowerCase();
     if (!normalized || seen.has(key) || size + normalized.length > characterLimit) return;
     seen.add(key);
@@ -2096,11 +2096,25 @@ function referenceMap(references) {
   const referenceByKey = /* @__PURE__ */ new Map();
   for (const reference of references) {
     const possessive = reference.match(/(['’]s)$/iu)?.[0] ?? "";
-    const canonical = possessive ? reference.slice(0, -possessive.length) : reference;
+    const canonical = normalizeReferenceCasing(
+      possessive ? reference.slice(0, -possessive.length) : reference
+    );
     if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(canonical)) continue;
     referenceByKey.set(canonical.toLocaleLowerCase(), canonical);
   }
   return referenceByKey;
+}
+function normalizeReferenceCasing(value) {
+  return value.replace(
+    /\p{L}[\p{L}\p{M}]*(?:[-'’][\p{L}\p{M}]+)*/gu,
+    (token) => {
+      const letters = token.match(/\p{L}/gu) ?? [];
+      if (letters.length < 2 || letters.some((letter) => letter !== letter.toLocaleUpperCase()))
+        return token;
+      const lower = token.toLocaleLowerCase();
+      return lower.replace(/(^|-)\p{Ll}/gu, (opening) => opening.toLocaleUpperCase());
+    }
+  );
 }
 var MODAL_WORDS = /* @__PURE__ */ new Set(["can", "could", "may", "might", "must", "shall", "should", "will", "would"]);
 var AUXILIARY_WORDS = /* @__PURE__ */ new Set([

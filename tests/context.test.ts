@@ -80,6 +80,19 @@ test('extracts compact proper-name and specialized-term references from conversa
   )
 })
 
+test('normalizes all-uppercase reference names to capitalized casing', () => {
+  assert.deepEqual(
+    extractConversationReferences([
+      { role: 'assistant', content: 'ERBOLD meets MARA VELIN beside VAULT-TEC.' },
+    ]),
+    ['Erbold', 'Mara Velin', 'Mara', 'Velin', 'Vault-Tec'],
+  )
+  assert.deepEqual(correctFromConversationReferences('Ervode turns around.', ['ERBOLD']), {
+    text: 'Erbold turns around.',
+    correctedTerms: [{ heard: 'Ervode', canonical: 'Erbold' }],
+  })
+})
+
 test('does not extract sentence-opening auxiliaries and question words as names', () => {
   assert.deepEqual(
     extractConversationReferences([

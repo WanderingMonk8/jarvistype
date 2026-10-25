@@ -1787,7 +1787,7 @@ function findApproximateMatch(text, search, start, end) {
         order: candidates.length,
         scores,
         boundaryFallback: length !== wanted.length && Math.min(wantedCompact.length, candidateCompact.length) >= 5 && Math.abs(wantedCompact.length - candidateCompact.length) <= 2 && scores.compactScore >= 2 / 3,
-        shortWordFallback: wanted.length === 1 && length === 1 && Math.min(wantedCompact.length, candidateCompact.length) >= 4 && Math.abs(wantedCompact.length - candidateCompact.length) <= 1 && scores.compactScore >= 0.75,
+        shortWordFallback: wanted.length === 1 && length === 1 && Math.min(wantedCompact.length, candidateCompact.length) >= 4 && Math.abs(wantedCompact.length - candidateCompact.length) <= 1 && scores.compactScore >= 0.75 && scores.phonetic === wantedPhonetic,
         phoneticFallback: false
       });
     }
@@ -2262,18 +2262,14 @@ function isReferenceTerm(term) {
 function isHighConfidenceReferenceMatch(heard, reference) {
   const maximumLengthDifference = Math.min(heard.length, reference.length) >= 6 ? 2 : 1;
   if (Math.abs(heard.length - reference.length) > maximumLengthDifference) return false;
-  if (Math.max(heard.length, reference.length) <= 5 && speechPhoneticKey(heard).length >= 3 && speechPhoneticKey(heard) === speechPhoneticKey(reference))
-    return true;
-  if (heard.charAt(0) !== reference.charAt(0)) {
-    return heard.length === 3 && reference.length === 3 && heard.slice(1) === reference.slice(1) && hardInitialsMatch(heard.charAt(0), reference.charAt(0));
+  if (Math.max(heard.length, reference.length) <= 5) {
+    const heardPhonetic = speechPhoneticKey(heard);
+    return heardPhonetic.length >= 3 && heardPhonetic === speechPhoneticKey(reference);
   }
+  if (heard.charAt(0) !== reference.charAt(0)) return false;
   if (editDistanceAtMost2(heard, reference, 1)) return true;
   if (areSpeechPhoneticNeighbors(heard, reference)) return true;
   return Math.min(heard.length, reference.length) >= 6 && heard.slice(0, 4) === reference.slice(0, 4) && editDistanceAtMost2(heard, reference, 2);
-}
-function hardInitialsMatch(left, right) {
-  const hardInitials = /* @__PURE__ */ new Set(["c", "k", "q"]);
-  return hardInitials.has(left) && hardInitials.has(right);
 }
 function editDistanceAtMost2(left, right, maximum) {
   if (Math.abs(left.length - right.length) > maximum) return false;

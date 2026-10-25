@@ -1704,7 +1704,8 @@ function findApproximateMatch(
           length === 1 &&
           Math.min(wantedCompact.length, candidateCompact.length) >= 4 &&
           Math.abs(wantedCompact.length - candidateCompact.length) <= 1 &&
-          scores.compactScore >= 0.75,
+          scores.compactScore >= 0.75 &&
+          scores.phonetic === wantedPhonetic,
         phoneticFallback: false,
       })
     }

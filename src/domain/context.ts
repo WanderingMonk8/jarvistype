@@ -508,20 +508,11 @@ function isReferenceTerm(term: string): boolean {
 function isHighConfidenceReferenceMatch(heard: string, reference: string): boolean {
   const maximumLengthDifference = Math.min(heard.length, reference.length) >= 6 ? 2 : 1
   if (Math.abs(heard.length - reference.length) > maximumLengthDifference) return false
-  if (
-    Math.max(heard.length, reference.length) <= 5 &&
-    speechPhoneticKey(heard).length >= 3 &&
-    speechPhoneticKey(heard) === speechPhoneticKey(reference)
-  )
-    return true
-  if (heard.charAt(0) !== reference.charAt(0)) {
-    return (
-      heard.length === 3 &&
-      reference.length === 3 &&
-      heard.slice(1) === reference.slice(1) &&
-      hardInitialsMatch(heard.charAt(0), reference.charAt(0))
-    )
+  if (Math.max(heard.length, reference.length) <= 5) {
+    const heardPhonetic = speechPhoneticKey(heard)
+    return heardPhonetic.length >= 3 && heardPhonetic === speechPhoneticKey(reference)
   }
+  if (heard.charAt(0) !== reference.charAt(0)) return false
   if (editDistanceAtMost(heard, reference, 1)) return true
   if (areSpeechPhoneticNeighbors(heard, reference)) return true
   return (
@@ -529,11 +520,6 @@ function isHighConfidenceReferenceMatch(heard: string, reference: string): boole
     heard.slice(0, 4) === reference.slice(0, 4) &&
     editDistanceAtMost(heard, reference, 2)
   )
-}
-
-function hardInitialsMatch(left: string, right: string): boolean {
-  const hardInitials = new Set(['c', 'k', 'q'])
-  return hardInitials.has(left) && hardInitials.has(right)
 }
 
 function editDistanceAtMost(left: string, right: string, maximum: number): boolean {

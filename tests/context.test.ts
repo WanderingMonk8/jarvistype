@@ -299,6 +299,14 @@ test('corrects a short phonetically equivalent card name', () => {
   })
 })
 
+test('does not conflate short names with different consonant structures', () => {
+  assert.equal(
+    correctFromConversationReferences('Walt will never do this.', ['Watt']).text,
+    'Walt will never do this.',
+  )
+  assert.equal(correctEditTargetFromConversationReferences('Walt', ['Watt']).text, 'Walt')
+})
+
 test('corrects provider consonant substitutions in recording and edit reference paths', () => {
   assert.deepEqual(correctFromConversationReferences('Ervode turns around.', ['Erbold']), {
     text: 'Erbold turns around.',

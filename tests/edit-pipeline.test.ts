@@ -1714,6 +1714,23 @@ test('fuzzy target matching tolerates similar-sounding consonants', () => {
   if (result.ok) assert.equal(result.afterText, 'The captain checks the road.')
 })
 
+test('fuzzy target matching rejects short words with different consonant structures', () => {
+  const result = executeEditPlan('Watt checks the road.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'do not conflate distinct short names',
+    operations: [
+      {
+        id: 'distinct-short-name',
+        type: 'replace',
+        target: { exactText: 'Walt' },
+        text: 'the scout',
+      },
+    ],
+  })
+  assert.deepEqual(result, { ok: false, reason: 'fuzzy text target was not found' })
+})
+
 test('ignores punctuation for unique text targets and uses it only to resolve lexical ties', () => {
   const unique = executeEditPlan('She answered, “So, yeah.”', [], 1, {
     schemaVersion: 2,

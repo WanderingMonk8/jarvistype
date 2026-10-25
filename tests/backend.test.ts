@@ -5572,19 +5572,25 @@ test('keeps the capital of a capitalized replacement word that is not a known re
 })
 
 test('restores a known proper noun after explicit spelling in a recording', async () => {
-  const cases: Array<readonly [Array<{ role: 'assistant' | 'user'; content: string }>, string]> = [
+  const cases: Array<
+    readonly [Array<{ role: 'assistant' | 'user'; content: string }>, string, string | null, string]
+  > = [
     [
       [{ role: 'assistant', content: 'Erbold hears it, and his jaw sets.' }],
+      'Earlier',
+      null,
       'Turn towards Erbold.',
     ],
-    [[], 'Turn towards erbold.'],
+    [[], 'Earlier', null, 'Turn towards erbold.'],
+    [[], 'Turns towards Erbold.', 'I turn towards erbold.', 'I turn towards Erbold.'],
   ]
-  for (const [index, [chat, expected]] of cases.entries()) {
+  for (const [index, [chat, draft, providerText, expected]] of cases.entries()) {
     const userId = `spelled-proper-noun-${index}`
     const chatId = `spelled-proper-noun-chat-${index}`
     activeChatId = chatId
     chatMessages = chat
-    await seedDraft(userId, chatId, 'Earlier')
+    generationNormalizedText = providerText
+    await seedDraft(userId, chatId, draft)
     responses.length = 0
     generationRequests.length = 0
     await dispatch(
@@ -5601,6 +5607,7 @@ test('restores a known proper noun after explicit spelling in a recording', asyn
     if (response?.type !== 'transcript.normalization.response') return
     assert.equal(response.proposal.candidateText, expected, `case ${index}`)
   }
+  generationNormalizedText = null
 })
 
 test('restores a known proper noun when a compact uppercase edit spelling defaults to lowercase', async () => {

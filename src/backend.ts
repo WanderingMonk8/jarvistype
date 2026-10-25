@@ -4068,6 +4068,17 @@ async function handleGlossaryUndo(
     )
 }
 
+/** Whether the host has at least one decision model connection the Jev check can use. */
+async function decisionModelAvailable(userId: string): Promise<boolean> {
+  if (!spindle.permissions.has('decisions')) return false
+  try {
+    const connections = await spindle.decisions.listConnections({ userId })
+    return connections.length > 0
+  } catch {
+    return false
+  }
+}
+
 async function sendPhaseFourState(
   requestId: string,
   context: RequestContext,
@@ -4086,6 +4097,7 @@ async function sendPhaseFourState(
       connections,
       glossary: glossary.entries,
       canUndoGlossary: glossary.undoStack.length > 0,
+      decisionModelAvailable: await decisionModelAvailable(context.userId),
       ...(notice ? { notice } : {}),
     },
     context,

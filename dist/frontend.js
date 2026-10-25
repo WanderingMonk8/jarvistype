@@ -294,7 +294,7 @@ function isBackendResponse(value) {
     return value.ok === true && value.outcome === "selection-required" && isEditCandidateSet(value.candidateSet);
   }
   if (value.type === "phase4.state.response") {
-    return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.connections) && value.connections.every(isNormalizationConnectionOption) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
+    return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.connections) && value.connections.every(isNormalizationConnectionOption) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && typeof value.decisionModelAvailable === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
   }
   if (value.type === "debug.log.response") {
     return value.ok === true && Array.isArray(value.entries) && value.entries.length <= 2100 && value.entries.every((entry) => typeof entry === "string" && entry.length <= 2e3);
@@ -669,6 +669,10 @@ function setup(ctx) {
   const decisionSummary = requireElement(tab.root, "[data-decision-summary]");
   const contextCountInput = requireElement(tab.root, "[data-context-count]");
   const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
+  const grammarRepairWarning = requireElement(
+    tab.root,
+    "[data-grammar-repair-warning]"
+  );
   const grammarRepairSelect = requireElement(
     tab.root,
     "[data-grammar-repair-mode]"
@@ -771,6 +775,7 @@ function setup(ctx) {
     normalizationConnections: [],
     glossary: [],
     canUndoGlossary: false,
+    decisionModelAvailable: null,
     phaseFourMessage: "Loading context and glossary settings\u2026"
   };
   const normalizationModelPicker = ctx.components.mountModelCombobox(normalizationModelSlot, {
@@ -945,6 +950,7 @@ function setup(ctx) {
     contextCountInput.value = String(state.settings.contextMessageCount);
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
     grammarRepairSelect.value = state.settings.grammarRepairMode;
+    grammarRepairWarning.hidden = state.settings.grammarRepairMode !== "when_needed" || state.decisionModelAvailable !== false;
     debugEnabledToggle.checked = state.settings.debugLoggingEnabled === true;
     debugRefreshButton.disabled = state.settings.debugLoggingEnabled !== true;
     debugCopyButton.disabled = false;
@@ -1571,6 +1577,7 @@ function setup(ctx) {
     state.normalizationConnections = response.connections;
     state.glossary = response.glossary;
     state.canUndoGlossary = response.canUndoGlossary;
+    state.decisionModelAvailable = response.decisionModelAvailable;
     state.phaseFourMessage = response.notice ?? "Context and glossary settings ready.";
   };
   const saveSettings = async () => {
@@ -2095,6 +2102,7 @@ function setup(ctx) {
   const handleCancelEditCandidatesClick = () => cancelEditCandidateSelection();
   const handleGrammarRepairModeChange = () => {
     state.settings.grammarRepairMode = grammarRepairSelect.value === "always" ? "always" : grammarRepairSelect.value === "when_needed" ? "when_needed" : "off";
+    render();
     scheduleSettingsSave(0);
   };
   const handleDebugEnabledChange = () => {
@@ -2571,9 +2579,7 @@ function joinTranscriptUpdates(finalSegments, interimText) {
 function detectQuotationBoundaryHint(input) {
   const trimmed = input.trim();
   if (/^begin\s+single\b[\s\S]*\bend\s+single[.,;:!?]*$/iu.test(trimmed)) return "single";
-  if (/^begin(?:ning)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing)?\s+speech[.,;:!?]*$/iu.test(
-    trimmed
-  ))
+  if (/^begin(?:ning)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing)?\s+speech[.,;:!?]*$/iu.test(trimmed))
     return "double";
   const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu;
   const doubleClosing = /\b(?:close\s+)?(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu;
@@ -2735,6 +2741,7 @@ function shellMarkup() {
       .jt-history { max-height: 12rem; overflow: auto; padding-inline-start: 1.4rem; }
       .jt-form-grid { display: grid; gap: .5rem; }
       .jt-form-grid label { display: grid; gap: .25rem; font-size: .85rem; }
+      .jt-setting-warning { color: #e53e3e; font-weight: 600; }
       .jt-form-grid input, .jt-form-grid select { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
       .jt-proposal { display: grid; gap: .55rem; padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
       .jt-proposal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .55rem; background: color-mix(in srgb, currentColor 6%, transparent); }
@@ -2929,7 +2936,7 @@ function shellMarkup() {
         <div class="jt-form-grid">
           <label>Messages scanned for references (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
-          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small></label>
+          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. \u201CWhen needed\u201D needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose \u201CAlways\u201D to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>

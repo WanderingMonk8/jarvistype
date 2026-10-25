@@ -6379,6 +6379,15 @@ async function handleGlossaryUndo(request, context, activeRequest) {
       mutation.changed ? "Latest glossary change undone." : "No glossary change to undo."
     );
 }
+async function decisionModelAvailable(userId) {
+  if (!spindle.permissions.has("decisions")) return false;
+  try {
+    const connections = await spindle.decisions.listConnections({ userId });
+    return connections.length > 0;
+  } catch {
+    return false;
+  }
+}
 async function sendPhaseFourState(requestId, context, settings, glossary, notice) {
   const connections = await listNormalizationConnections(context.userId);
   send(
@@ -6391,6 +6400,7 @@ async function sendPhaseFourState(requestId, context, settings, glossary, notice
       connections,
       glossary: glossary.entries,
       canUndoGlossary: glossary.undoStack.length > 0,
+      decisionModelAvailable: await decisionModelAvailable(context.userId),
       ...notice ? { notice } : {}
     },
     context

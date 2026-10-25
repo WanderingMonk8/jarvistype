@@ -259,6 +259,7 @@ export type BackendResponse =
       connections: NormalizationConnectionOption[]
       glossary: GlossaryEntry[]
       canUndoGlossary: boolean
+      decisionModelAvailable: boolean
       notice?: string
     })
   | (RequestEnvelope & {

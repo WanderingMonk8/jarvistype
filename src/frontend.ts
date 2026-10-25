@@ -220,6 +220,7 @@ interface ComposerState {
   normalizationConnections: NormalizationConnectionOption[]
   glossary: GlossaryEntry[]
   canUndoGlossary: boolean
+  decisionModelAvailable: boolean | null
   phaseFourMessage: string
 }
 
@@ -376,6 +377,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const decisionSummary = requireElement<HTMLElement>(tab.root, '[data-decision-summary]')
   const contextCountInput = requireElement<HTMLInputElement>(tab.root, '[data-context-count]')
   const contextualToggle = requireElement<HTMLInputElement>(tab.root, '[data-context-enabled]')
+  const grammarRepairWarning = requireElement<HTMLElement>(
+    tab.root,
+    '[data-grammar-repair-warning]',
+  )
   const grammarRepairSelect = requireElement<HTMLSelectElement>(
     tab.root,
     '[data-grammar-repair-mode]',
@@ -482,6 +487,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     normalizationConnections: [],
     glossary: [],
     canUndoGlossary: false,
+    decisionModelAvailable: null,
     phaseFourMessage: 'Loading context and glossary settings…',
   }
 
@@ -664,15 +670,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const recordingInProgress =
       activeRecording !== null &&
       (state.voicePhase === 'starting' || state.voicePhase === 'recording')
-    recordButton.disabled =
-      recordingInProgress
-        ? activeRecording?.mode !== 'message'
-        : !hasNativeStt() ||
-          !recordingOwnerReady ||
-          voiceBusy() ||
-          state.voicePhase === 'processing' ||
-          state.voicePhase === 'committing' ||
-          state.voicePhase === 'review'
+    recordButton.disabled = recordingInProgress
+      ? activeRecording?.mode !== 'message'
+      : !hasNativeStt() ||
+        !recordingOwnerReady ||
+        voiceBusy() ||
+        state.voicePhase === 'processing' ||
+        state.voicePhase === 'committing' ||
+        state.voicePhase === 'review'
     const editLive = activeRecording?.mode === 'edit'
     recordEditButton.dataset.recordingState =
       editLive && state.voicePhase === 'starting'
@@ -694,16 +699,15 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           : state.voicePhase === 'review' && state.pendingEditProposal
             ? 'Review required'
             : 'Edit'
-    recordEditButton.disabled =
-      recordingInProgress
-        ? activeRecording?.mode !== 'edit'
-        : !hasNativeStt() ||
-          !recordingOwnerReady ||
-          !desiredText.trim() ||
-          voiceBusy() ||
-          state.voicePhase === 'processing' ||
-          state.voicePhase === 'committing' ||
-          state.voicePhase === 'review'
+    recordEditButton.disabled = recordingInProgress
+      ? activeRecording?.mode !== 'edit'
+      : !hasNativeStt() ||
+        !recordingOwnerReady ||
+        !desiredText.trim() ||
+        voiceBusy() ||
+        state.voicePhase === 'processing' ||
+        state.voicePhase === 'committing' ||
+        state.voicePhase === 'review'
     cancelRecordingButton.style.visibility = messageIsLive ? 'visible' : 'hidden'
     cancelRecordingButton.disabled = !messageIsLive
     cancelEditRecordingButton.style.visibility = editIsLive ? 'visible' : 'hidden'
@@ -781,6 +785,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     contextCountInput.value = String(state.settings.contextMessageCount)
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
     grammarRepairSelect.value = state.settings.grammarRepairMode
+    grammarRepairWarning.hidden =
+      state.settings.grammarRepairMode !== 'when_needed' || state.decisionModelAvailable !== false
     debugEnabledToggle.checked = state.settings.debugLoggingEnabled === true
     debugRefreshButton.disabled = state.settings.debugLoggingEnabled !== true
     debugCopyButton.disabled = false
@@ -1555,6 +1561,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.normalizationConnections = response.connections
     state.glossary = response.glossary
     state.canUndoGlossary = response.canUndoGlossary
+    state.decisionModelAvailable = response.decisionModelAvailable
     state.phaseFourMessage = response.notice ?? 'Context and glossary settings ready.'
   }
 
@@ -2163,6 +2170,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         : grammarRepairSelect.value === 'when_needed'
           ? 'when_needed'
           : 'off'
+    render()
     scheduleSettingsSave(0)
   }
   const handleDebugEnabledChange = () => {
@@ -2318,8 +2326,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         Number.parseFloat(shellStyle.paddingBottom) +
         Number.parseFloat(shellStyle.borderBottomWidth)
       const contentBottom =
-        floatingTools.getBoundingClientRect().bottom -
-        floatingShell.getBoundingClientRect().top
+        floatingTools.getBoundingClientRect().bottom - floatingShell.getBoundingClientRect().top
       const fittedHeight = Math.min(
         Math.max(1, viewport.height - 24),
         Math.ceil(contentBottom + bottomInset),
@@ -2728,9 +2735,7 @@ function detectQuotationBoundaryHint(input: string): 'double' | 'single' | null 
   const trimmed = input.trim()
   if (/^begin\s+single\b[\s\S]*\bend\s+single[.,;:!?]*$/iu.test(trimmed)) return 'single'
   if (
-    /^begin(?:ning)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing)?\s+speech[.,;:!?]*$/iu.test(
-      trimmed,
-    )
+    /^begin(?:ning)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing)?\s+speech[.,;:!?]*$/iu.test(trimmed)
   )
     return 'double'
   const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu
@@ -2911,6 +2916,7 @@ function shellMarkup(): string {
       .jt-history { max-height: 12rem; overflow: auto; padding-inline-start: 1.4rem; }
       .jt-form-grid { display: grid; gap: .5rem; }
       .jt-form-grid label { display: grid; gap: .25rem; font-size: .85rem; }
+      .jt-setting-warning { color: #e53e3e; font-weight: 600; }
       .jt-form-grid input, .jt-form-grid select { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
       .jt-proposal { display: grid; gap: .55rem; padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
       .jt-proposal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .55rem; background: color-mix(in srgb, currentColor 6%, transparent); }
@@ -3105,7 +3111,7 @@ function shellMarkup(): string {
         <div class="jt-form-grid">
           <label>Messages scanned for references (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
-          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small></label>
+          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. “When needed” needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose “Always” to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>

@@ -202,6 +202,7 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
       Array.isArray(value.glossary) &&
       value.glossary.every(isGlossaryEntry) &&
       typeof value.canUndoGlossary === 'boolean' &&
+      typeof value.decisionModelAvailable === 'boolean' &&
       (value.notice === undefined || isBoundedString(value.notice, 1, 1_000))
     )
   }

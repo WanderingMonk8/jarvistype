@@ -65,6 +65,26 @@ const spindleMock = {
       (permission === 'decisions' && decisionsEnabled),
   },
   decisions: {
+    listConnections: () =>
+      Promise.resolve(
+        decisionsEnabled
+          ? [
+              {
+                id: 'jev-default',
+                name: 'Decision model',
+                provider: 'test',
+                api_url: 'http://localhost',
+                model: 'jev-test',
+                is_default: true,
+                has_api_key: true,
+                default_parameters: {},
+                metadata: {},
+                created_at: 0,
+                updated_at: 0,
+              },
+            ]
+          : [],
+      ),
     evaluate: (request: unknown) => {
       decisionRequests.push(request)
       return Promise.resolve({
@@ -414,6 +434,35 @@ test('lists safe normalization connections and dispatches with selected connecti
   assert.equal(generationRequests.length, 1)
   assert.equal(generationRequests[0]?.connection_id, normalizationConnection.id)
   assert.equal(generationRequests[0]?.parameters?.model, 'custom-text-model')
+})
+
+test('reports whether a decision model connection is available for the when-needed check', async () => {
+  const userId = 'decisions-availability-user'
+  const settingsRequest = (requestId: string) => ({
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'phase4.settings.update.request' as const,
+    requestId,
+    settings: {
+      contextMessageCount: 5,
+      contextualNormalizationEnabled: true,
+      grammarRepairMode: 'when_needed' as const,
+      normalizationConnectionId: null,
+      normalizationModelOverride: '',
+    },
+  })
+
+  decisionsEnabled = false
+  await dispatch(settingsRequest('decisions-availability-missing'), userId)
+  const missing = responses.at(-1)?.payload
+  assert.equal(missing?.type, 'phase4.state.response')
+  if (missing?.type === 'phase4.state.response') assert.equal(missing.decisionModelAvailable, false)
+
+  decisionsEnabled = true
+  await dispatch(settingsRequest('decisions-availability-present'), userId)
+  const present = responses.at(-1)?.payload
+  assert.equal(present?.type, 'phase4.state.response')
+  if (present?.type === 'phase4.state.response') assert.equal(present.decisionModelAvailable, true)
+  decisionsEnabled = false
 })
 
 test('uses local command context with compact conversational spelling references', async () => {

@@ -405,7 +405,32 @@ function correctReferenceTerms(
   const referenceByKey = referenceMap(references)
   const correctedTerms: Array<{ heard: string; canonical: string }> = []
 
-  const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard, offset: number) => {
+  let correctedText = text.replace(
+    /(\p{L}[\p{L}\p{M}\d-]*)\s+(\p{L}[\p{L}\p{M}\d-]*)(['’]s)\b/gu,
+    (heard, first: string, second: string, possessive: string) => {
+      if (requireInitialUppercase && !/^\p{Lu}/u.test(first)) return heard
+      const combined = `${first}${second}`.toLocaleLowerCase()
+      if (combined.length < 6) return heard
+      const candidates = [...referenceByKey.values()].filter((reference) => {
+        const key = reference.toLocaleLowerCase()
+        return (
+          reference.length >= 5 &&
+          Math.abs(combined.length - key.length) <= 2 &&
+          !protectedKeys.has(key) &&
+          areSpeechPhoneticNeighbors(combined, key)
+        )
+      })
+      const uniqueCandidates = [
+        ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values(),
+      ]
+      if (uniqueCandidates.length !== 1) return heard
+      const canonical = uniqueCandidates[0]!
+      correctedTerms.push({ heard: `${first} ${second}`, canonical })
+      return `${canonical}${possessive}`
+    },
+  )
+
+  correctedText = correctedText.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard, offset: number) => {
     const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
     const base = possessive ? heard.slice(0, -possessive.length) : heard
     const baseKey = base.toLocaleLowerCase()
@@ -431,7 +456,7 @@ function correctReferenceTerms(
         !possessive &&
         (isLikelyOneSyllable(reference) ||
           PARTICLE_WORDS.has(reference.toLocaleLowerCase())) &&
-        hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey)
+        hasProtectedOrdinaryWordUsage(correctedText, offset, offset + heard.length, baseKey)
       )
         return false
       return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase())

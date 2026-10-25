@@ -380,6 +380,20 @@ test('corrects a unique short phonetic name and preserves its possessive apostro
   assert.equal(correctFromConversationReferences("Cat's coat", ['Kat', 'Qat']).text, "Cat's coat")
 })
 
+test('collapses a provider-split possessive into one unique phonetic name', () => {
+  assert.deepEqual(
+    correctFromConversationReferences("Her boat's call alerted me.", ['Erbold']),
+    {
+      text: "Erbold's call alerted me.",
+      correctedTerms: [{ heard: 'Her boat', canonical: 'Erbold' }],
+    },
+  )
+  assert.equal(
+    correctFromConversationReferences("Her boat's call alerted me.", ['Erbold', 'Herbault']).text,
+    "Her boat's call alerted me.",
+  )
+})
+
 test('uses grammatical context to protect ordinary words from one-syllable names', () => {
   assert.equal(
     correctFromConversationReferences('Can you understand me?', ['Ken']).text,

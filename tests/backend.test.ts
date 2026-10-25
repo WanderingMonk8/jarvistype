@@ -526,6 +526,31 @@ test('uses an unambiguous recent-chat proper name when the model leaves the STT 
   }
 })
 
+test('uses a reference name when the provider splits its possessive pronunciation', async () => {
+  const userId = 'split-possessive-reference-user'
+  const chatId = 'split-possessive-reference-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'I spoke with Erbold beside the gate.' }]
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'split-possessive-reference-segment',
+      0,
+      "Her boat's call alerted me to the gravity of the situation.",
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(
+      response.proposal.candidateText,
+      "Erbold's call alerted me to the gravity of the situation.",
+    )
+})
+
 test('does not grant casing authority to a sentence-initial reference candidate', async () => {
   const userId = 'non-authoritative-building-user'
   const chatId = 'non-authoritative-building-chat'

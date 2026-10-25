@@ -2093,7 +2093,7 @@ function extractAuthoritativeCasingReferences(messages, options = {}) {
   const supportedSingles = candidates.filter((candidate) => {
     const item = evidence.get(referenceCanonicalKey(candidate));
     if (!item) return false;
-    return item.strong || item.occurrences >= 2;
+    return item.strong || options.allowRepeatedSentenceOpenings !== false && item.occurrences >= 2;
   });
   const supportedKeys = new Set([...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey));
   return extracted.filter((reference) => supportedKeys.has(referenceEvidenceKey(reference)));
@@ -3870,7 +3870,11 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
   );
   const draftCasingReferences = extractAuthoritativeCasingReferences(
     [{ role: "assistant", content: session.cleanText }],
-    { allowRepeatedWithinSource: true, allowMidSentenceCapitalized: true }
+    {
+      allowRepeatedWithinSource: true,
+      allowMidSentenceCapitalized: true,
+      allowRepeatedSentenceOpenings: false
+    }
   );
   const spellingReferences = mergeConversationReferences(
     mergeConversationReferences(authoritativeConversationReferences, draftCasingReferences),
@@ -6238,7 +6242,11 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
   ]);
   const draftReferences = extractAuthoritativeCasingReferences(
     [{ role: "assistant", content: draftText }],
-    { allowRepeatedWithinSource: true, allowMidSentenceCapitalized: true }
+    {
+      allowRepeatedWithinSource: true,
+      allowMidSentenceCapitalized: true,
+      allowRepeatedSentenceOpenings: false
+    }
   );
   const authoritativeReferences = mergeConversationReferences(
     authoritativeConversationReferences,

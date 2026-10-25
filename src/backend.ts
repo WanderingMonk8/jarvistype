@@ -530,7 +530,11 @@ async function handleTranscriptNormalization(
   )
   const draftCasingReferences = extractAuthoritativeCasingReferences(
     [{ role: 'assistant', content: session.cleanText }],
-    { allowRepeatedWithinSource: true, allowMidSentenceCapitalized: true },
+    {
+      allowRepeatedWithinSource: true,
+      allowMidSentenceCapitalized: true,
+      allowRepeatedSentenceOpenings: false,
+    },
   )
   const spellingReferences = mergeConversationReferences(
     mergeConversationReferences(authoritativeConversationReferences, draftCasingReferences),
@@ -3542,7 +3546,11 @@ function normalizeEditInputPayloads(
   ])
   const draftReferences = extractAuthoritativeCasingReferences(
     [{ role: 'assistant', content: draftText }],
-    { allowRepeatedWithinSource: true, allowMidSentenceCapitalized: true },
+    {
+      allowRepeatedWithinSource: true,
+      allowMidSentenceCapitalized: true,
+      allowRepeatedSentenceOpenings: false,
+    },
   )
   const authoritativeReferences = mergeConversationReferences(
     authoritativeConversationReferences,

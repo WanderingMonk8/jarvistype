@@ -202,6 +202,7 @@ export function extractAuthoritativeCasingReferences(
   options: {
     allowRepeatedWithinSource?: boolean
     allowMidSentenceCapitalized?: boolean
+    allowRepeatedSentenceOpenings?: boolean
     lowercaseExemptions?: readonly string[]
   } = {},
 ): string[] {
@@ -261,7 +262,7 @@ export function extractAuthoritativeCasingReferences(
     if (!item) return false
     return (
       item.strong ||
-      item.occurrences >= 2
+      (options.allowRepeatedSentenceOpenings !== false && item.occurrences >= 2)
     )
   })
   const supportedKeys = new Set([...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey))

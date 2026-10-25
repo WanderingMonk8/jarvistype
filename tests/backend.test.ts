@@ -5976,6 +5976,36 @@ test('keeps broad active-draft references available for recording fuzzy identifi
   }
 })
 
+test('does not use repeated sentence openings in the active draft as casing authority', async () => {
+  const userId = 'draft-repeated-opening-casing-user'
+  const chatId = 'draft-repeated-opening-casing-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'The road remains quiet.' }]
+  generationNormalizedText = null
+  await seedDraft(
+    userId,
+    chatId,
+    'Close enough to smell the leather. Close enough to count the stitches.',
+  )
+
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'draft-repeated-opening-casing',
+      1,
+      'All right, this is getting too close.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'All right, this is getting too close.')
+})
+
 test('keeps broad active-draft references available for edit payload fuzzy identification', async () => {
   const userId = 'draft-fuzzy-payload-user'
   const chatId = 'draft-fuzzy-payload-chat'

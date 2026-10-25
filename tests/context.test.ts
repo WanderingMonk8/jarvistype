@@ -217,6 +217,21 @@ test('uses immediate mid-sentence evidence for temporary active-draft casing', (
   assert.deepEqual(references, ['Building', 'Erbold'])
 })
 
+test('does not grant active-draft casing authority from repeated sentence openings', () => {
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences(
+      [
+        {
+          role: 'assistant',
+          content: 'Close enough to smell the leather. Close enough to count the stitches.',
+        },
+      ],
+      { allowRepeatedSentenceOpenings: false },
+    ),
+    [],
+  )
+})
+
 test('keeps multiword casing authority scoped to the complete phrase', () => {
   const references = extractAuthoritativeCasingReferences([
     { role: 'assistant', content: 'City Building stands nearby.' },

@@ -5545,6 +5545,50 @@ test('defaults collapsed uppercase edit spellings to lowercase and honors an exp
   }
 })
 
+test('restores a known proper noun after explicit spelling in an edit instruction', async () => {
+  const cases: Array<
+    readonly [string, Array<{ role: 'assistant' | 'user'; content: string }>, string]
+  > = [
+    [
+      'Turns towards Erbold. I turned towards erwin.',
+      [],
+      'Turns towards Erbold. I turned towards Erbold.',
+    ],
+    [
+      'Earlier. I turned towards erwin.',
+      [{ role: 'assistant', content: 'Erbold hears it.' }],
+      'Earlier. I turned towards Erbold.',
+    ],
+    ['Earlier. I turned towards erwin.', [], 'Earlier. I turned towards erbold.'],
+  ]
+  for (const [index, [draft, chat, expected]] of cases.entries()) {
+    const userId = `edit-spelled-proper-noun-${index}`
+    const chatId = `edit-spelled-proper-noun-chat-${index}`
+    activeChatId = chatId
+    chatMessages = chat
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `edit-spelled-proper-noun-interpret-${index}`,
+        operationId: `edit-spelled-proper-noun-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript: 'Replace ERWIN with E-R-B-O-L-D.',
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', `case ${index}`)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(proposal.proposal.afterText, expected, `case ${index}`)
+    assert.equal(generationRequests.length, 0, `case ${index}`)
+  }
+})
+
 test('keeps the capital of a capitalized replacement word that is not a known reference', async () => {
   const userId = 'capitalized-replacement-user'
   const chatId = 'capitalized-replacement-chat'

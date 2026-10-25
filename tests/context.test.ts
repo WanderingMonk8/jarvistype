@@ -220,7 +220,7 @@ test('corrects a unique short phonetic name and preserves its possessive apostro
   assert.equal(correctFromConversationReferences("Cat's coat", ['Kat', 'Qat']).text, "Cat's coat")
 })
 
-test('does not fuzzy-correct sentence-opening words into one-syllable names', () => {
+test('uses grammatical context to protect ordinary words from one-syllable names', () => {
   assert.equal(
     correctFromConversationReferences('Can you understand me?', ['Ken']).text,
     'Can you understand me?',
@@ -230,12 +230,32 @@ test('does not fuzzy-correct sentence-opening words into one-syllable names', ()
     'She asked, “Can you understand me?”',
   )
   assert.equal(
+    correctFromConversationReferences('Then we should leave.', ['Dan']).text,
+    'Then we should leave.',
+  )
+  assert.equal(
+    correctFromConversationReferences('We waited, and Then we left.', ['Dan']).text,
+    'We waited, and Then we left.',
+  )
+  assert.equal(
+    correctFromConversationReferences('The Cat slept inside the Den.', ['Kat', 'Dan']).text,
+    'The Cat slept inside the Den.',
+  )
+  assert.equal(
+    correctFromConversationReferences('I Mark each completed page.', ['Marc']).text,
+    'I Mark each completed page.',
+  )
+  assert.equal(
     correctFromConversationReferences('I know that can work.', ['Ken']).text,
     'I know that can work.',
   )
   assert.equal(
     correctFromConversationReferences('Please ask Can tomorrow.', ['Ken']).text,
     'Please ask Ken tomorrow.',
+  )
+  assert.equal(
+    correctFromConversationReferences('Please ask Mark tomorrow.', ['Marc']).text,
+    'Please ask Marc tomorrow.',
   )
 })
 

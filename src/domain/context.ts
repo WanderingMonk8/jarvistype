@@ -238,7 +238,7 @@ function correctReferenceTerms(
         requireInitialUppercase &&
         !possessive &&
         isLikelyOneSyllable(reference) &&
-        isSentenceOpening(text, offset)
+        hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey)
       )
         return false
       return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase())
@@ -256,13 +256,82 @@ function correctReferenceTerms(
   return { text: correctedText, correctedTerms }
 }
 
-function isSentenceOpening(text: string, offset: number): boolean {
-  const prefix = text.slice(0, offset).trimEnd()
-  return (
-    !prefix ||
-    /^["'“‘([{]+$/u.test(prefix) ||
-    /[.!?]["'”’)}\]]*\s*["'“‘([{]*$/u.test(prefix)
+const MODAL_WORDS = new Set(['can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would'])
+const DETERMINERS = new Set([
+  'a',
+  'an',
+  'the',
+  'this',
+  'that',
+  'these',
+  'those',
+  'my',
+  'your',
+  'his',
+  'her',
+  'its',
+  'our',
+  'their',
+  'each',
+  'every',
+  'some',
+  'any',
+  'no',
+])
+const SUBJECT_WORDS = new Set(['i', 'you', 'he', 'she', 'it', 'we', 'they', 'who'])
+const COMMON_VERB_CONFUSABLES = new Set(['bill', 'grant', 'jack', 'mark', 'rose'])
+const NAME_SIGNAL_WORDS = new Set([
+  'ask',
+  'asked',
+  'call',
+  'called',
+  'greet',
+  'greeted',
+  'meet',
+  'met',
+  'named',
+  'thank',
+  'thanked',
+  'tell',
+  'told',
+])
+const NAME_TITLES = new Set(['captain', 'doctor', 'dr', 'miss', 'mister', 'mr', 'mrs', 'ms', 'professor'])
+
+function hasProtectedOrdinaryWordUsage(
+  text: string,
+  start: number,
+  end: number,
+  heard: string,
+): boolean {
+  const previous = adjacentWord(text, start, 'before')
+  const next = adjacentWord(text, end, 'after')
+  if (previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous))) return false
+
+  if (MODAL_WORDS.has(heard)) return true
+  if (previous && DETERMINERS.has(previous)) return true
+  if (heard === 'then') return true
+  if (
+    COMMON_VERB_CONFUSABLES.has(heard) &&
+    (previous === 'to' || (previous !== undefined && SUBJECT_WORDS.has(previous)))
   )
+    return true
+  if (heard === 'mark' && next === 'my') return true
+  if (heard === 'bill' && next === 'of') return true
+  if (heard === 'jack' && next === 'up') return true
+  return false
+}
+
+function adjacentWord(
+  text: string,
+  offset: number,
+  direction: 'before' | 'after',
+): string | undefined {
+  const source = direction === 'before' ? text.slice(0, offset) : text.slice(offset)
+  const match =
+    direction === 'before'
+      ? source.match(/([\p{L}\p{M}]+)[^\p{L}\p{M}]*$/u)
+      : source.match(/^[^\p{L}\p{M}]*([\p{L}\p{M}]+)/u)
+  return match?.[1]?.toLocaleLowerCase()
 }
 
 function isLikelyOneSyllable(value: string): boolean {

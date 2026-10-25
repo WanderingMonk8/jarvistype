@@ -1318,10 +1318,10 @@ function addBoundarySpacing(text, point, insertion) {
 }
 function capitalizeReplacementAtSentenceOpening(text, start, replacement) {
   const before = text.slice(0, start);
-  const isSentenceOpening2 = /(?:^|\n{2,}|[.?!…][”’"']?(?:[ \t]+|$))[ \t]*[“‘"'([{]*[ \t]*$/u.test(
+  const isSentenceOpening = /(?:^|\n{2,}|[.?!…][”’"']?(?:[ \t]+|$))[ \t]*[“‘"'([{]*[ \t]*$/u.test(
     before
   );
-  if (!isSentenceOpening2) return replacement;
+  if (!isSentenceOpening) return replacement;
   return replacement.replace(
     /^([ \t]*[“‘"'([{]*[ \t]*)([\p{Ll}][\p{L}\p{M}'’-]*)/u,
     (whole, prefix, word) => {
@@ -2031,7 +2031,7 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
     if (base.length < 3 || requireInitialUppercase && !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
       return heard;
     const candidates = [...referenceByKey.values()].filter((reference) => {
-      if (requireInitialUppercase && !possessive && isLikelyOneSyllable(reference) && isSentenceOpening(text, offset))
+      if (requireInitialUppercase && !possessive && isLikelyOneSyllable(reference) && hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey))
         return false;
       return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase());
     });
@@ -2045,9 +2045,64 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
   });
   return { text: correctedText, correctedTerms };
 }
-function isSentenceOpening(text, offset) {
-  const prefix = text.slice(0, offset).trimEnd();
-  return !prefix || /^["'“‘([{]+$/u.test(prefix) || /[.!?]["'”’)}\]]*\s*["'“‘([{]*$/u.test(prefix);
+var MODAL_WORDS = /* @__PURE__ */ new Set(["can", "could", "may", "might", "must", "shall", "should", "will", "would"]);
+var DETERMINERS = /* @__PURE__ */ new Set([
+  "a",
+  "an",
+  "the",
+  "this",
+  "that",
+  "these",
+  "those",
+  "my",
+  "your",
+  "his",
+  "her",
+  "its",
+  "our",
+  "their",
+  "each",
+  "every",
+  "some",
+  "any",
+  "no"
+]);
+var SUBJECT_WORDS = /* @__PURE__ */ new Set(["i", "you", "he", "she", "it", "we", "they", "who"]);
+var COMMON_VERB_CONFUSABLES = /* @__PURE__ */ new Set(["bill", "grant", "jack", "mark", "rose"]);
+var NAME_SIGNAL_WORDS = /* @__PURE__ */ new Set([
+  "ask",
+  "asked",
+  "call",
+  "called",
+  "greet",
+  "greeted",
+  "meet",
+  "met",
+  "named",
+  "thank",
+  "thanked",
+  "tell",
+  "told"
+]);
+var NAME_TITLES = /* @__PURE__ */ new Set(["captain", "doctor", "dr", "miss", "mister", "mr", "mrs", "ms", "professor"]);
+function hasProtectedOrdinaryWordUsage(text, start, end, heard) {
+  const previous = adjacentWord(text, start, "before");
+  const next = adjacentWord(text, end, "after");
+  if (previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous))) return false;
+  if (MODAL_WORDS.has(heard)) return true;
+  if (previous && DETERMINERS.has(previous)) return true;
+  if (heard === "then") return true;
+  if (COMMON_VERB_CONFUSABLES.has(heard) && (previous === "to" || previous !== void 0 && SUBJECT_WORDS.has(previous)))
+    return true;
+  if (heard === "mark" && next === "my") return true;
+  if (heard === "bill" && next === "of") return true;
+  if (heard === "jack" && next === "up") return true;
+  return false;
+}
+function adjacentWord(text, offset, direction) {
+  const source = direction === "before" ? text.slice(0, offset) : text.slice(offset);
+  const match = direction === "before" ? source.match(/([\p{L}\p{M}]+)[^\p{L}\p{M}]*$/u) : source.match(/^[^\p{L}\p{M}]*([\p{L}\p{M}]+)/u);
+  return match?.[1]?.toLocaleLowerCase();
 }
 function isLikelyOneSyllable(value) {
   const normalized = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/[^a-z]/gu, "");

@@ -3155,7 +3155,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.8";
+var APP_VERSION = "1.6.9";
 var PHASE_FOUR_PERMISSIONS = [
   "media",
   "chats",

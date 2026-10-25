@@ -181,6 +181,115 @@ export function extractConversationReferences(
   return references
 }
 
+/**
+ * Returns only inferred references with enough contextual evidence to alter casing.
+ * The broader reference list remains available for unique fuzzy identification.
+ */
+export function extractAuthoritativeCasingReferences(
+  messages: readonly ContextMessage[],
+  options: {
+    allowRepeatedWithinSource?: boolean
+    allowMidSentenceCapitalized?: boolean
+  } = {},
+): string[] {
+  const extracted = extractConversationReferences(messages)
+  const phraseCandidates = extracted.filter((reference) => /\s/u.test(reference))
+  const candidates = extracted.filter((reference) => !/\s/u.test(reference))
+  const candidateByKey = new Map(candidates.map((candidate) => [referenceCanonicalKey(candidate), candidate]))
+  const evidence = new Map<
+    string,
+    { strong: boolean; occurrences: number; messageIndexes: Set<number> }
+  >()
+
+  messages.forEach((message, messageIndex) => {
+    const tokens = [
+      ...message.content.matchAll(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu),
+    ].map((match) => ({
+      value: match[0],
+      start: match.index,
+      end: match.index + match[0].length,
+    }))
+    tokens.forEach((token, tokenIndex) => {
+      if (!/^\p{Lu}/u.test(token.value)) return
+      const possessive = token.value.match(/(['’]s)$/iu)?.[0] ?? ''
+      const base = possessive ? token.value.slice(0, -possessive.length) : token.value
+      const key = referenceEvidenceKey(normalizeReferenceCasing(base))
+      if (!candidateByKey.has(key)) return
+      const previous = tokens[tokenIndex - 1]
+      const next = tokens[tokenIndex + 1]
+      const previousKey = previous ? referenceEvidenceKey(previous.value) : undefined
+      const adjacentCapitalizedCandidate = [previous, next].some((neighbor) => {
+        if (!neighbor || !/^\p{Lu}/u.test(neighbor.value)) return false
+        const between = message.content.slice(
+          Math.min(token.end, neighbor.end),
+          Math.max(token.start, neighbor.start),
+        )
+        return /^\s*$/u.test(between) && candidateByKey.has(referenceCanonicalKey(neighbor.value))
+      })
+      const followedByVocativeComma = /^\s*,/u.test(message.content.slice(token.end))
+      const precededByNameCue =
+        previousKey !== undefined &&
+        (NAME_SIGNAL_WORDS.has(previousKey) ||
+          NAME_TITLES.has(previousKey) ||
+          NAME_RELATION_WORDS.has(previousKey))
+      const supportedMidSentenceUse =
+        options.allowMidSentenceCapitalized === true &&
+        !isSentenceOpeningAt(message.content, token.start) &&
+        !adjacentCapitalizedCandidate &&
+        (previousKey === undefined || !DETERMINERS.has(previousKey))
+      const current = evidence.get(key) ?? {
+        strong: false,
+        occurrences: 0,
+        messageIndexes: new Set<number>(),
+      }
+      current.strong ||= Boolean(
+        possessive ||
+          followedByVocativeComma ||
+          precededByNameCue ||
+          supportedMidSentenceUse,
+      )
+      current.occurrences += 1
+      current.messageIndexes.add(messageIndex)
+      evidence.set(key, current)
+    })
+  })
+
+  const supportedSingles = candidates.filter((candidate) => {
+    const item = evidence.get(referenceCanonicalKey(candidate))
+    if (!item) return false
+    return (
+      item.strong ||
+      item.messageIndexes.size >= 2 ||
+      (options.allowRepeatedWithinSource === true && item.occurrences >= 2)
+    )
+  })
+  const supportedKeys = new Set([...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey))
+  return extracted.filter((reference) => supportedKeys.has(referenceEvidenceKey(reference)))
+}
+
+export function extractCardCasingReferences(title: string, cardText: string): string[] {
+  const titleReferences = title.trim()
+    ? extractConversationReferences([{ role: 'assistant', content: title }])
+    : []
+  const bodyIdentification = cardText.trim()
+    ? extractConversationReferences([{ role: 'assistant', content: cardText }])
+    : []
+  const bodyKeys = new Set(bodyIdentification.map(referenceEvidenceKey))
+  const confirmedTitleReferences = titleReferences.filter((reference) =>
+    bodyKeys.has(referenceEvidenceKey(reference)),
+  )
+  const selectedTitleReferences = confirmedTitleReferences.length
+    ? confirmedTitleReferences
+    : titleReferences
+  const bodyCasingReferences = cardText.trim()
+    ? extractAuthoritativeCasingReferences(
+        [{ role: 'assistant', content: cardText }],
+        { allowRepeatedWithinSource: true, allowMidSentenceCapitalized: true },
+      )
+    : []
+  return uniqueReferences([...selectedTitleReferences, ...bodyCasingReferences])
+}
+
 export function extractCardCharacterReferences(title: string, cardText: string): string[] {
   const normalizedTitle = title.trim()
   const titleReferences = normalizedTitle
@@ -202,6 +311,15 @@ export function extractCardCharacterReferences(title: string, cardText: string):
     if (!references.has(key)) references.set(key, reference)
   }
   return [...references.values()]
+}
+
+function uniqueReferences(references: readonly string[]): string[] {
+  const selected = new Map<string, string>()
+  for (const reference of references) {
+    const key = referenceEvidenceKey(reference)
+    if (!selected.has(key)) selected.set(key, reference)
+  }
+  return [...selected.values()]
 }
 
 export function correctFromConversationReferences(
@@ -233,7 +351,28 @@ export function canonicalizeExactConversationReferences(
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()))
   const referenceByKey = referenceMap(references)
   const correctedTerms: Array<{ heard: string; canonical: string }> = []
-  const correctedText = text.replace(
+  let correctedText = text
+  const phraseReferences = [
+    ...new Map(
+      references
+        .map((reference) => normalizeReferenceCasing(reference.trim()))
+        .filter((reference) => /\s/u.test(reference))
+        .map((reference) => [reference.toLocaleLowerCase(), reference]),
+    ).values(),
+  ].sort((left, right) => right.length - left.length)
+  for (const canonical of phraseReferences) {
+    if (protectedKeys.has(canonical.toLocaleLowerCase())) continue
+    const pattern = new RegExp(
+      `(?<![\\p{L}\\p{N}])${escapeReferencePattern(canonical).replace(/\s+/gu, '\\s+')}(?![\\p{L}\\p{N}])`,
+      'giu',
+    )
+    correctedText = correctedText.replace(pattern, (heard) => {
+      if (heard === canonical) return heard
+      correctedTerms.push({ heard, canonical })
+      return canonical
+    })
+  }
+  correctedText = correctedText.replace(
     /\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu,
     (heard, offset: number) => {
       const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
@@ -245,8 +384,8 @@ export function canonicalizeExactConversationReferences(
         (isLikelyOneSyllable(canonical) ||
           AUXILIARY_WORDS.has(baseKey) ||
           PARTICLE_WORDS.has(baseKey)) &&
-        (hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey) ||
-          hasPrecedingQuantity(text, offset))
+        (hasProtectedOrdinaryWordUsage(correctedText, offset, offset + heard.length, baseKey) ||
+          hasPrecedingQuantity(correctedText, offset))
       )
         return heard
       correctedTerms.push({ heard: base, canonical })
@@ -340,6 +479,22 @@ function referenceEvidenceKey(value: string): string {
   return value.toLocaleLowerCase().replace(/\u2019/gu, "'")
 }
 
+function referenceCanonicalKey(value: string): string {
+  const possessive = value.match(/(['’]s)$/iu)?.[0] ?? ''
+  return referenceEvidenceKey(
+    normalizeReferenceCasing(possessive ? value.slice(0, -possessive.length) : value),
+  )
+}
+
+function escapeReferencePattern(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace(/['’]/gu, "['’]")
+}
+
+function isSentenceOpeningAt(text: string, offset: number): boolean {
+  const prefix = text.slice(0, offset).replace(/[\s"'“”‘’([{]+$/gu, '')
+  return prefix.length === 0 || /[.!?]\s*$/u.test(prefix)
+}
+
 const MODAL_WORDS = new Set(['can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would'])
 const AUXILIARY_WORDS = new Set([
   'am',
@@ -408,6 +563,17 @@ const NAME_SIGNAL_WORDS = new Set([
   'told',
 ])
 const NAME_TITLES = new Set(['captain', 'doctor', 'dr', 'miss', 'mister', 'mr', 'mrs', 'ms', 'professor'])
+const NAME_RELATION_WORDS = new Set([
+  'about',
+  'alongside',
+  'beside',
+  'from',
+  'near',
+  'to',
+  'toward',
+  'towards',
+  'with',
+])
 
 function hasPositiveNameSignal(text: string, start: number): boolean {
   const previous = adjacentWord(text, start, 'before')

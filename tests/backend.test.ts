@@ -526,6 +526,66 @@ test('uses an unambiguous recent-chat proper name when the model leaves the STT 
   }
 })
 
+test('does not grant casing authority to a sentence-initial reference candidate', async () => {
+  const userId = 'non-authoritative-building-user'
+  const chatId = 'non-authoritative-building-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'Building stands beside us.' }]
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'non-authoritative-building-segment', 0, 'I look at the building next to us.'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'I look at the building next to us.')
+  const request = generationRequests.at(-1)
+  const prompt = JSON.parse(request?.messages?.at(-1)?.content ?? '{}') as {
+    conversationReferences?: string[]
+    authoritativeCasingReferences?: string[]
+  }
+  assert.ok(prompt.conversationReferences?.includes('Building'))
+  assert.equal(prompt.authoritativeCasingReferences?.includes('Building'), false)
+})
+
+test('uses structured card names as casing authority', async () => {
+  const userId = 'card-casing-authority-user'
+  const chatId = 'card-casing-authority-chat'
+  activeChatId = chatId
+  chatMessages = []
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'card-casing-authority-segment', 0, 'I turn toward aiko.'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'I turn toward Aiko.')
+})
+
+test('uses strong temporary active-draft names as casing authority', async () => {
+  const userId = 'draft-casing-authority-user'
+  const chatId = 'draft-casing-authority-chat'
+  activeChatId = chatId
+  chatMessages = []
+  await seedDraft(userId, chatId, 'I turned toward Erbold.')
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'draft-casing-authority-segment', 1, 'I look at erbold.'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'I look at Erbold.')
+})
+
 test('recovers a unique recent-chat name with a stable prefix and mistranscribed ending', async () => {
   const userId = 'recent-name-ending-user'
   const chatId = 'recent-name-ending-chat'

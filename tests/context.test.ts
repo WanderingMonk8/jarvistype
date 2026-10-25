@@ -6,6 +6,8 @@ import {
   clampContextMessageCount,
   correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
+  extractAuthoritativeCasingReferences,
+  extractCardCasingReferences,
   extractCardCharacterReferences,
   extractConversationReferences,
   selectRecentContext,
@@ -104,6 +106,16 @@ test('normalizes all-uppercase character-card names to capitalized casing', () =
   assert.equal(references.some((reference) => /\p{Lu}{2}/u.test(reference)), false)
 })
 
+test('keeps broad card terms for identification but limits card casing authority', () => {
+  const cardText = 'Building stands nearby. Aiko Tanaka waits beside Marcus.'
+  assert.ok(extractCardCharacterReferences('Aiko Tanaka', cardText).includes('Building'))
+  const casing = extractCardCasingReferences('Aiko Tanaka', cardText)
+  for (const expected of ['Aiko Tanaka', 'Aiko', 'Tanaka', 'Marcus']) {
+    assert.ok(casing.includes(expected), `missing ${expected}`)
+  }
+  assert.equal(casing.includes('Building'), false)
+})
+
 test('requires consistent casing evidence before treating a single word as a name', () => {
   assert.deepEqual(
     extractConversationReferences([
@@ -114,6 +126,64 @@ test('requires consistent casing evidence before treating a single word as a nam
       },
     ]),
     ['Zorlin'],
+  )
+})
+
+test('separates fuzzy identification references from casing authority', () => {
+  const messages = [
+    { role: 'assistant' as const, content: 'Building stands nearby. I spoke with Erbold.' },
+  ]
+  assert.ok(extractConversationReferences(messages).includes('Building'))
+  assert.deepEqual(extractAuthoritativeCasingReferences(messages), ['Erbold'])
+})
+
+test('grants casing authority from name context, multiword names, and repeated evidence', () => {
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant', content: 'Erbold, listen. Aiko Tanaka waits nearby.' },
+    ]),
+    ['Erbold', 'Aiko Tanaka'],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant', content: 'Mara waits.' },
+      { role: 'assistant', content: 'Mara returns.' },
+    ]),
+    ['Mara'],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences(
+      [{ role: 'assistant', content: 'Watt waits. Later, Watt returns.' }],
+      { allowRepeatedWithinSource: true },
+    ),
+    ['Watt'],
+  )
+})
+
+test('uses contextual mid-sentence evidence only for temporary active-draft casing', () => {
+  const references = extractAuthoritativeCasingReferences(
+    [
+      {
+        role: 'assistant',
+        content: 'Building stands nearby. I look at the Building. I turn toward Erbold.',
+      },
+    ],
+    { allowRepeatedWithinSource: true, allowMidSentenceCapitalized: true },
+  )
+  assert.deepEqual(references, ['Erbold'])
+})
+
+test('keeps multiword casing authority scoped to the complete phrase', () => {
+  const references = extractAuthoritativeCasingReferences([
+    { role: 'assistant', content: 'City Building stands nearby.' },
+  ])
+  assert.deepEqual(references, ['City Building'])
+  assert.equal(
+    canonicalizeExactConversationReferences(
+      'I see city building nearby, beside another building.',
+      references,
+    ).text,
+    'I see City Building nearby, beside another building.',
   )
 })
 

@@ -478,7 +478,7 @@ var COMMAND_GROUPS = [
     examples: [
       ["Uppercase", "Uppercase the draft, or make the entire draft all caps."],
       ["Lowercase", "Lowercase paragraph 2, or make paragraph 2 lowercase."],
-      ["Capitalize", "Capitalize \u201CProject Atlas,\u201D or capitalize its first letter."],
+      ["Capitalize", "Capitalize \u201Cthe hawk\u201D to make every word title-cased: \u201CThe Hawk.\u201D"],
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
       [
         "As in reference",

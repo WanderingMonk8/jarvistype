@@ -132,7 +132,7 @@ export const COMMAND_GROUPS = [
     examples: [
       ['Uppercase', 'Uppercase the draft, or make the entire draft all caps.'],
       ['Lowercase', 'Lowercase paragraph 2, or make paragraph 2 lowercase.'],
-      ['Capitalize', 'Capitalize “Project Atlas,” or capitalize its first letter.'],
+      ['Capitalize', 'Capitalize “the hawk” to make every word title-cased: “The Hawk.”'],
       ['Spelled form', 'Replace Kalora with capitalized C-A-E-L-O-R-A.'],
       [
         'As in reference',

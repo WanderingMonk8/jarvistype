@@ -1844,10 +1844,12 @@ function stringSimilarity(left: string, right: string): number {
 function applyCase(value: string, mode: NonNullable<EditOperation['caseMode']>): string {
   if (mode === 'uppercase') return value.toLocaleUpperCase()
   if (mode === 'lowercase') return value.toLocaleLowerCase()
-  const index = value.search(/[\p{L}]/u)
-  return index < 0
-    ? value
-    : `${value.slice(0, index)}${value[index]!.toLocaleUpperCase()}${value.slice(index + 1)}`
+  return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {
+    const index = word.search(/\p{L}/u)
+    return index < 0
+      ? word
+      : `${word.slice(0, index)}${word[index]!.toLocaleUpperCase()}${word.slice(index + 1)}`
+  })
 }
 
 function paragraphOrdinalAtOffset(text: string, offset: number): number {

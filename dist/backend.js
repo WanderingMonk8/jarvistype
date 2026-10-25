@@ -1888,8 +1888,10 @@ function stringSimilarity(left, right) {
 function applyCase(value, mode) {
   if (mode === "uppercase") return value.toLocaleUpperCase();
   if (mode === "lowercase") return value.toLocaleLowerCase();
-  const index = value.search(/[\p{L}]/u);
-  return index < 0 ? value : `${value.slice(0, index)}${value[index].toLocaleUpperCase()}${value.slice(index + 1)}`;
+  return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {
+    const index = word.search(/\p{L}/u);
+    return index < 0 ? word : `${word.slice(0, index)}${word[index].toLocaleUpperCase()}${word.slice(index + 1)}`;
+  });
 }
 function paragraphOrdinalAtOffset2(text, offset) {
   return Math.max(
@@ -4733,7 +4735,7 @@ async function interpretEditInstruction(instructionTranscript, session, settings
         },
         {
           role: "system",
-          content: "Recognize flexible edit vocabulary only when the instruction supplies the arguments required for that operation. Delete aliases: delete, remove, take off, take out, erase, cut. Replace aliases: replace X with Y; change X to or into Y; swap X with or for Y; substitute X with or for Y. Insert aliases: insert, add, place, or put X before or after Y. Append aliases: append, add to the end, place at the end, put at the end, or tack onto the end. Prepend aliases: prepend, add to the beginning or start, place at the beginning or start, or put at the beginning or start. Move aliases: move, relocate, or shift X before or after Y. Split aliases: split, break, or divide a paragraph after the identified target. Join aliases: join, merge, or combine a paragraph with the following paragraph. Casing aliases: uppercase or make all caps; lowercase or make lowercase; capitalize or capitalize the first letter. Isolated verbs without the required target, payload, or destination are not valid edit operations."
+          content: "Recognize flexible edit vocabulary only when the instruction supplies the arguments required for that operation. Delete aliases: delete, remove, take off, take out, erase, cut. Replace aliases: replace X with Y; change X to or into Y; swap X with or for Y; substitute X with or for Y. Insert aliases: insert, add, place, or put X before or after Y. Append aliases: append, add to the end, place at the end, put at the end, or tack onto the end. Prepend aliases: prepend, add to the beginning or start, place at the beginning or start, or put at the beginning or start. Move aliases: move, relocate, or shift X before or after Y. Split aliases: split, break, or divide a paragraph after the identified target. Join aliases: join, merge, or combine a paragraph with the following paragraph. Casing aliases: uppercase or make all caps; lowercase or make lowercase; capitalize or title case every word in the target phrase. Isolated verbs without the required target, payload, or destination are not valid edit operations."
         },
         {
           role: "user",

@@ -318,6 +318,23 @@ test('supports insert, append, prepend, delete, and casing through the same pipe
   )
 })
 
+test('capitalizes every word in a targeted phrase', () => {
+  const result = executeEditPlan('I watch the hawk-eyed scout.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'capitalize the phrase',
+    operations: [
+      {
+        id: 'capitalize-phrase',
+        type: 'case',
+        target: { exactText: 'the hawk-eyed scout' },
+        caseMode: 'capitalize',
+      },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'I watch The Hawk-Eyed Scout.')
+})
+
 test('adds missing word boundaries for prepend and append operations', () => {
   const text = 'Existing sentence.'
   const paragraphs = [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }]

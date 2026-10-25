@@ -183,7 +183,7 @@ export function hasUnresolvedCommandSignal(text: string): boolean {
 // Only these four casing words are dictation casing commands. The phrase after the word is the
 // target: "I look to the capitalized white hawk" → "I look to the White Hawk".
 const CASING_COMMAND_PATTERN =
-  /\b(capitalized|lowercase|uppercase|all caps)[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu
+  /\b(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu
 
 function titleCaseWords(value: string): string {
   return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {

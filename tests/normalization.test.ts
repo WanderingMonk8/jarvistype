@@ -576,6 +576,10 @@ test('applies only the strict casing words as dictation casing commands', () => 
     'I look to the WHITE HAWK.',
   )
   assert.equal(normalizeDeterministically('Capitalize the hawk.', []).text, 'Capitalize the hawk.')
+  assert.equal(
+    normalizeDeterministically('I believe uppercase, the white hawk.', []).text,
+    'I believe THE WHITE HAWK.',
+  )
   for (const prose of [
     'Lowercase remains lowercase.',
     'They capitalized the company.',

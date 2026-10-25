@@ -2951,7 +2951,7 @@ var LITERAL_PUNCTUATION_CONTEXTS = [
     "gi"
   )
 ];
-var CASING_COMMAND_PATTERN = /\b(capitalized|lowercase|uppercase|all caps)[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu;
+var CASING_COMMAND_PATTERN = /\b(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu;
 function titleCaseWords(value) {
   return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {
     const index = word.search(/\p{L}/u);
@@ -3493,7 +3493,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.13";
+var APP_VERSION = "1.6.14";
 var PHASE_FOUR_PERMISSIONS = [
   "media",
   "chats",

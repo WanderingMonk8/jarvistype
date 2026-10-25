@@ -5584,6 +5584,53 @@ test('a learned glossary spelling does not keep a known proper noun lowercase', 
   }
 })
 
+test('a learned glossary spelling does not keep a known proper noun lowercase in an edit', async () => {
+  const cases: Array<readonly [string, string]> = [
+    ['erbold', 'Replace ERWIN with E-R-B-O-L-D.'],
+    ['Erbold', 'Replace ERWIN with E.R.B.O.L.D.'],
+  ]
+  for (const [index, [canonical, instructionTranscript]] of cases.entries()) {
+    const userId = `edit-learned-glossary-${index}`
+    const chatId = `edit-learned-glossary-chat-${index}`
+    activeChatId = chatId
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'glossary.upsert.request',
+        requestId: `edit-learned-glossary-entry-${index}`,
+        canonical,
+        variants: ['E-R-B-O-L-D'],
+        hint: '',
+      },
+      userId,
+    )
+    await seedDraft(userId, chatId, 'Turns towards Erbold. I turned towards erwin.')
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `edit-learned-glossary-interpret-${index}`,
+        operationId: `edit-learned-glossary-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', `case ${index}`)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(
+      proposal.proposal.afterText,
+      'Turns towards Erbold. I turned towards Erbold.',
+      `case ${index}`,
+    )
+    assert.equal(generationRequests.length, 0, `case ${index}`)
+  }
+})
+
 test('restores a known proper noun after explicit spelling in an edit instruction', async () => {
   const cases: Array<
     readonly [string, Array<{ role: 'assistant' | 'user'; content: string }>, string]

@@ -3155,7 +3155,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.11";
+var APP_VERSION = "1.6.12";
 var PHASE_FOUR_PERMISSIONS = [
   "media",
   "chats",
@@ -5918,11 +5918,12 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
         ...protectedTerms
       ];
       const exactProtectedReferences = protectedReferences.filter((term) => {
-        if (!/^\p{Ll}/u.test(term)) return true;
         const key = term.toLocaleLowerCase();
-        return !exactReferences.some(
+        const hasTitleReference = exactReferences.some(
           (reference) => /^\p{Lu}\p{Ll}/u.test(reference) && reference.toLocaleLowerCase() === key
         );
+        if (!hasTitleReference) return true;
+        return /\p{Lu}{2,}/u.test(term) && term === term.toUpperCase();
       });
       const exactNormalized = canonicalizeExactConversationReferences(
         deterministic,

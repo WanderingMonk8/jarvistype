@@ -3447,14 +3447,15 @@ function normalizeEditInputPayloads(
         ...glossary.entries.map((entry) => entry.canonical),
         ...protectedTerms,
       ]
-      // A default-lowercased explicit spelling must not hide a known proper noun. A capitalized
-      // reference restores its casing; explicitly uppercase or capitalized spellings stay protected.
+      // A canonical spelling must not hide a known proper noun. A title-cased reference restores
+      // its casing; only an explicitly uppercase canonical spelling stays protected.
       const exactProtectedReferences = protectedReferences.filter((term) => {
-        if (!/^\p{Ll}/u.test(term)) return true
         const key = term.toLocaleLowerCase()
-        return !exactReferences.some(
+        const hasTitleReference = exactReferences.some(
           (reference) => /^\p{Lu}\p{Ll}/u.test(reference) && reference.toLocaleLowerCase() === key,
         )
+        if (!hasTitleReference) return true
+        return /\p{Lu}{2,}/u.test(term) && term === term.toUpperCase()
       })
       const exactNormalized = canonicalizeExactConversationReferences(
         deterministic,

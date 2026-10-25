@@ -1150,6 +1150,12 @@ function alignReplacementInitialCasing(
     .match(/^[ \t]*[\u201c\u2018"'([{]*[ \t]*(\p{L})/u)?.[1]
   if (!replacedOpening || !/\p{Ll}/u.test(replacedOpening)) return replacement
 
+  // Only a sentence-like phrase inherits a spurious capital ("My response"). A single
+  // capitalized word or a name ("Erica", "Mary Jones") keeps the capital the user gave.
+  const sentenceLikeReplacement =
+    /^[\s\u201c\u2018"'([{]*\p{Lu}[\p{L}\p{M}'\u2019-]*\s+\p{Ll}/u.test(replacement)
+  if (!sentenceLikeReplacement) return replacement
+
   const evidenceText = `${replacement}\n\n${text}`
   const lowered = lowercaseOrdinarySentenceOpening(
     replacement,
@@ -1427,7 +1433,9 @@ function findLexicallyBoundedExactMatches(
     const preceding = index > start ? text[index - 1] : undefined
     const following = index + search.length < end ? text[index + search.length] : undefined
     return (
-      (!searchStartsLexically || preceding === undefined || !/[\p{L}\p{M}\p{N}]/u.test(preceding)) &&
+      (!searchStartsLexically ||
+        preceding === undefined ||
+        !/[\p{L}\p{M}\p{N}]/u.test(preceding)) &&
       (!searchEndsLexically || following === undefined || !/[\p{L}\p{M}\p{N}]/u.test(following))
     )
   })

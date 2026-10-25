@@ -174,6 +174,19 @@ test('capitalizes replacement text only when it begins a sentence', () => {
     'She said my response was ready.',
   )
 
+  const singleCapitalizedWord = executeEditPlan('I turned towards erwin.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'keep a capitalized name after a lowercase target',
+    operations: [
+      { id: 'single-name', type: 'replace', target: { exactText: 'erwin' }, text: 'Erica' },
+    ],
+  })
+  assert.equal(
+    singleCapitalizedWord.ok && singleCapitalizedWord.afterText,
+    'I turned towards Erica.',
+  )
+
   const protectedMiddle = executeEditPlan(
     'She greeted the new arrival.',
     [],
@@ -1641,7 +1654,10 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
       },
     ],
   })
-  assert.equal(prefixOfLongerWord.ok && prefixOfLongerWord.afterText, 'A precious jewels rests nearby.')
+  assert.equal(
+    prefixOfLongerWord.ok && prefixOfLongerWord.afterText,
+    'A precious jewels rests nearby.',
+  )
 
   const deletedPrefixOfLongerWord = executeEditPlan('A precious sack rests nearby.', [], 1, {
     schemaVersion: 2,

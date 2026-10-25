@@ -5545,6 +5545,32 @@ test('defaults collapsed uppercase edit spellings to lowercase and honors an exp
   }
 })
 
+test('keeps the capital of a capitalized replacement word that is not a known reference', async () => {
+  const userId = 'capitalized-replacement-user'
+  const chatId = 'capitalized-replacement-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'I turned towards erwin.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'capitalized-replacement-interpret',
+      operationId: 'capitalized-replacement-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace ERWIN with Erica.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'I turned towards Erica.')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('restores a known proper noun after explicit spelling in a recording', async () => {
   const cases: Array<readonly [Array<{ role: 'assistant' | 'user'; content: string }>, string]> = [
     [

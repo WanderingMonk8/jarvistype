@@ -1335,6 +1335,8 @@ function alignReplacementInitialCasing(text, start, end, replacement, protectedC
     return capitalizeReplacementAtSentenceOpening(text, start, replacement);
   const replacedOpening = text.slice(start, end).match(/^[ \t]*[\u201c\u2018"'([{]*[ \t]*(\p{L})/u)?.[1];
   if (!replacedOpening || !/\p{Ll}/u.test(replacedOpening)) return replacement;
+  const sentenceLikeReplacement = /^[\s\u201c\u2018"'([{]*\p{Lu}[\p{L}\p{M}'\u2019-]*\s+\p{Ll}/u.test(replacement);
+  if (!sentenceLikeReplacement) return replacement;
   const evidenceText = `${replacement}
 
 ${text}`;

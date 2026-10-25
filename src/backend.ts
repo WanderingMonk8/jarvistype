@@ -299,8 +299,32 @@ async function handleTranscriptNormalization(
     const deterministic = normalizeDeterministically(recoveredBoundary.text, glossary.entries, {
       capitalizeOpening,
     })
-    const candidateText = deterministic.text
+    // A spelled word defaults to lowercase, but a known proper noun from the card or recent
+    // chat keeps its casing: "E-R-B-O-L-D" becomes "Erbold" when that name is known.
+    const titleReferences = conversationReferences.filter((reference) =>
+      /^\p{Lu}\p{Ll}/u.test(reference),
+    )
+    const referenceRestoration = canonicalizeExactConversationReferences(
+      deterministic.text,
+      conversationReferences,
+      [
+        ...glossary.entries.map((entry) => entry.canonical),
+        ...deterministic.learningCandidates
+          .map((candidate) => candidate.canonical)
+          .filter((term) => {
+            if (!/^\p{Ll}/u.test(term)) return true
+            const key = term.toLocaleLowerCase()
+            return !titleReferences.some((reference) => reference.toLocaleLowerCase() === key)
+          }),
+      ],
+    )
+    const candidateText = referenceRestoration.text
     const reasons = [...deterministic.reasons]
+    reasons.push(
+      ...referenceRestoration.correctedTerms.map(
+        ({ heard, canonical }) => `recent conversation spelling: ${heard} → ${canonical}`,
+      ),
+    )
     const explicitQuotationAliasHandled = didHandleExplicitQuotationAlias(
       recoveredBoundary.text,
       candidateText,

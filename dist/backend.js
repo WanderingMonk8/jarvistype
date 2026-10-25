@@ -3420,8 +3420,28 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     const deterministic2 = normalizeDeterministically(recoveredBoundary2.text, glossary2.entries, {
       capitalizeOpening: capitalizeOpening2
     });
-    const candidateText2 = deterministic2.text;
+    const titleReferences = conversationReferences2.filter(
+      (reference) => /^\p{Lu}\p{Ll}/u.test(reference)
+    );
+    const referenceRestoration = canonicalizeExactConversationReferences(
+      deterministic2.text,
+      conversationReferences2,
+      [
+        ...glossary2.entries.map((entry) => entry.canonical),
+        ...deterministic2.learningCandidates.map((candidate) => candidate.canonical).filter((term) => {
+          if (!/^\p{Ll}/u.test(term)) return true;
+          const key = term.toLocaleLowerCase();
+          return !titleReferences.some((reference) => reference.toLocaleLowerCase() === key);
+        })
+      ]
+    );
+    const candidateText2 = referenceRestoration.text;
     const reasons2 = [...deterministic2.reasons];
+    reasons2.push(
+      ...referenceRestoration.correctedTerms.map(
+        ({ heard, canonical }) => `recent conversation spelling: ${heard} \u2192 ${canonical}`
+      )
+    );
     const explicitQuotationAliasHandled2 = didHandleExplicitQuotationAlias(
       recoveredBoundary2.text,
       candidateText2

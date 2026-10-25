@@ -5545,6 +5545,38 @@ test('defaults collapsed uppercase edit spellings to lowercase and honors an exp
   }
 })
 
+test('a learned lowercase glossary spelling does not keep a known proper noun lowercase', async () => {
+  const userId = 'learned-lowercase-glossary-user'
+  const chatId = 'learned-lowercase-glossary-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'glossary.upsert.request',
+      requestId: 'learned-lowercase-glossary-entry',
+      canonical: 'erbold',
+      variants: ['E-R-B-O-L-D'],
+      hint: '',
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'Turns towards Erbold.')
+  responses.length = 0
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'learned-lowercase-glossary-segment',
+      1,
+      'I turn towards E-R-B-O-L-D.',
+    ),
+    userId,
+  )
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type !== 'transcript.normalization.response') return
+  assert.equal(response.proposal.candidateText, 'I turn towards Erbold.')
+})
+
 test('restores a known proper noun after explicit spelling in an edit instruction', async () => {
   const cases: Array<
     readonly [string, Array<{ role: 'assistant' | 'user'; content: string }>, string]

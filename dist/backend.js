@@ -3155,7 +3155,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.9";
+var APP_VERSION = "1.6.10";
 var PHASE_FOUR_PERMISSIONS = [
   "media",
   "chats",
@@ -3576,12 +3576,12 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
   const titleReferences = spellingReferences.filter((reference) => /^\p{Lu}\p{Ll}/u.test(reference));
   const spellingProtectedReferences = [
     ...glossary.entries.map((entry) => entry.canonical),
-    ...deterministic.learningCandidates.map((candidate) => candidate.canonical).filter((term) => {
-      if (!/^\p{Ll}/u.test(term)) return true;
-      const key = term.toLocaleLowerCase();
-      return !titleReferences.some((reference) => reference.toLocaleLowerCase() === key);
-    })
-  ];
+    ...deterministic.learningCandidates.map((candidate) => candidate.canonical)
+  ].filter((term) => {
+    if (!/^\p{Ll}/u.test(term)) return true;
+    const key = term.toLocaleLowerCase();
+    return !titleReferences.some((reference) => reference.toLocaleLowerCase() === key);
+  });
   const referenceRestoration = canonicalizeExactConversationReferences(
     candidateText,
     spellingReferences,
@@ -3605,9 +3605,15 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     candidateText = recoveredCommands.text;
     reasons.push(...recoveredCommands.reasons);
   }
+  const casedLearningCandidates = learningCandidates.map((candidate) => {
+    if (!/^\p{Ll}/u.test(candidate.canonical)) return candidate;
+    const key = candidate.canonical.toLocaleLowerCase();
+    const title = titleReferences.find((reference) => reference.toLocaleLowerCase() === key);
+    return title ? { ...candidate, canonical: title } : candidate;
+  });
   const uniqueLearningCandidates = [
     ...new Map(
-      learningCandidates.map((candidate) => [
+      casedLearningCandidates.map((candidate) => [
         `${candidate.canonical}\0${candidate.spokenVariant}`,
         candidate
       ])

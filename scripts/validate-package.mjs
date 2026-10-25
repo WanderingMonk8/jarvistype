@@ -9,10 +9,18 @@ if (manifest.identifier !== 'jarvistype') {
 if (
   !Array.isArray(manifest.permissions) ||
   JSON.stringify(manifest.permissions) !==
-    JSON.stringify(['media', 'chats', 'chat_mutation', 'generation', 'ui_panels', 'characters'])
+    JSON.stringify([
+      'media',
+      'chats',
+      'chat_mutation',
+      'generation',
+      'ui_panels',
+      'characters',
+      'decisions',
+    ])
 ) {
   throw new Error(
-    'Phase 7 must declare exactly media, chats, chat_mutation, generation, ui_panels, and characters',
+    'Phase 7 must declare exactly media, chats, chat_mutation, generation, ui_panels, characters, and decisions',
   )
 }
 

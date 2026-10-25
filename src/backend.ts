@@ -53,7 +53,6 @@ import {
   type GlossaryState,
 } from './domain/glossary'
 import {
-  hasAmbiguousArticleIssue,
   opensInsideDoubleQuote,
   repairDeterministicGrammar,
 } from './domain/grammar'
@@ -1698,6 +1697,8 @@ interface GrammarRepairEdit {
 
 const GRAMMAR_REPAIR_TIMEOUT_MS = 6_000
 const CANDIDATE_GRAMMAR_TIMEOUT_MS = 2_500
+const JEV_GRAMMAR_TIMEOUT_MS = 2_500
+const JEV_GRAMMAR_REPAIR_THRESHOLD = 0.7
 const MAX_GRAMMAR_SEGMENT_CHARACTERS = 3_000
 const MAX_GRAMMAR_EDITS = 8
 const MAX_GRAMMAR_FIND_CHARACTERS = 160
@@ -1777,14 +1778,25 @@ async function maybeRepairEditGrammar(
     (sum, segment) => sum + (deterministicTexts.get(segment.id) ?? segment.text).length,
     0,
   )
+  const canEvaluateOrRepair =
+    hasLetters && providerCharacters <= MAX_GRAMMAR_SEGMENT_CHARACTERS
+  const jevProbability =
+    settings.grammarRepairMode === 'when_needed' && canEvaluateOrRepair
+      ? await evaluateEditGrammarWithJev(
+          segments,
+          deterministicTexts,
+          operations,
+          userId,
+          signal,
+        )
+      : null
+  if (signal.aborted) return fallback
   const needsProvider =
-    hasLetters &&
-    providerCharacters <= MAX_GRAMMAR_SEGMENT_CHARACTERS &&
+    canEvaluateOrRepair &&
     (settings.grammarRepairMode === 'always' ||
-      editMayNeedGrammarRepair(beforeText, operations) ||
-      segments.some((segment) =>
-        hasAmbiguousArticleIssue(segment.text.slice(segment.focusStart, segment.focusEnd)),
-      ))
+      (settings.grammarRepairMode === 'when_needed' &&
+        jevProbability !== null &&
+        jevProbability >= JEV_GRAMMAR_REPAIR_THRESHOLD))
   if (!needsProvider) return fallback
   if (signal.aborted) return fallback
   recordDebug(
@@ -1934,6 +1946,90 @@ async function maybeRepairEditGrammar(
     finishProvider('failed')
     logSafeFailure('warn', 'EDIT_GRAMMAR_REPAIR', error)
     return fallback
+  } finally {
+    clearTimeout(timeout)
+    signal.removeEventListener('abort', abortFromRequest)
+  }
+}
+
+async function evaluateEditGrammarWithJev(
+  segments: readonly GrammarEditSegment[],
+  deterministicTexts: ReadonlyMap<string, string>,
+  operations: readonly ResolvedEditOperation[],
+  userId: string,
+  signal: AbortSignal,
+): Promise<number | null> {
+  if (!spindle.permissions.has('decisions') || signal.aborted) return null
+  const startedAt = performance.now()
+  recordDebug(userId, 'grammar.jev', `start segments=${segments.length}`)
+  const controller = new AbortController()
+  const abortFromRequest = () => controller.abort()
+  signal.addEventListener('abort', abortFromRequest, { once: true })
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    const result = await Promise.race([
+      spindle.decisions.evaluate(
+        {
+          userId,
+          state: {
+            task: 'Evaluate whether a completed text edit introduced a grammatical artifact.',
+            affectedSegments: segments.map((segment) => ({
+              id: segment.id,
+              text: deterministicTexts.get(segment.id) ?? segment.text,
+              changedText: segment.text.slice(segment.focusStart, segment.focusEnd),
+            })),
+            operations: operations.map((operation) => ({
+              type: operation.type,
+              before: operation.beforeText,
+              after: operation.afterText,
+            })),
+          },
+          questions: {
+            introducedGrammarError: {
+              type: 'noul',
+              instructions:
+                'Did the identified edit introduce a grammatical error, malformed sentence boundary, or broken local agreement that requires a minimal repair? Judge only damage caused by the edit. Treat dialogue, fragments, character voice, unconventional prose, and pre-existing errors as intentional unless the edit itself broke them.',
+              criteria: {
+                true: 'The edit introduced a clear local grammatical artifact that needs repair.',
+                false:
+                  'The edited text is grammatically viable in context, or any unusual wording was pre-existing or stylistic.',
+              },
+            },
+          },
+        },
+        { signal: controller.signal },
+      ),
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => {
+          controller.abort()
+          resolve(null)
+        }, JEV_GRAMMAR_TIMEOUT_MS)
+      }),
+    ])
+    const probability = result?.answers.introducedGrammarError.noul
+    if (typeof probability !== 'number' || !Number.isFinite(probability)) {
+      recordDebug(
+        userId,
+        'grammar.jev',
+        `end outcome=${result ? 'invalid-answer' : 'timed-out'} duration=${debugDuration(startedAt)}`,
+      )
+      return null
+    }
+    const bounded = Math.min(1, Math.max(0, probability))
+    recordDebug(
+      userId,
+      'grammar.jev',
+      `end outcome=ok probability=${bounded.toFixed(3)} threshold=${JEV_GRAMMAR_REPAIR_THRESHOLD.toFixed(2)} duration=${debugDuration(startedAt)}`,
+    )
+    return bounded
+  } catch (error) {
+    recordDebug(
+      userId,
+      'grammar.jev',
+      `end outcome=${controller.signal.aborted ? 'aborted' : 'failed'} duration=${debugDuration(startedAt)}`,
+    )
+    if (!controller.signal.aborted) logSafeFailure('warn', 'JEV_GRAMMAR_EVALUATION', error)
+    return null
   } finally {
     clearTimeout(timeout)
     signal.removeEventListener('abort', abortFromRequest)
@@ -2101,28 +2197,6 @@ function sentenceFocusRange(
   )
   if (!intersecting.length) return null
   return { start: intersecting[0]!.start, end: intersecting.at(-1)!.end }
-}
-
-function editMayNeedGrammarRepair(
-  beforeText: string,
-  operations: readonly ResolvedEditOperation[],
-): boolean {
-  if (
-    operations.some((operation) =>
-      ['move_before', 'move_after', 'split', 'join_next'].includes(operation.type),
-    )
-  )
-    return true
-  return operations.some((operation) => {
-    if (operation.type !== 'delete') return false
-    const before = beforeText.slice(0, operation.startOffset)
-    const after = beforeText.slice(operation.endOffset)
-    return (
-      /(?:^|[.!?\u2026]["'\u2019\u201d]?\s*)$/u.test(before) ||
-      /^\s*[.!?\u2026]/u.test(after) ||
-      /[.!?\u2026]/u.test(operation.beforeText + operation.afterText)
-    )
-  })
 }
 
 function boundedGrammarProtectedTerms(

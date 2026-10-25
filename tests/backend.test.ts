@@ -16,6 +16,9 @@ const generationRequests: Array<{
   parameters?: Record<string, unknown>
   messages?: Array<{ content: string }>
 }> = []
+const decisionRequests: unknown[] = []
+let decisionsEnabled = false
+let decisionProbability = 0
 let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
@@ -49,9 +52,28 @@ const spindleMock = {
   },
   permissions: {
     getGranted: () =>
-      Promise.resolve(['media', 'chats', 'chat_mutation', 'generation', 'characters']),
+      Promise.resolve([
+        'media',
+        'chats',
+        'chat_mutation',
+        'generation',
+        'characters',
+        ...(decisionsEnabled ? ['decisions'] : []),
+      ]),
     has: (permission: string) =>
-      ['media', 'chats', 'chat_mutation', 'generation', 'characters'].includes(permission),
+      ['media', 'chats', 'chat_mutation', 'generation', 'characters'].includes(permission) ||
+      (permission === 'decisions' && decisionsEnabled),
+  },
+  decisions: {
+    evaluate: (request: unknown) => {
+      decisionRequests.push(request)
+      return Promise.resolve({
+        model: 'jev-test',
+        answers: {
+          introducedGrammarError: { type: 'noul', noul: decisionProbability },
+        },
+      })
+    },
   },
   userStorage: {
     getJson: <T>(path: string, options?: { fallback?: T; userId?: string }) =>
@@ -198,6 +220,9 @@ test.beforeEach(() => {
   errors.length = 0
   appended.length = 0
   generationRequests.length = 0
+  decisionRequests.length = 0
+  decisionsEnabled = false
+  decisionProbability = 0
   activeChatId = 'chat-default'
   appendShouldFail = false
   appendAcknowledgementGate = null
@@ -4342,6 +4367,8 @@ test('skips a routine mid-sentence grammar call in when-needed mode', async () =
   const userId = 'conditional-grammar-repair-user'
   const chatId = 'conditional-grammar-repair-chat'
   activeChatId = chatId
+  decisionsEnabled = true
+  decisionProbability = 0.2
   await dispatch(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -4391,12 +4418,66 @@ test('skips a routine mid-sentence grammar call in when-needed mode', async () =
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'This is a wide entrance.')
+  assert.equal(decisionRequests.length, 1)
   assert.equal(
     generationRequests.filter((request) => {
       const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
       return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
     }).length,
     0,
+  )
+})
+
+test('uses a high Jev probability to invoke bounded grammar repair', async () => {
+  const userId = 'jev-gated-grammar-repair-user'
+  const chatId = 'jev-gated-grammar-repair-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  decisionProbability = 0.9
+  grammarRepairResponse = { edits: [] }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'jev-gated-grammar-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'when_needed',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'This is a narrow entrance.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'jev-gated-grammar-interpret',
+      operationId: 'jev-gated-grammar-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace narrow with wide.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'This is a wide entrance.')
+  assert.equal(decisionRequests.length, 1)
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+    }).length,
+    1,
   )
 })
 

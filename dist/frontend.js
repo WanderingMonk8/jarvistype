@@ -423,7 +423,7 @@ var COMMAND_GROUPS = [
       ],
       [
         "Quotations",
-        "Say \u201Cquote\u201D or \u201Cquotation\u201D at both ends of a quotation; use \u201Cbegin speech\u201D and \u201Cend speech,\u201D or \u201Cbeginning speech\u201D and \u201Cending speech.\u201D For single quotations, say \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D"
+        "Say \u201Cquote\u201D or \u201Cquotation\u201D at both ends of a quotation; use \u201Cbegin speech\u201D and \u201Cend speech,\u201D \u201Cbeginning speech\u201D and \u201Cending speech,\u201D or \u201Cbegins speech\u201D and \u201Cends speech.\u201D For single quotations, say \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D"
       ],
       ["Explicit punctuation", "Say \u201Cinsert period,\u201D \u201Cpunctuation colon,\u201D or \u201Ccommand new line.\u201D"],
       [
@@ -2671,7 +2671,7 @@ function joinTranscriptUpdates(finalSegments, interimText) {
 function detectQuotationBoundaryHint(input) {
   const trimmed = input.trim();
   if (/^begin\s+single\b[\s\S]*\bend\s+single[.,;:!?]*$/iu.test(trimmed)) return "single";
-  if (/^begin(?:ning)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing)?\s+speech[.,;:!?]*$/iu.test(trimmed))
+  if (/^begin(?:ning|s)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing|s)?\s+speech[.,;:!?]*$/iu.test(trimmed))
     return "double";
   const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu;
   const doubleClosing = /\b(?:close\s+)?(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu;

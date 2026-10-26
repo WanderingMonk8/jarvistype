@@ -2935,6 +2935,8 @@ var SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   "end speech",
   "beginning speech",
   "ending speech",
+  "begins speech",
+  "ends speech",
   "begin single",
   "end single"
 ];
@@ -2965,7 +2967,7 @@ var TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
   "\\.+(?=\\s*\\b(?:question mark|exclamation(?: (?:mark|point))?|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)",
   "giu"
 );
-var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
+var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
 var LITERAL_PUNCTUATION_CONTEXTS = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
   /\btime\s+period\b/gi,
@@ -3145,7 +3147,7 @@ function normalizeDeterministically(raw, glossary, options = {}) {
   const quotation = replaceSpokenQuotationCommands(
     text,
     protectedLiterals.some(
-      (literal) => /\b(?:(?:single\s+)?(?:quote|quotation)|begin(?:ning)?\s+speech|end(?:ing)?\s+speech|begin\s+single|end\s+single)\b/iu.test(
+      (literal) => /\b(?:(?:single\s+)?(?:quote|quotation)|begin(?:ning|s)?\s+speech|end(?:ing|s)?\s+speech|begin\s+single|end\s+single)\b/iu.test(
         literal
       )
     )
@@ -3301,7 +3303,7 @@ function removeRedundantProviderDashes(input) {
 }
 function removeRedundantTerminalPunctuationCommands(input) {
   return input.replace(/([.?!…][”’"']?)\s+(?:period|full stop)\b[.,]?/giu, "$1").replace(/(\?[”’"']?)\s+question mark\b[.,]?/giu, "$1").replace(/(![”’"']?)\s+exclamation (?:mark|point)\b[.,]?/giu, "$1").replace(
-    /(![”’"']?)\s+exclamation\b[.,]?(?=\s*(?:end(?:ing)?\s+speech|end\s+single|[”’"']|$))/giu,
+    /(![”’"']?)\s+exclamation\b[.,]?(?=\s*(?:end(?:ing|s)?\s+speech|end\s+single|[”’"']|$))/giu,
     "$1"
   ).replace(/(…[”’"']?)\s+(?:ellipsis|dot dot dot|three dots)\b[.,]?/giu, "$1");
 }
@@ -3409,8 +3411,8 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
     );
   };
   replaceGuardedAliasPair(
-    "begin(?:ning)?(?:\\s+the)?\\s+speech",
-    "end(?:ing)? speech",
+    "begin(?:ning|s)?(?:\\s+the)?\\s+speech",
+    "end(?:ing|s)? speech",
     "\u201C",
     "\u201D",
     "quote"
@@ -3449,7 +3451,7 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
   return { text, marks, reasons };
 }
 function hasNaturalAliasUsage(text) {
-  return /\b(?:begin(?:ning)?|end(?:ing)?)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
+  return /\b(?:begin(?:ning|s)?|end(?:ing|s)?)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
     text
   );
 }
@@ -4298,7 +4300,7 @@ function preservesAuthoritativePunctuationMarks(deterministicCandidate, contextu
 }
 function didHandleExplicitQuotationAlias(rawTranscript, candidateText) {
   return [
-    [/\bbegin(?:ning)?(?:\s+the)?\s+speech\b/iu, /\bend(?:ing)?\s+speech\b/iu],
+    [/\bbegin(?:ning|s)?(?:\s+the)?\s+speech\b/iu, /\bend(?:ing|s)?\s+speech\b/iu],
     [/\bbegin\s+single\b/iu, /\bend\s+single\b/iu]
   ].some(
     ([begin, end]) => begin.test(rawTranscript) && end.test(rawTranscript) && !begin.test(candidateText) && !end.test(candidateText)

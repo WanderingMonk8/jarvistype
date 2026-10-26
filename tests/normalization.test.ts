@@ -333,6 +333,10 @@ test('supports guarded speech quotation aliases without consuming natural usage'
     '“Mixed aliases work”.',
   )
   assert.equal(
+    normalizeDeterministically('begins speech this alias works too ends speech period', []).text,
+    '“This alias works too”.',
+  )
+  assert.equal(
     normalizeDeterministically('begin single a private thought end single period', []).text,
     '‘A private thought’.',
   )
@@ -349,6 +353,13 @@ test('supports guarded speech quotation aliases without consuming natural usage'
       [],
     ).text,
     'We are beginning speech therapy today and ending speech therapy next week.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'The class begins speech therapy today and ends speech therapy next week.',
+      [],
+    ).text,
+    'The class begins speech therapy today and ends speech therapy next week.',
   )
   assert.equal(
     normalizeDeterministically('A lone begin speech remains literal.', []).text,

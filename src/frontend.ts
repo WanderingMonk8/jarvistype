@@ -77,7 +77,7 @@ export const COMMAND_GROUPS = [
       ],
       [
         'Quotations',
-        'Say “quote” or “quotation” at both ends of a quotation; use “begin speech” and “end speech,” or “beginning speech” and “ending speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”',
+        'Say “quote” or “quotation” at both ends of a quotation; use “begin speech” and “end speech,” “beginning speech” and “ending speech,” or “begins speech” and “ends speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”',
       ],
       ['Explicit punctuation', 'Say “insert period,” “punctuation colon,” or “command new line.”'],
       [
@@ -2840,7 +2840,7 @@ function detectQuotationBoundaryHint(input: string): 'double' | 'single' | null 
   const trimmed = input.trim()
   if (/^begin\s+single\b[\s\S]*\bend\s+single[.,;:!?]*$/iu.test(trimmed)) return 'single'
   if (
-    /^begin(?:ning)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing)?\s+speech[.,;:!?]*$/iu.test(trimmed)
+    /^begin(?:ning|s)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing|s)?\s+speech[.,;:!?]*$/iu.test(trimmed)
   )
     return 'double'
   const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu

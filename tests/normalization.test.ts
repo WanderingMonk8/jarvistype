@@ -4,8 +4,32 @@ import test from 'node:test'
 import {
   hasUnresolvedCommandSignal,
   normalizeDeterministically,
+  normalizeQualifiedAsInReferences,
   recoverHighConfidenceContextualCommands,
 } from '../src/domain/normalization'
+
+test('uses qualified as-in spelling references in recording text', () => {
+  assert.equal(
+    normalizeQualifiedAsInReferences(
+      'I move slowly to pick up the sheaf, as in sheaf of arrows and the bow from the water, shaking them slightly.',
+    ).text,
+    'I move slowly to pick up the sheaf and the bow from the water, shaking them slightly.',
+  )
+  assert.equal(
+    normalizeQualifiedAsInReferences('I put the sheath, as in sheaf of arrows, on the cart.').text,
+    'I put the sheaf on the cart.',
+  )
+})
+
+test('keeps ordinary as-in prose literal', () => {
+  for (const text of [
+    'The arrangement stayed as in previous years.',
+    'I worked as in the example.',
+    'I described the building, as in the structure beside us.',
+  ]) {
+    assert.equal(normalizeQualifiedAsInReferences(text).text, text)
+  }
+})
 
 test('supports spoken punctuation and paragraph commands', () => {
   const result = normalizeDeterministically(

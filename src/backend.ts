@@ -64,6 +64,7 @@ import type { DeterministicGrammarOptions } from './domain/grammar'
 import {
   applySpellingCasing,
   normalizeDeterministically,
+  normalizeQualifiedAsInReferences,
   recoverHighConfidenceContextualCommands,
   SPOKEN_PUNCTUATION_COMMAND_PHRASES,
   type SpellingLearningCandidate,
@@ -611,6 +612,11 @@ async function handleTranscriptNormalization(
       'normalize.contextual',
       `end used=${contextualModelUsed} duration=${debugDuration(contextualStartedAt)}`,
     )
+  }
+  const qualifiedAsIn = normalizeQualifiedAsInReferences(candidateText)
+  if (qualifiedAsIn.changed) {
+    candidateText = qualifiedAsIn.text
+    reasons.push('qualified as-in spelling reference')
   }
   // A spelled word defaults to lowercase, but a known proper noun from the card, recent chat,
   // or the draft keeps its casing: "E-R-B-O-L-D" becomes "Erbold" when that name is known.

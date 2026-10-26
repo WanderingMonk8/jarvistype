@@ -1,4 +1,5 @@
 import type { GlossaryEntry } from './glossary'
+import { areSpeechPhoneticNeighbors } from './phonetics'
 
 export interface SpellingLearningCandidate {
   canonical: string
@@ -18,6 +19,11 @@ export interface DeterministicNormalization {
 export interface ContextualCommandRecovery {
   text: string
   reasons: string[]
+}
+
+export interface QualifiedAsInNormalization {
+  text: string
+  changed: boolean
 }
 
 export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
@@ -406,6 +412,71 @@ export function normalizeDeterministically(
     authoritativePunctuationLiterals: [...new Set(protectedLiterals)],
     authoritativePunctuationMarks,
   }
+}
+
+/**
+ * Resolves a recording-only spelling reference such as
+ * "the sheath, as in sheaf of arrows and the bow". The comma, an immediately
+ * adjacent reference word, and a strong lexical/phonetic relationship are all
+ * required so ordinary prose containing "as in" remains literal.
+ *
+ * This intentionally runs after contextual recognition: the explanatory words
+ * remain available to the provider to infer the spelling, then are removed from
+ * the accepted candidate without trusting the provider to classify commands.
+ */
+export function normalizeQualifiedAsInReferences(input: string): QualifiedAsInNormalization {
+  const pattern = /([\p{L}\p{M}][\p{L}\p{M}'’-]*)\s*,\s*as\s+in\s+([\p{L}\p{M}][\p{L}\p{M}'’-]*)/giu
+  let text = input
+  let searchFrom = 0
+  let changed = false
+
+  while (searchFrom < text.length) {
+    pattern.lastIndex = searchFrom
+    const match = pattern.exec(text)
+    if (!match || match.index === undefined) break
+    const heard = match[1]!
+    const reference = match[2]!
+    const heardKey = heard.toLocaleLowerCase()
+    const referenceKey = reference.toLocaleLowerCase()
+    const related =
+      heardKey === referenceKey ||
+      areSpeechPhoneticNeighbors(heard, reference) ||
+      (Math.min(heardKey.length, referenceKey.length) >= 4 &&
+        heardKey.slice(0, 2) === referenceKey.slice(0, 2) &&
+        withinEditDistance(heardKey, referenceKey, 2))
+    if (!related) {
+      searchFrom = match.index + match[0].length
+      continue
+    }
+
+    const suffixStart = match.index + match[0].length
+    const suffix = text.slice(suffixStart)
+    // A repeated pronoun in ordinary prose ("her, as in her opinion") is not a
+    // spelling reference. Require either an explanation cue or a closed command.
+    if (!/^\s*(?:(?:of|for|like|meaning)\b|[,.;:!?]|$)/iu.test(suffix)) {
+      searchFrom = suffixStart
+      continue
+    }
+    const sentenceBoundary = suffix.search(/[.!?\n]/u)
+    const clauseLimit = sentenceBoundary < 0 ? suffix.length : sentenceBoundary
+    const clause = suffix.slice(0, clauseLimit)
+    const continuation = clause.search(
+      /\s+(?:and|but|so|then)\s+(?=(?:the|a|an|my|your|his|her|its|our|their|this|that|these|those|I|we|you|he|she|it|they)\b)/iu,
+    )
+    const commaBoundary = clause.indexOf(',')
+    const explanationEnd =
+      continuation >= 0
+        ? suffixStart + continuation
+        : commaBoundary >= 0
+          ? suffixStart + commaBoundary + 1
+          : suffixStart + clauseLimit
+    const replacement = reference
+    text = `${text.slice(0, match.index)}${replacement}${text.slice(explanationEnd)}`
+    changed = true
+    searchFrom = match.index + replacement.length
+  }
+
+  return { text, changed }
 }
 
 function restoreHighConfidenceSentenceBoundaries(input: string): { text: string; count: number } {

@@ -2958,6 +2958,22 @@ var LITERAL_PUNCTUATION_CONTEXTS = [
     "gi"
   )
 ];
+function withinEditDistance(left, right, maximum) {
+  if (Math.abs(left.length - right.length) > maximum) return false;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    const current = [row];
+    for (let column = 1; column <= right.length; column += 1) {
+      current[column] = Math.min(
+        previous[column] + 1,
+        current[column - 1] + 1,
+        previous[column - 1] + (left[row - 1] === right[column - 1] ? 0 : 1)
+      );
+    }
+    previous = current;
+  }
+  return previous[right.length] <= maximum;
+}
 var CASING_COMMAND_PATTERN = /\b(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu;
 function titleCaseWords(value) {
   return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {
@@ -3160,6 +3176,45 @@ function normalizeDeterministically(raw, glossary, options = {}) {
     authoritativePunctuationLiterals: [...new Set(protectedLiterals)],
     authoritativePunctuationMarks
   };
+}
+function normalizeQualifiedAsInReferences(input) {
+  const pattern = /([\p{L}\p{M}][\p{L}\p{M}'’-]*)\s*,\s*as\s+in\s+([\p{L}\p{M}][\p{L}\p{M}'’-]*)/giu;
+  let text = input;
+  let searchFrom = 0;
+  let changed = false;
+  while (searchFrom < text.length) {
+    pattern.lastIndex = searchFrom;
+    const match = pattern.exec(text);
+    if (!match || match.index === void 0) break;
+    const heard = match[1];
+    const reference = match[2];
+    const heardKey = heard.toLocaleLowerCase();
+    const referenceKey = reference.toLocaleLowerCase();
+    const related = heardKey === referenceKey || areSpeechPhoneticNeighbors(heard, reference) || Math.min(heardKey.length, referenceKey.length) >= 4 && heardKey.slice(0, 2) === referenceKey.slice(0, 2) && withinEditDistance(heardKey, referenceKey, 2);
+    if (!related) {
+      searchFrom = match.index + match[0].length;
+      continue;
+    }
+    const suffixStart = match.index + match[0].length;
+    const suffix = text.slice(suffixStart);
+    if (!/^\s*(?:(?:of|for|like|meaning)\b|[,.;:!?]|$)/iu.test(suffix)) {
+      searchFrom = suffixStart;
+      continue;
+    }
+    const sentenceBoundary = suffix.search(/[.!?\n]/u);
+    const clauseLimit = sentenceBoundary < 0 ? suffix.length : sentenceBoundary;
+    const clause = suffix.slice(0, clauseLimit);
+    const continuation = clause.search(
+      /\s+(?:and|but|so|then)\s+(?=(?:the|a|an|my|your|his|her|its|our|their|this|that|these|those|I|we|you|he|she|it|they)\b)/iu
+    );
+    const commaBoundary = clause.indexOf(",");
+    const explanationEnd = continuation >= 0 ? suffixStart + continuation : commaBoundary >= 0 ? suffixStart + commaBoundary + 1 : suffixStart + clauseLimit;
+    const replacement = reference;
+    text = `${text.slice(0, match.index)}${replacement}${text.slice(explanationEnd)}`;
+    changed = true;
+    searchFrom = match.index + replacement.length;
+  }
+  return { text, changed };
 }
 function restoreHighConfidenceSentenceBoundaries(input) {
   let count = 0;
@@ -4045,6 +4100,11 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       "normalize.contextual",
       `end used=${contextualModelUsed} duration=${debugDuration(contextualStartedAt)}`
     );
+  }
+  const qualifiedAsIn = normalizeQualifiedAsInReferences(candidateText);
+  if (qualifiedAsIn.changed) {
+    candidateText = qualifiedAsIn.text;
+    reasons.push("qualified as-in spelling reference");
   }
   const spelledKeys = new Set(
     deterministic.learningCandidates.map((candidate) => candidate.canonical.toLocaleLowerCase())

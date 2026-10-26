@@ -224,20 +224,30 @@ interface ComposerState {
   phaseFourMessage: string
 }
 
-function findComposerControlRoot(mount: Element): Element {
-  let current: Element = mount
-  for (let depth = 0; depth < 4; depth += 1) {
-    const parent = current.parentElement
-    if (!parent) break
-    current = parent
-    if (current.querySelectorAll('button').length >= 2) return current
+function sharesNearbyComposerAncestor(left: Element, right: Element): boolean {
+  const leftAncestors = new Set<Element>()
+  let current: Element | null = left
+  for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement)
+    leftAncestors.add(current)
+  current = right
+  for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement) {
+    if (
+      leftAncestors.has(current) &&
+      current !== document.body &&
+      current !== document.documentElement
+    )
+      return true
   }
-  return mount.parentElement ?? mount
+  return false
 }
 
-function isNativeSttComposerButton(button: HTMLButtonElement): boolean {
+function isNativeSttComposerButton(
+  button: HTMLButtonElement,
+  composerLauncher: HTMLButtonElement,
+): boolean {
   if (button.closest('.jt-shell, .jt-floating') || button.classList.contains('jt-composer-launcher'))
     return false
+  if (!sharesNearbyComposerAncestor(button, composerLauncher)) return false
   const accessibleText = [
     button.getAttribute('aria-label'),
     button.getAttribute('title'),
@@ -291,16 +301,23 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   composerLauncher.title = 'Open JarvisType voice composer'
   composerLauncher.innerHTML = JARVISTYPE_ICON_SVG
   composerToolsMount.append(composerLauncherStyle, composerLauncher)
-  const composerControlRoot = findComposerControlRoot(composerToolsMount)
   const hideNativeSttButton = () => {
-    for (const button of composerControlRoot.querySelectorAll<HTMLButtonElement>('button')) {
+    for (const button of document.querySelectorAll<HTMLButtonElement>('button')) {
       if (button === composerLauncher || button.contains(composerLauncher)) continue
-      if (isNativeSttComposerButton(button)) button.classList.add('jt-native-stt-hidden')
+      if (isNativeSttComposerButton(button, composerLauncher))
+        button.classList.add('jt-native-stt-hidden')
     }
   }
   hideNativeSttButton()
-  const nativeSttObserver = new MutationObserver(hideNativeSttButton)
-  nativeSttObserver.observe(composerControlRoot, { childList: true, subtree: true })
+  let nativeSttScanFrame: number | null = null
+  const nativeSttObserver = new MutationObserver(() => {
+    if (nativeSttScanFrame !== null) return
+    nativeSttScanFrame = requestAnimationFrame(() => {
+      nativeSttScanFrame = null
+      hideNativeSttButton()
+    })
+  })
+  nativeSttObserver.observe(document.documentElement, { childList: true, subtree: true })
 
   const initialFloatingSize = getFloatingWidgetSize()
   const initialViewport = getViewportSize()
@@ -2551,7 +2568,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     document.removeEventListener('keydown', handleFloatingFocusTrap, true)
     normalizationModelPicker.destroy()
     nativeSttObserver.disconnect()
-    for (const button of composerControlRoot.querySelectorAll('.jt-native-stt-hidden'))
+    if (nativeSttScanFrame !== null) cancelAnimationFrame(nativeSttScanFrame)
+    for (const button of document.querySelectorAll('.jt-native-stt-hidden'))
       button.classList.remove('jt-native-stt-hidden')
     composerLauncher.remove()
     composerLauncherStyle.remove()

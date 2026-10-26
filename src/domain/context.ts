@@ -222,20 +222,22 @@ export function extractAuthoritativeCasingReferences(
   )
   const phraseCandidates = extracted.filter((reference) => /\s/u.test(reference))
   const candidates = extracted.filter((reference) => !/\s/u.test(reference))
-  const candidateByKey = new Map(candidates.map((candidate) => [referenceCanonicalKey(candidate), candidate]))
+  const candidateByKey = new Map(
+    candidates.map((candidate) => [referenceCanonicalKey(candidate), candidate]),
+  )
   const evidence = new Map<
     string,
     { strong: boolean; occurrences: number; messageIndexes: Set<number> }
   >()
 
   messages.forEach((message, messageIndex) => {
-    const tokens = [
-      ...message.content.matchAll(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu),
-    ].map((match) => ({
-      value: match[0],
-      start: match.index,
-      end: match.index + match[0].length,
-    }))
+    const tokens = [...message.content.matchAll(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu)].map(
+      (match) => ({
+        value: match[0],
+        start: match.index,
+        end: match.index + match[0].length,
+      }),
+    )
     tokens.forEach((token, tokenIndex) => {
       if (!/^\p{Lu}/u.test(token.value)) return
       const possessive = token.value.match(/(['’]s)$/iu)?.[0] ?? ''
@@ -275,7 +277,9 @@ export function extractAuthoritativeCasingReferences(
         item.occurrences >= (options.minimumOccurrences ?? 2))
     )
   })
-  const supportedKeys = new Set([...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey))
+  const supportedKeys = new Set(
+    [...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey),
+  )
   return extracted.filter((reference) => supportedKeys.has(referenceEvidenceKey(reference)))
 }
 
@@ -306,10 +310,10 @@ export function extractCardCasingReferences(title: string, cardText: string): st
     ? confirmedTitleReferences
     : titleReferences
   const bodyCasingReferences = cardText.trim()
-    ? extractAuthoritativeCasingReferences(
-        [{ role: 'assistant', content: cardText }],
-        { allowRepeatedWithinSource: true, allowMidSentenceCapitalized: true },
-      )
+    ? extractAuthoritativeCasingReferences([{ role: 'assistant', content: cardText }], {
+        allowRepeatedWithinSource: true,
+        allowMidSentenceCapitalized: true,
+      })
     : []
   return uniqueReferences([...selectedTitleReferences, ...bodyCasingReferences])
 }
@@ -454,46 +458,54 @@ function correctReferenceTerms(
     },
   )
 
-  correctedText = correctedText.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard, offset: number) => {
-    const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
-    const base = possessive ? heard.slice(0, -possessive.length) : heard
-    const baseKey = base.toLocaleLowerCase()
-    if (
-      base.length < 3 ||
-      (requireInitialUppercase && !/^\p{Lu}/u.test(base)) ||
-      protectedKeys.has(baseKey) ||
-      referenceByKey.has(baseKey)
-    )
-      return heard
+  correctedText = correctedText.replace(
+    /\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu,
+    (heard, offset: number) => {
+      const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
+      const base = possessive ? heard.slice(0, -possessive.length) : heard
+      const baseKey = base.toLocaleLowerCase()
+      if (
+        base.length < 3 ||
+        (requireInitialUppercase && !/^\p{Lu}/u.test(base)) ||
+        protectedKeys.has(baseKey) ||
+        referenceByKey.has(baseKey)
+      )
+        return heard
 
-    if (
-      requireInitialUppercase &&
-      !possessive &&
-      (MODAL_WORDS.has(baseKey) || baseKey === 'then') &&
-      !hasPositiveNameSignal(text, offset)
-    )
-      return heard
-
-    const candidates = [...referenceByKey.values()].filter((reference) => {
       if (
         requireInitialUppercase &&
         !possessive &&
-        (isLikelyOneSyllable(reference) ||
-          PARTICLE_WORDS.has(reference.toLocaleLowerCase())) &&
-        hasProtectedOrdinaryWordUsage(correctedText, offset, offset + heard.length, baseKey)
+        (MODAL_WORDS.has(baseKey) || baseKey === 'then') &&
+        !hasPositiveNameSignal(text, offset)
       )
-        return false
-      return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase())
-    })
-    const uniqueCandidates = [
-      ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values(),
-    ]
-    if (uniqueCandidates.length !== 1) return heard
+        return heard
 
-    const canonical = uniqueCandidates[0]
-    correctedTerms.push({ heard: base, canonical })
-    return `${canonical}${possessive}`
-  })
+      const candidates = [...referenceByKey.values()].filter((reference) => {
+        if (
+          requireInitialUppercase &&
+          !possessive &&
+          (isLikelyOneSyllable(reference) || PARTICLE_WORDS.has(reference.toLocaleLowerCase())) &&
+          hasProtectedOrdinaryWordUsage(correctedText, offset, offset + heard.length, baseKey)
+        )
+          return false
+        return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase())
+      })
+      // A spelling-close reference wins over phonetic-only neighbours, so "Kensai" resolves to
+      // "Kansai" even when "Kenji" also sounds similar.
+      const spellingClose = candidates.filter((reference) =>
+        editDistanceAtMost(baseKey, reference.toLocaleLowerCase(), 1),
+      )
+      const pool = spellingClose.length ? spellingClose : candidates
+      const uniqueCandidates = [
+        ...new Map(pool.map((value) => [value.toLocaleLowerCase(), value])).values(),
+      ]
+      if (uniqueCandidates.length !== 1) return heard
+
+      const canonical = uniqueCandidates[0]
+      correctedTerms.push({ heard: base, canonical })
+      return `${canonical}${possessive}`
+    },
+  )
 
   return { text: correctedText, correctedTerms }
 }
@@ -512,16 +524,13 @@ function referenceMap(references: readonly string[]): Map<string, string> {
 }
 
 function normalizeReferenceCasing(value: string): string {
-  return value.replace(
-    /\p{L}[\p{L}\p{M}]*(?:[-'’][\p{L}\p{M}]+)*/gu,
-    (token) => {
-      const letters = token.match(/\p{L}/gu) ?? []
-      if (letters.length < 2 || letters.some((letter) => letter !== letter.toLocaleUpperCase()))
-        return token
-      const lower = token.toLocaleLowerCase()
-      return lower.replace(/(^|-)\p{Ll}/gu, (opening) => opening.toLocaleUpperCase())
-    },
-  )
+  return value.replace(/\p{L}[\p{L}\p{M}]*(?:[-'’][\p{L}\p{M}]+)*/gu, (token) => {
+    const letters = token.match(/\p{L}/gu) ?? []
+    if (letters.length < 2 || letters.some((letter) => letter !== letter.toLocaleUpperCase()))
+      return token
+    const lower = token.toLocaleLowerCase()
+    return lower.replace(/(^|-)\p{Ll}/gu, (opening) => opening.toLocaleUpperCase())
+  })
 }
 
 function referenceEvidenceKey(value: string): string {
@@ -549,7 +558,17 @@ function isSentenceOpeningAt(text: string, offset: number): boolean {
   return prefix.length === 0 || /[.!?]\s*$/u.test(prefix)
 }
 
-const MODAL_WORDS = new Set(['can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would'])
+const MODAL_WORDS = new Set([
+  'can',
+  'could',
+  'may',
+  'might',
+  'must',
+  'shall',
+  'should',
+  'will',
+  'would',
+])
 const AUXILIARY_WORDS = new Set([
   'am',
   'are',
@@ -616,7 +635,17 @@ const NAME_SIGNAL_WORDS = new Set([
   'tell',
   'told',
 ])
-const NAME_TITLES = new Set(['captain', 'doctor', 'dr', 'miss', 'mister', 'mr', 'mrs', 'ms', 'professor'])
+const NAME_TITLES = new Set([
+  'captain',
+  'doctor',
+  'dr',
+  'miss',
+  'mister',
+  'mr',
+  'mrs',
+  'ms',
+  'professor',
+])
 function hasPositiveNameSignal(text: string, start: number): boolean {
   const previous = adjacentWord(text, start, 'before')
   return Boolean(previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous)))
@@ -777,7 +806,8 @@ function isHighConfidenceReferenceMatch(heard: string, reference: string): boole
   }
   if (heard.charAt(0) !== reference.charAt(0)) return false
   if (editDistanceAtMost(heard, reference, 1)) return true
-  if (areSpeechPhoneticNeighbors(heard, reference)) return true
+  if (heard.slice(0, 2) === reference.slice(0, 2) && areSpeechPhoneticNeighbors(heard, reference))
+    return true
   return (
     Math.min(heard.length, reference.length) >= 6 &&
     heard.slice(0, 4) === reference.slice(0, 4) &&

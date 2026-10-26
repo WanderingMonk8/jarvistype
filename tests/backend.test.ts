@@ -6029,7 +6029,7 @@ test('keeps broad active-draft references available for recording fuzzy identifi
   responses.length = 0
   generationRequests.length = 0
   await dispatch(
-    recordingAppendRequest(chatId, 'draft-fuzzy-recording', 1, 'Ervode answers me.'),
+    recordingAppendRequest(chatId, 'draft-fuzzy-recording', 1, 'Herbolt answers me.'),
     userId,
   )
 
@@ -6037,7 +6037,7 @@ test('keeps broad active-draft references available for recording fuzzy identifi
   assert.equal(response?.type, 'transcript.normalization.response')
   if (response?.type === 'transcript.normalization.response') {
     assert.equal(response.proposal.candidateText, 'Herbold answers me.')
-    assert.ok(response.proposal.reasons.includes('active draft spelling: Ervode → Herbold'))
+    assert.ok(response.proposal.reasons.includes('active draft spelling: Herbolt → Herbold'))
   }
 })
 
@@ -6090,7 +6090,7 @@ test('keeps broad active-draft references available for edit payload fuzzy ident
       operationId: 'draft-fuzzy-payload-operation',
       chatId,
       expectedVersion: 1,
-      instructionTranscript: 'Replace the captain with Ervode.',
+      instructionTranscript: 'Replace the captain with Herbolt.',
     },
     userId,
   )

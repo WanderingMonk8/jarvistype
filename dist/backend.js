@@ -2061,16 +2061,18 @@ function extractAuthoritativeCasingReferences(messages, options = {}) {
   );
   const phraseCandidates = extracted.filter((reference) => /\s/u.test(reference));
   const candidates = extracted.filter((reference) => !/\s/u.test(reference));
-  const candidateByKey = new Map(candidates.map((candidate) => [referenceCanonicalKey(candidate), candidate]));
+  const candidateByKey = new Map(
+    candidates.map((candidate) => [referenceCanonicalKey(candidate), candidate])
+  );
   const evidence = /* @__PURE__ */ new Map();
   messages.forEach((message, messageIndex) => {
-    const tokens = [
-      ...message.content.matchAll(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu)
-    ].map((match) => ({
-      value: match[0],
-      start: match.index,
-      end: match.index + match[0].length
-    }));
+    const tokens = [...message.content.matchAll(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu)].map(
+      (match) => ({
+        value: match[0],
+        start: match.index,
+        end: match.index + match[0].length
+      })
+    );
     tokens.forEach((token, tokenIndex) => {
       if (!/^\p{Lu}/u.test(token.value)) return;
       const possessive = token.value.match(/(['’]s)$/iu)?.[0] ?? "";
@@ -2104,7 +2106,9 @@ function extractAuthoritativeCasingReferences(messages, options = {}) {
     if (!item) return false;
     return item.strong || options.allowRepeatedSentenceOpenings !== false && item.occurrences >= (options.minimumOccurrences ?? 2);
   });
-  const supportedKeys = new Set([...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey));
+  const supportedKeys = new Set(
+    [...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey)
+  );
   return extracted.filter((reference) => supportedKeys.has(referenceEvidenceKey(reference)));
 }
 function extractLowercaseReferenceKeys(messages) {
@@ -2126,10 +2130,10 @@ function extractCardCasingReferences(title, cardText) {
     (reference) => bodyKeys.has(referenceEvidenceKey(reference))
   );
   const selectedTitleReferences = confirmedTitleReferences.length ? confirmedTitleReferences : titleReferences;
-  const bodyCasingReferences = cardText.trim() ? extractAuthoritativeCasingReferences(
-    [{ role: "assistant", content: cardText }],
-    { allowRepeatedWithinSource: true, allowMidSentenceCapitalized: true }
-  ) : [];
+  const bodyCasingReferences = cardText.trim() ? extractAuthoritativeCasingReferences([{ role: "assistant", content: cardText }], {
+    allowRepeatedWithinSource: true,
+    allowMidSentenceCapitalized: true
+  }) : [];
   return uniqueReferences([...selectedTitleReferences, ...bodyCasingReferences]);
 }
 function extractCardCharacterReferences(title, cardText) {
@@ -2223,27 +2227,34 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
       return `${canonical}${possessive}`;
     }
   );
-  correctedText = correctedText.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard, offset) => {
-    const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? "";
-    const base = possessive ? heard.slice(0, -possessive.length) : heard;
-    const baseKey = base.toLocaleLowerCase();
-    if (base.length < 3 || requireInitialUppercase && !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
-      return heard;
-    if (requireInitialUppercase && !possessive && (MODAL_WORDS.has(baseKey) || baseKey === "then") && !hasPositiveNameSignal(text, offset))
-      return heard;
-    const candidates = [...referenceByKey.values()].filter((reference) => {
-      if (requireInitialUppercase && !possessive && (isLikelyOneSyllable(reference) || PARTICLE_WORDS.has(reference.toLocaleLowerCase())) && hasProtectedOrdinaryWordUsage(correctedText, offset, offset + heard.length, baseKey))
-        return false;
-      return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase());
-    });
-    const uniqueCandidates = [
-      ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values()
-    ];
-    if (uniqueCandidates.length !== 1) return heard;
-    const canonical = uniqueCandidates[0];
-    correctedTerms.push({ heard: base, canonical });
-    return `${canonical}${possessive}`;
-  });
+  correctedText = correctedText.replace(
+    /\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu,
+    (heard, offset) => {
+      const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? "";
+      const base = possessive ? heard.slice(0, -possessive.length) : heard;
+      const baseKey = base.toLocaleLowerCase();
+      if (base.length < 3 || requireInitialUppercase && !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
+        return heard;
+      if (requireInitialUppercase && !possessive && (MODAL_WORDS.has(baseKey) || baseKey === "then") && !hasPositiveNameSignal(text, offset))
+        return heard;
+      const candidates = [...referenceByKey.values()].filter((reference) => {
+        if (requireInitialUppercase && !possessive && (isLikelyOneSyllable(reference) || PARTICLE_WORDS.has(reference.toLocaleLowerCase())) && hasProtectedOrdinaryWordUsage(correctedText, offset, offset + heard.length, baseKey))
+          return false;
+        return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase());
+      });
+      const spellingClose = candidates.filter(
+        (reference) => editDistanceAtMost2(baseKey, reference.toLocaleLowerCase(), 1)
+      );
+      const pool = spellingClose.length ? spellingClose : candidates;
+      const uniqueCandidates = [
+        ...new Map(pool.map((value) => [value.toLocaleLowerCase(), value])).values()
+      ];
+      if (uniqueCandidates.length !== 1) return heard;
+      const canonical = uniqueCandidates[0];
+      correctedTerms.push({ heard: base, canonical });
+      return `${canonical}${possessive}`;
+    }
+  );
   return { text: correctedText, correctedTerms };
 }
 function referenceMap(references) {
@@ -2259,16 +2270,13 @@ function referenceMap(references) {
   return referenceByKey;
 }
 function normalizeReferenceCasing(value) {
-  return value.replace(
-    /\p{L}[\p{L}\p{M}]*(?:[-'’][\p{L}\p{M}]+)*/gu,
-    (token) => {
-      const letters = token.match(/\p{L}/gu) ?? [];
-      if (letters.length < 2 || letters.some((letter) => letter !== letter.toLocaleUpperCase()))
-        return token;
-      const lower = token.toLocaleLowerCase();
-      return lower.replace(/(^|-)\p{Ll}/gu, (opening) => opening.toLocaleUpperCase());
-    }
-  );
+  return value.replace(/\p{L}[\p{L}\p{M}]*(?:[-'’][\p{L}\p{M}]+)*/gu, (token) => {
+    const letters = token.match(/\p{L}/gu) ?? [];
+    if (letters.length < 2 || letters.some((letter) => letter !== letter.toLocaleUpperCase()))
+      return token;
+    const lower = token.toLocaleLowerCase();
+    return lower.replace(/(^|-)\p{Ll}/gu, (opening) => opening.toLocaleUpperCase());
+  });
 }
 function referenceEvidenceKey(value) {
   return value.toLocaleLowerCase().replace(/\u2019/gu, "'");
@@ -2290,7 +2298,17 @@ function isSentenceOpeningAt2(text, offset) {
   const prefix = text.slice(0, offset).replace(/[\s"'“”‘’([{]+$/gu, "");
   return prefix.length === 0 || /[.!?]\s*$/u.test(prefix);
 }
-var MODAL_WORDS = /* @__PURE__ */ new Set(["can", "could", "may", "might", "must", "shall", "should", "will", "would"]);
+var MODAL_WORDS = /* @__PURE__ */ new Set([
+  "can",
+  "could",
+  "may",
+  "might",
+  "must",
+  "shall",
+  "should",
+  "will",
+  "would"
+]);
 var AUXILIARY_WORDS = /* @__PURE__ */ new Set([
   "am",
   "are",
@@ -2357,7 +2375,17 @@ var NAME_SIGNAL_WORDS = /* @__PURE__ */ new Set([
   "tell",
   "told"
 ]);
-var NAME_TITLES = /* @__PURE__ */ new Set(["captain", "doctor", "dr", "miss", "mister", "mr", "mrs", "ms", "professor"]);
+var NAME_TITLES = /* @__PURE__ */ new Set([
+  "captain",
+  "doctor",
+  "dr",
+  "miss",
+  "mister",
+  "mr",
+  "mrs",
+  "ms",
+  "professor"
+]);
 function hasPositiveNameSignal(text, start) {
   const previous = adjacentWord(text, start, "before");
   return Boolean(previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous)));
@@ -2470,7 +2498,8 @@ function isHighConfidenceReferenceMatch(heard, reference) {
   }
   if (heard.charAt(0) !== reference.charAt(0)) return false;
   if (editDistanceAtMost2(heard, reference, 1)) return true;
-  if (areSpeechPhoneticNeighbors(heard, reference)) return true;
+  if (heard.slice(0, 2) === reference.slice(0, 2) && areSpeechPhoneticNeighbors(heard, reference))
+    return true;
   return Math.min(heard.length, reference.length) >= 6 && heard.slice(0, 4) === reference.slice(0, 4) && editDistanceAtMost2(heard, reference, 2);
 }
 function editDistanceAtMost2(left, right, maximum) {
@@ -3564,7 +3593,7 @@ function escapeRegExp(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.14";
+var APP_VERSION = "1.6.15";
 var PHASE_FOUR_PERMISSIONS = [
   "media",
   "chats",

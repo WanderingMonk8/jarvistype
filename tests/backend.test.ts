@@ -19,6 +19,7 @@ const generationRequests: Array<{
 const decisionRequests: unknown[] = []
 let decisionsEnabled = false
 let decisionProbability = 0
+let referenceDecisionProbability = 1
 let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
@@ -87,11 +88,22 @@ const spindleMock = {
       ),
     evaluate: (request: unknown) => {
       decisionRequests.push(request)
+      const questions = (request as { questions?: Record<string, unknown> }).questions ?? {}
+      const answers = Object.fromEntries(
+        Object.keys(questions).map((key) => [
+          key,
+          {
+            type: 'noul',
+            noul:
+              key === 'introducedGrammarError'
+                ? decisionProbability
+                : referenceDecisionProbability,
+          },
+        ]),
+      )
       return Promise.resolve({
         model: 'jev-test',
-        answers: {
-          introducedGrammarError: { type: 'noul', noul: decisionProbability },
-        },
+        answers,
       })
     },
   },
@@ -243,6 +255,7 @@ test.beforeEach(() => {
   decisionRequests.length = 0
   decisionsEnabled = false
   decisionProbability = 0
+  referenceDecisionProbability = 1
   activeChatId = 'chat-default'
   appendShouldFail = false
   appendAcknowledgementGate = null
@@ -494,6 +507,7 @@ test('uses local command context with compact conversational spelling references
 })
 
 test('uses an unambiguous recent-chat proper name when the model leaves the STT spelling unchanged', async () => {
+  decisionsEnabled = true
   const userId = 'recent-name-user'
   const chatId = 'recent-name-chat'
   activeChatId = chatId
@@ -527,6 +541,7 @@ test('uses an unambiguous recent-chat proper name when the model leaves the STT 
 })
 
 test('persists strict references in a bounded per-chat rolling cache', async () => {
+  decisionsEnabled = true
   const userId = 'rolling-reference-cache-user'
   const chatId = 'rolling-reference-cache-chat'
   activeChatId = chatId
@@ -547,8 +562,16 @@ test('persists strict references in a bounded per-chat rolling cache', async () 
     userId,
   )
 
-  chatMessages = [{ role: 'assistant', content: 'I spoke with Alpha beside the gate.' }]
+  chatMessages = [
+    { role: 'assistant', content: 'I spoke with Alpha beside the gate. Alpha waited.' },
+  ]
   await dispatch(recordingAppendRequest(chatId, 'rolling-alpha', 0, 'Ready.'), userId)
+  const firstDecision = decisionRequests[0] as {
+    state?: { candidates?: Array<{ reference?: string }> }
+  }
+  const submittedReferences =
+    firstDecision.state?.candidates?.map((candidate) => candidate.reference) ?? []
+  assert.equal(submittedReferences.filter((reference) => reference === 'Alpha').length, 1)
 
   chatMessages = [{ role: 'assistant', content: 'An ordinary sentence.' }]
   responses.length = 0
@@ -578,6 +601,7 @@ test('persists strict references in a bounded per-chat rolling cache', async () 
 })
 
 test('uses a reference name when the provider splits its possessive pronunciation', async () => {
+  decisionsEnabled = true
   const userId = 'split-possessive-reference-user'
   const chatId = 'split-possessive-reference-chat'
   activeChatId = chatId
@@ -5941,6 +5965,7 @@ test('restores a known proper noun when a compact uppercase edit spelling defaul
 })
 
 test('uses phonetic character references for recording normalization and edit targets', async () => {
+  decisionsEnabled = true
   const userId = 'phonetic-character-reference-user'
   const chatId = 'phonetic-character-reference-chat'
   activeChatId = chatId

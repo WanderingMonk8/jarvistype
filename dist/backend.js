@@ -3578,6 +3578,7 @@ var glossaryCache = /* @__PURE__ */ new Map();
 var settingsCache = /* @__PURE__ */ new Map();
 var conversationReferenceCache = /* @__PURE__ */ new Map();
 var rollingReferenceCache = /* @__PURE__ */ new Map();
+var referenceVerdictCache = /* @__PURE__ */ new Map();
 var cardCharacterReferenceCache = /* @__PURE__ */ new Map();
 var MAX_COMPLETED_SENDS = 100;
 var MAX_CONVERSATION_REFERENCE_CACHES = 100;
@@ -3752,10 +3753,17 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       `messages=${messages.length} contextCount=${settings2.contextMessageCount} duration=${debugDuration(normalizeStartedAt)}`
     );
     const referenceContext2 = selectRecentReferenceContext(messages, settings2.contextMessageCount);
-    const recentConversationReferences = cachedConversationReferences(
+    const recentReferenceCandidates = cachedConversationReferences(
       context.userId,
       request.chatId,
       referenceContext2.messages
+    );
+    const recentConversationReferences = await approveReferenceCandidatesWithJev(
+      context.userId,
+      request.chatId,
+      recentReferenceCandidates,
+      referenceContext2.messages,
+      activeRequest.abort.signal
     );
     const glossaryReferenceExemptions = glossaryReferenceTerms(glossary2);
     const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey));
@@ -3765,8 +3773,9 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     const lowercaseReferenceKeys = extractLowercaseReferenceKeys(messages).filter(
       (key) => !glossaryReferenceKeys.has(key)
     );
+    const approvedReferenceKeys = new Set(recentConversationReferences.map(referenceCacheKey));
     const admittedRecentReferences = rejectLowercaseReferences(
-      strictRecentReferences,
+      strictRecentReferences.filter((reference) => approvedReferenceKeys.has(referenceCacheKey(reference))),
       lowercaseReferenceKeys
     );
     const rollingReferences = await updateRollingReferenceCache(
@@ -4259,15 +4268,23 @@ async function handleEditInterpretation(request, context, activeRequest) {
       `messages=${messages.length} references=${settings.contextualNormalizationEnabled ? "on" : "off"} duration=${debugDuration(editStartedAt)}`
     );
     const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount);
-    const recentConversationReferences = settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : [];
+    const recentReferenceCandidates = settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : [];
+    const recentConversationReferences = settings.contextualNormalizationEnabled ? await approveReferenceCandidatesWithJev(
+      context.userId,
+      request.chatId,
+      recentReferenceCandidates,
+      referenceContext.messages,
+      activeRequest.abort.signal
+    ) : [];
     const glossaryReferenceExemptions = glossaryReferenceTerms(glossary);
     const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey));
     const strictRecentReferences = settings.contextualNormalizationEnabled ? extractAuthoritativeCasingReferences(referenceContext.messages, {
       lowercaseExemptions: glossaryReferenceExemptions
     }) : [];
     const lowercaseReferenceKeys = settings.contextualNormalizationEnabled ? extractLowercaseReferenceKeys(messages).filter((key) => !glossaryReferenceKeys.has(key)) : [];
+    const approvedReferenceKeys = new Set(recentConversationReferences.map(referenceCacheKey));
     const admittedRecentReferences = rejectLowercaseReferences(
-      strictRecentReferences,
+      strictRecentReferences.filter((reference) => approvedReferenceKeys.has(referenceCacheKey(reference))),
       lowercaseReferenceKeys
     );
     const rollingReferences = await updateRollingReferenceCache(
@@ -6727,6 +6744,148 @@ function cachedConversationReferences(userId, chatId, messages) {
   }
   return references;
 }
+var JEV_REFERENCE_TIMEOUT_MS = 2500;
+var JEV_REFERENCE_ADMISSION_THRESHOLD = 0.85;
+var MAX_REFERENCE_VERDICTS = 500;
+async function approveReferenceCandidatesWithJev(userId, chatId, candidates, messages, signal) {
+  const deduplicated = /* @__PURE__ */ new Map();
+  for (const candidate of candidates) {
+    const normalized = candidate.trim();
+    const key = referenceCacheKey(normalized);
+    if (normalized && !deduplicated.has(key)) deduplicated.set(key, normalized);
+  }
+  if (!deduplicated.size) return [];
+  const cacheKey = `${userId}\0${chatId}`;
+  let state = referenceVerdictCache.get(cacheKey);
+  if (!state) {
+    const raw = await spindle.userStorage.getJson(referenceVerdictPath(chatId), {
+      fallback: null,
+      userId
+    });
+    state = restoreReferenceVerdicts(raw);
+    referenceVerdictCache.set(cacheKey, state);
+  }
+  const verdicts = new Map(
+    state.entries.map((entry) => [referenceCacheKey(entry.reference), entry.properNoun])
+  );
+  const novel = [...deduplicated].filter(([key]) => !verdicts.has(key));
+  if (!novel.length || !spindle.permissions.has("decisions") || signal.aborted) {
+    recordDebug(
+      userId,
+      "reference.jev",
+      `candidates=${deduplicated.size} cached=${deduplicated.size - novel.length} evaluated=0 admitted=${[...deduplicated.keys()].filter((key) => verdicts.get(key) === true).length}`
+    );
+    return [...deduplicated].filter(([key]) => verdicts.get(key) === true).map(([, value]) => value);
+  }
+  const startedAt2 = performance.now();
+  const questions = {};
+  const evaluated = novel.map(([key, reference], index) => {
+    const id = `candidate_${index}`;
+    questions[id] = {
+      type: "noul",
+      instructions: `Is \u201C${reference}\u201D used as a specific name or proper noun in its supplied context?`,
+      criteria: {
+        true: "It identifies a particular person, character, place, organization, branded object, or other proper noun.",
+        false: "It is ordinary vocabulary, capitalization caused only by sentence position, a title without a name, or the context is insufficient."
+      }
+    };
+    return {
+      id,
+      key,
+      reference,
+      context: referenceCandidateContext(reference, messages)
+    };
+  });
+  recordDebug(
+    userId,
+    "reference.jev",
+    `start candidates=${deduplicated.size} cached=${deduplicated.size - novel.length} evaluated=${evaluated.length}`
+  );
+  const controller = new AbortController();
+  const abortFromRequest = () => controller.abort();
+  signal.addEventListener("abort", abortFromRequest, { once: true });
+  let timeout;
+  try {
+    const result = await Promise.race([
+      spindle.decisions.evaluate(
+        {
+          userId,
+          state: {
+            task: "Classify deduplicated reference candidates conservatively as names or proper nouns.",
+            candidates: evaluated.map(({ id, reference, context }) => ({ id, reference, context }))
+          },
+          questions
+        },
+        { signal: controller.signal }
+      ),
+      new Promise((resolve) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          resolve(null);
+        }, JEV_REFERENCE_TIMEOUT_MS);
+      })
+    ]);
+    if (result) {
+      for (const item of evaluated) {
+        const answer = result.answers[item.id];
+        const probability = answer?.type === "noul" ? answer.noul : void 0;
+        verdicts.set(
+          item.key,
+          typeof probability === "number" && Number.isFinite(probability) && probability >= JEV_REFERENCE_ADMISSION_THRESHOLD
+        );
+      }
+      const entries = [...state.entries, ...evaluated.map((item) => ({
+        reference: item.reference,
+        properNoun: verdicts.get(item.key) === true
+      }))].slice(-MAX_REFERENCE_VERDICTS);
+      state = { schemaVersion: 1, entries };
+      referenceVerdictCache.set(cacheKey, state);
+      await spindle.userStorage.setJson(referenceVerdictPath(chatId), state, { userId });
+    }
+    const approved = [...deduplicated].filter(([key]) => verdicts.get(key) === true).map(([, value]) => value);
+    recordDebug(
+      userId,
+      "reference.jev",
+      `end outcome=${result ? "ok" : "timed-out"} admitted=${approved.length} duration=${debugDuration(startedAt2)}`
+    );
+    return approved;
+  } catch (error) {
+    recordDebug(
+      userId,
+      "reference.jev",
+      `end outcome=${controller.signal.aborted ? "aborted" : "failed"} admitted=0 duration=${debugDuration(startedAt2)}`
+    );
+    if (!controller.signal.aborted) logSafeFailure("warn", "JEV_REFERENCE_EVALUATION", error);
+    return [...deduplicated].filter(([key]) => verdicts.get(key) === true).map(([, value]) => value);
+  } finally {
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", abortFromRequest);
+  }
+}
+function referenceCandidateContext(reference, messages) {
+  const key = reference.toLocaleLowerCase();
+  for (const message of [...messages].reverse()) {
+    const sentence = message.content.split(/(?<=[.!?])\s+|[\n\r]+/u).find((part) => part.toLocaleLowerCase().includes(key));
+    if (sentence) return sentence.trim().slice(0, 400);
+  }
+  return "";
+}
+function restoreReferenceVerdicts(raw) {
+  if (!isRecord5(raw) || raw.schemaVersion !== 1 || !Array.isArray(raw.entries))
+    return { schemaVersion: 1, entries: [] };
+  const entries = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const value of raw.entries.slice(-MAX_REFERENCE_VERDICTS)) {
+    if (!isRecord5(value) || typeof value.reference !== "string" || typeof value.properNoun !== "boolean")
+      continue;
+    const reference = value.reference.trim().slice(0, 200);
+    const key = referenceCacheKey(reference);
+    if (!reference || seen.has(key)) continue;
+    seen.add(key);
+    entries.push({ reference, properNoun: value.properNoun });
+  }
+  return { schemaVersion: 1, entries };
+}
 async function updateRollingReferenceCache(userId, chatId, additions, lowercaseReferenceKeys, requestedLimit) {
   const limit = clampReferenceCacheLimit(requestedLimit);
   const key = `${userId}\0${chatId}`;
@@ -6750,7 +6909,7 @@ async function updateRollingReferenceCache(userId, chatId, additions, lowercaseR
   }
   const entries = limit === 0 ? [] : [...next.values()].slice(-limit);
   if (entries.length !== state.entries.length || entries.some((entry, index) => entry !== state.entries[index])) {
-    state = { schemaVersion: 1, entries };
+    state = { schemaVersion: 2, entries };
     rollingReferenceCache.set(key, state);
     await spindle.userStorage.setJson(referenceCachePath(chatId), state, { userId });
   }
@@ -6779,8 +6938,8 @@ function rejectLowercaseReferences(references, lowercaseReferenceKeys) {
   });
 }
 function restoreRollingReferenceCache(raw) {
-  if (!isRecord5(raw) || raw.schemaVersion !== 1 || !Array.isArray(raw.entries))
-    return { schemaVersion: 1, entries: [] };
+  if (!isRecord5(raw) || raw.schemaVersion !== 2 || !Array.isArray(raw.entries))
+    return { schemaVersion: 2, entries: [] };
   const entries = [];
   const seen = /* @__PURE__ */ new Set();
   for (const value of raw.entries) {
@@ -6792,10 +6951,13 @@ function restoreRollingReferenceCache(raw) {
     entries.push(normalized);
     if (entries.length >= 200) break;
   }
-  return { schemaVersion: 1, entries };
+  return { schemaVersion: 2, entries };
 }
 function referenceCachePath(chatId) {
   return `reference-cache-${encodeURIComponent(chatId)}.json`;
+}
+function referenceVerdictPath(chatId) {
+  return `reference-verdicts-${encodeURIComponent(chatId)}.json`;
 }
 function glossaryForPrompt(glossary) {
   const selected = [];

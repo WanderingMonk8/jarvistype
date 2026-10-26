@@ -6006,6 +6006,7 @@ test('uses phonetic character references for recording normalization and edit ta
 })
 
 test('keeps broad active-draft references available for recording fuzzy identification', async () => {
+  decisionsEnabled = true
   const userId = 'draft-fuzzy-recording-user'
   const chatId = 'draft-fuzzy-recording-chat'
   activeChatId = chatId
@@ -6029,6 +6030,7 @@ test('keeps broad active-draft references available for recording fuzzy identifi
 })
 
 test('does not use repeated sentence openings in the active draft as casing authority', async () => {
+  decisionsEnabled = true
   const userId = 'draft-repeated-opening-casing-user'
   const chatId = 'draft-repeated-opening-casing-chat'
   activeChatId = chatId
@@ -6059,6 +6061,7 @@ test('does not use repeated sentence openings in the active draft as casing auth
 })
 
 test('keeps broad active-draft references available for edit payload fuzzy identification', async () => {
+  decisionsEnabled = true
   const userId = 'draft-fuzzy-payload-user'
   const chatId = 'draft-fuzzy-payload-chat'
   activeChatId = chatId

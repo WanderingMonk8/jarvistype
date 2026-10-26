@@ -111,7 +111,14 @@ const editCandidateContexts = new Map<
 const glossaryCache = new Map<string, GlossaryState>()
 const settingsCache = new Map<string, PhaseFourSettings>()
 const conversationReferenceCache = new Map<string, { signature: string; references: string[] }>()
-const rollingReferenceCache = new Map<string, { schemaVersion: 2; entries: string[] }>()
+interface RollingReferenceState {
+  schemaVersion: 3
+  entries: string[]
+  permanentEntries: string[]
+  validated: boolean
+  cardChecked: boolean
+}
+const rollingReferenceCache = new Map<string, RollingReferenceState>()
 const referenceVerdictCache = new Map<
   string,
   { schemaVersion: 1; entries: Array<{ reference: string; properNoun: boolean }> }
@@ -295,8 +302,8 @@ async function handleTranscriptNormalization(
       spindle.chat.getMessages(request.chatId),
       loadCardCharacterReferences(request.chatId, context.userId),
     ])
-    const cardCharacterReferences = cardReferenceSet.identification
-    const cardCasingReferences = cardReferenceSet.casing
+    let cardCharacterReferences = cardReferenceSet.identification
+    let cardCasingReferences = cardReferenceSet.casing
     recordDebug(
       context.userId,
       'normalize.context',
@@ -308,13 +315,63 @@ async function handleTranscriptNormalization(
       request.chatId,
       referenceContext.messages,
     )
-    const recentConversationReferences = await approveReferenceCandidatesWithJev(
+    const rollingState = await loadRollingReferenceState(context.userId, request.chatId)
+    const draftReferenceCandidates = extractConversationReferences([
+      { role: 'assistant', content: session.cleanText },
+    ])
+    const candidatesForJev = mergeConversationReferences(
+      mergeConversationReferences(
+        rollingState.validated ? [] : rollingState.entries,
+        rollingState.cardChecked ? [] : cardCharacterReferences,
+      ),
+      mergeConversationReferences(recentReferenceCandidates, draftReferenceCandidates),
+    )
+    const approvedCandidates = await approveReferenceCandidatesWithJev(
       context.userId,
       request.chatId,
-      recentReferenceCandidates,
-      referenceContext.messages,
+      candidatesForJev,
+      [
+        ...referenceContext.messages,
+        ...referenceCandidateSnippets(draftReferenceCandidates, session.cleanText),
+      ],
       activeRequest.abort.signal,
     )
+    const approvedCandidateKeys = new Set(approvedCandidates.map(referenceCacheKey))
+    const recentConversationReferences = recentReferenceCandidates.filter((reference) =>
+      approvedCandidateKeys.has(referenceCacheKey(reference)),
+    )
+    const draftIdentificationReferences = draftReferenceCandidates.filter((reference) =>
+      approvedCandidateKeys.has(referenceCacheKey(reference)),
+    )
+    if (!rollingState.validated || !rollingState.cardChecked) {
+      const nextState: RollingReferenceState = {
+        ...rollingState,
+        entries: rollingState.validated
+          ? rollingState.entries
+          : rollingState.entries.filter((reference) =>
+              approvedCandidateKeys.has(referenceCacheKey(reference)),
+            ),
+        permanentEntries: rollingState.cardChecked
+          ? rollingState.permanentEntries
+          : cardCharacterReferences.filter((reference) =>
+              approvedCandidateKeys.has(referenceCacheKey(reference)),
+            ),
+        validated: true,
+        cardChecked: true,
+      }
+      await persistRollingReferenceState(context.userId, request.chatId, nextState)
+      cardCharacterReferences = nextState.permanentEntries
+      const permanentKeys = new Set(nextState.permanentEntries.map(referenceCacheKey))
+      cardCasingReferences = cardCasingReferences.filter((reference) =>
+        permanentKeys.has(referenceCacheKey(reference)),
+      )
+    } else {
+      cardCharacterReferences = rollingState.permanentEntries
+      const permanentKeys = new Set(rollingState.permanentEntries.map(referenceCacheKey))
+      cardCasingReferences = cardCasingReferences.filter((reference) =>
+        permanentKeys.has(referenceCacheKey(reference)),
+      )
+    }
     const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
     const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey))
     const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext.messages, {
@@ -376,6 +433,7 @@ async function handleTranscriptNormalization(
       cardCasingReferences,
       conversationReferences,
       authoritativeConversationReferences,
+      draftIdentificationReferences,
       capitalizeOpening,
       recoveredBoundary,
       deterministic,
@@ -405,6 +463,7 @@ async function handleTranscriptNormalization(
     cardCharacterReferences,
     conversationReferences,
     authoritativeConversationReferences,
+    draftIdentificationReferences,
     capitalizeOpening,
     recoveredBoundary,
     deterministic,
@@ -418,9 +477,6 @@ async function handleTranscriptNormalization(
   // It must not enter the persistent rolling cache or gain casing authority merely by
   // appearing capitalized once, but it still needs to recover names the user pasted or
   // misspelled before they have appeared in chat history.
-  const draftIdentificationReferences = extractConversationReferences([
-    { role: 'assistant', content: session.cleanText },
-  ])
   let contextualModelUsed = false
   if (settings.contextualNormalizationEnabled) {
     const contextualStartedAt = performance.now()
@@ -900,8 +956,8 @@ async function handleEditInterpretation(
       spindle.chat.getMessages(request.chatId),
       loadCardCharacterReferences(request.chatId, context.userId),
     ])
-    const cardCharacterReferences = cardReferenceSet.identification
-    const cardCasingReferences = cardReferenceSet.casing
+    let cardCharacterReferences = cardReferenceSet.identification
+    let cardCasingReferences = cardReferenceSet.casing
     recordDebug(
       context.userId,
       'edit.loaded',
@@ -911,15 +967,61 @@ async function handleEditInterpretation(
     const recentReferenceCandidates = settings.contextualNormalizationEnabled
       ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages)
       : []
-    const recentConversationReferences = settings.contextualNormalizationEnabled
+    const rollingState = await loadRollingReferenceState(context.userId, request.chatId)
+    const draftReferenceCandidates = extractConversationReferences([
+      { role: 'assistant', content: session.cleanText },
+    ])
+    const candidatesForJev = mergeConversationReferences(
+      mergeConversationReferences(
+        rollingState.validated ? [] : rollingState.entries,
+        rollingState.cardChecked ? [] : cardCharacterReferences,
+      ),
+      mergeConversationReferences(recentReferenceCandidates, draftReferenceCandidates),
+    )
+    const approvedCandidates = settings.contextualNormalizationEnabled
       ? await approveReferenceCandidatesWithJev(
           context.userId,
           request.chatId,
-          recentReferenceCandidates,
-          referenceContext.messages,
+          candidatesForJev,
+          [
+            ...referenceContext.messages,
+            ...referenceCandidateSnippets(draftReferenceCandidates, session.cleanText),
+          ],
           activeRequest.abort.signal,
         )
       : []
+    const approvedCandidateKeys = new Set(approvedCandidates.map(referenceCacheKey))
+    const recentConversationReferences = recentReferenceCandidates.filter((reference) =>
+      approvedCandidateKeys.has(referenceCacheKey(reference)),
+    )
+    const draftIdentificationReferences = draftReferenceCandidates.filter((reference) =>
+      approvedCandidateKeys.has(referenceCacheKey(reference)),
+    )
+    if (settings.contextualNormalizationEnabled && (!rollingState.validated || !rollingState.cardChecked)) {
+      const nextState: RollingReferenceState = {
+        ...rollingState,
+        entries: rollingState.validated
+          ? rollingState.entries
+          : rollingState.entries.filter((reference) =>
+              approvedCandidateKeys.has(referenceCacheKey(reference)),
+            ),
+        permanentEntries: rollingState.cardChecked
+          ? rollingState.permanentEntries
+          : cardCharacterReferences.filter((reference) =>
+              approvedCandidateKeys.has(referenceCacheKey(reference)),
+            ),
+        validated: true,
+        cardChecked: true,
+      }
+      await persistRollingReferenceState(context.userId, request.chatId, nextState)
+      cardCharacterReferences = nextState.permanentEntries
+    } else if (rollingState.cardChecked) {
+      cardCharacterReferences = rollingState.permanentEntries
+    }
+    const permanentCardKeys = new Set(cardCharacterReferences.map(referenceCacheKey))
+    cardCasingReferences = cardCasingReferences.filter((reference) =>
+      permanentCardKeys.has(referenceCacheKey(reference)),
+    )
     const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
     const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey))
     const strictRecentReferences = settings.contextualNormalizationEnabled
@@ -985,10 +1087,12 @@ async function handleEditInterpretation(
         authoritativeConversationReferences,
         spelling.learningCandidates.map((candidate) => candidate.canonical),
         session.cleanText,
+        draftIdentificationReferences,
       ),
       session.cleanText,
       cardCharacterReferences,
       conversationReferences,
+      draftIdentificationReferences,
     )
     const executeStartedAt = performance.now()
     const executed = executeEditPlan(
@@ -3562,10 +3666,8 @@ function normalizeEditInputPayloads(
   authoritativeConversationReferences: string[],
   protectedTerms: string[],
   draftText: string,
+  draftIdentificationReferences: string[],
 ): EditPlan {
-  const draftIdentificationReferences = extractConversationReferences([
-    { role: 'assistant', content: draftText },
-  ])
   const draftReferences = extractAuthoritativeCasingReferences(
     [{ role: 'assistant', content: draftText }],
     {
@@ -3636,8 +3738,8 @@ function normalizeEditReferenceTargets(
   draftText: string,
   cardCharacterReferences: string[],
   conversationReferences: string[],
+  draftReferences: string[],
 ): EditPlan {
-  const draftReferences = extractConversationReferences([{ role: 'assistant', content: draftText }])
   const references = mergeConversationReferences(
     mergeConversationReferences(cardCharacterReferences, conversationReferences),
     draftReferences,
@@ -4231,6 +4333,20 @@ function referenceCandidateContext(
   return ''
 }
 
+function referenceCandidateSnippets(
+  candidates: readonly string[],
+  text: string,
+): Array<{ role: 'assistant'; content: string }> {
+  const sentences = text.split(/(?<=[.!?])\s+|[\n\r]+/u)
+  const selected = new Set<string>()
+  for (const candidate of candidates) {
+    const key = candidate.toLocaleLowerCase()
+    const sentence = sentences.find((part) => part.toLocaleLowerCase().includes(key))
+    if (sentence?.trim()) selected.add(sentence.trim().slice(0, 400))
+  }
+  return [...selected].map((content) => ({ role: 'assistant', content }))
+}
+
 function restoreReferenceVerdicts(
   raw: unknown,
 ): { schemaVersion: 1; entries: Array<{ reference: string; properNoun: boolean }> } {
@@ -4259,15 +4375,7 @@ async function updateRollingReferenceCache(
 ): Promise<string[]> {
   const limit = clampReferenceCacheLimit(requestedLimit)
   const key = `${userId}\u0000${chatId}`
-  let state = rollingReferenceCache.get(key)
-  if (!state) {
-    const raw = await spindle.userStorage.getJson<unknown>(referenceCachePath(chatId), {
-      fallback: null,
-      userId,
-    })
-    state = restoreRollingReferenceCache(raw)
-    rollingReferenceCache.set(key, state)
-  }
+  let state = await loadRollingReferenceState(userId, chatId)
 
   const next = new Map<string, string>()
   const rejectedKeys = new Set(lowercaseReferenceKeys)
@@ -4288,11 +4396,36 @@ async function updateRollingReferenceCache(
     entries.length !== state.entries.length ||
     entries.some((entry, index) => entry !== state!.entries[index])
   ) {
-    state = { schemaVersion: 2, entries }
+    state = { ...state, schemaVersion: 3, entries }
     rollingReferenceCache.set(key, state)
     await spindle.userStorage.setJson(referenceCachePath(chatId), state, { userId })
   }
   return entries
+}
+
+async function loadRollingReferenceState(
+  userId: string,
+  chatId: string,
+): Promise<RollingReferenceState> {
+  const key = `${userId}\u0000${chatId}`
+  const cached = rollingReferenceCache.get(key)
+  if (cached) return cached
+  const raw = await spindle.userStorage.getJson<unknown>(referenceCachePath(chatId), {
+    fallback: null,
+    userId,
+  })
+  const state = restoreRollingReferenceCache(raw)
+  rollingReferenceCache.set(key, state)
+  return state
+}
+
+async function persistRollingReferenceState(
+  userId: string,
+  chatId: string,
+  state: RollingReferenceState,
+): Promise<void> {
+  rollingReferenceCache.set(`${userId}\u0000${chatId}`, state)
+  await spindle.userStorage.setJson(referenceCachePath(chatId), state, { userId })
 }
 
 function glossaryReferenceTerms(glossary: GlossaryState): string[] {
@@ -4324,10 +4457,9 @@ function rejectLowercaseReferences(
   })
 }
 
-function restoreRollingReferenceCache(raw: unknown): { schemaVersion: 2; entries: string[] } {
-  // Version 1 entries predate Jev admission and are intentionally discarded.
-  if (!isRecord(raw) || raw.schemaVersion !== 2 || !Array.isArray(raw.entries))
-    return { schemaVersion: 2, entries: [] }
+function restoreRollingReferenceCache(raw: unknown): RollingReferenceState {
+  if (!isRecord(raw) || !Array.isArray(raw.entries))
+    return { schemaVersion: 3, entries: [], permanentEntries: [], validated: true, cardChecked: false }
   const entries: string[] = []
   const seen = new Set<string>()
   for (const value of raw.entries) {
@@ -4339,7 +4471,16 @@ function restoreRollingReferenceCache(raw: unknown): { schemaVersion: 2; entries
     entries.push(normalized)
     if (entries.length >= 200) break
   }
-  return { schemaVersion: 2, entries }
+  const permanentEntries = Array.isArray(raw.permanentEntries)
+    ? raw.permanentEntries.filter((value): value is string => typeof value === 'string')
+    : []
+  return {
+    schemaVersion: 3,
+    entries,
+    permanentEntries,
+    validated: raw.schemaVersion === 3 && raw.validated === true,
+    cardChecked: raw.schemaVersion === 3 && raw.cardChecked === true,
+  }
 }
 
 function referenceCachePath(chatId: string): string {

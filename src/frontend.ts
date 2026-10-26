@@ -224,6 +224,41 @@ interface ComposerState {
   phaseFourMessage: string
 }
 
+function findComposerControlRoot(mount: Element): Element {
+  let current: Element = mount
+  for (let depth = 0; depth < 4; depth += 1) {
+    const parent = current.parentElement
+    if (!parent) break
+    current = parent
+    if (current.querySelectorAll('button').length >= 2) return current
+  }
+  return mount.parentElement ?? mount
+}
+
+function isNativeSttComposerButton(button: HTMLButtonElement): boolean {
+  if (button.closest('.jt-shell, .jt-floating') || button.classList.contains('jt-composer-launcher'))
+    return false
+  const accessibleText = [
+    button.getAttribute('aria-label'),
+    button.getAttribute('title'),
+    button.getAttribute('data-tooltip'),
+    button.getAttribute('data-tooltip-content'),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' ')
+  if (
+    /\b(?:speech[ -]?to[ -]?text|voice input|voice dictation|microphone|start (?:voice|dictation|recording)|record voice)\b/iu.test(
+      accessibleText,
+    )
+  )
+    return true
+  return Boolean(
+    button.querySelector(
+      'svg[data-lucide="mic"], svg.lucide-mic, svg[class*="microphone" i], [data-icon="microphone" i], [data-icon="mic" i]',
+    ),
+  )
+}
+
 export function setup(ctx: SpindleFrontendContext): () => void {
   ctx.deferReady()
 
@@ -247,7 +282,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     .jt-composer-launcher { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; padding: .45rem; border: 0; border-radius: .5rem; background: transparent; color: inherit; line-height: 1; cursor: pointer; opacity: .78; }
     .jt-composer-launcher .jt-brand-icon { width: 1.35rem; height: 1.35rem; flex: 0 0 auto; }
     .jt-composer-launcher:hover { background: color-mix(in srgb, currentColor 9%, transparent); opacity: 1; }
-    .jt-composer-launcher:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; opacity: 1; }`
+    .jt-composer-launcher:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; opacity: 1; }
+    .jt-native-stt-hidden { display: none !important; }`
   const composerLauncher = document.createElement('button')
   composerLauncher.type = 'button'
   composerLauncher.className = 'jt-composer-launcher'
@@ -255,6 +291,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   composerLauncher.title = 'Open JarvisType voice composer'
   composerLauncher.innerHTML = JARVISTYPE_ICON_SVG
   composerToolsMount.append(composerLauncherStyle, composerLauncher)
+  const composerControlRoot = findComposerControlRoot(composerToolsMount)
+  const hideNativeSttButton = () => {
+    for (const button of composerControlRoot.querySelectorAll<HTMLButtonElement>('button')) {
+      if (button === composerLauncher || button.contains(composerLauncher)) continue
+      if (isNativeSttComposerButton(button)) button.classList.add('jt-native-stt-hidden')
+    }
+  }
+  hideNativeSttButton()
+  const nativeSttObserver = new MutationObserver(hideNativeSttButton)
+  nativeSttObserver.observe(composerControlRoot, { childList: true, subtree: true })
 
   const initialFloatingSize = getFloatingWidgetSize()
   const initialViewport = getViewportSize()
@@ -2504,6 +2550,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     floatingWidget.root.removeEventListener('keydown', handleFloatingScrollKey)
     document.removeEventListener('keydown', handleFloatingFocusTrap, true)
     normalizationModelPicker.destroy()
+    nativeSttObserver.disconnect()
+    for (const button of composerControlRoot.querySelectorAll('.jt-native-stt-hidden'))
+      button.classList.remove('jt-native-stt-hidden')
     composerLauncher.remove()
     composerLauncherStyle.remove()
     floatingWidget.destroy()

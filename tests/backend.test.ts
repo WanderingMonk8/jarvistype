@@ -96,9 +96,7 @@ const spindleMock = {
           {
             type: 'noul',
             noul:
-              key === 'introducedGrammarError'
-                ? decisionProbability
-                : referenceDecisionProbability,
+              key === 'introducedGrammarError' ? decisionProbability : referenceDecisionProbability,
           },
         ]),
       )
@@ -480,6 +478,7 @@ test('reports whether a decision model connection is available for the when-need
 })
 
 test('uses local command context with compact conversational spelling references', async () => {
+  decisionsEnabled = true
   const userId = 'split-context-user'
   const chatId = 'split-context-chat'
   activeChatId = chatId
@@ -653,6 +652,7 @@ test('uses a reference name when the provider splits its possessive pronunciatio
 })
 
 test('does not grant casing authority to a sentence-initial reference candidate', async () => {
+  decisionsEnabled = true
   const userId = 'non-authoritative-building-user'
   const chatId = 'non-authoritative-building-chat'
   activeChatId = chatId
@@ -682,6 +682,7 @@ test('does not grant casing authority to a sentence-initial reference candidate'
 })
 
 test('uses structured card names as casing authority', async () => {
+  decisionsEnabled = true
   const userId = 'card-casing-authority-user'
   const chatId = 'card-casing-authority-chat'
   activeChatId = chatId
@@ -718,6 +719,7 @@ test('uses strong temporary active-draft names as casing authority', async () =>
 })
 
 test('recovers a unique recent-chat name with a stable prefix and mistranscribed ending', async () => {
+  decisionsEnabled = true
   const userId = 'recent-name-ending-user'
   const chatId = 'recent-name-ending-chat'
   activeChatId = chatId
@@ -750,6 +752,7 @@ test('recovers a unique recent-chat name with a stable prefix and mistranscribed
 })
 
 test('recovers a short possessive character name from recent chat', async () => {
+  decisionsEnabled = true
   const userId = 'recent-short-possessive-name-user'
   const chatId = 'recent-short-possessive-name-chat'
   activeChatId = chatId
@@ -4658,7 +4661,12 @@ test('skips a routine mid-sentence grammar call in when-needed mode', async () =
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'This is a wide entrance.')
-  assert.equal(decisionRequests.length, 1)
+  assert.equal(
+    decisionRequests.filter((request) =>
+      Object.hasOwn((request as { questions?: object }).questions ?? {}, 'introducedGrammarError'),
+    ).length,
+    1,
+  )
   assert.equal(
     generationRequests.filter((request) => {
       const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
@@ -4711,7 +4719,12 @@ test('uses a high Jev probability to invoke bounded grammar repair', async () =>
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'This is a wide entrance.')
-  assert.equal(decisionRequests.length, 1)
+  assert.equal(
+    decisionRequests.filter((request) =>
+      Object.hasOwn((request as { questions?: object }).questions ?? {}, 'introducedGrammarError'),
+    ).length,
+    1,
+  )
   assert.equal(
     generationRequests.filter((request) => {
       const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
@@ -5847,6 +5860,7 @@ test('a learned glossary spelling does not keep a known proper noun lowercase in
 })
 
 test('restores a known proper noun after explicit spelling in an edit instruction', async () => {
+  decisionsEnabled = true
   const cases: Array<
     readonly [string, Array<{ role: 'assistant' | 'user'; content: string }>, string]
   > = [
@@ -5917,6 +5931,7 @@ test('keeps the capital of a capitalized replacement word that is not a known re
 })
 
 test('restores a known proper noun after explicit spelling in a recording', async () => {
+  decisionsEnabled = true
   const cases: Array<
     readonly [Array<{ role: 'assistant' | 'user'; content: string }>, string, string | null, string]
   > = [
@@ -5956,6 +5971,7 @@ test('restores a known proper noun after explicit spelling in a recording', asyn
 })
 
 test('restores a known proper noun when a compact uppercase edit spelling defaults to lowercase', async () => {
+  decisionsEnabled = true
   const draft =
     "Brenner's voice comes up the lane raw and thin, and it is not an order. It is a report, and Erdl hears it, and his jaw sets."
   const cases: Array<readonly [Array<{ role: 'assistant' | 'user'; content: string }>, string]> = [

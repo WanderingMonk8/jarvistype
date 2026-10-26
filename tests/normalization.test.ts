@@ -40,6 +40,19 @@ test('capitalizes ordinary message and paragraph openings without changing estab
   )
 })
 
+test('consumes a capitalized phrase command even when the provider already title-cased it', () => {
+  const result = normalizeDeterministically(
+    'I turn to watch the man of capitalized White Hawk.',
+    [],
+  )
+  assert.equal(result.text, 'I turn to watch the man of White Hawk.')
+  assert.ok(result.reasons.includes('spoken casing'))
+  assert.equal(
+    normalizeDeterministically('We discussed the use of capitalized words.', []).text,
+    'We discussed the use of capitalized words.',
+  )
+})
+
 test('restores a missing sentence boundary after an opening My God interjection', () => {
   const result = normalizeDeterministically(
     'quotation My God Three mouths working on me period quotation',

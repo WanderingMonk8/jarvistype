@@ -198,7 +198,6 @@ const CASING_PROSE_PRECEDERS = new Set([
   'a',
   'an',
   'in',
-  'of',
   'as',
   'word',
   'words',
@@ -262,6 +261,14 @@ const CASING_TARGET_STOPWORDS = new Set([
   'you',
   'i',
   'me',
+  'letter',
+  'letters',
+  'word',
+  'words',
+  'text',
+  'phrase',
+  'phrases',
+  'type',
 ])
 
 function applySpokenCasingCommands(text: string): string {
@@ -377,7 +384,9 @@ export function normalizeDeterministically(
     }
   }
 
-  text = spaceEmDashes(cleanupPunctuationSpacing(applySpokenCasingCommands(text)))
+  const cased = applySpokenCasingCommands(text)
+  if (cased !== text) reasons.push('spoken casing')
+  text = spaceEmDashes(cleanupPunctuationSpacing(cased))
   const capitalized = capitalizeMessageOpenings(
     text,
     [

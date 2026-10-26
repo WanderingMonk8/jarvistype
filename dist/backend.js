@@ -2969,7 +2969,6 @@ var CASING_PROSE_PRECEDERS = /* @__PURE__ */ new Set([
   "a",
   "an",
   "in",
-  "of",
   "as",
   "word",
   "words",
@@ -3030,7 +3029,15 @@ var CASING_TARGET_STOPWORDS = /* @__PURE__ */ new Set([
   "us",
   "you",
   "i",
-  "me"
+  "me",
+  "letter",
+  "letters",
+  "word",
+  "words",
+  "text",
+  "phrase",
+  "phrases",
+  "type"
 ]);
 function applySpokenCasingCommands(text) {
   return text.replace(
@@ -3131,7 +3138,9 @@ function normalizeDeterministically(raw, glossary, options = {}) {
       text = next;
     }
   }
-  text = spaceEmDashes(cleanupPunctuationSpacing(applySpokenCasingCommands(text)));
+  const cased = applySpokenCasingCommands(text);
+  if (cased !== text) reasons.push("spoken casing");
+  text = spaceEmDashes(cleanupPunctuationSpacing(cased));
   const capitalized = capitalizeMessageOpenings(
     text,
     [

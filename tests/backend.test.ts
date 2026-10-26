@@ -34,6 +34,7 @@ let grammarRepairHangs = false
 let grammarRepairIgnoresAbort = false
 let grammarRepairSignal: AbortSignal | undefined
 let chatMessages: Array<{
+  id?: string
   role: 'system' | 'user' | 'assistant'
   content: unknown
   metadata?: Record<string, unknown>
@@ -563,7 +564,11 @@ test('persists strict references in a bounded per-chat rolling cache', async () 
   )
 
   chatMessages = [
-    { role: 'assistant', content: 'I spoke with Alpha beside the gate. Alpha waited.' },
+    {
+      id: 'rolling-message-alpha',
+      role: 'assistant',
+      content: 'I spoke with Alpha beside the gate. Alpha waited.',
+    },
   ]
   await dispatch(recordingAppendRequest(chatId, 'rolling-alpha', 0, 'Ready.'), userId)
   const firstDecision = decisionRequests[0] as {
@@ -573,7 +578,9 @@ test('persists strict references in a bounded per-chat rolling cache', async () 
     firstDecision.state?.candidates?.map((candidate) => candidate.reference) ?? []
   assert.equal(submittedReferences.filter((reference) => reference === 'Alpha').length, 1)
 
-  chatMessages = [{ role: 'assistant', content: 'An ordinary sentence.' }]
+  chatMessages = [
+    { id: 'rolling-message-ordinary', role: 'assistant', content: 'An ordinary sentence.' },
+  ]
   responses.length = 0
   await dispatch(recordingAppendRequest(chatId, 'rolling-alpha-recall', 0, 'Alfa arrives.'), userId)
   const recalled = responses.at(-1)?.payload
@@ -582,10 +589,16 @@ test('persists strict references in a bounded per-chat rolling cache', async () 
     assert.equal(recalled.proposal.candidateText, 'Alpha arrives.')
 
   chatMessages = [
-    { role: 'assistant', content: 'Building stands nearby. I spoke with Beta beside it.' },
+    {
+      id: 'rolling-message-beta',
+      role: 'assistant',
+      content: 'Building stands nearby. I spoke with Beta beside it.',
+    },
   ]
   await dispatch(recordingAppendRequest(chatId, 'rolling-beta', 0, 'Ready.'), userId)
-  chatMessages = [{ role: 'assistant', content: 'I spoke with Gamma beside it.' }]
+  chatMessages = [
+    { id: 'rolling-message-gamma', role: 'assistant', content: 'I spoke with Gamma beside it.' },
+  ]
   await dispatch(recordingAppendRequest(chatId, 'rolling-gamma', 0, 'Ready.'), userId)
 
   const storedCache = stored.get(`${userId}:reference-cache-${encodeURIComponent(chatId)}.json`) as
@@ -593,11 +606,24 @@ test('persists strict references in a bounded per-chat rolling cache', async () 
   assert.deepEqual(storedCache?.entries, ['Beta', 'Gamma'])
   assert.equal(storedCache?.entries?.includes('Building'), false)
 
-  chatMessages = [{ role: 'assistant', content: 'The beta release remains unstable.' }]
+  chatMessages = [
+    {
+      id: 'rolling-message-lowercase-beta',
+      role: 'assistant',
+      content: 'The beta release remains unstable.',
+    },
+  ]
   await dispatch(recordingAppendRequest(chatId, 'rolling-lowercase-beta', 0, 'Ready.'), userId)
   const prunedCache = stored.get(`${userId}:reference-cache-${encodeURIComponent(chatId)}.json`) as
-    { entries?: string[] } | undefined
+    { entries?: string[]; processedMessageIds?: string[] } | undefined
   assert.deepEqual(prunedCache?.entries, ['Gamma'])
+  assert.deepEqual(prunedCache?.processedMessageIds, [
+    'rolling-message-alpha',
+    'rolling-message-ordinary',
+    'rolling-message-beta',
+    'rolling-message-gamma',
+    'rolling-message-lowercase-beta',
+  ])
 })
 
 test('uses a reference name when the provider splits its possessive pronunciation', async () => {

@@ -114,11 +114,12 @@ const glossaryCache = new Map<string, GlossaryState>()
 const settingsCache = new Map<string, PhaseFourSettings>()
 const conversationReferenceCache = new Map<string, { signature: string; references: string[] }>()
 interface RollingReferenceState {
-  schemaVersion: 3
+  schemaVersion: 4
   entries: string[]
   permanentEntries: string[]
   validated: boolean
   cardChecked: boolean
+  processedMessageIds: string[]
 }
 const rollingReferenceCache = new Map<string, RollingReferenceState>()
 const referenceVerdictCache = new Map<
@@ -312,7 +313,23 @@ async function handleTranscriptNormalization(
       'normalize.context',
       `messages=${messages.length} contextCount=${settings.contextMessageCount} duration=${debugDuration(normalizeStartedAt)}`,
     )
-    const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount)
+    const rollingState = await loadRollingReferenceState(context.userId, request.chatId)
+    const processedMessageIds = new Set(rollingState.processedMessageIds)
+    const bootstrappingMessageScan = processedMessageIds.size === 0
+    const referenceSource = bootstrappingMessageScan
+      ? messages
+      : messages.filter(
+          (message, index) => !processedMessageIds.has(chatMessageIdentity(message, index)),
+        )
+    const referenceContext = selectRecentReferenceContext(
+      referenceSource,
+      bootstrappingMessageScan || settings.contextMessageCount === 0
+        ? settings.contextMessageCount
+        : 20,
+    )
+    const messageIdsToMark = (bootstrappingMessageScan ? messages : referenceSource).map(
+      chatMessageIdentity,
+    )
     const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
     const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext.messages, {
       lowercaseExemptions: glossaryReferenceExemptions,
@@ -324,7 +341,6 @@ async function handleTranscriptNormalization(
       request.chatId,
       referenceContext.messages,
     ).filter((reference) => eligibleReferenceKeys.has(referenceCacheKey(reference)))
-    const rollingState = await loadRollingReferenceState(context.userId, request.chatId)
     const draftReferenceCandidates = extractConversationReferences([
       { role: 'assistant', content: session.cleanText },
     ])
@@ -381,6 +397,15 @@ async function handleTranscriptNormalization(
         permanentKeys.has(referenceCacheKey(reference)),
       )
     }
+    const persistedRollingState = await loadRollingReferenceState(context.userId, request.chatId)
+    const nextProcessedMessageIds = [
+      ...new Set([...persistedRollingState.processedMessageIds, ...messageIdsToMark]),
+    ]
+    if (nextProcessedMessageIds.length !== persistedRollingState.processedMessageIds.length)
+      await persistRollingReferenceState(context.userId, request.chatId, {
+        ...persistedRollingState,
+        processedMessageIds: nextProcessedMessageIds,
+      })
     const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey))
     const lowercaseReferenceKeys = extractLowercaseReferenceKeys(messages).filter(
       (key) => !glossaryReferenceKeys.has(key),
@@ -968,7 +993,23 @@ async function handleEditInterpretation(
       'edit.loaded',
       `messages=${messages.length} references=${settings.contextualNormalizationEnabled ? 'on' : 'off'} duration=${debugDuration(editStartedAt)}`,
     )
-    const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount)
+    const rollingState = await loadRollingReferenceState(context.userId, request.chatId)
+    const processedMessageIds = new Set(rollingState.processedMessageIds)
+    const bootstrappingMessageScan = processedMessageIds.size === 0
+    const referenceSource = bootstrappingMessageScan
+      ? messages
+      : messages.filter(
+          (message, index) => !processedMessageIds.has(chatMessageIdentity(message, index)),
+        )
+    const referenceContext = selectRecentReferenceContext(
+      referenceSource,
+      bootstrappingMessageScan || settings.contextMessageCount === 0
+        ? settings.contextMessageCount
+        : 20,
+    )
+    const messageIdsToMark = (bootstrappingMessageScan ? messages : referenceSource).map(
+      chatMessageIdentity,
+    )
     const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
     const strictRecentReferences = settings.contextualNormalizationEnabled
       ? extractAuthoritativeCasingReferences(referenceContext.messages, {
@@ -982,7 +1023,6 @@ async function handleEditInterpretation(
           (reference) => eligibleReferenceKeys.has(referenceCacheKey(reference)),
         )
       : []
-    const rollingState = await loadRollingReferenceState(context.userId, request.chatId)
     const draftReferenceCandidates = extractConversationReferences([
       { role: 'assistant', content: session.cleanText },
     ])
@@ -1037,6 +1077,15 @@ async function handleEditInterpretation(
     cardCasingReferences = cardCasingReferences.filter((reference) =>
       permanentCardKeys.has(referenceCacheKey(reference)),
     )
+    const persistedRollingState = await loadRollingReferenceState(context.userId, request.chatId)
+    const nextProcessedMessageIds = [
+      ...new Set([...persistedRollingState.processedMessageIds, ...messageIdsToMark]),
+    ]
+    if (nextProcessedMessageIds.length !== persistedRollingState.processedMessageIds.length)
+      await persistRollingReferenceState(context.userId, request.chatId, {
+        ...persistedRollingState,
+        processedMessageIds: nextProcessedMessageIds,
+      })
     const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey))
     const lowercaseReferenceKeys = settings.contextualNormalizationEnabled
       ? extractLowercaseReferenceKeys(messages).filter((key) => !glossaryReferenceKeys.has(key))
@@ -4188,6 +4237,15 @@ function cachedConversationReferences(
   return references
 }
 
+function chatMessageIdentity(
+  message: { id?: string; role: string; content: string },
+  index: number,
+): string {
+  return typeof message.id === 'string' && message.id
+    ? message.id
+    : `legacy-${index}-${message.role}-${message.content}`
+}
+
 const JEV_REFERENCE_TIMEOUT_MS = 2_500
 const JEV_REFERENCE_ADMISSION_THRESHOLD = 0.85
 const MAX_REFERENCE_VERDICTS = 500
@@ -4405,7 +4463,7 @@ async function updateRollingReferenceCache(
     entries.length !== state.entries.length ||
     entries.some((entry, index) => entry !== state!.entries[index])
   ) {
-    state = { ...state, schemaVersion: 3, entries }
+    state = { ...state, schemaVersion: 4, entries }
     rollingReferenceCache.set(key, state)
     await spindle.userStorage.setJson(referenceCachePath(chatId), state, { userId })
   }
@@ -4468,7 +4526,14 @@ function rejectLowercaseReferences(
 
 function restoreRollingReferenceCache(raw: unknown): RollingReferenceState {
   if (!isRecord(raw) || !Array.isArray(raw.entries))
-    return { schemaVersion: 3, entries: [], permanentEntries: [], validated: true, cardChecked: false }
+    return {
+      schemaVersion: 4,
+      entries: [],
+      permanentEntries: [],
+      validated: true,
+      cardChecked: false,
+      processedMessageIds: [],
+    }
   const entries: string[] = []
   const seen = new Set<string>()
   for (const value of raw.entries) {
@@ -4484,11 +4549,15 @@ function restoreRollingReferenceCache(raw: unknown): RollingReferenceState {
     ? raw.permanentEntries.filter((value): value is string => typeof value === 'string')
     : []
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     entries,
     permanentEntries,
-    validated: raw.schemaVersion === 3 && raw.validated === true,
-    cardChecked: raw.schemaVersion === 3 && raw.cardChecked === true,
+    validated: (raw.schemaVersion === 3 || raw.schemaVersion === 4) && raw.validated === true,
+    cardChecked: (raw.schemaVersion === 3 || raw.schemaVersion === 4) && raw.cardChecked === true,
+    processedMessageIds:
+      raw.schemaVersion === 4 && Array.isArray(raw.processedMessageIds)
+        ? raw.processedMessageIds.filter((value): value is string => typeof value === 'string')
+        : [],
   }
 }
 

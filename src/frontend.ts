@@ -380,6 +380,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     tab.root,
     '[data-reference-cache-limit]',
   )
+  const referenceAdmissionOccurrencesInput = requireElement<HTMLInputElement>(
+    tab.root,
+    '[data-reference-admission-occurrences]',
+  )
   const contextualToggle = requireElement<HTMLInputElement>(tab.root, '[data-context-enabled]')
   const grammarRepairWarning = requireElement<HTMLElement>(
     tab.root,
@@ -483,6 +487,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     settings: {
       contextMessageCount: 5,
       referenceCacheLimit: 30,
+      referenceAdmissionOccurrences: 1,
       contextualNormalizationEnabled: true,
       grammarRepairMode: 'off',
       normalizationConnectionId: null,
@@ -789,6 +794,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     cancelEditCandidatesButton.disabled = !editCandidates || state.automatedBusy
     contextCountInput.value = String(state.settings.contextMessageCount)
     referenceCacheLimitInput.value = String(state.settings.referenceCacheLimit ?? 30)
+    referenceAdmissionOccurrencesInput.value = String(
+      state.settings.referenceAdmissionOccurrences ?? 1,
+    )
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
     grammarRepairSelect.value = state.settings.grammarRepairMode
     grammarRepairWarning.hidden =
@@ -1580,6 +1588,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       200,
       Math.max(0, Number.parseInt(referenceCacheLimitInput.value, 10) || 0),
     )
+    const referenceAdmissionOccurrences = Math.min(
+      5,
+      Math.max(1, Number.parseInt(referenceAdmissionOccurrencesInput.value, 10) || 1),
+    )
     const grammarRepairMode =
       grammarRepairSelect.value === 'always'
         ? 'always'
@@ -1588,6 +1600,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           : 'off'
     state.settings.contextMessageCount = contextMessageCount
     state.settings.referenceCacheLimit = referenceCacheLimit
+    state.settings.referenceAdmissionOccurrences = referenceAdmissionOccurrences
     state.settings.contextualNormalizationEnabled = contextualToggle.checked
     state.settings.grammarRepairMode = grammarRepairMode
     state.settings.debugLoggingEnabled = debugEnabledToggle.checked
@@ -1599,6 +1612,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       settings: {
         contextMessageCount,
         referenceCacheLimit,
+        referenceAdmissionOccurrences,
         contextualNormalizationEnabled: contextualToggle.checked,
         grammarRepairMode,
         normalizationConnectionId: state.settings.normalizationConnectionId,
@@ -1622,6 +1636,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
   const handleContextCountInput = () => scheduleSettingsSave(600)
   const handleReferenceCacheLimitInput = () => scheduleSettingsSave(600)
+  const handleReferenceAdmissionOccurrencesInput = () => scheduleSettingsSave(600)
   const handleSettingToggleChange = () => scheduleSettingsSave(0)
 
   const refreshDebugLog = async (clear = false): Promise<void> => {
@@ -2389,6 +2404,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   debugEnabledToggle.addEventListener('change', handleDebugEnabledChange)
   contextCountInput.addEventListener('input', handleContextCountInput)
   referenceCacheLimitInput.addEventListener('input', handleReferenceCacheLimitInput)
+  referenceAdmissionOccurrencesInput.addEventListener(
+    'input',
+    handleReferenceAdmissionOccurrencesInput,
+  )
   contextualToggle.addEventListener('change', handleSettingToggleChange)
   debugRefreshButton.addEventListener('click', handleDebugRefreshClick)
   debugCopyButton.addEventListener('click', handleDebugCopyClick)
@@ -2456,6 +2475,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (settingsSaveTimer) clearTimeout(settingsSaveTimer)
     contextCountInput.removeEventListener('input', handleContextCountInput)
     referenceCacheLimitInput.removeEventListener('input', handleReferenceCacheLimitInput)
+    referenceAdmissionOccurrencesInput.removeEventListener(
+      'input',
+      handleReferenceAdmissionOccurrencesInput,
+    )
     contextualToggle.removeEventListener('change', handleSettingToggleChange)
     grammarRepairSelect.removeEventListener('change', handleGrammarRepairModeChange)
     debugEnabledToggle.removeEventListener('change', handleDebugEnabledChange)
@@ -3126,6 +3149,7 @@ function shellMarkup(): string {
         <div class="jt-form-grid">
           <label>Messages scanned for references (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label>Rolling name cache (0–200, default 30)<input type="number" min="0" max="200" step="1" value="30" data-reference-cache-limit></label>
+          <label>Capitalized occurrences before Jev (1–5, default 1)<input type="number" min="1" max="5" step="1" value="1" data-reference-admission-occurrences></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. “When needed” needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose “Always” to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>

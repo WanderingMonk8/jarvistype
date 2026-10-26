@@ -157,6 +157,13 @@ test('admits mid-sentence capitalization immediately but requires two sentence o
     [],
   )
   assert.deepEqual(
+    extractAuthoritativeCasingReferences(
+      [{ role: 'assistant', content: 'Zorlin waits.' }],
+      { minimumOccurrences: 1 },
+    ),
+    ['Zorlin'],
+  )
+  assert.deepEqual(
     extractAuthoritativeCasingReferences([
       { role: 'assistant', content: 'Zorlin waits. Zorlin returns.' },
     ]),

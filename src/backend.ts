@@ -36,9 +36,11 @@ import {
 import {
   DEFAULT_CONTEXT_MESSAGE_COUNT,
   DEFAULT_REFERENCE_CACHE_LIMIT,
+  DEFAULT_REFERENCE_ADMISSION_OCCURRENCES,
   canonicalizeExactConversationReferences,
   clampContextMessageCount,
   clampReferenceCacheLimit,
+  clampReferenceAdmissionOccurrences,
   correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
   extractAuthoritativeCasingReferences,
@@ -152,6 +154,7 @@ const DEBUG_LOGGED_REQUEST_TYPES = new Set<FrontendRequest['type']>([
 const DEFAULT_SETTINGS: PhaseFourSettings = {
   contextMessageCount: DEFAULT_CONTEXT_MESSAGE_COUNT,
   referenceCacheLimit: DEFAULT_REFERENCE_CACHE_LIMIT,
+  referenceAdmissionOccurrences: DEFAULT_REFERENCE_ADMISSION_OCCURRENCES,
   contextualNormalizationEnabled: true,
   grammarRepairMode: 'off',
   normalizationConnectionId: null,
@@ -310,11 +313,17 @@ async function handleTranscriptNormalization(
       `messages=${messages.length} contextCount=${settings.contextMessageCount} duration=${debugDuration(normalizeStartedAt)}`,
     )
     const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount)
+    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
+    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext.messages, {
+      lowercaseExemptions: glossaryReferenceExemptions,
+      minimumOccurrences: settings.referenceAdmissionOccurrences,
+    })
+    const eligibleReferenceKeys = new Set(strictRecentReferences.map(referenceCacheKey))
     const recentReferenceCandidates = cachedConversationReferences(
       context.userId,
       request.chatId,
       referenceContext.messages,
-    )
+    ).filter((reference) => eligibleReferenceKeys.has(referenceCacheKey(reference)))
     const rollingState = await loadRollingReferenceState(context.userId, request.chatId)
     const draftReferenceCandidates = extractConversationReferences([
       { role: 'assistant', content: session.cleanText },
@@ -372,11 +381,7 @@ async function handleTranscriptNormalization(
         permanentKeys.has(referenceCacheKey(reference)),
       )
     }
-    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
     const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey))
-    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext.messages, {
-      lowercaseExemptions: glossaryReferenceExemptions,
-    })
     const lowercaseReferenceKeys = extractLowercaseReferenceKeys(messages).filter(
       (key) => !glossaryReferenceKeys.has(key),
     )
@@ -964,8 +969,18 @@ async function handleEditInterpretation(
       `messages=${messages.length} references=${settings.contextualNormalizationEnabled ? 'on' : 'off'} duration=${debugDuration(editStartedAt)}`,
     )
     const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount)
+    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
+    const strictRecentReferences = settings.contextualNormalizationEnabled
+      ? extractAuthoritativeCasingReferences(referenceContext.messages, {
+          lowercaseExemptions: glossaryReferenceExemptions,
+          minimumOccurrences: settings.referenceAdmissionOccurrences,
+        })
+      : []
+    const eligibleReferenceKeys = new Set(strictRecentReferences.map(referenceCacheKey))
     const recentReferenceCandidates = settings.contextualNormalizationEnabled
-      ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages)
+      ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages).filter(
+          (reference) => eligibleReferenceKeys.has(referenceCacheKey(reference)),
+        )
       : []
     const rollingState = await loadRollingReferenceState(context.userId, request.chatId)
     const draftReferenceCandidates = extractConversationReferences([
@@ -1022,13 +1037,7 @@ async function handleEditInterpretation(
     cardCasingReferences = cardCasingReferences.filter((reference) =>
       permanentCardKeys.has(referenceCacheKey(reference)),
     )
-    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
     const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey))
-    const strictRecentReferences = settings.contextualNormalizationEnabled
-      ? extractAuthoritativeCasingReferences(referenceContext.messages, {
-          lowercaseExemptions: glossaryReferenceExemptions,
-        })
-      : []
     const lowercaseReferenceKeys = settings.contextualNormalizationEnabled
       ? extractLowercaseReferenceKeys(messages).filter((key) => !glossaryReferenceKeys.has(key))
       : []
@@ -4587,6 +4596,9 @@ async function handleSettingsUpdate(
   const settings = {
     contextMessageCount: clampContextMessageCount(request.settings.contextMessageCount),
     referenceCacheLimit: clampReferenceCacheLimit(request.settings.referenceCacheLimit),
+    referenceAdmissionOccurrences: clampReferenceAdmissionOccurrences(
+      request.settings.referenceAdmissionOccurrences,
+    ),
     contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled,
     grammarRepairMode: request.settings.grammarRepairMode,
     normalizationConnectionId: request.settings.normalizationConnectionId,
@@ -5194,6 +5206,9 @@ async function loadSettings(userId: string): Promise<PhaseFourSettings> {
       ? {
           contextMessageCount: clampContextMessageCount(raw.contextMessageCount),
           referenceCacheLimit: clampReferenceCacheLimit(raw.referenceCacheLimit),
+          referenceAdmissionOccurrences: clampReferenceAdmissionOccurrences(
+            raw.referenceAdmissionOccurrences,
+          ),
           contextualNormalizationEnabled: raw.contextualNormalizationEnabled,
           grammarRepairMode:
             raw.grammarRepairMode === 'when_needed' || raw.grammarRepairMode === 'always'

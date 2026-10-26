@@ -335,7 +335,7 @@ function isPermissionSnapshot(value) {
   return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function isPhaseFourSettings(value) {
-  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger2(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
+  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger2(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger2(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function isNormalizationConnectionOption(value) {
   return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
@@ -672,6 +672,10 @@ function setup(ctx) {
     tab.root,
     "[data-reference-cache-limit]"
   );
+  const referenceAdmissionOccurrencesInput = requireElement(
+    tab.root,
+    "[data-reference-admission-occurrences]"
+  );
   const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
   const grammarRepairWarning = requireElement(
     tab.root,
@@ -771,6 +775,7 @@ function setup(ctx) {
     settings: {
       contextMessageCount: 5,
       referenceCacheLimit: 30,
+      referenceAdmissionOccurrences: 1,
       contextualNormalizationEnabled: true,
       grammarRepairMode: "off",
       normalizationConnectionId: null,
@@ -954,6 +959,9 @@ function setup(ctx) {
     cancelEditCandidatesButton.disabled = !editCandidates || state.automatedBusy;
     contextCountInput.value = String(state.settings.contextMessageCount);
     referenceCacheLimitInput.value = String(state.settings.referenceCacheLimit ?? 30);
+    referenceAdmissionOccurrencesInput.value = String(
+      state.settings.referenceAdmissionOccurrences ?? 1
+    );
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
     grammarRepairSelect.value = state.settings.grammarRepairMode;
     grammarRepairWarning.hidden = state.settings.grammarRepairMode !== "when_needed" || state.decisionModelAvailable !== false;
@@ -1595,9 +1603,14 @@ function setup(ctx) {
       200,
       Math.max(0, Number.parseInt(referenceCacheLimitInput.value, 10) || 0)
     );
+    const referenceAdmissionOccurrences = Math.min(
+      5,
+      Math.max(1, Number.parseInt(referenceAdmissionOccurrencesInput.value, 10) || 1)
+    );
     const grammarRepairMode = grammarRepairSelect.value === "always" ? "always" : grammarRepairSelect.value === "when_needed" ? "when_needed" : "off";
     state.settings.contextMessageCount = contextMessageCount;
     state.settings.referenceCacheLimit = referenceCacheLimit;
+    state.settings.referenceAdmissionOccurrences = referenceAdmissionOccurrences;
     state.settings.contextualNormalizationEnabled = contextualToggle.checked;
     state.settings.grammarRepairMode = grammarRepairMode;
     state.settings.debugLoggingEnabled = debugEnabledToggle.checked;
@@ -1609,6 +1622,7 @@ function setup(ctx) {
       settings: {
         contextMessageCount,
         referenceCacheLimit,
+        referenceAdmissionOccurrences,
         contextualNormalizationEnabled: contextualToggle.checked,
         grammarRepairMode,
         normalizationConnectionId: state.settings.normalizationConnectionId,
@@ -1632,6 +1646,7 @@ function setup(ctx) {
   };
   const handleContextCountInput = () => scheduleSettingsSave(600);
   const handleReferenceCacheLimitInput = () => scheduleSettingsSave(600);
+  const handleReferenceAdmissionOccurrencesInput = () => scheduleSettingsSave(600);
   const handleSettingToggleChange = () => scheduleSettingsSave(0);
   const refreshDebugLog = async (clear = false) => {
     if (state.settings.debugLoggingEnabled !== true) {
@@ -2292,6 +2307,10 @@ function setup(ctx) {
   debugEnabledToggle.addEventListener("change", handleDebugEnabledChange);
   contextCountInput.addEventListener("input", handleContextCountInput);
   referenceCacheLimitInput.addEventListener("input", handleReferenceCacheLimitInput);
+  referenceAdmissionOccurrencesInput.addEventListener(
+    "input",
+    handleReferenceAdmissionOccurrencesInput
+  );
   contextualToggle.addEventListener("change", handleSettingToggleChange);
   debugRefreshButton.addEventListener("click", handleDebugRefreshClick);
   debugCopyButton.addEventListener("click", handleDebugCopyClick);
@@ -2357,6 +2376,10 @@ function setup(ctx) {
     if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
     contextCountInput.removeEventListener("input", handleContextCountInput);
     referenceCacheLimitInput.removeEventListener("input", handleReferenceCacheLimitInput);
+    referenceAdmissionOccurrencesInput.removeEventListener(
+      "input",
+      handleReferenceAdmissionOccurrencesInput
+    );
     contextualToggle.removeEventListener("change", handleSettingToggleChange);
     grammarRepairSelect.removeEventListener("change", handleGrammarRepairModeChange);
     debugEnabledToggle.removeEventListener("change", handleDebugEnabledChange);
@@ -2951,6 +2974,7 @@ function shellMarkup() {
         <div class="jt-form-grid">
           <label>Messages scanned for references (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label>Rolling name cache (0\u2013200, default 30)<input type="number" min="0" max="200" step="1" value="30" data-reference-cache-limit></label>
+          <label>Capitalized occurrences before Jev (1\u20135, default 1)<input type="number" min="1" max="5" step="1" value="1" data-reference-admission-occurrences></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. \u201CWhen needed\u201D needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose \u201CAlways\u201D to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>

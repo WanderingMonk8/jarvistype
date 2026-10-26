@@ -347,6 +347,10 @@ function isPhaseFourSettings(value: unknown): boolean {
     value.contextMessageCount <= 20 &&
     (value.referenceCacheLimit === undefined ||
       (isNonNegativeInteger(value.referenceCacheLimit) && value.referenceCacheLimit <= 200)) &&
+    (value.referenceAdmissionOccurrences === undefined ||
+      (isNonNegativeInteger(value.referenceAdmissionOccurrences) &&
+        value.referenceAdmissionOccurrences >= 1 &&
+        value.referenceAdmissionOccurrences <= 5)) &&
     typeof value.contextualNormalizationEnabled === 'boolean' &&
     (value.grammarRepairMode === 'off' ||
       value.grammarRepairMode === 'when_needed' ||

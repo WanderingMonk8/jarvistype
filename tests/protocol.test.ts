@@ -152,6 +152,7 @@ test('validates normalization connection and custom-model settings', () => {
       settings: {
         contextMessageCount: 5,
         referenceCacheLimit: 30,
+        referenceAdmissionOccurrences: 1,
         contextualNormalizationEnabled: true,
         grammarRepairMode: 'when_needed',
         normalizationConnectionId: 'connection-1',

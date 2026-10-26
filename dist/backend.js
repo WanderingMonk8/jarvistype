@@ -1917,6 +1917,8 @@ var DEFAULT_CONTEXT_MESSAGE_COUNT = 5;
 var MAX_CONTEXT_MESSAGE_COUNT = 20;
 var DEFAULT_REFERENCE_CACHE_LIMIT = 30;
 var MAX_REFERENCE_CACHE_LIMIT = 200;
+var DEFAULT_REFERENCE_ADMISSION_OCCURRENCES = 1;
+var MAX_REFERENCE_ADMISSION_OCCURRENCES = 5;
 var MAX_CONTEXT_CHARACTERS = 12e3;
 var MAX_CONVERSATION_REFERENCE_CHARACTERS = 2e3;
 function clampContextMessageCount(value) {
@@ -1926,6 +1928,11 @@ function clampContextMessageCount(value) {
 function clampReferenceCacheLimit(value) {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_REFERENCE_CACHE_LIMIT;
   return Math.min(MAX_REFERENCE_CACHE_LIMIT, Math.max(0, Math.floor(value)));
+}
+function clampReferenceAdmissionOccurrences(value) {
+  if (typeof value !== "number" || !Number.isFinite(value))
+    return DEFAULT_REFERENCE_ADMISSION_OCCURRENCES;
+  return Math.min(MAX_REFERENCE_ADMISSION_OCCURRENCES, Math.max(1, Math.floor(value)));
 }
 function selectRecentContext(source, requestedCount, characterLimit = MAX_CONTEXT_CHARACTERS) {
   const count = clampContextMessageCount(requestedCount);
@@ -2095,7 +2102,7 @@ function extractAuthoritativeCasingReferences(messages, options = {}) {
   const supportedSingles = candidates.filter((candidate) => {
     const item = evidence.get(referenceCanonicalKey(candidate));
     if (!item) return false;
-    return item.strong || options.allowRepeatedSentenceOpenings !== false && item.occurrences >= 2;
+    return item.strong || options.allowRepeatedSentenceOpenings !== false && item.occurrences >= (options.minimumOccurrences ?? 2);
   });
   const supportedKeys = new Set([...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey));
   return extracted.filter((reference) => supportedKeys.has(referenceEvidenceKey(reference)));
@@ -3548,7 +3555,7 @@ function sanitizeGrantedPermissions(granted) {
   };
 }
 function isPhaseFourSettings(value) {
-  return isRecord4(value) && isNonNegativeInteger3(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger3(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
+  return isRecord4(value) && isNonNegativeInteger3(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger3(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger3(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function hasEnvelope(value) {
   return isRecord4(value) && value.protocolVersion === PROTOCOL_VERSION && isBoundedString(value.type, 1, 128) && isIdentifier2(value.requestId);
@@ -3605,6 +3612,7 @@ var DEBUG_LOGGED_REQUEST_TYPES = /* @__PURE__ */ new Set([
 var DEFAULT_SETTINGS = {
   contextMessageCount: DEFAULT_CONTEXT_MESSAGE_COUNT,
   referenceCacheLimit: DEFAULT_REFERENCE_CACHE_LIMIT,
+  referenceAdmissionOccurrences: DEFAULT_REFERENCE_ADMISSION_OCCURRENCES,
   contextualNormalizationEnabled: true,
   grammarRepairMode: "off",
   normalizationConnectionId: null,
@@ -3753,11 +3761,17 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       `messages=${messages.length} contextCount=${settings2.contextMessageCount} duration=${debugDuration(normalizeStartedAt)}`
     );
     const referenceContext2 = selectRecentReferenceContext(messages, settings2.contextMessageCount);
+    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary2);
+    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext2.messages, {
+      lowercaseExemptions: glossaryReferenceExemptions,
+      minimumOccurrences: settings2.referenceAdmissionOccurrences
+    });
+    const eligibleReferenceKeys = new Set(strictRecentReferences.map(referenceCacheKey));
     const recentReferenceCandidates = cachedConversationReferences(
       context.userId,
       request.chatId,
       referenceContext2.messages
-    );
+    ).filter((reference) => eligibleReferenceKeys.has(referenceCacheKey(reference)));
     const rollingState = await loadRollingReferenceState(context.userId, request.chatId);
     const draftReferenceCandidates = extractConversationReferences([
       { role: "assistant", content: session2.cleanText }
@@ -3811,11 +3825,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
         (reference) => permanentKeys.has(referenceCacheKey(reference))
       );
     }
-    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary2);
     const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey));
-    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext2.messages, {
-      lowercaseExemptions: glossaryReferenceExemptions
-    });
     const lowercaseReferenceKeys = extractLowercaseReferenceKeys(messages).filter(
       (key) => !glossaryReferenceKeys.has(key)
     );
@@ -4313,7 +4323,15 @@ async function handleEditInterpretation(request, context, activeRequest) {
       `messages=${messages.length} references=${settings.contextualNormalizationEnabled ? "on" : "off"} duration=${debugDuration(editStartedAt)}`
     );
     const referenceContext = selectRecentReferenceContext(messages, settings.contextMessageCount);
-    const recentReferenceCandidates = settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages) : [];
+    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary);
+    const strictRecentReferences = settings.contextualNormalizationEnabled ? extractAuthoritativeCasingReferences(referenceContext.messages, {
+      lowercaseExemptions: glossaryReferenceExemptions,
+      minimumOccurrences: settings.referenceAdmissionOccurrences
+    }) : [];
+    const eligibleReferenceKeys = new Set(strictRecentReferences.map(referenceCacheKey));
+    const recentReferenceCandidates = settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages).filter(
+      (reference) => eligibleReferenceKeys.has(referenceCacheKey(reference))
+    ) : [];
     const rollingState = await loadRollingReferenceState(context.userId, request.chatId);
     const draftReferenceCandidates = extractConversationReferences([
       { role: "assistant", content: session.cleanText }
@@ -4363,11 +4381,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
     cardCasingReferences = cardCasingReferences.filter(
       (reference) => permanentCardKeys.has(referenceCacheKey(reference))
     );
-    const glossaryReferenceExemptions = glossaryReferenceTerms(glossary);
     const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey));
-    const strictRecentReferences = settings.contextualNormalizationEnabled ? extractAuthoritativeCasingReferences(referenceContext.messages, {
-      lowercaseExemptions: glossaryReferenceExemptions
-    }) : [];
     const lowercaseReferenceKeys = settings.contextualNormalizationEnabled ? extractLowercaseReferenceKeys(messages).filter((key) => !glossaryReferenceKeys.has(key)) : [];
     const approvedReferenceKeys = new Set(recentConversationReferences.map(referenceCacheKey));
     const admittedRecentReferences = rejectLowercaseReferences(
@@ -7132,6 +7146,9 @@ async function handleSettingsUpdate(request, context, activeRequest) {
   const settings = {
     contextMessageCount: clampContextMessageCount(request.settings.contextMessageCount),
     referenceCacheLimit: clampReferenceCacheLimit(request.settings.referenceCacheLimit),
+    referenceAdmissionOccurrences: clampReferenceAdmissionOccurrences(
+      request.settings.referenceAdmissionOccurrences
+    ),
     contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled,
     grammarRepairMode: request.settings.grammarRepairMode,
     normalizationConnectionId: request.settings.normalizationConnectionId,
@@ -7622,6 +7639,9 @@ async function loadSettings(userId) {
   const settings = isRecord5(raw) && typeof raw.contextualNormalizationEnabled === "boolean" ? {
     contextMessageCount: clampContextMessageCount(raw.contextMessageCount),
     referenceCacheLimit: clampReferenceCacheLimit(raw.referenceCacheLimit),
+    referenceAdmissionOccurrences: clampReferenceAdmissionOccurrences(
+      raw.referenceAdmissionOccurrences
+    ),
     contextualNormalizationEnabled: raw.contextualNormalizationEnabled,
     grammarRepairMode: raw.grammarRepairMode === "when_needed" || raw.grammarRepairMode === "always" ? raw.grammarRepairMode : "off",
     normalizationConnectionId: typeof raw.normalizationConnectionId === "string" && raw.normalizationConnectionId.length > 0 ? raw.normalizationConnectionId.slice(0, 256) : null,

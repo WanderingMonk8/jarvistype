@@ -4,6 +4,8 @@ export const DEFAULT_CONTEXT_MESSAGE_COUNT = 5
 export const MAX_CONTEXT_MESSAGE_COUNT = 20
 export const DEFAULT_REFERENCE_CACHE_LIMIT = 30
 export const MAX_REFERENCE_CACHE_LIMIT = 200
+export const DEFAULT_REFERENCE_ADMISSION_OCCURRENCES = 1
+export const MAX_REFERENCE_ADMISSION_OCCURRENCES = 5
 export const MAX_CONTEXT_CHARACTERS = 12_000
 export const NORMALIZATION_RECENT_MESSAGE_COUNT = 2
 export const NORMALIZATION_RECENT_CONTEXT_CHARACTERS = 4_000
@@ -42,6 +44,12 @@ export function clampContextMessageCount(value: unknown): number {
 export function clampReferenceCacheLimit(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_REFERENCE_CACHE_LIMIT
   return Math.min(MAX_REFERENCE_CACHE_LIMIT, Math.max(0, Math.floor(value)))
+}
+
+export function clampReferenceAdmissionOccurrences(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    return DEFAULT_REFERENCE_ADMISSION_OCCURRENCES
+  return Math.min(MAX_REFERENCE_ADMISSION_OCCURRENCES, Math.max(1, Math.floor(value)))
 }
 
 export function selectRecentContext(
@@ -203,6 +211,7 @@ export function extractAuthoritativeCasingReferences(
     allowRepeatedWithinSource?: boolean
     allowMidSentenceCapitalized?: boolean
     allowRepeatedSentenceOpenings?: boolean
+    minimumOccurrences?: number
     lowercaseExemptions?: readonly string[]
   } = {},
 ): string[] {
@@ -262,7 +271,8 @@ export function extractAuthoritativeCasingReferences(
     if (!item) return false
     return (
       item.strong ||
-      (options.allowRepeatedSentenceOpenings !== false && item.occurrences >= 2)
+      (options.allowRepeatedSentenceOpenings !== false &&
+        item.occurrences >= (options.minimumOccurrences ?? 2))
     )
   })
   const supportedKeys = new Set([...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey))

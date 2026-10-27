@@ -1002,7 +1002,7 @@ function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms
   } else if (!paragraph && operation.target.scope !== "draft") {
     return `${operation.type} requires exact text or one paragraph target`;
   }
-  const isParagraphInsertion = paragraph !== void 0 && operation.target.exactText === void 0 && operation.target.approximateText === void 0 && operation.target.punctuation === void 0 && (operation.type === "insert_before" || operation.type === "insert_after");
+  const isParagraphInsertion = paragraph !== void 0 && !hasInlineSelector(operation.target) && (operation.type === "insert_before" || operation.type === "insert_after");
   if (isParagraphInsertion) {
     const insertedParagraph = (operation.text ?? "").trim();
     if (!insertedParagraph) return "paragraph insertion text is empty";

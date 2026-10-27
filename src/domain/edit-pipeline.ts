@@ -510,9 +510,7 @@ function resolveOperation(
   }
   const isParagraphInsertion =
     paragraph !== undefined &&
-    operation.target.exactText === undefined &&
-    operation.target.approximateText === undefined &&
-    operation.target.punctuation === undefined &&
+    !hasInlineSelector(operation.target) &&
     (operation.type === 'insert_before' || operation.type === 'insert_after')
   if (isParagraphInsertion) {
     const insertedParagraph = (operation.text ?? '').trim()

@@ -439,6 +439,33 @@ test('adds deterministic paragraph boundaries for paragraph-targeted insertions'
   )
 })
 
+test('keeps insertion after the last sentence inside its paragraph', () => {
+  const text = 'First sentence. You know?'
+  const result = executeEditPlan(
+    text,
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'Insert a sentence after the last sentence.',
+      operations: [
+        {
+          id: 'after-last-sentence',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, sentenceFromEnd: 1 },
+          text: 'All right, I am going now.',
+        },
+      ],
+    },
+  )
+
+  assert.equal(
+    result.ok && result.afterText,
+    'First sentence. You know? All right, I am going now.',
+  )
+})
+
 test('keeps exact-text insertions inline and adds only missing boundary spacing', () => {
   const session = fixture()
   const after = executeEditPlan(session.cleanText, session.paragraphs, 1, {

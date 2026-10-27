@@ -1038,7 +1038,11 @@ ${formattedParagraph}`,
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? "");
       const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? "");
       const endsLine = end >= range.end || /[\r\n]/.test(cleanText[end] ?? "");
-      if (hasSeparatorBefore && (hasSeparatorAfter || endsLine)) start -= 1;
+      const endsBeforeClosingWrapper = /^[”’"')\]}]+(?=\s|$)/u.test(
+        cleanText.slice(end, range.end)
+      );
+      if (hasSeparatorBefore && (hasSeparatorAfter || endsLine || endsBeforeClosingWrapper))
+        start -= 1;
       else if (hasSeparatorAfter && start === range.start) end += 1;
       else if (hasSeparatorAfter && /[“‘"'([{<`*_]$/u.test(cleanText.slice(range.start, start)))
         end += 1;
@@ -1151,7 +1155,7 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
   };
 }
 function attachedSentencePartPunctuation(text, end, limit) {
-  return text.slice(end, limit).match(/^(?:\.{3}|[.,;:!?…—–-])+(?=\s|$)/u)?.[0] ?? "";
+  return text.slice(end, limit).match(/^((?:\.{3}|[.,;:!?…—–-])+)(?=[”’"')\]}]*(?:\s|$))/u)?.[1] ?? "";
 }
 function expandThroughPairedPunctuation(text, start, end, limitStart, limitEnd) {
   const before = text.slice(limitStart, start);

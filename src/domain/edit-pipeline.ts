@@ -553,7 +553,11 @@ function resolveOperation(
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
       const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
       const endsLine = end >= range.end || /[\r\n]/.test(cleanText[end] ?? '')
-      if (hasSeparatorBefore && (hasSeparatorAfter || endsLine)) start -= 1
+      const endsBeforeClosingWrapper = /^[”’"')\]}]+(?=\s|$)/u.test(
+        cleanText.slice(end, range.end),
+      )
+      if (hasSeparatorBefore && (hasSeparatorAfter || endsLine || endsBeforeClosingWrapper))
+        start -= 1
       else if (hasSeparatorAfter && start === range.start) end += 1
       else if (
         hasSeparatorAfter &&
@@ -781,7 +785,11 @@ function executeInlineMove(
 
 /** Sentence-part punctuation that becomes orphaned when the entire part is removed. */
 function attachedSentencePartPunctuation(text: string, end: number, limit: number): string {
-  return text.slice(end, limit).match(/^(?:\.{3}|[.,;:!?…—–-])+(?=\s|$)/u)?.[0] ?? ''
+  return (
+    text
+      .slice(end, limit)
+      .match(/^((?:\.{3}|[.,;:!?…—–-])+)(?=[”’"')\]}]*(?:\s|$))/u)?.[1] ?? ''
+  )
 }
 
 /**

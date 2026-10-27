@@ -996,6 +996,52 @@ test('deletion consumes one adjacent horizontal separator without touching other
     'This is the [of staff] roster.',
   )
 
+  const finalQuotedSentence = executeEditPlan(
+    '“I swear if I have to deal with these smug bastards again. Commonwealth.”',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete the final sentence inside a surrounding quotation',
+      operations: [
+        {
+          id: 'delete-final-quoted-sentence',
+          type: 'delete',
+          target: { exactText: 'Commonwealth' },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    finalQuotedSentence.ok && finalQuotedSentence.afterText,
+    '“I swear if I have to deal with these smug bastards again.”',
+  )
+
+  for (const separator of [':', ';'] as const) {
+    const quotedSentencePart = executeEditPlan(
+      `"I swear if I have to deal with these smug bastards again. Commonwealth${separator}” I shake my head as I let out my snort.`,
+      [],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'delete an entire quoted sentence part and its attached separator',
+        operations: [
+          {
+            id: `delete-quoted-part-${separator}`,
+            type: 'delete',
+            target: { exactText: 'Commonwealth' },
+          },
+        ],
+      },
+    )
+    assert.equal(
+      quotedSentencePart.ok && quotedSentencePart.afterText,
+      '"I swear if I have to deal with these smug bastards again.” I shake my head as I let out my snort.',
+    )
+  }
+
   const middlePhraseBeforeComma = executeEditPlan(
     'Everyday they are digging a hole, despite the rain.',
     [],

@@ -1,5 +1,11 @@
+import { areSpeechPhoneticNeighbors, speechPhoneticKey } from './phonetics'
+
 export const DEFAULT_CONTEXT_MESSAGE_COUNT = 5
 export const MAX_CONTEXT_MESSAGE_COUNT = 20
+export const DEFAULT_REFERENCE_CACHE_LIMIT = 30
+export const MAX_REFERENCE_CACHE_LIMIT = 200
+export const DEFAULT_REFERENCE_ADMISSION_OCCURRENCES = 1
+export const MAX_REFERENCE_ADMISSION_OCCURRENCES = 5
 export const MAX_CONTEXT_CHARACTERS = 12_000
 export const NORMALIZATION_RECENT_MESSAGE_COUNT = 2
 export const NORMALIZATION_RECENT_CONTEXT_CHARACTERS = 4_000
@@ -33,6 +39,17 @@ export interface ConversationReferenceCorrection {
 export function clampContextMessageCount(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_CONTEXT_MESSAGE_COUNT
   return Math.min(MAX_CONTEXT_MESSAGE_COUNT, Math.max(0, Math.trunc(value)))
+}
+
+export function clampReferenceCacheLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_REFERENCE_CACHE_LIMIT
+  return Math.min(MAX_REFERENCE_CACHE_LIMIT, Math.max(0, Math.floor(value)))
+}
+
+export function clampReferenceAdmissionOccurrences(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    return DEFAULT_REFERENCE_ADMISSION_OCCURRENCES
+  return Math.min(MAX_REFERENCE_ADMISSION_OCCURRENCES, Math.max(1, Math.floor(value)))
 }
 
 export function selectRecentContext(
@@ -124,15 +141,31 @@ export function selectRecentReferenceContext(
 export function extractConversationReferences(
   messages: readonly ContextMessage[],
   characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS,
+  lowercaseExemptions: readonly string[] = [],
 ): string[] {
   if (characterLimit <= 0) return []
   const references: string[] = []
   const seen = new Set<string>()
+  // A capitalized occurrence alone is weak evidence: it may only begin a sentence.
+  // If the selected source also uses the same token lowercase, treat it as ordinary
+  // vocabulary and never promote that single token into a casing reference.
+  const lowercaseEvidence = new Set<string>()
+  const exemptLowercaseKeys = new Set(lowercaseExemptions.map(referenceEvidenceKey))
+  for (const message of messages) {
+    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
+    for (const term of terms) {
+      if (/^\p{Ll}/u.test(term)) {
+        const key = referenceEvidenceKey(stripPossessiveSuffix(term))
+        if (!exemptLowercaseKeys.has(key)) lowercaseEvidence.add(key)
+      }
+    }
+  }
   let size = 0
 
   const add = (value: string) => {
-    const normalized = value.trim()
-    const key = normalized.toLocaleLowerCase()
+    const normalized = normalizeReferenceCasing(value.trim())
+    const key = referenceEvidenceKey(normalized)
+    if (!/\s/u.test(normalized) && lowercaseEvidence.has(key)) return
     if (!normalized || seen.has(key) || size + normalized.length > characterLimit) return
     seen.add(key)
     references.push(normalized)
@@ -146,8 +179,11 @@ export function extractConversationReferences(
       const terms = segment.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
       let sequence: string[] = []
       const flushSequence = () => {
-        if (sequence.length > 1) add(sequence.slice(0, 4).join(' '))
-        for (const term of sequence) add(term)
+        const supported = sequence.filter(
+          (term) => !lowercaseEvidence.has(referenceEvidenceKey(term)),
+        )
+        if (supported.length > 1) add(supported.slice(0, 4).join(' '))
+        for (const term of supported) add(term)
         sequence = []
       }
 
@@ -163,6 +199,123 @@ export function extractConversationReferences(
   }
 
   return references
+}
+
+/**
+ * Returns only inferred references with enough contextual evidence to alter casing.
+ * The broader reference list remains available for unique fuzzy identification.
+ */
+export function extractAuthoritativeCasingReferences(
+  messages: readonly ContextMessage[],
+  options: {
+    allowRepeatedWithinSource?: boolean
+    allowMidSentenceCapitalized?: boolean
+    allowRepeatedSentenceOpenings?: boolean
+    minimumOccurrences?: number
+    lowercaseExemptions?: readonly string[]
+  } = {},
+): string[] {
+  const extracted = extractConversationReferences(
+    messages,
+    MAX_CONVERSATION_REFERENCE_CHARACTERS,
+    options.lowercaseExemptions,
+  )
+  const phraseCandidates = extracted.filter((reference) => /\s/u.test(reference))
+  const candidates = extracted.filter((reference) => !/\s/u.test(reference))
+  const candidateByKey = new Map(
+    candidates.map((candidate) => [referenceCanonicalKey(candidate), candidate]),
+  )
+  const evidence = new Map<
+    string,
+    { strong: boolean; occurrences: number; messageIndexes: Set<number> }
+  >()
+
+  messages.forEach((message, messageIndex) => {
+    const tokens = [...message.content.matchAll(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu)].map(
+      (match) => ({
+        value: match[0],
+        start: match.index,
+        end: match.index + match[0].length,
+      }),
+    )
+    tokens.forEach((token, tokenIndex) => {
+      if (!/^\p{Lu}/u.test(token.value)) return
+      const possessive = token.value.match(/(['’]s)$/iu)?.[0] ?? ''
+      const base = possessive ? token.value.slice(0, -possessive.length) : token.value
+      const key = referenceEvidenceKey(normalizeReferenceCasing(base))
+      if (!candidateByKey.has(key)) return
+      const previous = tokens[tokenIndex - 1]
+      const next = tokens[tokenIndex + 1]
+      const adjacentCapitalizedCandidate = [previous, next].some((neighbor) => {
+        if (!neighbor || !/^\p{Lu}/u.test(neighbor.value)) return false
+        const between = message.content.slice(
+          Math.min(token.end, neighbor.end),
+          Math.max(token.start, neighbor.start),
+        )
+        return /^\s*$/u.test(between) && candidateByKey.has(referenceCanonicalKey(neighbor.value))
+      })
+      const supportedMidSentenceUse =
+        !isSentenceOpeningAt(message.content, token.start) && !adjacentCapitalizedCandidate
+      const current = evidence.get(key) ?? {
+        strong: false,
+        occurrences: 0,
+        messageIndexes: new Set<number>(),
+      }
+      current.strong ||= supportedMidSentenceUse
+      current.occurrences += 1
+      current.messageIndexes.add(messageIndex)
+      evidence.set(key, current)
+    })
+  })
+
+  const supportedSingles = candidates.filter((candidate) => {
+    const item = evidence.get(referenceCanonicalKey(candidate))
+    if (!item) return false
+    return (
+      item.strong ||
+      (options.allowRepeatedSentenceOpenings !== false &&
+        item.occurrences >= (options.minimumOccurrences ?? 2))
+    )
+  })
+  const supportedKeys = new Set(
+    [...phraseCandidates, ...supportedSingles].map(referenceEvidenceKey),
+  )
+  return extracted.filter((reference) => supportedKeys.has(referenceEvidenceKey(reference)))
+}
+
+export function extractLowercaseReferenceKeys(messages: readonly ContextSourceMessage[]): string[] {
+  const keys = new Set<string>()
+  for (const message of messages) {
+    if (!isEligible(message)) continue
+    const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
+    for (const term of terms) {
+      if (/^\p{Ll}/u.test(term)) keys.add(referenceEvidenceKey(stripPossessiveSuffix(term)))
+    }
+  }
+  return [...keys]
+}
+
+export function extractCardCasingReferences(title: string, cardText: string): string[] {
+  const titleReferences = title.trim()
+    ? extractConversationReferences([{ role: 'assistant', content: title }])
+    : []
+  const bodyIdentification = cardText.trim()
+    ? extractConversationReferences([{ role: 'assistant', content: cardText }])
+    : []
+  const bodyKeys = new Set(bodyIdentification.map(referenceEvidenceKey))
+  const confirmedTitleReferences = titleReferences.filter((reference) =>
+    bodyKeys.has(referenceEvidenceKey(reference)),
+  )
+  const selectedTitleReferences = confirmedTitleReferences.length
+    ? confirmedTitleReferences
+    : titleReferences
+  const bodyCasingReferences = cardText.trim()
+    ? extractAuthoritativeCasingReferences([{ role: 'assistant', content: cardText }], {
+        allowRepeatedWithinSource: true,
+        allowMidSentenceCapitalized: true,
+      })
+    : []
+  return uniqueReferences([...selectedTitleReferences, ...bodyCasingReferences])
 }
 
 export function extractCardCharacterReferences(title: string, cardText: string): string[] {
@@ -186,6 +339,15 @@ export function extractCardCharacterReferences(title: string, cardText: string):
     if (!references.has(key)) references.set(key, reference)
   }
   return [...references.values()]
+}
+
+function uniqueReferences(references: readonly string[]): string[] {
+  const selected = new Map<string, string>()
+  for (const reference of references) {
+    const key = referenceEvidenceKey(reference)
+    if (!selected.has(key)) selected.set(key, reference)
+  }
+  return [...selected.values()]
 }
 
 export function correctFromConversationReferences(
@@ -217,7 +379,28 @@ export function canonicalizeExactConversationReferences(
   const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()))
   const referenceByKey = referenceMap(references)
   const correctedTerms: Array<{ heard: string; canonical: string }> = []
-  const correctedText = text.replace(
+  let correctedText = text
+  const phraseReferences = [
+    ...new Map(
+      references
+        .map((reference) => normalizeReferenceCasing(reference.trim()))
+        .filter((reference) => /\s/u.test(reference))
+        .map((reference) => [reference.toLocaleLowerCase(), reference]),
+    ).values(),
+  ].sort((left, right) => right.length - left.length)
+  for (const canonical of phraseReferences) {
+    if (protectedKeys.has(canonical.toLocaleLowerCase())) continue
+    const pattern = new RegExp(
+      `(?<![\\p{L}\\p{N}])${escapeReferencePattern(canonical).replace(/\s+/gu, '\\s+')}(?![\\p{L}\\p{N}])`,
+      'giu',
+    )
+    correctedText = correctedText.replace(pattern, (heard) => {
+      if (heard === canonical) return heard
+      correctedTerms.push({ heard, canonical })
+      return canonical
+    })
+  }
+  correctedText = correctedText.replace(
     /\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu,
     (heard, offset: number) => {
       const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
@@ -226,9 +409,11 @@ export function canonicalizeExactConversationReferences(
       const canonical = referenceByKey.get(baseKey)
       if (!canonical || canonical === base || protectedKeys.has(baseKey)) return heard
       if (
-        isLikelyOneSyllable(canonical) &&
-        (hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey) ||
-          hasPrecedingQuantity(text, offset))
+        (isLikelyOneSyllable(canonical) ||
+          AUXILIARY_WORDS.has(baseKey) ||
+          PARTICLE_WORDS.has(baseKey)) &&
+        (hasProtectedOrdinaryWordUsage(correctedText, offset, offset + heard.length, baseKey) ||
+          hasPrecedingQuantity(correctedText, offset))
       )
         return heard
       correctedTerms.push({ heard: base, canonical })
@@ -248,45 +433,79 @@ function correctReferenceTerms(
   const referenceByKey = referenceMap(references)
   const correctedTerms: Array<{ heard: string; canonical: string }> = []
 
-  const correctedText = text.replace(/\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu, (heard, offset: number) => {
-    const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
-    const base = possessive ? heard.slice(0, -possessive.length) : heard
-    const baseKey = base.toLocaleLowerCase()
-    if (
-      base.length < 3 ||
-      (requireInitialUppercase && !/^\p{Lu}/u.test(base)) ||
-      protectedKeys.has(baseKey) ||
-      referenceByKey.has(baseKey)
-    )
-      return heard
+  let correctedText = text.replace(
+    /(\p{L}[\p{L}\p{M}\d-]*)\s+(\p{L}[\p{L}\p{M}\d-]*)(['’]s)\b/gu,
+    (heard, first: string, second: string, possessive: string) => {
+      if (requireInitialUppercase && !/^\p{Lu}/u.test(first)) return heard
+      const combined = `${first}${second}`.toLocaleLowerCase()
+      if (combined.length < 6) return heard
+      const candidates = [...referenceByKey.values()].filter((reference) => {
+        const key = reference.toLocaleLowerCase()
+        return (
+          reference.length >= 5 &&
+          Math.abs(combined.length - key.length) <= 2 &&
+          !protectedKeys.has(key) &&
+          areSpeechPhoneticNeighbors(combined, key)
+        )
+      })
+      const uniqueCandidates = [
+        ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values(),
+      ]
+      if (uniqueCandidates.length !== 1) return heard
+      const canonical = uniqueCandidates[0]!
+      correctedTerms.push({ heard: `${first} ${second}`, canonical })
+      return `${canonical}${possessive}`
+    },
+  )
 
-    if (
-      requireInitialUppercase &&
-      !possessive &&
-      (MODAL_WORDS.has(baseKey) || baseKey === 'then') &&
-      !hasPositiveNameSignal(text, offset)
-    )
-      return heard
+  correctedText = correctedText.replace(
+    /\p{L}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*/gu,
+    (heard, offset: number) => {
+      const possessive = heard.match(/(['’]s)$/iu)?.[0] ?? ''
+      const base = possessive ? heard.slice(0, -possessive.length) : heard
+      const baseKey = base.toLocaleLowerCase()
+      if (
+        base.length < 3 ||
+        (requireInitialUppercase && !/^\p{Lu}/u.test(base)) ||
+        protectedKeys.has(baseKey) ||
+        referenceByKey.has(baseKey)
+      )
+        return heard
 
-    const candidates = [...referenceByKey.values()].filter((reference) => {
       if (
         requireInitialUppercase &&
         !possessive &&
-        isLikelyOneSyllable(reference) &&
-        hasProtectedOrdinaryWordUsage(text, offset, offset + heard.length, baseKey)
+        (MODAL_WORDS.has(baseKey) || baseKey === 'then') &&
+        !hasPositiveNameSignal(text, offset)
       )
-        return false
-      return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase())
-    })
-    const uniqueCandidates = [
-      ...new Map(candidates.map((value) => [value.toLocaleLowerCase(), value])).values(),
-    ]
-    if (uniqueCandidates.length !== 1) return heard
+        return heard
 
-    const canonical = uniqueCandidates[0]
-    correctedTerms.push({ heard: base, canonical })
-    return `${canonical}${possessive}`
-  })
+      const candidates = [...referenceByKey.values()].filter((reference) => {
+        if (
+          requireInitialUppercase &&
+          !possessive &&
+          (isLikelyOneSyllable(reference) || PARTICLE_WORDS.has(reference.toLocaleLowerCase())) &&
+          hasProtectedOrdinaryWordUsage(correctedText, offset, offset + heard.length, baseKey)
+        )
+          return false
+        return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase())
+      })
+      // A spelling-close reference wins over phonetic-only neighbours, so "Kensai" resolves to
+      // "Kansai" even when "Kenji" also sounds similar.
+      const spellingClose = candidates.filter((reference) =>
+        editDistanceAtMost(baseKey, reference.toLocaleLowerCase(), 1),
+      )
+      const pool = spellingClose.length ? spellingClose : candidates
+      const uniqueCandidates = [
+        ...new Map(pool.map((value) => [value.toLocaleLowerCase(), value])).values(),
+      ]
+      if (uniqueCandidates.length !== 1) return heard
+
+      const canonical = uniqueCandidates[0]
+      correctedTerms.push({ heard: base, canonical })
+      return `${canonical}${possessive}`
+    },
+  )
 
   return { text: correctedText, correctedTerms }
 }
@@ -295,14 +514,89 @@ function referenceMap(references: readonly string[]): Map<string, string> {
   const referenceByKey = new Map<string, string>()
   for (const reference of references) {
     const possessive = reference.match(/(['’]s)$/iu)?.[0] ?? ''
-    const canonical = possessive ? reference.slice(0, -possessive.length) : reference
+    const canonical = normalizeReferenceCasing(
+      possessive ? reference.slice(0, -possessive.length) : reference,
+    )
     if (!/^\p{Lu}[\p{L}\p{M}\d]*(?:[-'’][\p{L}\p{M}\d]+)*$/u.test(canonical)) continue
     referenceByKey.set(canonical.toLocaleLowerCase(), canonical)
   }
   return referenceByKey
 }
 
-const MODAL_WORDS = new Set(['can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would'])
+function normalizeReferenceCasing(value: string): string {
+  return value.replace(/\p{L}[\p{L}\p{M}]*(?:[-'’][\p{L}\p{M}]+)*/gu, (token) => {
+    const letters = token.match(/\p{L}/gu) ?? []
+    if (letters.length < 2 || letters.some((letter) => letter !== letter.toLocaleUpperCase()))
+      return token
+    const lower = token.toLocaleLowerCase()
+    return lower.replace(/(^|-)\p{Ll}/gu, (opening) => opening.toLocaleUpperCase())
+  })
+}
+
+function referenceEvidenceKey(value: string): string {
+  return value.toLocaleLowerCase().replace(/\u2019/gu, "'")
+}
+
+function stripPossessiveSuffix(value: string): string {
+  const possessive = value.match(/(['’]s)$/iu)?.[0] ?? ''
+  return possessive ? value.slice(0, -possessive.length) : value
+}
+
+function referenceCanonicalKey(value: string): string {
+  const possessive = value.match(/(['’]s)$/iu)?.[0] ?? ''
+  return referenceEvidenceKey(
+    normalizeReferenceCasing(possessive ? value.slice(0, -possessive.length) : value),
+  )
+}
+
+function escapeReferencePattern(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace(/['’]/gu, "['’]")
+}
+
+function isSentenceOpeningAt(text: string, offset: number): boolean {
+  const prefix = text.slice(0, offset).replace(/[\s"'“”‘’([{]+$/gu, '')
+  return prefix.length === 0 || /[.!?]\s*$/u.test(prefix)
+}
+
+const MODAL_WORDS = new Set([
+  'can',
+  'could',
+  'may',
+  'might',
+  'must',
+  'shall',
+  'should',
+  'will',
+  'would',
+])
+const AUXILIARY_WORDS = new Set([
+  'am',
+  'are',
+  'be',
+  'been',
+  'being',
+  'did',
+  'do',
+  'does',
+  'had',
+  'has',
+  'have',
+  'is',
+  'was',
+  'were',
+])
+const PARTICLE_WORDS = new Set([
+  'away',
+  'back',
+  'down',
+  'in',
+  'off',
+  'on',
+  'out',
+  'over',
+  'through',
+  'up',
+])
 const DETERMINERS = new Set([
   'a',
   'an',
@@ -341,8 +635,17 @@ const NAME_SIGNAL_WORDS = new Set([
   'tell',
   'told',
 ])
-const NAME_TITLES = new Set(['captain', 'doctor', 'dr', 'miss', 'mister', 'mr', 'mrs', 'ms', 'professor'])
-
+const NAME_TITLES = new Set([
+  'captain',
+  'doctor',
+  'dr',
+  'miss',
+  'mister',
+  'mr',
+  'mrs',
+  'ms',
+  'professor',
+])
 function hasPositiveNameSignal(text: string, start: number): boolean {
   const previous = adjacentWord(text, start, 'before')
   return Boolean(previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous)))
@@ -359,6 +662,8 @@ function hasProtectedOrdinaryWordUsage(
   if (previous && (NAME_SIGNAL_WORDS.has(previous) || NAME_TITLES.has(previous))) return false
 
   if (MODAL_WORDS.has(heard)) return true
+  if (AUXILIARY_WORDS.has(heard)) return true
+  if (PARTICLE_WORDS.has(heard)) return true
   if (previous && DETERMINERS.has(previous)) return true
   if (heard === 'then') return true
   if (
@@ -438,11 +743,18 @@ const COMMON_CAPITALIZED_WORDS = new Set([
   'as',
   'at',
   'but',
+  'did',
+  'do',
+  'does',
   'for',
   'from',
+  'had',
+  'has',
+  'have',
   'he',
   'her',
   'his',
+  'how',
   'i',
   'if',
   'in',
@@ -462,69 +774,45 @@ const COMMON_CAPITALIZED_WORDS = new Set([
   'this',
   'to',
   'we',
+  'what',
   'when',
+  'where',
+  'which',
+  'who',
+  'why',
   'with',
   'you',
   'your',
 ])
 
 function isReferenceTerm(term: string): boolean {
-  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(term.toLocaleLowerCase())) return false
+  const key = term.toLocaleLowerCase()
+  if (
+    term.length < 2 ||
+    COMMON_CAPITALIZED_WORDS.has(key) ||
+    AUXILIARY_WORDS.has(key) ||
+    PARTICLE_WORDS.has(key)
+  )
+    return false
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1))
 }
 
 function isHighConfidenceReferenceMatch(heard: string, reference: string): boolean {
   const maximumLengthDifference = Math.min(heard.length, reference.length) >= 6 ? 2 : 1
   if (Math.abs(heard.length - reference.length) > maximumLengthDifference) return false
-  if (
-    Math.max(heard.length, reference.length) <= 5 &&
-    referenceSoundKey(heard).length >= 3 &&
-    referenceSoundKey(heard) === referenceSoundKey(reference)
-  )
-    return true
-  if (heard.charAt(0) !== reference.charAt(0)) {
-    return (
-      heard.length === 3 &&
-      reference.length === 3 &&
-      heard.slice(1) === reference.slice(1) &&
-      hardInitialsMatch(heard.charAt(0), reference.charAt(0))
-    )
+  if (Math.max(heard.length, reference.length) <= 5) {
+    const heardPhonetic = speechPhoneticKey(heard)
+    return heardPhonetic.length >= 3 && heardPhonetic === speechPhoneticKey(reference)
   }
+  if (heard.charAt(0) !== reference.charAt(0)) return false
   if (editDistanceAtMost(heard, reference, 1)) return true
+  if (heard.slice(0, 2) === reference.slice(0, 2) && areSpeechPhoneticNeighbors(heard, reference))
+    return true
   return (
     Math.min(heard.length, reference.length) >= 6 &&
     heard.slice(0, 4) === reference.slice(0, 4) &&
     editDistanceAtMost(heard, reference, 2)
   )
-}
-
-function referenceSoundKey(value: string): string {
-  const prepared = value.normalize('NFKD').toLocaleLowerCase().replace(/\p{M}/gu, '')
-  let key = ''
-  for (const character of prepared) {
-    const sound = /[aeiouy]/u.test(character)
-      ? 'A'
-      : /[cgjkq]/u.test(character)
-        ? 'K'
-        : /[bp]/u.test(character)
-          ? 'B'
-          : /[fv]/u.test(character)
-            ? 'F'
-            : /[dt]/u.test(character)
-              ? 'T'
-              : /[sxz]/u.test(character)
-                ? 'S'
-                : /[lmnr]/u.test(character)
-                  ? character.toLocaleUpperCase()
-                  : ''
-    if (sound && sound !== key.at(-1)) key += sound
-  }
-  return key
-}
-
-function hardInitialsMatch(left: string, right: string): boolean {
-  const hardInitials = new Set(['c', 'k', 'q'])
-  return hardInitials.has(left) && hardInitials.has(right)
 }
 
 function editDistanceAtMost(left: string, right: string, maximum: number): boolean {

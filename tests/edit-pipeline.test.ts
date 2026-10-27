@@ -174,6 +174,19 @@ test('capitalizes replacement text only when it begins a sentence', () => {
     'She said my response was ready.',
   )
 
+  const singleCapitalizedWord = executeEditPlan('I turned towards erwin.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'keep a capitalized name after a lowercase target',
+    operations: [
+      { id: 'single-name', type: 'replace', target: { exactText: 'erwin' }, text: 'Erica' },
+    ],
+  })
+  assert.equal(
+    singleCapitalizedWord.ok && singleCapitalizedWord.afterText,
+    'I turned towards Erica.',
+  )
+
   const protectedMiddle = executeEditPlan(
     'She greeted the new arrival.',
     [],
@@ -305,6 +318,23 @@ test('supports insert, append, prepend, delete, and casing through the same pipe
   )
 })
 
+test('capitalizes every word in a targeted phrase', () => {
+  const result = executeEditPlan('I watch the hawk-eyed scout.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'capitalize the phrase',
+    operations: [
+      {
+        id: 'capitalize-phrase',
+        type: 'case',
+        target: { exactText: 'the hawk-eyed scout' },
+        caseMode: 'capitalize',
+      },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'I watch The Hawk-Eyed Scout.')
+})
+
 test('adds missing word boundaries for prepend and append operations', () => {
   const text = 'Existing sentence.'
   const paragraphs = [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }]
@@ -407,6 +437,81 @@ test('adds deterministic paragraph boundaries for paragraph-targeted insertions'
     afterFragment.ok && afterFragment.afterText,
     'unfinished fragment\n\ninserted paragraph.\n\nSecond paragraph.',
   )
+})
+
+test('keeps insertion after the last sentence inside its paragraph', () => {
+  const text = 'First sentence. You know?'
+  const result = executeEditPlan(
+    text,
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'Insert a sentence after the last sentence.',
+      operations: [
+        {
+          id: 'after-last-sentence',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, sentenceFromEnd: 1 },
+          text: 'All right, I am going now.',
+        },
+      ],
+    },
+  )
+
+  assert.equal(
+    result.ok && result.afterText,
+    'First sentence. You know? All right, I am going now.',
+  )
+})
+
+test('keeps prepend and append inline and rejects inline selectors on them', () => {
+  const text = 'First paragraph.\n\nSecond paragraph.'
+  const paragraphs = [
+    { id: 'first', ordinal: 1, lineIndex: 0, text: 'First paragraph.' },
+    { id: 'second', ordinal: 2, lineIndex: 2, text: 'Second paragraph.' },
+  ]
+  const boundaryPlan: EditPlan = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Keep both additions in their paragraphs.',
+    operations: [
+      {
+        id: 'append-first',
+        type: 'append',
+        target: { paragraphOrdinal: 1 },
+        text: 'Appended sentence.',
+      },
+      {
+        id: 'prepend-second',
+        type: 'prepend',
+        target: { paragraphOrdinal: 2 },
+        text: 'Prepended sentence.',
+      },
+    ],
+  }
+  const boundaryResult = executeEditPlan(text, paragraphs, 1, boundaryPlan)
+  assert.equal(
+    boundaryResult.ok && boundaryResult.afterText,
+    'First paragraph. Appended sentence.\n\nPrepended sentence. Second paragraph.',
+  )
+
+  const invalid = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Do not silently ignore a sentence selector.',
+    operations: [
+      {
+        id: 'invalid-append',
+        type: 'append',
+        target: { paragraphOrdinal: 1, sentenceFromEnd: 1 },
+        text: 'Unsafe.',
+      },
+    ],
+  })
+  assert.equal(invalid.ok, false)
+  if (!invalid.ok) assert.equal(invalid.reason, 'append does not accept an inline target')
 })
 
 test('keeps exact-text insertions inline and adds only missing boundary spacing', () => {
@@ -1641,7 +1746,10 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
       },
     ],
   })
-  assert.equal(prefixOfLongerWord.ok && prefixOfLongerWord.afterText, 'A precious jewels rests nearby.')
+  assert.equal(
+    prefixOfLongerWord.ok && prefixOfLongerWord.afterText,
+    'A precious jewels rests nearby.',
+  )
 
   const deletedPrefixOfLongerWord = executeEditPlan('A precious sack rests nearby.', [], 1, {
     schemaVersion: 2,
@@ -1673,6 +1781,46 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
     ],
   })
   assert.deepEqual(ambiguous, { ok: false, reason: 'fuzzy text target is ambiguous' })
+})
+
+test('fuzzy target matching tolerates similar-sounding consonants', () => {
+  const result = executeEditPlan(
+    'Erbold checks the road.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'replace a provider-misheard name',
+      operations: [
+        {
+          id: 'phonetic-consonants',
+          type: 'replace',
+          target: { exactText: 'Ervode' },
+          text: 'the captain',
+        },
+      ],
+    },
+  )
+  assert.equal(result.ok, true)
+  if (result.ok) assert.equal(result.afterText, 'The captain checks the road.')
+})
+
+test('fuzzy target matching rejects short words with different consonant structures', () => {
+  const result = executeEditPlan('Watt checks the road.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'do not conflate distinct short names',
+    operations: [
+      {
+        id: 'distinct-short-name',
+        type: 'replace',
+        target: { exactText: 'Walt' },
+        text: 'the scout',
+      },
+    ],
+  })
+  assert.deepEqual(result, { ok: false, reason: 'fuzzy text target was not found' })
 })
 
 test('ignores punctuation for unique text targets and uses it only to resolve lexical ties', () => {

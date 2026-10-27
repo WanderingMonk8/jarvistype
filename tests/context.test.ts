@@ -4,8 +4,11 @@ import test from 'node:test'
 import {
   canonicalizeExactConversationReferences,
   clampContextMessageCount,
+  clampReferenceCacheLimit,
   correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
+  extractAuthoritativeCasingReferences,
+  extractCardCasingReferences,
   extractCardCharacterReferences,
   extractConversationReferences,
   selectRecentContext,
@@ -17,6 +20,13 @@ test('defaults and bounds the user-configurable context count', () => {
   assert.equal(clampContextMessageCount(-4), 0)
   assert.equal(clampContextMessageCount(99), 20)
   assert.equal(clampContextMessageCount(7.8), 7)
+})
+
+test('defaults and bounds the rolling reference cache limit', () => {
+  assert.equal(clampReferenceCacheLimit(undefined), 30)
+  assert.equal(clampReferenceCacheLimit(-4), 0)
+  assert.equal(clampReferenceCacheLimit(999), 200)
+  assert.equal(clampReferenceCacheLimit(42.8), 42)
 })
 
 test('selects newest eligible visible user and assistant text within a hard ceiling', () => {
@@ -76,6 +86,187 @@ test('extracts compact proper-name and specialized-term references from conversa
   )
   assert.deepEqual(
     extractConversationReferences([{ role: 'user', content: 'Ordinary sentence.' }], 0),
+    [],
+  )
+})
+
+test('normalizes all-uppercase reference names from recent chat or an active draft', () => {
+  assert.deepEqual(
+    extractConversationReferences([
+      { role: 'assistant', content: 'ERBOLD meets MARA VELIN beside VAULT-TEC.' },
+    ]),
+    ['Erbold', 'Mara Velin', 'Mara', 'Velin', 'Vault-Tec'],
+  )
+  assert.deepEqual(correctFromConversationReferences('Ervode turns around.', ['ERBOLD']), {
+    text: 'Erbold turns around.',
+    correctedTerms: [{ heard: 'Ervode', canonical: 'Erbold' }],
+  })
+})
+
+test('normalizes all-uppercase character-card names to capitalized casing', () => {
+  const references = extractCardCharacterReferences(
+    'ERBOLD - THE SENTINEL',
+    'ERBOLD VENN watches the road beside MARA.',
+  )
+  for (const expected of ['Erbold', 'Erbold Venn', 'Venn', 'Mara']) {
+    assert.ok(references.includes(expected), `missing ${expected}`)
+  }
+  assert.equal(references.some((reference) => /\p{Lu}{2}/u.test(reference)), false)
+})
+
+test('keeps broad card terms for identification but limits card casing authority', () => {
+  const cardText = 'Building stands nearby. Aiko Tanaka waits beside Marcus.'
+  assert.ok(extractCardCharacterReferences('Aiko Tanaka', cardText).includes('Building'))
+  const casing = extractCardCasingReferences('Aiko Tanaka', cardText)
+  for (const expected of ['Aiko Tanaka', 'Aiko', 'Tanaka', 'Marcus']) {
+    assert.ok(casing.includes(expected), `missing ${expected}`)
+  }
+  assert.equal(casing.includes('Building'), false)
+})
+
+test('requires consistent casing evidence before treating a single word as a name', () => {
+  assert.deepEqual(
+    extractConversationReferences([
+      {
+        role: 'assistant',
+        content:
+          "Make the turn. We can make it work. Loved the view. I loved it. Don’t wait, but don't run. Okay? It is okay. That works; I know that. Zorlin waits nearby.",
+      },
+    ]),
+    ['Zorlin'],
+  )
+})
+
+test('separates fuzzy identification references from casing authority', () => {
+  const messages = [
+    { role: 'assistant' as const, content: 'Building stands nearby. I spoke with Erbold.' },
+  ]
+  assert.ok(extractConversationReferences(messages).includes('Building'))
+  assert.deepEqual(extractAuthoritativeCasingReferences(messages), ['Erbold'])
+})
+
+test('admits mid-sentence capitalization immediately but requires two sentence openings', () => {
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant', content: 'I saw Zorlin.' },
+    ]),
+    ['Zorlin'],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([{ role: 'assistant', content: 'Zorlin waits.' }]),
+    [],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences(
+      [{ role: 'assistant', content: 'Zorlin waits.' }],
+      { minimumOccurrences: 1 },
+    ),
+    ['Zorlin'],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant', content: 'Zorlin waits. Zorlin returns.' },
+    ]),
+    ['Zorlin'],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant', content: 'The road bends. The gate opens.' },
+    ]),
+    [],
+  )
+})
+
+test('lowercase history rejects a casing reference unless the term is in the glossary', () => {
+  const messages = [
+    { role: 'assistant' as const, content: 'I saw Zorlin. Later, zorlin leaves.' },
+  ]
+  assert.deepEqual(extractAuthoritativeCasingReferences(messages), [])
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences(messages, { lowercaseExemptions: ['Zorlin'] }),
+    ['Zorlin'],
+  )
+})
+
+test('grants casing authority to multiword names and repeated sentence openings', () => {
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant', content: 'Erbold, listen. Aiko Tanaka waits nearby.' },
+    ]),
+    ['Aiko Tanaka'],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant', content: 'Mara waits.' },
+      { role: 'assistant', content: 'Mara returns.' },
+    ]),
+    ['Mara'],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences(
+      [{ role: 'assistant', content: 'Watt waits. Later, Watt returns.' }],
+      { allowRepeatedWithinSource: true },
+    ),
+    ['Watt'],
+  )
+})
+
+test('uses immediate mid-sentence evidence for temporary active-draft casing', () => {
+  const references = extractAuthoritativeCasingReferences(
+    [
+      {
+        role: 'assistant',
+        content: 'Building stands nearby. I look at the Building. I turn toward Erbold.',
+      },
+    ],
+    { allowRepeatedWithinSource: true, allowMidSentenceCapitalized: true },
+  )
+  assert.deepEqual(references, ['Building', 'Erbold'])
+})
+
+test('does not grant active-draft casing authority from repeated sentence openings', () => {
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences(
+      [
+        {
+          role: 'assistant',
+          content: 'Close enough to smell the leather. Close enough to count the stitches.',
+        },
+      ],
+      { allowRepeatedSentenceOpenings: false },
+    ),
+    [],
+  )
+})
+
+test('keeps multiword casing authority scoped to the complete phrase', () => {
+  const references = extractAuthoritativeCasingReferences([
+    { role: 'assistant', content: 'City Building stands nearby.' },
+  ])
+  assert.deepEqual(references, ['City Building'])
+  assert.equal(
+    canonicalizeExactConversationReferences(
+      'I see city building nearby, beside another building.',
+      references,
+    ).text,
+    'I see City Building nearby, beside another building.',
+  )
+})
+
+test('does not extract sentence-opening auxiliaries and question words as names', () => {
+  assert.deepEqual(
+    extractConversationReferences([
+      { role: 'assistant', content: 'Do you understand? What happens next? Have we finished?' },
+    ]),
+    [],
+  )
+})
+
+test('does not extract sentence-opening directional particles as names', () => {
+  assert.deepEqual(
+    extractConversationReferences([
+      { role: 'assistant', content: 'Up they climb. Down they fall. Back they go.' },
+    ]),
     [],
   )
 })
@@ -187,6 +378,21 @@ test('canonicalizes exact lowercase payload references while preserving ordinary
     canonicalizeExactConversationReferences('one watt of power', ['Watt']).text,
     'one watt of power',
   )
+  assert.equal(
+    canonicalizeExactConversationReferences('Erbold, what do you mean by this?', ['Do']).text,
+    'Erbold, what do you mean by this?',
+  )
+  assert.equal(
+    canonicalizeExactConversationReferences('The pole goes up and comes down on the gravel.', [
+      'Up',
+      'DOWN',
+    ]).text,
+    'The pole goes up and comes down on the gravel.',
+  )
+  assert.equal(
+    canonicalizeExactConversationReferences('Please ask Down.', ['Down']).text,
+    'Please ask Down.',
+  )
 })
 
 test('draft-extracted proper nouns can correct lowercase edit targets', () => {
@@ -240,6 +446,20 @@ test('corrects a unique short phonetic name and preserves its possessive apostro
   assert.equal(correctFromConversationReferences("Cat's coat", ['Kat', 'Qat']).text, "Cat's coat")
 })
 
+test('collapses a provider-split possessive into one unique phonetic name', () => {
+  assert.deepEqual(
+    correctFromConversationReferences("Her boat's call alerted me.", ['Erbold']),
+    {
+      text: "Erbold's call alerted me.",
+      correctedTerms: [{ heard: 'Her boat', canonical: 'Erbold' }],
+    },
+  )
+  assert.equal(
+    correctFromConversationReferences("Her boat's call alerted me.", ['Erbold', 'Herbault']).text,
+    "Her boat's call alerted me.",
+  )
+})
+
 test('uses grammatical context to protect ordinary words from one-syllable names', () => {
   assert.equal(
     correctFromConversationReferences('Can you understand me?', ['Ken']).text,
@@ -283,6 +503,25 @@ test('corrects a short phonetically equivalent card name', () => {
   assert.deepEqual(correctFromConversationReferences('ICO', ['Aiko']), {
     text: 'Aiko',
     correctedTerms: [{ heard: 'ICO', canonical: 'Aiko' }],
+  })
+})
+
+test('does not conflate short names with different consonant structures', () => {
+  assert.equal(
+    correctFromConversationReferences('Walt will never do this.', ['Watt']).text,
+    'Walt will never do this.',
+  )
+  assert.equal(correctEditTargetFromConversationReferences('Walt', ['Watt']).text, 'Walt')
+})
+
+test('corrects provider consonant substitutions in recording and edit reference paths', () => {
+  assert.deepEqual(correctFromConversationReferences('Ervode turns around.', ['Erbold']), {
+    text: 'Erbold turns around.',
+    correctedTerms: [{ heard: 'Ervode', canonical: 'Erbold' }],
+  })
+  assert.deepEqual(correctEditTargetFromConversationReferences('ervode', ['Erbold']), {
+    text: 'Erbold',
+    correctedTerms: [{ heard: 'ervode', canonical: 'Erbold' }],
   })
 })
 

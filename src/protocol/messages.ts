@@ -4,7 +4,7 @@ import type { SpellingLearningCandidate } from '../domain/normalization'
 import type { EditPlan, ResolvedEditOperation } from '../domain/edit-pipeline'
 
 export const PROTOCOL_VERSION = 7 as const
-export const APP_VERSION = '1.6.7'
+export const APP_VERSION = '1.6.15'
 export const REQUEST_TIMEOUT_MS = 15_000
 export const NORMALIZATION_TIMEOUT_MS = 120_000
 export const SEND_TIMEOUT_MS = 120_000
@@ -21,6 +21,8 @@ export type PermissionName = (typeof PHASE_FOUR_PERMISSIONS)[number]
 
 export interface PhaseFourSettings {
   contextMessageCount: number
+  referenceCacheLimit?: number
+  referenceAdmissionOccurrences?: number
   contextualNormalizationEnabled: boolean
   grammarRepairMode: 'off' | 'when_needed' | 'always'
   normalizationConnectionId: string | null
@@ -259,6 +261,7 @@ export type BackendResponse =
       connections: NormalizationConnectionOption[]
       glossary: GlossaryEntry[]
       canUndoGlossary: boolean
+      decisionModelAvailable: boolean
       notice?: string
     })
   | (RequestEnvelope & {
@@ -300,3 +303,4 @@ export type AppErrorCode =
 export function createRequestId(prefix = 'request'): string {
   return `${prefix}-${Date.now().toString(36)}-${crypto.randomUUID()}`
 }
+

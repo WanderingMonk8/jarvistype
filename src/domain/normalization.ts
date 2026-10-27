@@ -1,4 +1,5 @@
 import type { GlossaryEntry } from './glossary'
+import { areSpeechPhoneticNeighbors } from './phonetics'
 
 export interface SpellingLearningCandidate {
   canonical: string
@@ -20,6 +21,11 @@ export interface ContextualCommandRecovery {
   reasons: string[]
 }
 
+export interface QualifiedAsInNormalization {
+  text: string
+  changed: boolean
+}
+
 export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   'new paragraph',
   'new line',
@@ -32,6 +38,7 @@ export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   'begin bracket',
   'end bracket',
   'question mark',
+  'exclamation',
   'exclamation mark',
   'exclamation point',
   'semicolon',
@@ -61,6 +68,8 @@ export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   'end speech',
   'beginning speech',
   'ending speech',
+  'begins speech',
+  'ends speech',
   'begin single',
   'end single',
 ] as const
@@ -75,7 +84,7 @@ const PUNCTUATION: Array<[RegExp, string, string]> = [
   [/\bbegin bracket\b([.,;:!?…—–-]*)/gi, '<', 'begin bracket'],
   [/\bend bracket\b([.,;:!?…—–-]*)/gi, '>', 'end bracket'],
   [/\bquestion mark\b([.,;:!?…—–-]*)/gi, '?', 'question mark'],
-  [/\bexclamation (?:mark|point)\b([.,;:!?…—–-]*)/gi, '!', 'exclamation mark'],
+  [/\bexclamation(?: (?:mark|point))?\b([.,;:!?…—–-]*)/gi, '!', 'exclamation mark'],
   [/\bsemi[ -]?colon\b([.,;:!?…—–-]*)/gi, ';', 'semicolon'],
   [/\bcolon\b([.,;:!?…—–-]*)/gi, ':', 'colon'],
   [/\bcomma\b([.,;:!?…—–-]*)/gi, ',', 'comma'],
@@ -95,12 +104,12 @@ const PUNCTUATION: Array<[RegExp, string, string]> = [
  * stay, since combinations such as “?!” are explicit and intentional.
  */
 const TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
-  '\\.+(?=\\s*\\b(?:question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)',
+  '\\.+(?=\\s*\\b(?:question mark|exclamation(?: (?:mark|point))?|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)',
   'giu',
 )
 
 const SPOKEN_PUNCTUATION_TERM_SOURCE =
-  'open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation (?:mark|point)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe'
+  'open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe'
 
 const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
@@ -115,7 +124,7 @@ const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
   /\b(?:Oxford|serial)\s+comma\b/gi,
   /\bpossessive\s+apostrophe\b/gi,
   new RegExp(
-    `\\b(?:a|an|the|this|that|these|those|my|your|our|its|another|each|every)\\s+(?:${SPOKEN_PUNCTUATION_TERM_SOURCE})\\b`,
+    `\\b(?:a|an|the|this|that|these|those|my|your|his|her|our|their|its|another|each|every)\\s+(?:${SPOKEN_PUNCTUATION_TERM_SOURCE})\\b`,
     'gi',
   ),
   new RegExp(
@@ -179,10 +188,120 @@ export function hasUnresolvedCommandSignal(text: string): boolean {
   return false
 }
 
+// Only these four casing words are dictation casing commands. The phrase after the word is the
+// target: "I look to the capitalized white hawk" → "I look to the White Hawk".
+const CASING_COMMAND_PATTERN =
+  /\b(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu
+
+function titleCaseWords(value: string): string {
+  return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {
+    const index = word.search(/\p{L}/u)
+    return `${word.slice(0, index)}${word[index]!.toLocaleUpperCase()}${word.slice(index + 1)}`
+  })
+}
+
+// Words that make a casing word prose rather than a command: "a lowercase letter", "in all caps",
+// "the word uppercase", "they capitalized the company".
+const CASING_PROSE_PRECEDERS = new Set([
+  'a',
+  'an',
+  'in',
+  'as',
+  'word',
+  'words',
+  'phrase',
+  'term',
+  'command',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'i',
+  'you',
+  'he',
+  'she',
+  'we',
+  'they',
+  'it',
+])
+// Function words that cannot appear in a casing target phrase; their presence means the phrase
+// runs into the rest of a sentence.
+const CASING_TARGET_STOPWORDS = new Set([
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'and',
+  'or',
+  'but',
+  'so',
+  'if',
+  'then',
+  'that',
+  'which',
+  'who',
+  'when',
+  'where',
+  'while',
+  'because',
+  'to',
+  'of',
+  'in',
+  'on',
+  'at',
+  'for',
+  'with',
+  'by',
+  'from',
+  'as',
+  'it',
+  'they',
+  'them',
+  'he',
+  'she',
+  'we',
+  'us',
+  'you',
+  'i',
+  'me',
+  'letter',
+  'letters',
+  'word',
+  'words',
+  'text',
+  'phrase',
+  'phrases',
+  'type',
+])
+
+function applySpokenCasingCommands(text: string): string {
+  return text.replace(
+    CASING_COMMAND_PATTERN,
+    (whole: string, cue: string, phrase: string, offset: number, source: string) => {
+      const before = source.slice(0, offset)
+      // A casing word that opens a sentence is ordinary prose ("Lowercase remains lowercase").
+      if (/(?:^|[.!?]["'”’]?|\n)\s*$/u.test(before)) return whole
+      const previous = before.match(/(\p{L}[\p{L}\p{M}'’-]*)[ \t]*$/u)?.[1]?.toLocaleLowerCase()
+      if (previous && CASING_PROSE_PRECEDERS.has(previous)) return whole
+      const target = phrase.trim()
+      const words = target.split(/\s+/u).map((word) => word.toLocaleLowerCase())
+      if (words.some((word) => CASING_TARGET_STOPWORDS.has(word))) return whole
+      const command = cue.toLocaleLowerCase()
+      if (command === 'uppercase' || command === 'all caps') return target.toLocaleUpperCase()
+      if (command === 'lowercase') return target.toLocaleLowerCase()
+      return titleCaseWords(target)
+    },
+  )
+}
 export function normalizeDeterministically(
   raw: string,
   glossary: readonly GlossaryEntry[],
-  options: { capitalizeOpening?: boolean } = {},
+  options: { capitalizeOpening?: boolean; compactUppercaseSpelling?: boolean } = {},
 ): DeterministicNormalization {
   const protectedLiterals: string[] = []
   let text = raw.replace(
@@ -219,7 +338,7 @@ export function normalizeDeterministically(
     })
   }
   const learningCandidates: SpellingLearningCandidate[] = []
-  const spelling = replaceExplicitSpelling(text)
+  const spelling = replaceExplicitSpelling(text, options.compactUppercaseSpelling === true)
   text = spelling.text
   if (spelling.learningCandidates.length) reasons.push('explicit spelling')
   learningCandidates.push(...spelling.learningCandidates)
@@ -227,7 +346,7 @@ export function normalizeDeterministically(
   const quotation = replaceSpokenQuotationCommands(
     text,
     protectedLiterals.some((literal) =>
-      /\b(?:(?:single\s+)?(?:quote|quotation)|begin(?:ning)?\s+speech|end(?:ing)?\s+speech|begin\s+single|end\s+single)\b/iu.test(
+      /\b(?:(?:single\s+)?(?:quote|quotation)|begin(?:ning|s)?\s+speech|end(?:ing|s)?\s+speech|begin\s+single|end\s+single)\b/iu.test(
         literal,
       ),
     ),
@@ -273,7 +392,9 @@ export function normalizeDeterministically(
     }
   }
 
-  text = spaceEmDashes(cleanupPunctuationSpacing(text))
+  const cased = applySpokenCasingCommands(text)
+  if (cased !== text) reasons.push('spoken casing')
+  text = spaceEmDashes(cleanupPunctuationSpacing(cased))
   const capitalized = capitalizeMessageOpenings(
     text,
     [
@@ -293,6 +414,71 @@ export function normalizeDeterministically(
     authoritativePunctuationLiterals: [...new Set(protectedLiterals)],
     authoritativePunctuationMarks,
   }
+}
+
+/**
+ * Resolves a recording-only spelling reference such as
+ * "the sheath, as in sheaf of arrows and the bow". The comma, an immediately
+ * adjacent reference word, and a strong lexical/phonetic relationship are all
+ * required so ordinary prose containing "as in" remains literal.
+ *
+ * This intentionally runs after contextual recognition: the explanatory words
+ * remain available to the provider to infer the spelling, then are removed from
+ * the accepted candidate without trusting the provider to classify commands.
+ */
+export function normalizeQualifiedAsInReferences(input: string): QualifiedAsInNormalization {
+  const pattern = /([\p{L}\p{M}][\p{L}\p{M}'’-]*)\s*,\s*as\s+in\s+([\p{L}\p{M}][\p{L}\p{M}'’-]*)/giu
+  let text = input
+  let searchFrom = 0
+  let changed = false
+
+  while (searchFrom < text.length) {
+    pattern.lastIndex = searchFrom
+    const match = pattern.exec(text)
+    if (!match || match.index === undefined) break
+    const heard = match[1]!
+    const reference = match[2]!
+    const heardKey = heard.toLocaleLowerCase()
+    const referenceKey = reference.toLocaleLowerCase()
+    const related =
+      heardKey === referenceKey ||
+      areSpeechPhoneticNeighbors(heard, reference) ||
+      (Math.min(heardKey.length, referenceKey.length) >= 4 &&
+        heardKey.slice(0, 2) === referenceKey.slice(0, 2) &&
+        withinEditDistance(heardKey, referenceKey, 2))
+    if (!related) {
+      searchFrom = match.index + match[0].length
+      continue
+    }
+
+    const suffixStart = match.index + match[0].length
+    const suffix = text.slice(suffixStart)
+    // A repeated pronoun in ordinary prose ("her, as in her opinion") is not a
+    // spelling reference. Require either an explanation cue or a closed command.
+    if (!/^\s*(?:(?:of|for|like|meaning)\b|[,.;:!?]|$)/iu.test(suffix)) {
+      searchFrom = suffixStart
+      continue
+    }
+    const sentenceBoundary = suffix.search(/[.!?\n]/u)
+    const clauseLimit = sentenceBoundary < 0 ? suffix.length : sentenceBoundary
+    const clause = suffix.slice(0, clauseLimit)
+    const continuation = clause.search(
+      /\s+(?:and|but|so|then)\s+(?=(?:the|a|an|my|your|his|her|its|our|their|this|that|these|those|I|we|you|he|she|it|they)\b)/iu,
+    )
+    const commaBoundary = clause.indexOf(',')
+    const explanationEnd =
+      continuation >= 0
+        ? suffixStart + continuation
+        : commaBoundary >= 0
+          ? suffixStart + commaBoundary + 1
+          : suffixStart + clauseLimit
+    const replacement = reference
+    text = `${text.slice(0, match.index)}${replacement}${text.slice(explanationEnd)}`
+    changed = true
+    searchFrom = match.index + replacement.length
+  }
+
+  return { text, changed }
 }
 
 function restoreHighConfidenceSentenceBoundaries(input: string): { text: string; count: number } {
@@ -367,6 +553,10 @@ function removeRedundantTerminalPunctuationCommands(input: string): string {
     .replace(/([.?!…][”’"']?)\s+(?:period|full stop)\b[.,]?/giu, '$1')
     .replace(/(\?[”’"']?)\s+question mark\b[.,]?/giu, '$1')
     .replace(/(![”’"']?)\s+exclamation (?:mark|point)\b[.,]?/giu, '$1')
+    .replace(
+      /(![”’"']?)\s+exclamation\b[.,]?(?=\s*(?:end(?:ing|s)?\s+speech|end\s+single|[”’"']|$))/giu,
+      '$1',
+    )
     .replace(/(…[”’"']?)\s+(?:ellipsis|dot dot dot|three dots)\b[.,]?/giu, '$1')
 }
 
@@ -419,7 +609,11 @@ function punctuationCommand(phrase: string): { mark: string; reason: string } | 
   if (normalized === 'begin bracket') return { mark: '<', reason: 'begin bracket' }
   if (normalized === 'end bracket') return { mark: '>', reason: 'end bracket' }
   if (normalized === 'question mark') return { mark: '?', reason: 'question mark' }
-  if (normalized === 'exclamation mark' || normalized === 'exclamation point')
+  if (
+    normalized === 'exclamation' ||
+    normalized === 'exclamation mark' ||
+    normalized === 'exclamation point'
+  )
     return { mark: '!', reason: 'exclamation mark' }
   if (normalized === 'semicolon') return { mark: ';', reason: 'semicolon' }
   if (normalized === 'colon') return { mark: ':', reason: 'colon' }
@@ -508,8 +702,8 @@ function replaceSpokenQuotationCommands(
   }
 
   replaceGuardedAliasPair(
-    'begin(?:ning)?(?:\\s+the)?\\s+speech',
-    'end(?:ing)? speech',
+    'begin(?:ning|s)?(?:\\s+the)?\\s+speech',
+    'end(?:ing|s)? speech',
     '“',
     '”',
     'quote',
@@ -560,7 +754,7 @@ function replaceSpokenQuotationCommands(
 }
 
 function hasNaturalAliasUsage(text: string): boolean {
-  return /\b(?:begin(?:ning)?|end(?:ing)?)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
+  return /\b(?:begin(?:ning|s)?|end(?:ing|s)?)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
     text,
   )
 }
@@ -635,7 +829,7 @@ function punctuationAfterSpokenCommand(
   const contentBeforeCommand = source.slice(0, commandOffset).trimEnd()
   const contentAlreadyEndsSentence =
     /[.?!…]$/u.test(contentBeforeCommand) ||
-    /\b(?:period|full stop|question mark|exclamation (?:mark|point)|ellipsis|dot dot dot|three dots)$/iu.test(
+    /\b(?:period|full stop|question mark|exclamation(?: (?:mark|point))?|ellipsis|dot dot dot|three dots)$/iu.test(
       contentBeforeCommand,
     )
   const quotedContentAlreadyEndsWithPunctuation =
@@ -664,6 +858,7 @@ function formatGeneratedQuotationOpenings(input: string, marker: string): string
 
 function replaceExplicitSpelling(
   input: string,
+  compactUppercaseSpelling = false,
 ): Pick<DeterministicNormalization, 'text' | 'learningCandidates' | 'ambiguities'> {
   const learningCandidates: SpellingLearningCandidate[] = []
   const ambiguities: string[] = []
@@ -710,20 +905,21 @@ function replaceExplicitSpelling(
   )
 
   // Some transcription providers collapse a deliberately spelled sequence into
-  // one uppercase token (for example, "E R B O L D" becomes "ERBOLD"). Only
-  // treat that compact form as spelling when the speaker supplied an explicit
-  // casing cue; otherwise ordinary acronyms such as NASA must remain untouched.
+  // one uppercase token (for example, "S H E A F" becomes "SHEAF"). Ordinary
+  // dictation still requires a casing cue; edit payloads can opt into treating
+  // compact uppercase tokens as explicit spelling, defaulting them to lowercase.
   const compactUppercasePattern =
-    /\b(all caps|uppercase|lowercase|capitalized?)\s+([A-Z]{3,})(?![A-Za-z])(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/g
+    /\b(?:(all caps|uppercase|lowercase|capitalized?)\s+)?([A-Z]{3,})(?![A-Za-z])(?:\s*([,;:]?)\s+([A-Za-z][A-Za-z'-]*))?/g
   text = text.replace(
     compactUppercasePattern,
     (
-      _whole,
-      casing: string,
+      whole,
+      casing: string | undefined,
       spoken: string,
       separator: string | undefined,
       cue: string | undefined,
     ) => {
+      if (!casing && !compactUppercaseSpelling) return whole
       const matchingCue = cueMatchesLetters(cue, spoken) ? cue : undefined
       const canonical = applySpellingCasing(matchingCue ?? spoken, casing)
       learningCandidates.push({ canonical, spokenVariant: spoken.trim() })
@@ -776,7 +972,7 @@ function cueMatchesLetters(cue: string | undefined, letters: string): cue is str
   )
 }
 
-function applySpellingCasing(value: string, casing: string | undefined): string {
+export function applySpellingCasing(value: string, casing: string | undefined): string {
   if (!casing) return value.toLowerCase()
   const normalized = casing.toLowerCase()
   if (normalized === 'all caps' || normalized === 'uppercase') return value.toUpperCase()

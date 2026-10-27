@@ -202,6 +202,7 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
       Array.isArray(value.glossary) &&
       value.glossary.every(isGlossaryEntry) &&
       typeof value.canUndoGlossary === 'boolean' &&
+      typeof value.decisionModelAvailable === 'boolean' &&
       (value.notice === undefined || isBoundedString(value.notice, 1, 1_000))
     )
   }
@@ -344,6 +345,12 @@ function isPhaseFourSettings(value: unknown): boolean {
     isRecord(value) &&
     isNonNegativeInteger(value.contextMessageCount) &&
     value.contextMessageCount <= 20 &&
+    (value.referenceCacheLimit === undefined ||
+      (isNonNegativeInteger(value.referenceCacheLimit) && value.referenceCacheLimit <= 200)) &&
+    (value.referenceAdmissionOccurrences === undefined ||
+      (isNonNegativeInteger(value.referenceAdmissionOccurrences) &&
+        value.referenceAdmissionOccurrences >= 1 &&
+        value.referenceAdmissionOccurrences <= 5)) &&
     typeof value.contextualNormalizationEnabled === 'boolean' &&
     (value.grammarRepairMode === 'off' ||
       value.grammarRepairMode === 'when_needed' ||

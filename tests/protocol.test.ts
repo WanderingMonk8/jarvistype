@@ -151,6 +151,8 @@ test('validates normalization connection and custom-model settings', () => {
       requestId: 'settings-request',
       settings: {
         contextMessageCount: 5,
+        referenceCacheLimit: 30,
+        referenceAdmissionOccurrences: 1,
         contextualNormalizationEnabled: true,
         grammarRepairMode: 'when_needed',
         normalizationConnectionId: 'connection-1',
@@ -168,6 +170,22 @@ test('validates normalization connection and custom-model settings', () => {
         contextMessageCount: 5,
         contextualNormalizationEnabled: true,
         grammarRepairMode: 'sometimes',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    }),
+    false,
+  )
+  assert.equal(
+    isFrontendRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'invalid-reference-cache-limit',
+      settings: {
+        contextMessageCount: 5,
+        referenceCacheLimit: 201,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'when_needed',
         normalizationConnectionId: null,
         normalizationModelOverride: '',
       },

@@ -1,12 +1,20 @@
 {
-  "version": "1.6.7",
+  "version": "1.6.15",
   "name": "JarvisType",
   "identifier": "jarvistype",
   "author": "WanderingMonk8",
   "github": "https://github.com/WanderingMonk8/jarvistype",
   "homepage": "https://github.com/WanderingMonk8/jarvistype",
   "description": "Private, review-first voice composition for Lumiverse.",
-  "permissions": ["media", "chats", "chat_mutation", "generation", "ui_panels", "characters"],
+  "permissions": [
+    "media",
+    "chats",
+    "chat_mutation",
+    "generation",
+    "ui_panels",
+    "characters",
+    "decisions"
+  ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js"
 }

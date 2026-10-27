@@ -4,8 +4,32 @@ import test from 'node:test'
 import {
   hasUnresolvedCommandSignal,
   normalizeDeterministically,
+  normalizeQualifiedAsInReferences,
   recoverHighConfidenceContextualCommands,
 } from '../src/domain/normalization'
+
+test('uses qualified as-in spelling references in recording text', () => {
+  assert.equal(
+    normalizeQualifiedAsInReferences(
+      'I move slowly to pick up the sheaf, as in sheaf of arrows and the bow from the water, shaking them slightly.',
+    ).text,
+    'I move slowly to pick up the sheaf and the bow from the water, shaking them slightly.',
+  )
+  assert.equal(
+    normalizeQualifiedAsInReferences('I put the sheath, as in sheaf of arrows, on the cart.').text,
+    'I put the sheaf on the cart.',
+  )
+})
+
+test('keeps ordinary as-in prose literal', () => {
+  for (const text of [
+    'The arrangement stayed as in previous years.',
+    'I worked as in the example.',
+    'I described the building, as in the structure beside us.',
+  ]) {
+    assert.equal(normalizeQualifiedAsInReferences(text).text, text)
+  }
+})
 
 test('supports spoken punctuation and paragraph commands', () => {
   const result = normalizeDeterministically(
@@ -40,6 +64,19 @@ test('capitalizes ordinary message and paragraph openings without changing estab
   )
 })
 
+test('consumes a capitalized phrase command even when the provider already title-cased it', () => {
+  const result = normalizeDeterministically(
+    'I turn to watch the man of capitalized White Hawk.',
+    [],
+  )
+  assert.equal(result.text, 'I turn to watch the man of White Hawk.')
+  assert.ok(result.reasons.includes('spoken casing'))
+  assert.equal(
+    normalizeDeterministically('We discussed the use of capitalized words.', []).text,
+    'We discussed the use of capitalized words.',
+  )
+})
+
 test('restores a missing sentence boundary after an opening My God interjection', () => {
   const result = normalizeDeterministically(
     'quotation My God Three mouths working on me period quotation',
@@ -64,6 +101,7 @@ test('does not append a bare terminal command after provider terminal punctuatio
   assert.equal(normalizeDeterministically('How is that? ."', []).text, 'How is that?"')
   assert.equal(normalizeDeterministically('Really? question mark', []).text, 'Really?')
   assert.equal(normalizeDeterministically('Really! exclamation mark', []).text, 'Really!')
+  assert.equal(normalizeDeterministically('Really! exclamation', []).text, 'Really!')
   assert.equal(normalizeDeterministically('Wait… ellipsis', []).text, 'Wait…')
   assert.equal(normalizeDeterministically('Really? exclamation mark', []).text, 'Really?!')
   assert.equal(normalizeDeterministically('Really! question mark', []).text, 'Really!?')
@@ -74,6 +112,22 @@ test('does not append a bare terminal command after provider terminal punctuatio
   assert.equal(
     normalizeDeterministically('Is this working? insert period', []).text,
     'Is this working?.',
+  )
+})
+
+test('deduplicates a provider-rendered exclamation before a speech-closing command', () => {
+  assert.equal(
+    normalizeDeterministically('Begin speech. That is close enough! Exclamation. End speech.', [])
+      .text,
+    '“That is close enough!”',
+  )
+  assert.equal(
+    normalizeDeterministically('Begin speech that is close enough exclamation end speech', []).text,
+    '“That is close enough!”',
+  )
+  assert.equal(
+    normalizeDeterministically('His exclamation startled everyone period', []).text,
+    'His exclamation startled everyone.',
   )
 })
 
@@ -279,6 +333,10 @@ test('supports guarded speech quotation aliases without consuming natural usage'
     '“Mixed aliases work”.',
   )
   assert.equal(
+    normalizeDeterministically('begins speech this alias works too ends speech period', []).text,
+    '“This alias works too”.',
+  )
+  assert.equal(
     normalizeDeterministically('begin single a private thought end single period', []).text,
     '‘A private thought’.',
   )
@@ -295,6 +353,13 @@ test('supports guarded speech quotation aliases without consuming natural usage'
       [],
     ).text,
     'We are beginning speech therapy today and ending speech therapy next week.',
+  )
+  assert.equal(
+    normalizeDeterministically(
+      'The class begins speech therapy today and ends speech therapy next week.',
+      [],
+    ).text,
+    'The class begins speech therapy today and ends speech therapy next week.',
   )
   assert.equal(
     normalizeDeterministically('A lone begin speech remains literal.', []).text,
@@ -500,18 +565,18 @@ test('collapses explicit spelling, obeys casing, and creates a learning candidat
     normalizeDeterministically('Use lowercase C-O-O-L-E-Y period', []).text,
     'Use cooley.',
   )
-  assert.equal(
-    normalizeDeterministically('Use capitalized ERBOLD period', []).text,
-    'Use Erbold.',
-  )
-  assert.equal(
-    normalizeDeterministically('Use lowercase ERBOLD period', []).text,
-    'Use erbold.',
-  )
-  assert.equal(
-    normalizeDeterministically('Use uppercase ERBOLD period', []).text,
-    'Use ERBOLD.',
-  )
+  assert.equal(normalizeDeterministically('Use capitalized ERBOLD period', []).text, 'Use Erbold.')
+  assert.equal(normalizeDeterministically('Use lowercase ERBOLD period', []).text, 'Use erbold.')
+  assert.equal(normalizeDeterministically('Use uppercase ERBOLD period', []).text, 'Use ERBOLD.')
+  assert.equal(normalizeDeterministically('Use NASA period', []).text, 'Use NASA.')
+  const compactEditSpelling = normalizeDeterministically('Replace SHEATH with SHEAF.', [], {
+    compactUppercaseSpelling: true,
+  })
+  assert.equal(compactEditSpelling.text, 'Replace sheath with sheaf.')
+  assert.deepEqual(compactEditSpelling.learningCandidates, [
+    { canonical: 'sheath', spokenVariant: 'SHEATH' },
+    { canonical: 'sheaf', spokenVariant: 'SHEAF' },
+  ])
   assert.equal(
     normalizeDeterministically('NASA launched capitalized ERBOLD period', []).text,
     'NASA launched Erbold.',
@@ -541,34 +606,36 @@ test('collapses explicit spelling, obeys casing, and creates a learning candidat
   )
 })
 
-test('collapses guarded compact spelling emitted by speech-to-text', () => {
-  const result = normalizeDeterministically('Write, capitalize PIP-Boy, Pip-Boy, period.', [])
-  assert.equal(result.text, 'Write Pip-Boy.')
-  assert.deepEqual(result.learningCandidates, [{ canonical: 'Pip-Boy', spokenVariant: 'PIP-Boy' }])
+test('applies only the strict casing words as dictation casing commands', () => {
   assert.equal(
-    normalizeDeterministically('Please use API-client without a spelling command', []).text,
-    'Please use API-client without a spelling command',
+    normalizeDeterministically('I look to the capitalized white hawk.', []).text,
+    'I look to the White Hawk.',
   )
-  assert.equal(normalizeDeterministically('Write, capitalize PIP-BOY.', []).text, 'Write Pip-Boy.')
   assert.equal(
-    normalizeDeterministically('Write, capitalized P. I. P. dash B. O. Y, Pip-Boy, period.', [])
-      .text,
-    'Write Pip-Boy.',
+    normalizeDeterministically('I look to the lowercase white hawk.', []).text,
+    'I look to the white hawk.',
   )
-})
-
-test('uses glossary variants without paraphrasing surrounding content', () => {
-  const result = normalizeDeterministically('My pip boy is ready', [
-    {
-      id: 'entry-1',
-      canonical: 'Pip-Boy',
-      variants: ['pip boy'],
-      hint: 'Fallout device',
-      source: 'manual',
-      useCount: 0,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    },
-  ])
-  assert.equal(result.text, 'My Pip-Boy is ready')
+  assert.equal(
+    normalizeDeterministically('I look to the uppercase white hawk.', []).text,
+    'I look to the WHITE HAWK.',
+  )
+  assert.equal(
+    normalizeDeterministically('I look to the all caps white hawk.', []).text,
+    'I look to the WHITE HAWK.',
+  )
+  assert.equal(normalizeDeterministically('Capitalize the hawk.', []).text, 'Capitalize the hawk.')
+  assert.equal(
+    normalizeDeterministically('I believe uppercase, the white hawk.', []).text,
+    'I believe THE WHITE HAWK.',
+  )
+  for (const prose of [
+    'Lowercase remains lowercase.',
+    'They capitalized the company.',
+    'Use a lowercase letter here.',
+    'The word uppercase is a verb.',
+    'It is in all caps for the title.',
+    'I look to the lowercase white hawk and the gull.',
+  ]) {
+    assert.equal(normalizeDeterministically(prose, []).text, prose)
+  }
 })

@@ -2950,6 +2950,7 @@ var SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   "hyphen",
   "dash",
   "apostrophe",
+  "asterisk",
   "open quote",
   "close quote",
   "quote",
@@ -2988,13 +2989,14 @@ var PUNCTUATION = [
   [/\ben dash\b([.,;:!?…—–-]*)/gi, "\u2013", "en dash"],
   [/\bhyphen\b([.,;:!?…—–-]*)/gi, "-", "hyphen"],
   [/\bdash\b([.,;:!?…—–-]*)/gi, "\u2014", "em dash"],
-  [/\bapostrophe\b([.,;:!?…—–-]*)/gi, "\u2019", "apostrophe"]
+  [/\bapostrophe\b([.,;:!?…—–-]*)/gi, "\u2019", "apostrophe"],
+  [/\basterisk\b([.,;:!?…—–-]*)/gi, "*", "asterisk"]
 ];
 var TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
   "\\.+(?=\\s*\\b(?:question mark|exclamation(?: (?:mark|point))?|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)",
   "giu"
 );
-var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe";
+var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk";
 var LITERAL_PUNCTUATION_CONTEXTS = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
   /\btime\s+period\b/gi,
@@ -3387,6 +3389,7 @@ function punctuationCommand(phrase) {
   if (normalized === "en dash") return { mark: "\u2013", reason: "en dash" };
   if (normalized === "hyphen") return { mark: "-", reason: "hyphen" };
   if (normalized === "apostrophe") return { mark: "\u2019", reason: "apostrophe" };
+  if (normalized === "asterisk") return { mark: "*", reason: "asterisk" };
   if (normalized === "open quote") return { mark: "\u201C", reason: "quote" };
   if (normalized === "close quote" || normalized === "quote" || normalized === "quotation")
     return { mark: "\u201D", reason: "quote" };

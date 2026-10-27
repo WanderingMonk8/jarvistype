@@ -56,6 +56,7 @@ export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   'hyphen',
   'dash',
   'apostrophe',
+  'asterisk',
   'open quote',
   'close quote',
   'quote',
@@ -96,6 +97,7 @@ const PUNCTUATION: Array<[RegExp, string, string]> = [
   [/\bhyphen\b([.,;:!?…—–-]*)/gi, '-', 'hyphen'],
   [/\bdash\b([.,;:!?…—–-]*)/gi, '—', 'em dash'],
   [/\bapostrophe\b([.,;:!?…—–-]*)/gi, '’', 'apostrophe'],
+  [/\basterisk\b([.,;:!?…—–-]*)/gi, '*', 'asterisk'],
 ]
 
 /**
@@ -109,7 +111,7 @@ const TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
 )
 
 const SPOKEN_PUNCTUATION_TERM_SOURCE =
-  'open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe'
+  'open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk'
 
 const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
@@ -148,6 +150,7 @@ const COMMAND_SIGNAL_WORDS = [
   'paragraph',
   'speech',
   'apostrophe',
+  'asterisk',
   'parenthesis',
   'bracket',
 ]
@@ -177,6 +180,9 @@ function withinEditDistance(left: string, right: string, maximum: number): boole
 export function hasUnresolvedCommandSignal(text: string): boolean {
   // Known mishearing of “new paragraph”, which the provider prompt also documents.
   if (/\bpair\s+of\s+graphs?\b/iu.test(text)) return true
+  // Common split-word recognition of “asterisk”; contextual classification still
+  // decides whether it is a command or ordinary prose.
+  if (/\baster\s+risk\b/iu.test(text)) return true
   for (const match of text.matchAll(/\p{L}+/gu)) {
     const word = match[0].toLocaleLowerCase()
     if (COMMAND_SIGNAL_WORDS.includes(word)) return true
@@ -625,6 +631,7 @@ function punctuationCommand(phrase: string): { mark: string; reason: string } | 
   if (normalized === 'en dash') return { mark: '–', reason: 'en dash' }
   if (normalized === 'hyphen') return { mark: '-', reason: 'hyphen' }
   if (normalized === 'apostrophe') return { mark: '’', reason: 'apostrophe' }
+  if (normalized === 'asterisk') return { mark: '*', reason: 'asterisk' }
   if (normalized === 'open quote') return { mark: '“', reason: 'quote' }
   if (normalized === 'close quote' || normalized === 'quote' || normalized === 'quotation')
     return { mark: '”', reason: 'quote' }

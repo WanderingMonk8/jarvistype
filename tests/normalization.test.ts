@@ -40,6 +40,25 @@ test('supports spoken punctuation and paragraph commands', () => {
   assert.equal(result.changed, true)
 })
 
+test('inserts an asterisk command while preserving natural-language uses', () => {
+  assert.equal(
+    normalizeDeterministically('Alpha asterisk beta period', []).text,
+    'Alpha * beta.',
+  )
+  assert.equal(
+    normalizeDeterministically('The asterisk marks a footnote.', []).text,
+    'The asterisk marks a footnote.',
+  )
+  assert.equal(
+    normalizeDeterministically('I added an asterisk beside the title.', []).text,
+    'I added an asterisk beside the title.',
+  )
+  assert.equal(
+    normalizeDeterministically('The word asterisk appears twice.', []).text,
+    'Asterisk appears twice.',
+  )
+})
+
 test('capitalizes ordinary message and paragraph openings without changing established casing', () => {
   assert.equal(
     normalizeDeterministically('we drift into sleep, holding each other through the night.', [])
@@ -198,6 +217,8 @@ test('flags unresolved spoken command words without flagging ordinary prose', ()
   assert.equal(hasUnresolvedCommandSignal('Begin the speach here.'), true)
   assert.equal(hasUnresolvedCommandSignal('She said period.'), true)
   assert.equal(hasUnresolvedCommandSignal('Another dash here'), true)
+  assert.equal(hasUnresolvedCommandSignal('Insert an astrisk here'), true)
+  assert.equal(hasUnresolvedCommandSignal('Insert an aster risk here'), true)
 })
 
 test('a dash the provider already rendered is not doubled by a spoken dash', () => {

@@ -897,6 +897,105 @@ test('deletion consumes one adjacent horizontal separator without touching other
   )
   assert.equal(openingPhrase.ok && openingPhrase.afterText, 'it can disrupt the bugs living there.')
 
+  const introductoryPhrase = executeEditPlan(
+    'Most of the time, I feel quite happy.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete an introductory phrase and its attached separator',
+      operations: [
+        {
+          id: 'delete-introductory-phrase',
+          type: 'delete',
+          target: { exactText: 'Most of the time' },
+        },
+      ],
+    },
+  )
+  assert.equal(introductoryPhrase.ok && introductoryPhrase.afterText, 'I feel quite happy.')
+
+  for (const [punctuation, expected] of [
+    ['.', 'I feel quite happy.'],
+    ['?', 'I feel quite happy.'],
+    ['!', 'I feel quite happy.'],
+    ['…', 'I feel quite happy.'],
+    ['—', 'I feel quite happy.'],
+  ] as const) {
+    const punctuatedPart = executeEditPlan(
+      `Most of the time${punctuation} I feel quite happy.`,
+      [],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'delete a complete sentence part with attached punctuation',
+        operations: [
+          {
+            id: `delete-punctuated-part-${punctuation}`,
+            type: 'delete',
+            target: { exactText: 'Most of the time' },
+          },
+        ],
+      },
+    )
+    assert.equal(punctuatedPart.ok && punctuatedPart.afterText, expected)
+  }
+
+  for (const [opening, closing] of [
+    ['"', '"'],
+    ['‘', '’'],
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+    ['`', '`'],
+    ['*', '*'],
+    ['**', '**'],
+  ] as const) {
+    const wrappedPhrase = executeEditPlan(
+      `This is the ${opening}who's who${closing} of staff.`,
+      [],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'delete a phrase occupying an entire paired wrapper',
+        operations: [
+          {
+            id: `delete-wrapped-phrase-${opening}`,
+            type: 'delete',
+            target: { exactText: "who's who" },
+          },
+        ],
+      },
+    )
+    assert.equal(wrappedPhrase.ok && wrappedPhrase.afterText, 'This is the of staff.')
+  }
+
+  const partiallyWrappedPhrase = executeEditPlan(
+    "This is the [who's who of staff] roster.",
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete only part of wrapped content',
+      operations: [
+        {
+          id: 'delete-partially-wrapped-phrase',
+          type: 'delete',
+          target: { exactText: "who's who" },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    partiallyWrappedPhrase.ok && partiallyWrappedPhrase.afterText,
+    'This is the [of staff] roster.',
+  )
+
   const middlePhraseBeforeComma = executeEditPlan(
     'Everyday they are digging a hole, despite the rain.',
     [],
@@ -942,7 +1041,7 @@ test('deletion consumes one adjacent horizontal separator without touching other
   )
 })
 
-test('sentence deletion consumes adjacent terminal punctuation for short targets only when requested', () => {
+test('sentence-part deletion consumes adjacent terminal punctuation', () => {
   for (const [text, target, expected] of [
     ['Enough! Continue.', 'Enough', 'Continue.'],
     ['Not today? Continue.', 'Not today', 'Continue.'],
@@ -982,7 +1081,7 @@ test('sentence deletion consumes adjacent terminal punctuation for short targets
       ],
     },
   )
-  assert.equal(wordOnly.ok && wordOnly.afterText, '! Continue.')
+  assert.equal(wordOnly.ok && wordOnly.afterText, 'Continue.')
 })
 
 test('deleting a whole sentence without a flag removes its period, but not a word inside a sentence', () => {

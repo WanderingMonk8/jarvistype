@@ -533,23 +533,21 @@ function resolveOperation(
     }
   }
   if (operation.type === 'delete') {
+    const wrapped = expandThroughPairedPunctuation(cleanText, start, end, range.start, range.end)
+    start = wrapped.start
+    end = wrapped.end
     if (operation.includeTrailingPunctuation) {
       end = extendThroughTerminalPunctuation(cleanText, end, range.end)
-    } else if (
-      isWholeSentenceSpan(cleanText, start, end, range.start) &&
-      /^\.(?!\.)/u.test(cleanText.slice(end, range.end))
-    ) {
-      end += 1
     } else if (isSentenceOpeningAt(cleanText, start)) {
-      const orphanedSeparator = cleanText.slice(end, range.end).match(/^[,;:](?=\s|$)/u)?.[0]
-      if (orphanedSeparator) end += orphanedSeparator.length
+      const orphanedPunctuation = attachedSentencePartPunctuation(cleanText, end, range.end)
+      if (orphanedPunctuation) end += orphanedPunctuation.length
     } else if (
-      /[,;:][ \t]*$/u.test(cleanText.slice(range.start, start)) &&
-      /^[,;:](?=\s|$)/u.test(cleanText.slice(end, range.end))
+      /[.,;:!?…—–-][ \t]*$/u.test(cleanText.slice(range.start, start)) &&
+      attachedSentencePartPunctuation(cleanText, end, range.end)
     ) {
       // A complete middle phrase has a separator on each side. Preserve the
       // leading separator and consume the now-duplicate trailing one.
-      end += 1
+      end += attachedSentencePartPunctuation(cleanText, end, range.end).length
     }
     if (formatText) {
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
@@ -557,6 +555,11 @@ function resolveOperation(
       const endsLine = end >= range.end || /[\r\n]/.test(cleanText[end] ?? '')
       if (hasSeparatorBefore && (hasSeparatorAfter || endsLine)) start -= 1
       else if (hasSeparatorAfter && start === range.start) end += 1
+      else if (
+        hasSeparatorAfter &&
+        /[“‘"'([{<`*_]$/u.test(cleanText.slice(range.start, start))
+      )
+        end += 1
     }
   }
   const insertionText = operation.text ?? ''
@@ -776,19 +779,56 @@ function executeInlineMove(
   }
 }
 
+/** Sentence-part punctuation that becomes orphaned when the entire part is removed. */
+function attachedSentencePartPunctuation(text: string, end: number, limit: number): string {
+  return text.slice(end, limit).match(/^(?:\.{3}|[.,;:!?…—–-])+(?=\s|$)/u)?.[0] ?? ''
+}
+
 /**
- * True when a span starts a sentence and ends a word, so removing it should also
- * remove the sentence's own terminal mark instead of leaving it orphaned.
+ * Include a paired wrapper only when the target is the wrapper's complete content.
+ * Optional inner whitespace and terminal punctuation inside a closing wrapper belong
+ * to that wrapped phrase. Longer Markdown markers are checked before single markers.
  */
-function isWholeSentenceSpan(
+function expandThroughPairedPunctuation(
   text: string,
   start: number,
   end: number,
-  rangeStart: number,
-): boolean {
-  const before = text.slice(rangeStart, start)
-  const startsSentence = before.trim() === '' || /[.!?…]["'’”)\]]?\s*$/u.test(before)
-  return startsSentence && /[\p{L}\p{N}]$/u.test(text.slice(0, end))
+  limitStart: number,
+  limitEnd: number,
+): { start: number; end: number } {
+  const before = text.slice(limitStart, start)
+  const after = text.slice(end, limitEnd)
+  const pairs: ReadonlyArray<readonly [string, string]> = [
+    ['***', '***'],
+    ['___', '___'],
+    ['**', '**'],
+    ['__', '__'],
+    ['“', '”'],
+    ['‘', '’'],
+    ['"', '"'],
+    ["'", "'"],
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+    ['`', '`'],
+    ['*', '*'],
+    ['_', '_'],
+  ]
+  for (const [opening, closing] of pairs) {
+    const left = before.match(new RegExp(`${escapeRegExp(opening)}[ \\t]*$`, 'u'))?.[0]
+    if (!left) continue
+    const right = after.match(
+      new RegExp(`^[ \\t]*(?:\\.{3}|[.,;:!?…—–-])*[ \\t]*${escapeRegExp(closing)}`, 'u'),
+    )?.[0]
+    if (!right) continue
+    return { start: start - left.length, end: end + right.length }
+  }
+  return { start, end }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function extendThroughTerminalPunctuation(text: string, end: number, limit: number): number {

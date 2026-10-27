@@ -5296,6 +5296,54 @@ test('removes an orphaned opening separator and capitalizes the remaining senten
   assert.equal(generationRequests.length, 0)
 })
 
+test('capitalizes a conjunction promoted to the sentence opening by phrase deletion', async () => {
+  const userId = 'opening-conjunction-cleanup-user'
+  const chatId = 'opening-conjunction-cleanup-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    "I will continue working on this project, and don't think I will slack off either.",
+  )
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the opening phrase.',
+    operations: [
+      {
+        id: 'delete-opening-clause-before-conjunction',
+        type: 'delete',
+        target: {
+          paragraphOrdinal: 1,
+          exactText: 'I will continue working on this project',
+        },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'opening-conjunction-cleanup-interpret',
+      operationId: 'opening-conjunction-cleanup-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Remove the phrase I will continue working on this project.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, "And don't think I will slack off either.")
+  assert.equal(generationRequests.length, 0)
+})
+
 test('removes the duplicate trailing separator when deleting a delimited middle phrase', async () => {
   const userId = 'middle-phrase-cleanup-user'
   const chatId = 'middle-phrase-cleanup-chat'

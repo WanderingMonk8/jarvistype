@@ -1023,15 +1023,16 @@ ${formattedParagraph}`,
     };
   }
   if (operation.type === "delete") {
+    const wrapped = expandThroughPairedPunctuation(cleanText, start, end, range.start, range.end);
+    start = wrapped.start;
+    end = wrapped.end;
     if (operation.includeTrailingPunctuation) {
       end = extendThroughTerminalPunctuation(cleanText, end, range.end);
-    } else if (isWholeSentenceSpan(cleanText, start, end, range.start) && /^\.(?!\.)/u.test(cleanText.slice(end, range.end))) {
-      end += 1;
     } else if (isSentenceOpeningAt(cleanText, start)) {
-      const orphanedSeparator = cleanText.slice(end, range.end).match(/^[,;:](?=\s|$)/u)?.[0];
-      if (orphanedSeparator) end += orphanedSeparator.length;
-    } else if (/[,;:][ \t]*$/u.test(cleanText.slice(range.start, start)) && /^[,;:](?=\s|$)/u.test(cleanText.slice(end, range.end))) {
-      end += 1;
+      const orphanedPunctuation = attachedSentencePartPunctuation(cleanText, end, range.end);
+      if (orphanedPunctuation) end += orphanedPunctuation.length;
+    } else if (/[.,;:!?…—–-][ \t]*$/u.test(cleanText.slice(range.start, start)) && attachedSentencePartPunctuation(cleanText, end, range.end)) {
+      end += attachedSentencePartPunctuation(cleanText, end, range.end).length;
     }
     if (formatText) {
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? "");
@@ -1039,6 +1040,8 @@ ${formattedParagraph}`,
       const endsLine = end >= range.end || /[\r\n]/.test(cleanText[end] ?? "");
       if (hasSeparatorBefore && (hasSeparatorAfter || endsLine)) start -= 1;
       else if (hasSeparatorAfter && start === range.start) end += 1;
+      else if (hasSeparatorAfter && /[“‘"'([{<`*_]$/u.test(cleanText.slice(range.start, start)))
+        end += 1;
     }
   }
   const insertionText = operation.text ?? "";
@@ -1147,10 +1150,42 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
     ].sort((left, right) => left - right)
   };
 }
-function isWholeSentenceSpan(text, start, end, rangeStart) {
-  const before = text.slice(rangeStart, start);
-  const startsSentence = before.trim() === "" || /[.!?…]["'’”)\]]?\s*$/u.test(before);
-  return startsSentence && /[\p{L}\p{N}]$/u.test(text.slice(0, end));
+function attachedSentencePartPunctuation(text, end, limit) {
+  return text.slice(end, limit).match(/^(?:\.{3}|[.,;:!?…—–-])+(?=\s|$)/u)?.[0] ?? "";
+}
+function expandThroughPairedPunctuation(text, start, end, limitStart, limitEnd) {
+  const before = text.slice(limitStart, start);
+  const after = text.slice(end, limitEnd);
+  const pairs = [
+    ["***", "***"],
+    ["___", "___"],
+    ["**", "**"],
+    ["__", "__"],
+    ["\u201C", "\u201D"],
+    ["\u2018", "\u2019"],
+    ['"', '"'],
+    ["'", "'"],
+    ["(", ")"],
+    ["[", "]"],
+    ["{", "}"],
+    ["<", ">"],
+    ["`", "`"],
+    ["*", "*"],
+    ["_", "_"]
+  ];
+  for (const [opening, closing] of pairs) {
+    const left = before.match(new RegExp(`${escapeRegExp(opening)}[ \\t]*$`, "u"))?.[0];
+    if (!left) continue;
+    const right = after.match(
+      new RegExp(`^[ \\t]*(?:\\.{3}|[.,;:!?\u2026\u2014\u2013-])*[ \\t]*${escapeRegExp(closing)}`, "u")
+    )?.[0];
+    if (!right) continue;
+    return { start: start - left.length, end: end + right.length };
+  }
+  return { start, end };
+}
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function extendThroughTerminalPunctuation(text, end, limit) {
   const punctuation = text.slice(end, limit).match(/^(?:\.{3}|[.!?…])/u)?.[0];
@@ -3208,7 +3243,7 @@ function normalizeDeterministically(raw, glossary, options = {}) {
     for (const variant of entry.variants) {
       if (!variant.trim() || variant.localeCompare(entry.canonical, void 0, { sensitivity: "accent" }) === 0)
         continue;
-      const pattern = new RegExp(`\\b${escapeRegExp(variant)}\\b`, "gi");
+      const pattern = new RegExp(`\\b${escapeRegExp2(variant)}\\b`, "gi");
       const next = text.replace(pattern, entry.canonical);
       if (next !== text) reasons.push(`glossary: ${entry.canonical}`);
       text = next;
@@ -3584,7 +3619,7 @@ function replaceExplicitSpelling(input, compactUppercaseSpelling = false) {
   );
   for (const candidate of learningCandidates) {
     text = text.replace(
-      new RegExp(`\\b(write|type|spell)\\s*,\\s+(?=${escapeRegExp(candidate.canonical)}\\b)`, "gi"),
+      new RegExp(`\\b(write|type|spell)\\s*,\\s+(?=${escapeRegExp2(candidate.canonical)}\\b)`, "gi"),
       "$1 "
     );
   }
@@ -3619,7 +3654,7 @@ function applySpellingCasing(value, casing) {
 function cleanupPunctuationSpacing(value) {
   return value.replace(/[ \t]+([,.;:!?)\]>])/g, "$1").replace(/([(<[])\s+/g, "$1").replace(/([“‘])[ \t]+/g, "$1").replace(/[ \t]+([”’])/g, "$1").replace(/[ \t]+…/g, "\u2026").replace(/(?<=\p{L})[ \t]*’[ \t]*(?=\p{L})/gu, "\u2019").replace(/[ \t]*-[ \t]*/g, "-").replace(/[,;:]\s*([.!?])/g, "$1").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").replace(/^[ \t]+/, "").replace(/\s+$/, "");
 }
-function escapeRegExp(value) {
+function escapeRegExp2(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 

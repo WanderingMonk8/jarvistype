@@ -456,6 +456,8 @@ function resolveOperation(
 
   if (operation.type === 'append' || operation.type === 'prepend') {
     if (!paragraph) return `${operation.type} requires one paragraph target`
+    if (hasInlineSelector(operation.target))
+      return `${operation.type} does not accept an inline target`
     const point = operation.type === 'append' ? range.end : range.start
     const insertionText = formatText
       ? capitalizeReplacementAtSentenceOpening(cleanText, point, operation.text ?? '')

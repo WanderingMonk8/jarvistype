@@ -466,6 +466,54 @@ test('keeps insertion after the last sentence inside its paragraph', () => {
   )
 })
 
+test('keeps prepend and append inline and rejects inline selectors on them', () => {
+  const text = 'First paragraph.\n\nSecond paragraph.'
+  const paragraphs = [
+    { id: 'first', ordinal: 1, lineIndex: 0, text: 'First paragraph.' },
+    { id: 'second', ordinal: 2, lineIndex: 2, text: 'Second paragraph.' },
+  ]
+  const boundaryPlan: EditPlan = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Keep both additions in their paragraphs.',
+    operations: [
+      {
+        id: 'append-first',
+        type: 'append',
+        target: { paragraphOrdinal: 1 },
+        text: 'Appended sentence.',
+      },
+      {
+        id: 'prepend-second',
+        type: 'prepend',
+        target: { paragraphOrdinal: 2 },
+        text: 'Prepended sentence.',
+      },
+    ],
+  }
+  const boundaryResult = executeEditPlan(text, paragraphs, 1, boundaryPlan)
+  assert.equal(
+    boundaryResult.ok && boundaryResult.afterText,
+    'First paragraph. Appended sentence.\n\nPrepended sentence. Second paragraph.',
+  )
+
+  const invalid = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Do not silently ignore a sentence selector.',
+    operations: [
+      {
+        id: 'invalid-append',
+        type: 'append',
+        target: { paragraphOrdinal: 1, sentenceFromEnd: 1 },
+        text: 'Unsafe.',
+      },
+    ],
+  })
+  assert.equal(invalid.ok, false)
+  if (!invalid.ok) assert.equal(invalid.reason, 'append does not accept an inline target')
+})
+
 test('keeps exact-text insertions inline and adds only missing boundary spacing', () => {
   const session = fixture()
   const after = executeEditPlan(session.cleanText, session.paragraphs, 1, {

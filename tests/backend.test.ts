@@ -3349,6 +3349,68 @@ test('keeps beginning and end insertions inside the targeted paragraph', async (
   }
 })
 
+test('normalizes before-beginning and after-end paragraph insertions to inline boundaries', async () => {
+  const cases = [
+    {
+      name: 'before-beginning',
+      instruction: 'Insert before the beginning of the second paragraph: New sentence.',
+      operation: {
+        id: 'before-beginning',
+        type: 'insert_before' as const,
+        target: { paragraphOrdinal: 2 },
+        text: 'New sentence.',
+      },
+      expected: 'First paragraph.\n\nNew sentence. Second paragraph.',
+      normalizedType: 'prepend',
+    },
+    {
+      name: 'after-end',
+      instruction: 'Insert after the end of the first paragraph: New sentence.',
+      operation: {
+        id: 'after-end',
+        type: 'insert_after' as const,
+        target: { paragraphOrdinal: 1 },
+        text: 'New sentence.',
+      },
+      expected: 'First paragraph. New sentence.\n\nSecond paragraph.',
+      normalizedType: 'append',
+    },
+  ]
+
+  for (const [index, testCase] of cases.entries()) {
+    const userId = `paragraph-inline-boundary-user-${index}`
+    const chatId = `paragraph-inline-boundary-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.')
+    responses.length = 0
+    editPlanResponse = {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'Insert at the requested boundary within the paragraph.',
+      operations: [testCase.operation],
+    }
+
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `paragraph-inline-boundary-interpret-${index}`,
+        operationId: `paragraph-inline-boundary-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript: testCase.instruction,
+      },
+      userId,
+    )
+
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', testCase.name)
+    if (response?.type !== 'edit.proposal.response') continue
+    assert.equal(response.proposal.afterText, testCase.expected, testCase.name)
+    assert.equal(response.proposal.plan.operations[0]?.type, testCase.normalizedType, testCase.name)
+  }
+})
+
 test('puts one pair of quotations around a numbered paragraph instead of each sentence', async () => {
   const userId = 'deterministic-paragraph-quotation-user'
   const chatId = 'deterministic-paragraph-quotation-chat'

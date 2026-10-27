@@ -956,6 +956,8 @@ function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms
   const range = paragraph ? paragraphRange(cleanText, paragraph) : { start: 0, end: cleanText.length };
   if (operation.type === "append" || operation.type === "prepend") {
     if (!paragraph) return `${operation.type} requires one paragraph target`;
+    if (hasInlineSelector(operation.target))
+      return `${operation.type} does not accept an inline target`;
     const point = operation.type === "append" ? range.end : range.start;
     const insertionText2 = formatText ? capitalizeReplacementAtSentenceOpening(cleanText, point, operation.text ?? "") : operation.text ?? "";
     return {
@@ -6500,15 +6502,15 @@ function planUsesAsInLiterally(plan) {
 }
 function normalizeParagraphBoundaryInsertions(plan, instructionTranscript) {
   if (/\bnew\s+paragraph\b/iu.test(instructionTranscript)) return plan;
-  const requestsBeginning = /\b(?:at|to)\s+(?:the\s+)?(?:beginning|start)\b/iu.test(
+  const requestsBeginning = /\b(?:at|to|before)\s+(?:the\s+)?(?:beginning|start)\b/iu.test(
     instructionTranscript
   );
-  const requestsEnd = /\b(?:at|to)\s+(?:the\s+)?end\b/iu.test(instructionTranscript) || /\b(?:beginning|start)\s+and\s+(?:the\s+)?end\b/iu.test(instructionTranscript);
+  const requestsEnd = /\b(?:at|to|after)\s+(?:the\s+)?end\b/iu.test(instructionTranscript) || /\b(?:beginning|start)\s+and\s+(?:the\s+)?end\b/iu.test(instructionTranscript);
   if (!requestsBeginning && !requestsEnd) return plan;
   return {
     ...plan,
     operations: plan.operations.map((operation) => {
-      const isWholeParagraphTarget = (operation.target.paragraphId !== void 0 || operation.target.paragraphOrdinal !== void 0) && operation.target.exactText === void 0 && operation.target.approximateText === void 0 && operation.target.punctuation === void 0;
+      const isWholeParagraphTarget = (operation.target.paragraphId !== void 0 || operation.target.paragraphOrdinal !== void 0) && operation.target.exactText === void 0 && operation.target.approximateText === void 0 && operation.target.punctuation === void 0 && operation.target.sentenceOrdinal === void 0 && operation.target.sentenceFromEnd === void 0;
       if (!isWholeParagraphTarget) return operation;
       if (operation.type === "insert_before" && requestsBeginning)
         return { ...operation, type: "prepend" };

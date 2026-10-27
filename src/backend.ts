@@ -3605,11 +3605,11 @@ function normalizeParagraphBoundaryInsertions(
   instructionTranscript: string,
 ): EditPlan {
   if (/\bnew\s+paragraph\b/iu.test(instructionTranscript)) return plan
-  const requestsBeginning = /\b(?:at|to)\s+(?:the\s+)?(?:beginning|start)\b/iu.test(
+  const requestsBeginning = /\b(?:at|to|before)\s+(?:the\s+)?(?:beginning|start)\b/iu.test(
     instructionTranscript,
   )
   const requestsEnd =
-    /\b(?:at|to)\s+(?:the\s+)?end\b/iu.test(instructionTranscript) ||
+    /\b(?:at|to|after)\s+(?:the\s+)?end\b/iu.test(instructionTranscript) ||
     /\b(?:beginning|start)\s+and\s+(?:the\s+)?end\b/iu.test(instructionTranscript)
   if (!requestsBeginning && !requestsEnd) return plan
 
@@ -3621,7 +3621,9 @@ function normalizeParagraphBoundaryInsertions(
           operation.target.paragraphOrdinal !== undefined) &&
         operation.target.exactText === undefined &&
         operation.target.approximateText === undefined &&
-        operation.target.punctuation === undefined
+        operation.target.punctuation === undefined &&
+        operation.target.sentenceOrdinal === undefined &&
+        operation.target.sentenceFromEnd === undefined
       if (!isWholeParagraphTarget) return operation
       if (operation.type === 'insert_before' && requestsBeginning)
         return { ...operation, type: 'prepend' }

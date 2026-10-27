@@ -294,7 +294,7 @@ function isBackendResponse(value) {
     return value.ok === true && value.outcome === "selection-required" && isEditCandidateSet(value.candidateSet);
   }
   if (value.type === "phase4.state.response") {
-    return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.connections) && value.connections.every(isNormalizationConnectionOption) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && typeof value.decisionModelAvailable === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
+    return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.connections) && value.connections.every(isNormalizationConnectionOption) && Array.isArray(value.decisionConnections) && value.decisionConnections.every(isNormalizationConnectionOption) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && typeof value.decisionModelAvailable === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
   }
   if (value.type === "debug.log.response") {
     return value.ok === true && Array.isArray(value.entries) && value.entries.length <= 2100 && value.entries.every((entry) => typeof entry === "string" && entry.length <= 2e3);
@@ -335,7 +335,7 @@ function isPermissionSnapshot(value) {
   return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function isPhaseFourSettings(value) {
-  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger2(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger2(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
+  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger2(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger2(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.glossaryDefaultScope === void 0 || value.glossaryDefaultScope === "local" || value.glossaryDefaultScope === "global") && (value.decisionConnectionId === void 0 || value.decisionConnectionId === null || isIdentifier2(value.decisionConnectionId)) && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function isNormalizationConnectionOption(value) {
   return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
@@ -745,6 +745,10 @@ function setup(ctx) {
     tab.root,
     "[data-normalization-connection]"
   );
+  const decisionConnectionSelect = requireElement(
+    tab.root,
+    "[data-decision-connection]"
+  );
   const normalizationModelSlot = requireElement(tab.root, "[data-normalization-model]");
   const glossaryCanonicalInput = requireElement(
     tab.root,
@@ -755,6 +759,11 @@ function setup(ctx) {
     "[data-glossary-variants]"
   );
   const glossaryHintInput = requireElement(tab.root, "[data-glossary-hint]");
+  const glossaryGlobalInput = requireElement(tab.root, "[data-glossary-global]");
+  const glossaryDefaultScopeSelect = requireElement(
+    tab.root,
+    "[data-glossary-default-scope]"
+  );
   const glossarySaveButton = requireElement(tab.root, "[data-glossary-save]");
   const glossaryCancelButton = requireElement(tab.root, "[data-glossary-cancel]");
   const glossaryUndoButton = requireElement(tab.root, "[data-glossary-undo]");
@@ -779,6 +788,14 @@ function setup(ctx) {
   const floatingGlossaryHintInput = requireElement(
     floatingWidget.root,
     "[data-floating-glossary-hint]"
+  );
+  const floatingGlossaryGlobalInput = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-global]"
+  );
+  const floatingGlossaryDefaultScopeSelect = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-default-scope]"
   );
   const floatingGlossarySaveButton = requireElement(
     floatingWidget.root,
@@ -828,11 +845,14 @@ function setup(ctx) {
       referenceAdmissionOccurrences: 1,
       contextualNormalizationEnabled: true,
       grammarRepairMode: "off",
+      glossaryDefaultScope: "local",
+      decisionConnectionId: null,
       normalizationConnectionId: null,
       normalizationModelOverride: "",
       debugLoggingEnabled: false
     },
     normalizationConnections: [],
+    decisionConnections: [],
     glossary: [],
     canUndoGlossary: false,
     decisionModelAvailable: null,
@@ -1014,6 +1034,13 @@ function setup(ctx) {
     );
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
     grammarRepairSelect.value = state.settings.grammarRepairMode;
+    glossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope ?? "local";
+    floatingGlossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope ?? "local";
+    if (!editingGlossaryEntryId && !glossaryCanonicalInput.value && !floatingGlossaryCanonicalInput.value) {
+      const useGlobal = (state.settings.glossaryDefaultScope ?? "local") === "global";
+      glossaryGlobalInput.checked = useGlobal;
+      floatingGlossaryGlobalInput.checked = useGlobal;
+    }
     grammarRepairWarning.hidden = state.settings.grammarRepairMode !== "when_needed" || state.decisionModelAvailable !== false;
     debugEnabledToggle.checked = state.settings.debugLoggingEnabled === true;
     debugRefreshButton.disabled = state.settings.debugLoggingEnabled !== true;
@@ -1023,6 +1050,12 @@ function setup(ctx) {
       normalizationConnectionSelect,
       state.normalizationConnections,
       state.settings.normalizationConnectionId
+    );
+    renderConnectionOptions(
+      decisionConnectionSelect,
+      state.decisionConnections,
+      state.settings.decisionConnectionId ?? null,
+      "Default decision connection"
     );
     if (modelPickerConnectionId !== state.settings.normalizationConnectionId) {
       modelPickerConnectionId = state.settings.normalizationConnectionId;
@@ -1128,12 +1161,14 @@ function setup(ctx) {
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: "phase4.load.request",
-      requestId: createRequestId("phase4-load")
+      requestId: createRequestId("phase4-load"),
+      chatId: state.activeChatId ?? void 0
     });
     if (!alive) return;
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
       state.settings = outcome.value.settings;
       state.normalizationConnections = outcome.value.connections;
+      state.decisionConnections = outcome.value.decisionConnections;
       state.glossary = outcome.value.glossary;
       state.canUndoGlossary = outcome.value.canUndoGlossary;
       state.phaseFourMessage = outcome.value.notice ?? "Context and glossary settings ready.";
@@ -1639,6 +1674,7 @@ function setup(ctx) {
   const applyPhaseFourResponse = (response) => {
     state.settings = response.settings;
     state.normalizationConnections = response.connections;
+    state.decisionConnections = response.decisionConnections;
     state.glossary = response.glossary;
     state.canUndoGlossary = response.canUndoGlossary;
     state.decisionModelAvailable = response.decisionModelAvailable;
@@ -1675,10 +1711,13 @@ function setup(ctx) {
         referenceAdmissionOccurrences,
         contextualNormalizationEnabled: contextualToggle.checked,
         grammarRepairMode,
+        glossaryDefaultScope: state.settings.glossaryDefaultScope ?? "local",
+        decisionConnectionId: state.settings.decisionConnectionId ?? null,
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: state.settings.normalizationModelOverride,
         debugLoggingEnabled: debugEnabledToggle.checked
-      }
+      },
+      chatId: state.activeChatId ?? void 0
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
       applyPhaseFourResponse(outcome.value);
@@ -1751,7 +1790,9 @@ function setup(ctx) {
       ...editingGlossaryEntryId ? { entryId: editingGlossaryEntryId } : {},
       canonical,
       variants,
-      hint: hintInput.value.trim()
+      hint: hintInput.value.trim(),
+      scope: (surface === "floating" ? floatingGlossaryGlobalInput : glossaryGlobalInput).checked ? "global" : "local",
+      chatId: state.activeChatId ?? void 0
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
       applyPhaseFourResponse(outcome.value);
@@ -1769,14 +1810,36 @@ function setup(ctx) {
     floatingGlossaryCanonicalInput.value = "";
     floatingGlossaryVariantsInput.value = "";
     floatingGlossaryHintInput.value = "";
+    const useGlobal = (state.settings.glossaryDefaultScope ?? "local") === "global";
+    glossaryGlobalInput.checked = useGlobal;
+    floatingGlossaryGlobalInput.checked = useGlobal;
   };
   const handleGlossaryListClick = async (event) => {
     const button = event.target?.closest(
-      "button[data-glossary-action]"
+      "[data-glossary-action]"
     );
     if (!button) return;
     const entry = state.glossary.find((item) => item.id === button.dataset.entryId);
     if (!entry) return;
+    if (button.dataset.glossaryAction === "toggle-global") {
+      const global = button.checked;
+      const outcome2 = await performRequest({
+        protocolVersion: PROTOCOL_VERSION,
+        type: "glossary.upsert.request",
+        requestId: createRequestId("glossary-scope"),
+        entryId: entry.id,
+        canonical: entry.canonical,
+        variants: entry.variants,
+        hint: entry.hint,
+        scope: global ? "global" : "local",
+        chatId: state.activeChatId ?? void 0
+      });
+      if (outcome2.status === "resolved" && outcome2.value.type === "phase4.state.response")
+        applyPhaseFourResponse(outcome2.value);
+      else state.phaseFourMessage = "Glossary scope was not changed. Try again.";
+      render();
+      return;
+    }
     if (button.dataset.glossaryAction === "edit") {
       editingGlossaryEntryId = entry.id;
       glossaryCanonicalInput.value = entry.canonical;
@@ -1785,6 +1848,9 @@ function setup(ctx) {
       floatingGlossaryCanonicalInput.value = entry.canonical;
       floatingGlossaryVariantsInput.value = entry.variants.join(", ");
       floatingGlossaryHintInput.value = entry.hint;
+      const isGlobal = (entry.scope ?? "global") === "global";
+      glossaryGlobalInput.checked = isGlobal;
+      floatingGlossaryGlobalInput.checked = isGlobal;
       render();
       return;
     }
@@ -1792,7 +1858,8 @@ function setup(ctx) {
       protocolVersion: PROTOCOL_VERSION,
       type: "glossary.delete.request",
       requestId: createRequestId("glossary-delete"),
-      entryId: entry.id
+      entryId: entry.id,
+      chatId: state.activeChatId ?? void 0
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
       applyPhaseFourResponse(outcome.value);
@@ -1802,7 +1869,8 @@ function setup(ctx) {
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: "glossary.undo.request",
-      requestId: createRequestId("glossary-undo")
+      requestId: createRequestId("glossary-undo"),
+      chatId: state.activeChatId ?? void 0
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
       applyPhaseFourResponse(outcome.value);
@@ -2197,6 +2265,22 @@ function setup(ctx) {
     normalizationModelPicker.refresh();
     scheduleSettingsSave(0);
   };
+  const handleDecisionConnectionChange = () => {
+    state.settings.decisionConnectionId = decisionConnectionSelect.value || null;
+    scheduleSettingsSave(0);
+  };
+  const handleGlossaryDefaultScopeChange = (event) => {
+    const select = event.currentTarget;
+    state.settings.glossaryDefaultScope = select.value === "global" ? "global" : "local";
+    glossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope;
+    floatingGlossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope;
+    if (!editingGlossaryEntryId) {
+      const global = state.settings.glossaryDefaultScope === "global";
+      glossaryGlobalInput.checked = global;
+      floatingGlossaryGlobalInput.checked = global;
+    }
+    scheduleSettingsSave(0);
+  };
   const handleSaveGlossaryClick = () => void saveGlossaryEntry("drawer");
   const handleFloatingSaveGlossaryClick = () => void saveGlossaryEntry("floating");
   const handleCancelGlossaryClick = () => {
@@ -2366,6 +2450,9 @@ function setup(ctx) {
   debugCopyButton.addEventListener("click", handleDebugCopyClick);
   debugClearButton.addEventListener("click", handleDebugClearClick);
   normalizationConnectionSelect.addEventListener("change", handleNormalizationConnectionChange);
+  decisionConnectionSelect.addEventListener("change", handleDecisionConnectionChange);
+  glossaryDefaultScopeSelect.addEventListener("change", handleGlossaryDefaultScopeChange);
+  floatingGlossaryDefaultScopeSelect.addEventListener("change", handleGlossaryDefaultScopeChange);
   glossarySaveButton.addEventListener("click", handleSaveGlossaryClick);
   glossaryCancelButton.addEventListener("click", handleCancelGlossaryClick);
   glossaryUndoButton.addEventListener("click", handleUndoGlossaryClick);
@@ -2437,6 +2524,12 @@ function setup(ctx) {
     debugCopyButton.removeEventListener("click", handleDebugCopyClick);
     debugClearButton.removeEventListener("click", handleDebugClearClick);
     normalizationConnectionSelect.removeEventListener("change", handleNormalizationConnectionChange);
+    decisionConnectionSelect.removeEventListener("change", handleDecisionConnectionChange);
+    glossaryDefaultScopeSelect.removeEventListener("change", handleGlossaryDefaultScopeChange);
+    floatingGlossaryDefaultScopeSelect.removeEventListener(
+      "change",
+      handleGlossaryDefaultScopeChange
+    );
     glossarySaveButton.removeEventListener("click", handleSaveGlossaryClick);
     glossaryCancelButton.removeEventListener("click", handleCancelGlossaryClick);
     glossaryUndoButton.removeEventListener("click", handleUndoGlossaryClick);
@@ -2469,11 +2562,11 @@ function setup(ctx) {
   if (removeTeardownListener) disposers.push(removeTeardownListener);
   return cleanup;
 }
-function renderConnectionOptions(select, connections, selectedId) {
+function renderConnectionOptions(select, connections, selectedId, defaultLabel = "Main connection") {
   select.replaceChildren();
   const main = document.createElement("option");
   main.value = "";
-  main.textContent = "Main connection";
+  main.textContent = defaultLabel;
   select.append(main);
   for (const connection of connections) {
     const option = document.createElement("option");
@@ -2512,6 +2605,14 @@ function renderGlossary(container, entries, query = "") {
     text.textContent = `${entry.canonical}${entry.variants.length ? ` \u2014 heard as: ${entry.variants.join(", ")}` : ""}${entry.hint ? ` \u2014 ${entry.hint}` : ""} \u2014 source: ${entry.source === "explicit-spelling" ? "explicit spelling" : "manual"} \u2014 used ${entry.useCount} ${entry.useCount === 1 ? "time" : "times"}`;
     const actions = document.createElement("div");
     actions.className = "jt-actions";
+    const globalLabel = document.createElement("label");
+    const globalToggle = document.createElement("input");
+    globalToggle.type = "checkbox";
+    globalToggle.checked = (entry.scope ?? "global") === "global";
+    globalToggle.dataset.glossaryAction = "toggle-global";
+    globalToggle.dataset.entryId = entry.id;
+    globalLabel.append(globalToggle, " Global");
+    actions.append(globalLabel);
     for (const action of ["edit", "delete"]) {
       const button = document.createElement("button");
       button.type = "button";
@@ -2761,6 +2862,8 @@ function floatingMarkup() {
                 <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-floating-glossary-canonical></label>
                 <label>Heard-as variants<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-floating-glossary-variants></label>
                 <label>Optional hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-floating-glossary-hint></label>
+                <label>Default glossary scope<select data-floating-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
+                <label><span><input type="checkbox" data-floating-glossary-global> Use this entry in all chats</span></label>
               </div>
               <div class="jt-actions">
                 <button type="button" data-floating-glossary-save>Add entry</button>
@@ -3032,6 +3135,7 @@ function shellMarkup() {
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. \u201CWhen needed\u201D needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose \u201CAlways\u201D to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
+          <label>Decision model connection<select data-decision-connection><option value="">Default decision connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
         <details class="jt-proposal__details">
@@ -3054,6 +3158,8 @@ function shellMarkup() {
           <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-glossary-canonical></label>
           <label>Heard-as variants, comma separated<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-glossary-variants></label>
           <label>Optional reference or hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-glossary-hint></label>
+          <label>Default glossary scope<select data-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
+          <label><span><input type="checkbox" data-glossary-global> Use this entry in all chats</span></label>
         </div>
         <div class="jt-actions">
           <button type="button" data-glossary-save>Add entry</button>

@@ -20,6 +20,7 @@ import {
   type EditCandidateSet,
   type FrontendRequest,
   type NormalizationConnectionOption,
+  type DecisionConnectionOption,
   type NormalizationProposal,
   type PhaseFourSettings,
   type PermissionSnapshot,
@@ -218,6 +219,7 @@ interface ComposerState {
   pendingEditCandidates: EditCandidateSet | null
   settings: PhaseFourSettings
   normalizationConnections: NormalizationConnectionOption[]
+  decisionConnections: DecisionConnectionOption[]
   glossary: GlossaryEntry[]
   canUndoGlossary: boolean
   decisionModelAvailable: boolean | null
@@ -466,6 +468,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     tab.root,
     '[data-normalization-connection]',
   )
+  const decisionConnectionSelect = requireElement<HTMLSelectElement>(
+    tab.root,
+    '[data-decision-connection]',
+  )
   const normalizationModelSlot = requireElement<HTMLElement>(tab.root, '[data-normalization-model]')
   const glossaryCanonicalInput = requireElement<HTMLInputElement>(
     tab.root,
@@ -476,6 +482,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     '[data-glossary-variants]',
   )
   const glossaryHintInput = requireElement<HTMLInputElement>(tab.root, '[data-glossary-hint]')
+  const glossaryGlobalInput = requireElement<HTMLInputElement>(tab.root, '[data-glossary-global]')
+  const glossaryDefaultScopeSelect = requireElement<HTMLSelectElement>(
+    tab.root,
+    '[data-glossary-default-scope]',
+  )
   const glossarySaveButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-save]')
   const glossaryCancelButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-cancel]')
   const glossaryUndoButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-undo]')
@@ -500,6 +511,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const floatingGlossaryHintInput = requireElement<HTMLInputElement>(
     floatingWidget.root,
     '[data-floating-glossary-hint]',
+  )
+  const floatingGlossaryGlobalInput = requireElement<HTMLInputElement>(
+    floatingWidget.root,
+    '[data-floating-glossary-global]',
+  )
+  const floatingGlossaryDefaultScopeSelect = requireElement<HTMLSelectElement>(
+    floatingWidget.root,
+    '[data-floating-glossary-default-scope]',
   )
   const floatingGlossarySaveButton = requireElement<HTMLButtonElement>(
     floatingWidget.root,
@@ -553,11 +572,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       referenceAdmissionOccurrences: 1,
       contextualNormalizationEnabled: true,
       grammarRepairMode: 'off',
+      glossaryDefaultScope: 'local',
+      decisionConnectionId: null,
       normalizationConnectionId: null,
       normalizationModelOverride: '',
       debugLoggingEnabled: false,
     },
     normalizationConnections: [],
+    decisionConnections: [],
     glossary: [],
     canUndoGlossary: false,
     decisionModelAvailable: null,
@@ -862,6 +884,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     )
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
     grammarRepairSelect.value = state.settings.grammarRepairMode
+    glossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope ?? 'local'
+    floatingGlossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope ?? 'local'
+    if (!editingGlossaryEntryId && !glossaryCanonicalInput.value && !floatingGlossaryCanonicalInput.value) {
+      const useGlobal = (state.settings.glossaryDefaultScope ?? 'local') === 'global'
+      glossaryGlobalInput.checked = useGlobal
+      floatingGlossaryGlobalInput.checked = useGlobal
+    }
     grammarRepairWarning.hidden =
       state.settings.grammarRepairMode !== 'when_needed' || state.decisionModelAvailable !== false
     debugEnabledToggle.checked = state.settings.debugLoggingEnabled === true
@@ -872,6 +901,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       normalizationConnectionSelect,
       state.normalizationConnections,
       state.settings.normalizationConnectionId,
+    )
+    renderConnectionOptions(
+      decisionConnectionSelect,
+      state.decisionConnections,
+      state.settings.decisionConnectionId ?? null,
+      'Default decision connection',
     )
     if (modelPickerConnectionId !== state.settings.normalizationConnectionId) {
       modelPickerConnectionId = state.settings.normalizationConnectionId
@@ -1004,11 +1039,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       protocolVersion: PROTOCOL_VERSION,
       type: 'phase4.load.request',
       requestId: createRequestId('phase4-load'),
+      chatId: state.activeChatId ?? undefined,
     })
     if (!alive) return
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response') {
       state.settings = outcome.value.settings
       state.normalizationConnections = outcome.value.connections
+      state.decisionConnections = outcome.value.decisionConnections
       state.glossary = outcome.value.glossary
       state.canUndoGlossary = outcome.value.canUndoGlossary
       state.phaseFourMessage = outcome.value.notice ?? 'Context and glossary settings ready.'
@@ -1636,6 +1673,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   ) => {
     state.settings = response.settings
     state.normalizationConnections = response.connections
+    state.decisionConnections = response.decisionConnections
     state.glossary = response.glossary
     state.canUndoGlossary = response.canUndoGlossary
     state.decisionModelAvailable = response.decisionModelAvailable
@@ -1678,10 +1716,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         referenceAdmissionOccurrences,
         contextualNormalizationEnabled: contextualToggle.checked,
         grammarRepairMode,
+        glossaryDefaultScope: state.settings.glossaryDefaultScope ?? 'local',
+        decisionConnectionId: state.settings.decisionConnectionId ?? null,
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: state.settings.normalizationModelOverride,
         debugLoggingEnabled: debugEnabledToggle.checked,
       },
+      chatId: state.activeChatId ?? undefined,
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response') {
       applyPhaseFourResponse(outcome.value)
@@ -1767,6 +1808,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       canonical,
       variants,
       hint: hintInput.value.trim(),
+      scope: (surface === 'floating' ? floatingGlossaryGlobalInput : glossaryGlobalInput).checked
+        ? 'global'
+        : 'local',
+      chatId: state.activeChatId ?? undefined,
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response') {
       applyPhaseFourResponse(outcome.value)
@@ -1785,15 +1830,37 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     floatingGlossaryCanonicalInput.value = ''
     floatingGlossaryVariantsInput.value = ''
     floatingGlossaryHintInput.value = ''
+    const useGlobal = (state.settings.glossaryDefaultScope ?? 'local') === 'global'
+    glossaryGlobalInput.checked = useGlobal
+    floatingGlossaryGlobalInput.checked = useGlobal
   }
 
   const handleGlossaryListClick = async (event: Event) => {
-    const button = (event.target as Element | null)?.closest<HTMLButtonElement>(
-      'button[data-glossary-action]',
+    const button = (event.target as Element | null)?.closest<HTMLElement>(
+      '[data-glossary-action]',
     )
     if (!button) return
     const entry = state.glossary.find((item) => item.id === button.dataset.entryId)
     if (!entry) return
+    if (button.dataset.glossaryAction === 'toggle-global') {
+      const global = (button as HTMLInputElement).checked
+      const outcome = await performRequest({
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'glossary.upsert.request',
+        requestId: createRequestId('glossary-scope'),
+        entryId: entry.id,
+        canonical: entry.canonical,
+        variants: entry.variants,
+        hint: entry.hint,
+        scope: global ? 'global' : 'local',
+        chatId: state.activeChatId ?? undefined,
+      })
+      if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
+        applyPhaseFourResponse(outcome.value)
+      else state.phaseFourMessage = 'Glossary scope was not changed. Try again.'
+      render()
+      return
+    }
     if (button.dataset.glossaryAction === 'edit') {
       editingGlossaryEntryId = entry.id
       glossaryCanonicalInput.value = entry.canonical
@@ -1802,6 +1869,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       floatingGlossaryCanonicalInput.value = entry.canonical
       floatingGlossaryVariantsInput.value = entry.variants.join(', ')
       floatingGlossaryHintInput.value = entry.hint
+      const isGlobal = (entry.scope ?? 'global') === 'global'
+      glossaryGlobalInput.checked = isGlobal
+      floatingGlossaryGlobalInput.checked = isGlobal
       render()
       return
     }
@@ -1810,6 +1880,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       type: 'glossary.delete.request',
       requestId: createRequestId('glossary-delete'),
       entryId: entry.id,
+      chatId: state.activeChatId ?? undefined,
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
       applyPhaseFourResponse(outcome.value)
@@ -1821,6 +1892,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       protocolVersion: PROTOCOL_VERSION,
       type: 'glossary.undo.request',
       requestId: createRequestId('glossary-undo'),
+      chatId: state.activeChatId ?? undefined,
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
       applyPhaseFourResponse(outcome.value)
@@ -2278,6 +2350,22 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     normalizationModelPicker.refresh()
     scheduleSettingsSave(0)
   }
+  const handleDecisionConnectionChange = () => {
+    state.settings.decisionConnectionId = decisionConnectionSelect.value || null
+    scheduleSettingsSave(0)
+  }
+  const handleGlossaryDefaultScopeChange = (event: Event) => {
+    const select = event.currentTarget as HTMLSelectElement
+    state.settings.glossaryDefaultScope = select.value === 'global' ? 'global' : 'local'
+    glossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope
+    floatingGlossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope
+    if (!editingGlossaryEntryId) {
+      const global = state.settings.glossaryDefaultScope === 'global'
+      glossaryGlobalInput.checked = global
+      floatingGlossaryGlobalInput.checked = global
+    }
+    scheduleSettingsSave(0)
+  }
   const handleSaveGlossaryClick = () => void saveGlossaryEntry('drawer')
   const handleFloatingSaveGlossaryClick = () => void saveGlossaryEntry('floating')
   const handleCancelGlossaryClick = () => {
@@ -2476,6 +2564,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   debugCopyButton.addEventListener('click', handleDebugCopyClick)
   debugClearButton.addEventListener('click', handleDebugClearClick)
   normalizationConnectionSelect.addEventListener('change', handleNormalizationConnectionChange)
+  decisionConnectionSelect.addEventListener('change', handleDecisionConnectionChange)
+  glossaryDefaultScopeSelect.addEventListener('change', handleGlossaryDefaultScopeChange)
+  floatingGlossaryDefaultScopeSelect.addEventListener('change', handleGlossaryDefaultScopeChange)
   glossarySaveButton.addEventListener('click', handleSaveGlossaryClick)
   glossaryCancelButton.addEventListener('click', handleCancelGlossaryClick)
   glossaryUndoButton.addEventListener('click', handleUndoGlossaryClick)
@@ -2549,6 +2640,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     debugCopyButton.removeEventListener('click', handleDebugCopyClick)
     debugClearButton.removeEventListener('click', handleDebugClearClick)
     normalizationConnectionSelect.removeEventListener('change', handleNormalizationConnectionChange)
+    decisionConnectionSelect.removeEventListener('change', handleDecisionConnectionChange)
+    glossaryDefaultScopeSelect.removeEventListener('change', handleGlossaryDefaultScopeChange)
+    floatingGlossaryDefaultScopeSelect.removeEventListener(
+      'change',
+      handleGlossaryDefaultScopeChange,
+    )
     glossarySaveButton.removeEventListener('click', handleSaveGlossaryClick)
     glossaryCancelButton.removeEventListener('click', handleCancelGlossaryClick)
     glossaryUndoButton.removeEventListener('click', handleUndoGlossaryClick)
@@ -2586,11 +2683,12 @@ function renderConnectionOptions(
   select: HTMLSelectElement,
   connections: readonly NormalizationConnectionOption[],
   selectedId: string | null,
+  defaultLabel = 'Main connection',
 ): void {
   select.replaceChildren()
   const main = document.createElement('option')
   main.value = ''
-  main.textContent = 'Main connection'
+  main.textContent = defaultLabel
   select.append(main)
   for (const connection of connections) {
     const option = document.createElement('option')
@@ -2638,6 +2736,14 @@ function renderGlossary(
     text.textContent = `${entry.canonical}${entry.variants.length ? ` — heard as: ${entry.variants.join(', ')}` : ''}${entry.hint ? ` — ${entry.hint}` : ''} — source: ${entry.source === 'explicit-spelling' ? 'explicit spelling' : 'manual'} — used ${entry.useCount} ${entry.useCount === 1 ? 'time' : 'times'}`
     const actions = document.createElement('div')
     actions.className = 'jt-actions'
+    const globalLabel = document.createElement('label')
+    const globalToggle = document.createElement('input')
+    globalToggle.type = 'checkbox'
+    globalToggle.checked = (entry.scope ?? 'global') === 'global'
+    globalToggle.dataset.glossaryAction = 'toggle-global'
+    globalToggle.dataset.entryId = entry.id
+    globalLabel.append(globalToggle, ' Global')
+    actions.append(globalLabel)
     for (const action of ['edit', 'delete'] as const) {
       const button = document.createElement('button')
       button.type = 'button'
@@ -2948,6 +3054,8 @@ function floatingMarkup(): string {
                 <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-floating-glossary-canonical></label>
                 <label>Heard-as variants<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-floating-glossary-variants></label>
                 <label>Optional hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-floating-glossary-hint></label>
+                <label>Default glossary scope<select data-floating-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
+                <label><span><input type="checkbox" data-floating-glossary-global> Use this entry in all chats</span></label>
               </div>
               <div class="jt-actions">
                 <button type="button" data-floating-glossary-save>Add entry</button>
@@ -3220,6 +3328,7 @@ function shellMarkup(): string {
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. “When needed” needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose “Always” to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
+          <label>Decision model connection<select data-decision-connection><option value="">Default decision connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
         <details class="jt-proposal__details">
@@ -3242,6 +3351,8 @@ function shellMarkup(): string {
           <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-glossary-canonical></label>
           <label>Heard-as variants, comma separated<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-glossary-variants></label>
           <label>Optional reference or hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-glossary-hint></label>
+          <label>Default glossary scope<select data-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
+          <label><span><input type="checkbox" data-glossary-global> Use this entry in all chats</span></label>
         </div>
         <div class="jt-actions">
           <button type="button" data-glossary-save>Add entry</button>

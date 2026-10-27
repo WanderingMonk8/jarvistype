@@ -473,7 +473,18 @@ test('reports whether a decision model connection is available for the when-need
   await dispatch(settingsRequest('decisions-availability-present'), userId)
   const present = responses.at(-1)?.payload
   assert.equal(present?.type, 'phase4.state.response')
-  if (present?.type === 'phase4.state.response') assert.equal(present.decisionModelAvailable, true)
+  if (present?.type === 'phase4.state.response') {
+    assert.equal(present.decisionModelAvailable, true)
+    assert.deepEqual(present.decisionConnections, [
+      {
+        id: 'jev-default',
+        name: 'Decision model',
+        provider: 'test',
+        model: 'jev-test',
+        isDefault: true,
+      },
+    ])
+  }
   decisionsEnabled = false
 })
 

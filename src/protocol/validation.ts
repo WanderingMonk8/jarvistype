@@ -108,10 +108,15 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       isNonNegativeInteger(value.expectedVersion)
     )
   }
-  if (value.type === 'phase4.load.request' || value.type === 'glossary.undo.request') return true
+  if (value.type === 'phase4.load.request' || value.type === 'glossary.undo.request')
+    return value.chatId === undefined || isIdentifier(value.chatId)
   if (value.type === 'debug.log.request')
     return value.clear === undefined || typeof value.clear === 'boolean'
-  if (value.type === 'phase4.settings.update.request') return isPhaseFourSettings(value.settings)
+  if (value.type === 'phase4.settings.update.request')
+    return (
+      isPhaseFourSettings(value.settings) &&
+      (value.chatId === undefined || isIdentifier(value.chatId))
+    )
   if (value.type === 'glossary.upsert.request') {
     return (
       (value.entryId === undefined || isIdentifier(value.entryId)) &&
@@ -120,10 +125,13 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       value.variants.length <= 20 &&
       value.variants.every((variant) => isBoundedString(variant, 1, 200)) &&
       typeof value.hint === 'string' &&
-      value.hint.length <= 500
+      value.hint.length <= 500 &&
+      (value.scope === undefined || value.scope === 'local' || value.scope === 'global') &&
+      (value.chatId === undefined || isIdentifier(value.chatId))
     )
   }
-  if (value.type === 'glossary.delete.request') return isIdentifier(value.entryId)
+  if (value.type === 'glossary.delete.request')
+    return isIdentifier(value.entryId) && (value.chatId === undefined || isIdentifier(value.chatId))
   return false
 }
 
@@ -199,6 +207,8 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
       isPhaseFourSettings(value.settings) &&
       Array.isArray(value.connections) &&
       value.connections.every(isNormalizationConnectionOption) &&
+      Array.isArray(value.decisionConnections) &&
+      value.decisionConnections.every(isNormalizationConnectionOption) &&
       Array.isArray(value.glossary) &&
       value.glossary.every(isGlossaryEntry) &&
       typeof value.canUndoGlossary === 'boolean' &&
@@ -355,6 +365,12 @@ function isPhaseFourSettings(value: unknown): boolean {
     (value.grammarRepairMode === 'off' ||
       value.grammarRepairMode === 'when_needed' ||
       value.grammarRepairMode === 'always') &&
+    (value.glossaryDefaultScope === undefined ||
+      value.glossaryDefaultScope === 'local' ||
+      value.glossaryDefaultScope === 'global') &&
+    (value.decisionConnectionId === undefined ||
+      value.decisionConnectionId === null ||
+      isIdentifier(value.decisionConnectionId)) &&
     (value.normalizationConnectionId === null || isIdentifier(value.normalizationConnectionId)) &&
     typeof value.normalizationModelOverride === 'string' &&
     value.normalizationModelOverride.length <= 200 &&

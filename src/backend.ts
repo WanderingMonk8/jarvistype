@@ -53,6 +53,7 @@ import {
 import {
   createGlossaryState,
   deleteGlossaryEntry,
+  glossaryEntriesForChat,
   isGlossaryState,
   learnExplicitSpelling,
   undoGlossaryMutation,
@@ -159,6 +160,8 @@ const DEFAULT_SETTINGS: PhaseFourSettings = {
   referenceAdmissionOccurrences: DEFAULT_REFERENCE_ADMISSION_OCCURRENCES,
   contextualNormalizationEnabled: true,
   grammarRepairMode: 'off',
+  glossaryDefaultScope: 'local',
+  decisionConnectionId: null,
   normalizationConnectionId: null,
   normalizationModelOverride: '',
   debugLoggingEnabled: false,
@@ -303,7 +306,7 @@ async function handleTranscriptNormalization(
 
     const [settings, glossary, messages, cardReferenceSet] = await Promise.all([
       loadSettings(context.userId),
-      loadGlossary(context.userId),
+      loadGlossary(context.userId, request.chatId),
       spindle.chat.getMessages(request.chatId),
       loadCardCharacterReferences(request.chatId, context.userId),
     ])
@@ -361,6 +364,7 @@ async function handleTranscriptNormalization(
         ...referenceCandidateSnippets(draftReferenceCandidates, session.cleanText),
       ],
       activeRequest.abort.signal,
+      settings.decisionConnectionId ?? null,
     )
     const approvedCandidateKeys = new Set(approvedCandidates.map(referenceCacheKey))
     const recentConversationReferences = recentReferenceCandidates.filter((reference) =>
@@ -892,10 +896,19 @@ async function handleTranscriptConfirmation(
         reason: mutation.reason,
         session: mutation.session,
       }
+    const settings = await loadSettings(context.userId)
     let glossary = await loadGlossary(context.userId)
     const learned = []
     for (const candidate of proposal.learningCandidates) {
-      const result = learnExplicitSpelling(glossary, candidate.canonical, candidate.spokenVariant)
+      const result = learnExplicitSpelling(
+        glossary,
+        candidate.canonical,
+        candidate.spokenVariant,
+        undefined,
+        undefined,
+        settings.glossaryDefaultScope ?? 'local',
+        request.chatId,
+      )
       if (result.conflict) continue
       glossary = result.state
       if (result.entry) learned.push(result.entry)
@@ -988,7 +1001,7 @@ async function handleEditInterpretation(
 
     const [settings, glossary, messages, cardReferenceSet] = await Promise.all([
       loadSettings(context.userId),
-      loadGlossary(context.userId),
+      loadGlossary(context.userId, request.chatId),
       spindle.chat.getMessages(request.chatId),
       loadCardCharacterReferences(request.chatId, context.userId),
     ])
@@ -1049,6 +1062,7 @@ async function handleEditInterpretation(
             ...referenceCandidateSnippets(draftReferenceCandidates, session.cleanText),
           ],
           activeRequest.abort.signal,
+          settings.decisionConnectionId ?? null,
         )
       : []
     const approvedCandidateKeys = new Set(approvedCandidates.map(referenceCacheKey))
@@ -1404,10 +1418,19 @@ async function handleEditConfirmation(
       'edit.confirm.apply',
       `version=${mutation.session.draftVersion} duration=${debugDuration(confirmStartedAt)}`,
     )
+    const settings = await loadSettings(context.userId)
     let glossary = await loadGlossary(context.userId)
     const learned = []
     for (const candidate of proposal.learningCandidates) {
-      const learning = learnExplicitSpelling(glossary, candidate.canonical, candidate.spokenVariant)
+      const learning = learnExplicitSpelling(
+        glossary,
+        candidate.canonical,
+        candidate.spokenVariant,
+        undefined,
+        undefined,
+        settings.glossaryDefaultScope ?? 'local',
+        request.chatId,
+      )
       if (learning.conflict) continue
       glossary = learning.state
       if (learning.entry) learned.push(learning.entry)
@@ -1519,7 +1542,7 @@ async function handleEditCandidateSelection(
     return
   }
   const [glossary, settings] = await Promise.all([
-    loadGlossary(context.userId),
+    loadGlossary(context.userId, request.chatId),
     loadSettings(context.userId),
   ])
   const spelling = normalizeDeterministically(
@@ -2136,7 +2159,14 @@ async function maybeRepairEditGrammar(
   const canEvaluateOrRepair = hasLetters && providerCharacters <= MAX_GRAMMAR_SEGMENT_CHARACTERS
   const jevProbability =
     settings.grammarRepairMode === 'when_needed' && canEvaluateOrRepair
-      ? await evaluateEditGrammarWithJev(segments, deterministicTexts, operations, userId, signal)
+      ? await evaluateEditGrammarWithJev(
+          segments,
+          deterministicTexts,
+          operations,
+          userId,
+          signal,
+          settings.decisionConnectionId ?? null,
+        )
       : null
   if (signal.aborted) return fallback
   const needsProvider =
@@ -2306,6 +2336,7 @@ async function evaluateEditGrammarWithJev(
   operations: readonly ResolvedEditOperation[],
   userId: string,
   signal: AbortSignal,
+  decisionConnectionId: string | null,
 ): Promise<number | null> {
   if (!spindle.permissions.has('decisions') || signal.aborted) return null
   const startedAt = performance.now()
@@ -2319,6 +2350,7 @@ async function evaluateEditGrammarWithJev(
       spindle.decisions.evaluate(
         {
           userId,
+          ...(decisionConnectionId ? { connection_id: decisionConnectionId } : {}),
           state: {
             task: 'Evaluate whether a completed text edit introduced a grammatical artifact.',
             affectedSegments: segments.map((segment) => ({
@@ -4261,6 +4293,7 @@ async function approveReferenceCandidatesWithJev(
   candidates: readonly string[],
   messages: ReadonlyArray<{ role: 'user' | 'assistant'; content: string }>,
   signal: AbortSignal,
+  decisionConnectionId: string | null,
 ): Promise<string[]> {
   const deduplicated = new Map<string, string>()
   for (const candidate of candidates) {
@@ -4334,6 +4367,7 @@ async function approveReferenceCandidatesWithJev(
       spindle.decisions.evaluate(
         {
           userId,
+          ...(decisionConnectionId ? { connection_id: decisionConnectionId } : {}),
           state: {
             task: 'Classify deduplicated reference candidates conservatively as names or proper nouns.',
             candidates: evaluated.map(({ id, reference, context }) => ({ id, reference, context })),
@@ -4659,7 +4693,7 @@ async function handlePhaseFourLoad(
     loadGlossary(context.userId),
   ])
   if (activeRequest.cancelled) return
-  await sendPhaseFourState(request.requestId, context, settings, glossary)
+  await sendPhaseFourState(request.requestId, context, settings, glossary, undefined, request.chatId)
 }
 
 async function handleSettingsUpdate(
@@ -4667,7 +4701,7 @@ async function handleSettingsUpdate(
   context: RequestContext,
   activeRequest: ActiveRequest,
 ): Promise<void> {
-  const settings = {
+  const settings: PhaseFourSettings = {
     contextMessageCount: clampContextMessageCount(request.settings.contextMessageCount),
     referenceCacheLimit: clampReferenceCacheLimit(request.settings.referenceCacheLimit),
     referenceAdmissionOccurrences: clampReferenceAdmissionOccurrences(
@@ -4675,6 +4709,8 @@ async function handleSettingsUpdate(
     ),
     contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled,
     grammarRepairMode: request.settings.grammarRepairMode,
+    glossaryDefaultScope: request.settings.glossaryDefaultScope === 'global' ? 'global' : 'local',
+    decisionConnectionId: request.settings.decisionConnectionId ?? null,
     normalizationConnectionId: request.settings.normalizationConnectionId,
     normalizationModelOverride: request.settings.normalizationModelOverride.trim(),
     debugLoggingEnabled: request.settings.debugLoggingEnabled === true,
@@ -4701,6 +4737,24 @@ async function handleSettingsUpdate(
       return
     }
   }
+  if (settings.decisionConnectionId) {
+    const decisionConnections = await listDecisionConnections(context.userId)
+    if (!decisionConnections.some((connection) => connection.id === settings.decisionConnectionId)) {
+      send(
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          type: 'app.error',
+          requestId: request.requestId,
+          ok: false,
+          code: 'MALFORMED_REQUEST',
+          message: 'The selected decision connection is unavailable. Settings were not changed.',
+          retryable: false,
+        },
+        context,
+      )
+      return
+    }
+  }
   await persistSettings(context.userId, settings)
   setDebugEnabled(context.userId, settings.debugLoggingEnabled === true)
   const glossary = await loadGlossary(context.userId)
@@ -4711,6 +4765,7 @@ async function handleSettingsUpdate(
       settings,
       glossary,
       'Normalization settings saved.',
+      request.chatId,
     )
 }
 
@@ -4727,6 +4782,9 @@ async function handleGlossaryUpsert(
     variants: request.variants,
     hint: request.hint,
     source: 'manual',
+    scope:
+      request.scope ?? (request.chatId ? (settings.glossaryDefaultScope ?? 'local') : 'global'),
+    chatId: request.chatId,
   })
   if (mutation.conflict) {
     send(
@@ -4753,6 +4811,7 @@ async function handleGlossaryUpsert(
       mutation.changed
         ? 'Glossary entry saved. You can undo this change.'
         : 'Glossary was unchanged.',
+      request.chatId,
     )
 }
 
@@ -4773,6 +4832,7 @@ async function handleGlossaryDelete(
       mutation.changed
         ? 'Glossary entry deleted. You can undo this change.'
         : 'Glossary entry was already absent.',
+      request.chatId,
     )
 }
 
@@ -4791,17 +4851,24 @@ async function handleGlossaryUndo(
       settings,
       mutation.state,
       mutation.changed ? 'Latest glossary change undone.' : 'No glossary change to undo.',
+      request.chatId,
     )
 }
 
-/** Whether the host has at least one decision model connection the Jev check can use. */
-async function decisionModelAvailable(userId: string): Promise<boolean> {
-  if (!spindle.permissions.has('decisions')) return false
+/** Safe connection metadata for the decision-model selector. */
+async function listDecisionConnections(userId: string) {
+  if (!spindle.permissions.has('decisions')) return []
   try {
     const connections = await spindle.decisions.listConnections({ userId })
-    return connections.length > 0
+    return connections.map((connection) => ({
+      id: connection.id,
+      name: connection.name,
+      provider: connection.provider,
+      model: connection.model,
+      isDefault: connection.is_default,
+    }))
   } catch {
-    return false
+    return []
   }
 }
 
@@ -4811,8 +4878,12 @@ async function sendPhaseFourState(
   settings: PhaseFourSettings,
   glossary: GlossaryState,
   notice?: string,
+  chatId?: string,
 ): Promise<void> {
-  const connections = await listNormalizationConnections(context.userId)
+  const [connections, decisionConnections] = await Promise.all([
+    listNormalizationConnections(context.userId),
+    listDecisionConnections(context.userId),
+  ])
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -4821,9 +4892,10 @@ async function sendPhaseFourState(
       ok: true,
       settings,
       connections,
-      glossary: glossary.entries,
+      decisionConnections,
+      glossary: chatId ? glossaryEntriesForChat(glossary, chatId) : glossary.entries,
       canUndoGlossary: glossary.undoStack.length > 0,
-      decisionModelAvailable: await decisionModelAvailable(context.userId),
+      decisionModelAvailable: decisionConnections.length > 0,
       ...(notice ? { notice } : {}),
     },
     context,
@@ -5288,6 +5360,11 @@ async function loadSettings(userId: string): Promise<PhaseFourSettings> {
             raw.grammarRepairMode === 'when_needed' || raw.grammarRepairMode === 'always'
               ? raw.grammarRepairMode
               : 'off',
+          glossaryDefaultScope: raw.glossaryDefaultScope === 'global' ? 'global' : 'local',
+          decisionConnectionId:
+            typeof raw.decisionConnectionId === 'string' && raw.decisionConnectionId.length > 0
+              ? raw.decisionConnectionId.slice(0, 256)
+              : null,
           normalizationConnectionId:
             typeof raw.normalizationConnectionId === 'string' &&
             raw.normalizationConnectionId.length > 0
@@ -5313,11 +5390,11 @@ async function persistSettings(userId: string, settings: PhaseFourSettings): Pro
   recordDebug(userId, 'settings.persist', `duration=${debugDuration(startedAt)}`)
 }
 
-async function loadGlossary(userId: string): Promise<GlossaryState> {
+async function loadGlossary(userId: string, chatId?: string): Promise<GlossaryState> {
   const cached = glossaryCache.get(userId)
   if (cached) {
     recordDebug(userId, 'glossary.load', 'cache')
-    return cached
+    return chatId ? { ...cached, entries: glossaryEntriesForChat(cached, chatId) } : cached
   }
   const startedAt = performance.now()
   const raw = await spindle.userStorage.getJson<unknown>('glossary.json', {
@@ -5331,7 +5408,7 @@ async function loadGlossary(userId: string): Promise<GlossaryState> {
     'glossary.load',
     `host entries=${glossary.entries.length} duration=${debugDuration(startedAt)}`,
   )
-  return glossary
+  return chatId ? { ...glossary, entries: glossaryEntriesForChat(glossary, chatId) } : glossary
 }
 
 async function persistGlossary(userId: string, glossary: GlossaryState): Promise<void> {

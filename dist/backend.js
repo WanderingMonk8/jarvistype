@@ -2536,9 +2536,12 @@ function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).to
   const canonical = input.canonical.trim();
   if (!canonical) return { state, changed: false };
   const variants = unique([...input.variants ?? []].map((value) => value.trim()).filter(Boolean));
+  const scope = input.scope ?? "global";
+  const chatId = scope === "local" ? input.chatId?.trim() : void 0;
+  if (scope === "local" && !chatId) return { state, changed: false };
   const keys = new Set([canonical, ...variants].map(normalizeKey));
   const conflict = state.entries.find(
-    (entry2) => entry2.id !== input.id && [entry2.canonical, ...entry2.variants].some((value) => keys.has(normalizeKey(value)))
+    (entry2) => entry2.id !== input.id && glossaryScopeKey(entry2) === `${scope}:${chatId ?? ""}` && [entry2.canonical, ...entry2.variants].some((value) => keys.has(normalizeKey(value)))
   );
   if (conflict) return { state, changed: false, conflict };
   const existing = input.id ? state.entries.find((entry2) => entry2.id === input.id) : void 0;
@@ -2548,6 +2551,8 @@ function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).to
     variants,
     hint: input.hint?.trim() ?? "",
     source: input.source,
+    scope,
+    ...chatId ? { chatId } : { chatId: void 0 },
     updatedAt: now
   } : {
     id: createId(),
@@ -2555,6 +2560,8 @@ function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).to
     variants,
     hint: input.hint?.trim() ?? "",
     source: input.source,
+    scope,
+    ...chatId ? { chatId } : {},
     useCount: 0,
     createdAt: now,
     updatedAt: now
@@ -2562,9 +2569,12 @@ function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).to
   const entries = existing ? state.entries.map((item) => item.id === existing.id ? entry : item) : [...state.entries, entry].slice(-MAX_GLOSSARY_ENTRIES);
   return { state: pushUndo(state, entries), changed: true, entry };
 }
-function learnExplicitSpelling(state, canonical, spokenVariant, now = (/* @__PURE__ */ new Date()).toISOString(), createId) {
+function learnExplicitSpelling(state, canonical, spokenVariant, now = (/* @__PURE__ */ new Date()).toISOString(), createId, scope = "global", chatId) {
   const key = normalizeKey(canonical);
-  const existing = state.entries.find((entry) => normalizeKey(entry.canonical) === key);
+  const scopeKey = `${scope}:${scope === "local" ? chatId ?? "" : ""}`;
+  const existing = state.entries.find(
+    (entry) => normalizeKey(entry.canonical) === key && glossaryScopeKey(entry) === scopeKey
+  );
   if (existing) {
     const variants = unique([...existing.variants, spokenVariant].filter(Boolean));
     const entry = { ...existing, variants, useCount: existing.useCount + 1, updatedAt: now };
@@ -2579,12 +2589,23 @@ function learnExplicitSpelling(state, canonical, spokenVariant, now = (/* @__PUR
   }
   const result = upsertGlossaryEntry(
     state,
-    { canonical, variants: spokenVariant ? [spokenVariant] : [], source: "explicit-spelling" },
+    {
+      canonical,
+      variants: spokenVariant ? [spokenVariant] : [],
+      source: "explicit-spelling",
+      scope,
+      chatId
+    },
     now,
     createId
   );
   if (result.entry) result.entry.useCount = 1;
   return result;
+}
+function glossaryEntriesForChat(state, chatId) {
+  return state.entries.filter(
+    (entry) => (entry.scope ?? "global") === "global" || entry.chatId === chatId
+  );
 }
 function deleteGlossaryEntry(state, id) {
   if (!state.entries.some((entry) => entry.id === id)) return { state, changed: false };
@@ -2622,7 +2643,11 @@ function unique(values) {
   return [...new Set(values)];
 }
 function isGlossaryEntry(value) {
-  return isRecord3(value) && typeof value.id === "string" && typeof value.canonical === "string" && value.canonical.trim().length > 0 && Array.isArray(value.variants) && value.variants.every((item) => typeof item === "string") && typeof value.hint === "string" && (value.source === "explicit-spelling" || value.source === "manual") && Number.isSafeInteger(value.useCount) && Number(value.useCount) >= 0 && typeof value.createdAt === "string" && typeof value.updatedAt === "string";
+  return isRecord3(value) && typeof value.id === "string" && typeof value.canonical === "string" && value.canonical.trim().length > 0 && Array.isArray(value.variants) && value.variants.every((item) => typeof item === "string") && typeof value.hint === "string" && (value.source === "explicit-spelling" || value.source === "manual") && (value.scope === void 0 || value.scope === "local" || value.scope === "global") && (value.chatId === void 0 || typeof value.chatId === "string") && (value.scope !== "local" || typeof value.chatId === "string" && value.chatId.length > 0) && Number.isSafeInteger(value.useCount) && Number(value.useCount) >= 0 && typeof value.createdAt === "string" && typeof value.updatedAt === "string";
+}
+function glossaryScopeKey(entry) {
+  const scope = entry.scope ?? "global";
+  return `${scope}:${scope === "local" ? entry.chatId ?? "" : ""}`;
 }
 function isRecord3(value) {
   return typeof value === "object" && value !== null;
@@ -3635,14 +3660,17 @@ function isFrontendRequest(value) {
   if (value.type === "draft.recording.undo.request") {
     return isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger3(value.expectedVersion);
   }
-  if (value.type === "phase4.load.request" || value.type === "glossary.undo.request") return true;
+  if (value.type === "phase4.load.request" || value.type === "glossary.undo.request")
+    return value.chatId === void 0 || isIdentifier2(value.chatId);
   if (value.type === "debug.log.request")
     return value.clear === void 0 || typeof value.clear === "boolean";
-  if (value.type === "phase4.settings.update.request") return isPhaseFourSettings(value.settings);
+  if (value.type === "phase4.settings.update.request")
+    return isPhaseFourSettings(value.settings) && (value.chatId === void 0 || isIdentifier2(value.chatId));
   if (value.type === "glossary.upsert.request") {
-    return (value.entryId === void 0 || isIdentifier2(value.entryId)) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.length <= 20 && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && typeof value.hint === "string" && value.hint.length <= 500;
+    return (value.entryId === void 0 || isIdentifier2(value.entryId)) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.length <= 20 && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && typeof value.hint === "string" && value.hint.length <= 500 && (value.scope === void 0 || value.scope === "local" || value.scope === "global") && (value.chatId === void 0 || isIdentifier2(value.chatId));
   }
-  if (value.type === "glossary.delete.request") return isIdentifier2(value.entryId);
+  if (value.type === "glossary.delete.request")
+    return isIdentifier2(value.entryId) && (value.chatId === void 0 || isIdentifier2(value.chatId));
   return false;
 }
 function sanitizeGrantedPermissions(granted) {
@@ -3652,7 +3680,7 @@ function sanitizeGrantedPermissions(granted) {
   };
 }
 function isPhaseFourSettings(value) {
-  return isRecord4(value) && isNonNegativeInteger3(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger3(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger3(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
+  return isRecord4(value) && isNonNegativeInteger3(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger3(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger3(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.glossaryDefaultScope === void 0 || value.glossaryDefaultScope === "local" || value.glossaryDefaultScope === "global") && (value.decisionConnectionId === void 0 || value.decisionConnectionId === null || isIdentifier2(value.decisionConnectionId)) && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function hasEnvelope(value) {
   return isRecord4(value) && value.protocolVersion === PROTOCOL_VERSION && isBoundedString(value.type, 1, 128) && isIdentifier2(value.requestId);
@@ -3712,6 +3740,8 @@ var DEFAULT_SETTINGS = {
   referenceAdmissionOccurrences: DEFAULT_REFERENCE_ADMISSION_OCCURRENCES,
   contextualNormalizationEnabled: true,
   grammarRepairMode: "off",
+  glossaryDefaultScope: "local",
+  decisionConnectionId: null,
   normalizationConnectionId: null,
   normalizationModelOverride: "",
   debugLoggingEnabled: false
@@ -3846,7 +3876,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     const normalizedAgainstNewerDraft = session2.draftVersion !== request.expectedVersion;
     const [settings2, glossary2, messages, cardReferenceSet] = await Promise.all([
       loadSettings(context.userId),
-      loadGlossary(context.userId),
+      loadGlossary(context.userId, request.chatId),
       spindle.chat.getMessages(request.chatId),
       loadCardCharacterReferences(request.chatId, context.userId)
     ]);
@@ -3899,7 +3929,8 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
         ...referenceContext2.messages,
         ...referenceCandidateSnippets(draftReferenceCandidates, session2.cleanText)
       ],
-      activeRequest.abort.signal
+      activeRequest.abort.signal,
+      settings2.decisionConnectionId ?? null
     );
     const approvedCandidateKeys = new Set(approvedCandidates.map(referenceCacheKey));
     const recentConversationReferences = recentReferenceCandidates.filter(
@@ -4353,10 +4384,19 @@ async function handleTranscriptConfirmation(request, context, activeRequest) {
         reason: mutation.reason,
         session: mutation.session
       };
+    const settings = await loadSettings(context.userId);
     let glossary = await loadGlossary(context.userId);
     const learned = [];
     for (const candidate of proposal.learningCandidates) {
-      const result2 = learnExplicitSpelling(glossary, candidate.canonical, candidate.spokenVariant);
+      const result2 = learnExplicitSpelling(
+        glossary,
+        candidate.canonical,
+        candidate.spokenVariant,
+        void 0,
+        void 0,
+        settings.glossaryDefaultScope ?? "local",
+        request.chatId
+      );
       if (result2.conflict) continue;
       glossary = result2.state;
       if (result2.entry) learned.push(result2.entry);
@@ -4433,7 +4473,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
     if (!session.cleanText.trim()) return { error: "empty", session };
     const [settings, glossary, messages, cardReferenceSet] = await Promise.all([
       loadSettings(context.userId),
-      loadGlossary(context.userId),
+      loadGlossary(context.userId, request.chatId),
       spindle.chat.getMessages(request.chatId),
       loadCardCharacterReferences(request.chatId, context.userId)
     ]);
@@ -4484,7 +4524,8 @@ async function handleEditInterpretation(request, context, activeRequest) {
         ...referenceContext.messages,
         ...referenceCandidateSnippets(draftReferenceCandidates, session.cleanText)
       ],
-      activeRequest.abort.signal
+      activeRequest.abort.signal,
+      settings.decisionConnectionId ?? null
     ) : [];
     const approvedCandidateKeys = new Set(approvedCandidates.map(referenceCacheKey));
     const recentConversationReferences = recentReferenceCandidates.filter(
@@ -4795,10 +4836,19 @@ async function handleEditConfirmation(request, context, activeRequest) {
       "edit.confirm.apply",
       `version=${mutation.session.draftVersion} duration=${debugDuration(confirmStartedAt)}`
     );
+    const settings = await loadSettings(context.userId);
     let glossary = await loadGlossary(context.userId);
     const learned = [];
     for (const candidate of proposal.learningCandidates) {
-      const learning = learnExplicitSpelling(glossary, candidate.canonical, candidate.spokenVariant);
+      const learning = learnExplicitSpelling(
+        glossary,
+        candidate.canonical,
+        candidate.spokenVariant,
+        void 0,
+        void 0,
+        settings.glossaryDefaultScope ?? "local",
+        request.chatId
+      );
       if (learning.conflict) continue;
       glossary = learning.state;
       if (learning.entry) learned.push(learning.entry);
@@ -4892,7 +4942,7 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
     return;
   }
   const [glossary, settings] = await Promise.all([
-    loadGlossary(context.userId),
+    loadGlossary(context.userId, request.chatId),
     loadSettings(context.userId)
   ]);
   const spelling = normalizeDeterministically(
@@ -5357,7 +5407,14 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
     0
   );
   const canEvaluateOrRepair = hasLetters && providerCharacters <= MAX_GRAMMAR_SEGMENT_CHARACTERS;
-  const jevProbability = settings.grammarRepairMode === "when_needed" && canEvaluateOrRepair ? await evaluateEditGrammarWithJev(segments, deterministicTexts, operations, userId, signal) : null;
+  const jevProbability = settings.grammarRepairMode === "when_needed" && canEvaluateOrRepair ? await evaluateEditGrammarWithJev(
+    segments,
+    deterministicTexts,
+    operations,
+    userId,
+    signal,
+    settings.decisionConnectionId ?? null
+  ) : null;
   if (signal.aborted) return fallback;
   const needsProvider = canEvaluateOrRepair && (settings.grammarRepairMode === "always" || settings.grammarRepairMode === "when_needed" && jevProbability !== null && jevProbability >= JEV_GRAMMAR_REPAIR_THRESHOLD);
   if (!needsProvider) return fallback;
@@ -5501,7 +5558,7 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
     signal.removeEventListener("abort", abortFromRequest);
   }
 }
-async function evaluateEditGrammarWithJev(segments, deterministicTexts, operations, userId, signal) {
+async function evaluateEditGrammarWithJev(segments, deterministicTexts, operations, userId, signal, decisionConnectionId) {
   if (!spindle.permissions.has("decisions") || signal.aborted) return null;
   const startedAt2 = performance.now();
   recordDebug(userId, "grammar.jev", `start segments=${segments.length}`);
@@ -5514,6 +5571,7 @@ async function evaluateEditGrammarWithJev(segments, deterministicTexts, operatio
       spindle.decisions.evaluate(
         {
           userId,
+          ...decisionConnectionId ? { connection_id: decisionConnectionId } : {},
           state: {
             task: "Evaluate whether a completed text edit introduced a grammatical artifact.",
             affectedSegments: segments.map((segment) => ({
@@ -6988,7 +7046,7 @@ function chatMessageIdentity(message, index) {
 var JEV_REFERENCE_TIMEOUT_MS = 2500;
 var JEV_REFERENCE_ADMISSION_THRESHOLD = 0.85;
 var MAX_REFERENCE_VERDICTS = 500;
-async function approveReferenceCandidatesWithJev(userId, chatId, candidates, messages, signal) {
+async function approveReferenceCandidatesWithJev(userId, chatId, candidates, messages, signal, decisionConnectionId) {
   const deduplicated = /* @__PURE__ */ new Map();
   for (const candidate of candidates) {
     const normalized = candidate.trim();
@@ -7051,6 +7109,7 @@ async function approveReferenceCandidatesWithJev(userId, chatId, candidates, mes
       spindle.decisions.evaluate(
         {
           userId,
+          ...decisionConnectionId ? { connection_id: decisionConnectionId } : {},
           state: {
             task: "Classify deduplicated reference candidates conservatively as names or proper nouns.",
             candidates: evaluated.map(({ id, reference, context }) => ({ id, reference, context }))
@@ -7290,7 +7349,7 @@ async function handlePhaseFourLoad(request, context, activeRequest) {
     loadGlossary(context.userId)
   ]);
   if (activeRequest.cancelled) return;
-  await sendPhaseFourState(request.requestId, context, settings, glossary);
+  await sendPhaseFourState(request.requestId, context, settings, glossary, void 0, request.chatId);
 }
 async function handleSettingsUpdate(request, context, activeRequest) {
   const settings = {
@@ -7301,6 +7360,8 @@ async function handleSettingsUpdate(request, context, activeRequest) {
     ),
     contextualNormalizationEnabled: request.settings.contextualNormalizationEnabled,
     grammarRepairMode: request.settings.grammarRepairMode,
+    glossaryDefaultScope: request.settings.glossaryDefaultScope === "global" ? "global" : "local",
+    decisionConnectionId: request.settings.decisionConnectionId ?? null,
     normalizationConnectionId: request.settings.normalizationConnectionId,
     normalizationModelOverride: request.settings.normalizationModelOverride.trim(),
     debugLoggingEnabled: request.settings.debugLoggingEnabled === true
@@ -7326,6 +7387,24 @@ async function handleSettingsUpdate(request, context, activeRequest) {
       return;
     }
   }
+  if (settings.decisionConnectionId) {
+    const decisionConnections = await listDecisionConnections(context.userId);
+    if (!decisionConnections.some((connection) => connection.id === settings.decisionConnectionId)) {
+      send(
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          type: "app.error",
+          requestId: request.requestId,
+          ok: false,
+          code: "MALFORMED_REQUEST",
+          message: "The selected decision connection is unavailable. Settings were not changed.",
+          retryable: false
+        },
+        context
+      );
+      return;
+    }
+  }
   await persistSettings(context.userId, settings);
   setDebugEnabled(context.userId, settings.debugLoggingEnabled === true);
   const glossary = await loadGlossary(context.userId);
@@ -7335,7 +7414,8 @@ async function handleSettingsUpdate(request, context, activeRequest) {
       context,
       settings,
       glossary,
-      "Normalization settings saved."
+      "Normalization settings saved.",
+      request.chatId
     );
 }
 async function handleGlossaryUpsert(request, context, activeRequest) {
@@ -7346,7 +7426,9 @@ async function handleGlossaryUpsert(request, context, activeRequest) {
     canonical: request.canonical,
     variants: request.variants,
     hint: request.hint,
-    source: "manual"
+    source: "manual",
+    scope: request.scope ?? (request.chatId ? settings.glossaryDefaultScope ?? "local" : "global"),
+    chatId: request.chatId
   });
   if (mutation.conflict) {
     send(
@@ -7370,7 +7452,8 @@ async function handleGlossaryUpsert(request, context, activeRequest) {
       context,
       settings,
       mutation.state,
-      mutation.changed ? "Glossary entry saved. You can undo this change." : "Glossary was unchanged."
+      mutation.changed ? "Glossary entry saved. You can undo this change." : "Glossary was unchanged.",
+      request.chatId
     );
 }
 async function handleGlossaryDelete(request, context, activeRequest) {
@@ -7383,7 +7466,8 @@ async function handleGlossaryDelete(request, context, activeRequest) {
       context,
       settings,
       mutation.state,
-      mutation.changed ? "Glossary entry deleted. You can undo this change." : "Glossary entry was already absent."
+      mutation.changed ? "Glossary entry deleted. You can undo this change." : "Glossary entry was already absent.",
+      request.chatId
     );
 }
 async function handleGlossaryUndo(request, context, activeRequest) {
@@ -7396,20 +7480,30 @@ async function handleGlossaryUndo(request, context, activeRequest) {
       context,
       settings,
       mutation.state,
-      mutation.changed ? "Latest glossary change undone." : "No glossary change to undo."
+      mutation.changed ? "Latest glossary change undone." : "No glossary change to undo.",
+      request.chatId
     );
 }
-async function decisionModelAvailable(userId) {
-  if (!spindle.permissions.has("decisions")) return false;
+async function listDecisionConnections(userId) {
+  if (!spindle.permissions.has("decisions")) return [];
   try {
     const connections = await spindle.decisions.listConnections({ userId });
-    return connections.length > 0;
+    return connections.map((connection) => ({
+      id: connection.id,
+      name: connection.name,
+      provider: connection.provider,
+      model: connection.model,
+      isDefault: connection.is_default
+    }));
   } catch {
-    return false;
+    return [];
   }
 }
-async function sendPhaseFourState(requestId, context, settings, glossary, notice) {
-  const connections = await listNormalizationConnections(context.userId);
+async function sendPhaseFourState(requestId, context, settings, glossary, notice, chatId) {
+  const [connections, decisionConnections] = await Promise.all([
+    listNormalizationConnections(context.userId),
+    listDecisionConnections(context.userId)
+  ]);
   send(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -7418,9 +7512,10 @@ async function sendPhaseFourState(requestId, context, settings, glossary, notice
       ok: true,
       settings,
       connections,
-      glossary: glossary.entries,
+      decisionConnections,
+      glossary: chatId ? glossaryEntriesForChat(glossary, chatId) : glossary.entries,
       canUndoGlossary: glossary.undoStack.length > 0,
-      decisionModelAvailable: await decisionModelAvailable(context.userId),
+      decisionModelAvailable: decisionConnections.length > 0,
       ...notice ? { notice } : {}
     },
     context
@@ -7794,6 +7889,8 @@ async function loadSettings(userId) {
     ),
     contextualNormalizationEnabled: raw.contextualNormalizationEnabled,
     grammarRepairMode: raw.grammarRepairMode === "when_needed" || raw.grammarRepairMode === "always" ? raw.grammarRepairMode : "off",
+    glossaryDefaultScope: raw.glossaryDefaultScope === "global" ? "global" : "local",
+    decisionConnectionId: typeof raw.decisionConnectionId === "string" && raw.decisionConnectionId.length > 0 ? raw.decisionConnectionId.slice(0, 256) : null,
     normalizationConnectionId: typeof raw.normalizationConnectionId === "string" && raw.normalizationConnectionId.length > 0 ? raw.normalizationConnectionId.slice(0, 256) : null,
     normalizationModelOverride: typeof raw.normalizationModelOverride === "string" ? raw.normalizationModelOverride.trim().slice(0, 200) : "",
     debugLoggingEnabled: raw.debugLoggingEnabled === true
@@ -7809,11 +7906,11 @@ async function persistSettings(userId, settings) {
   settingsCache.set(userId, settings);
   recordDebug(userId, "settings.persist", `duration=${debugDuration(startedAt2)}`);
 }
-async function loadGlossary(userId) {
+async function loadGlossary(userId, chatId) {
   const cached = glossaryCache.get(userId);
   if (cached) {
     recordDebug(userId, "glossary.load", "cache");
-    return cached;
+    return chatId ? { ...cached, entries: glossaryEntriesForChat(cached, chatId) } : cached;
   }
   const startedAt2 = performance.now();
   const raw = await spindle.userStorage.getJson("glossary.json", {
@@ -7827,7 +7924,7 @@ async function loadGlossary(userId) {
     "glossary.load",
     `host entries=${glossary.entries.length} duration=${debugDuration(startedAt2)}`
   );
-  return glossary;
+  return chatId ? { ...glossary, entries: glossaryEntriesForChat(glossary, chatId) } : glossary;
 }
 async function persistGlossary(userId, glossary) {
   const startedAt2 = performance.now();

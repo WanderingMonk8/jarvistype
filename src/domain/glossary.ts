@@ -7,6 +7,10 @@ export interface GlossaryEntry {
   variants: string[]
   hint: string
   source: 'explicit-spelling' | 'manual'
+  /** Missing on legacy entries, which are treated as global. */
+  scope?: 'local' | 'global'
+  /** Present only for chat-local entries. */
+  chatId?: string
   useCount: number
   createdAt: string
   updatedAt: string
@@ -37,6 +41,8 @@ export function upsertGlossaryEntry(
     variants?: string[]
     hint?: string
     source: GlossaryEntry['source']
+    scope?: 'local' | 'global'
+    chatId?: string
   },
   now = new Date().toISOString(),
   createId: () => string = () => crypto.randomUUID(),
@@ -44,10 +50,14 @@ export function upsertGlossaryEntry(
   const canonical = input.canonical.trim()
   if (!canonical) return { state, changed: false }
   const variants = unique([...(input.variants ?? [])].map((value) => value.trim()).filter(Boolean))
+  const scope = input.scope ?? 'global'
+  const chatId = scope === 'local' ? input.chatId?.trim() : undefined
+  if (scope === 'local' && !chatId) return { state, changed: false }
   const keys = new Set([canonical, ...variants].map(normalizeKey))
   const conflict = state.entries.find(
     (entry) =>
       entry.id !== input.id &&
+      glossaryScopeKey(entry) === `${scope}:${chatId ?? ''}` &&
       [entry.canonical, ...entry.variants].some((value) => keys.has(normalizeKey(value))),
   )
   if (conflict) return { state, changed: false, conflict }
@@ -60,6 +70,8 @@ export function upsertGlossaryEntry(
         variants,
         hint: input.hint?.trim() ?? '',
         source: input.source,
+        scope,
+        ...(chatId ? { chatId } : { chatId: undefined }),
         updatedAt: now,
       }
     : {
@@ -68,6 +80,8 @@ export function upsertGlossaryEntry(
         variants,
         hint: input.hint?.trim() ?? '',
         source: input.source,
+        scope,
+        ...(chatId ? { chatId } : {}),
         useCount: 0,
         createdAt: now,
         updatedAt: now,
@@ -84,9 +98,14 @@ export function learnExplicitSpelling(
   spokenVariant: string,
   now = new Date().toISOString(),
   createId?: () => string,
+  scope: 'local' | 'global' = 'global',
+  chatId?: string,
 ): GlossaryMutation {
   const key = normalizeKey(canonical)
-  const existing = state.entries.find((entry) => normalizeKey(entry.canonical) === key)
+  const scopeKey = `${scope}:${scope === 'local' ? (chatId ?? '') : ''}`
+  const existing = state.entries.find(
+    (entry) => normalizeKey(entry.canonical) === key && glossaryScopeKey(entry) === scopeKey,
+  )
   if (existing) {
     const variants = unique([...existing.variants, spokenVariant].filter(Boolean))
     const entry = { ...existing, variants, useCount: existing.useCount + 1, updatedAt: now }
@@ -101,12 +120,27 @@ export function learnExplicitSpelling(
   }
   const result = upsertGlossaryEntry(
     state,
-    { canonical, variants: spokenVariant ? [spokenVariant] : [], source: 'explicit-spelling' },
+    {
+      canonical,
+      variants: spokenVariant ? [spokenVariant] : [],
+      source: 'explicit-spelling',
+      scope,
+      chatId,
+    },
     now,
     createId,
   )
   if (result.entry) result.entry.useCount = 1
   return result
+}
+
+export function glossaryEntriesForChat(
+  state: GlossaryState,
+  chatId: string,
+): GlossaryEntry[] {
+  return state.entries.filter(
+    (entry) => (entry.scope ?? 'global') === 'global' || entry.chatId === chatId,
+  )
 }
 
 export function deleteGlossaryEntry(state: GlossaryState, id: string): GlossaryMutation {
@@ -170,11 +204,19 @@ function isGlossaryEntry(value: unknown): value is GlossaryEntry {
     value.variants.every((item) => typeof item === 'string') &&
     typeof value.hint === 'string' &&
     (value.source === 'explicit-spelling' || value.source === 'manual') &&
+    (value.scope === undefined || value.scope === 'local' || value.scope === 'global') &&
+    (value.chatId === undefined || typeof value.chatId === 'string') &&
+    (value.scope !== 'local' || (typeof value.chatId === 'string' && value.chatId.length > 0)) &&
     Number.isSafeInteger(value.useCount) &&
     Number(value.useCount) >= 0 &&
     typeof value.createdAt === 'string' &&
     typeof value.updatedAt === 'string'
   )
+}
+
+function glossaryScopeKey(entry: GlossaryEntry): string {
+  const scope = entry.scope ?? 'global'
+  return `${scope}:${scope === 'local' ? (entry.chatId ?? '') : ''}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

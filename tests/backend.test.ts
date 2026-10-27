@@ -3375,6 +3375,30 @@ test('normalizes before-beginning and after-end paragraph insertions to inline b
       expected: 'First paragraph. New sentence.\n\nSecond paragraph.',
       normalizedType: 'append',
     },
+    {
+      name: 'before-paragraph-without-explicit-new-paragraph',
+      instruction: 'Insert before the second paragraph: New sentence.',
+      operation: {
+        id: 'before-paragraph-inline',
+        type: 'insert_before' as const,
+        target: { paragraphOrdinal: 2 },
+        text: 'New sentence.',
+      },
+      expected: 'First paragraph.\n\nNew sentence. Second paragraph.',
+      normalizedType: 'prepend',
+    },
+    {
+      name: 'after-paragraph-without-explicit-new-paragraph',
+      instruction: 'Insert after the first paragraph: New sentence.',
+      operation: {
+        id: 'after-paragraph-inline',
+        type: 'insert_after' as const,
+        target: { paragraphOrdinal: 1 },
+        text: 'New sentence.',
+      },
+      expected: 'First paragraph. New sentence.\n\nSecond paragraph.',
+      normalizedType: 'append',
+    },
   ]
 
   for (const [index, testCase] of cases.entries()) {
@@ -3409,6 +3433,49 @@ test('normalizes before-beginning and after-end paragraph insertions to inline b
     assert.equal(response.proposal.afterText, testCase.expected, testCase.name)
     assert.equal(response.proposal.plan.operations[0]?.type, testCase.normalizedType, testCase.name)
   }
+})
+
+test('creates a paragraph only when paragraph insertion is explicit', async () => {
+  const userId = 'explicit-paragraph-insertion-user'
+  const chatId = 'explicit-paragraph-insertion-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Insert the requested new paragraph.',
+    operations: [
+      {
+        id: 'explicit-paragraph-before',
+        type: 'insert_before',
+        target: { paragraphOrdinal: 2 },
+        text: 'Inserted paragraph.',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'explicit-paragraph-insertion-interpret',
+      operationId: 'explicit-paragraph-insertion-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Insert a paragraph before the second paragraph: Inserted paragraph.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(
+    response.proposal.afterText,
+    'First paragraph.\n\nInserted paragraph.\n\nSecond paragraph.',
+  )
+  assert.equal(response.proposal.plan.operations[0]?.type, 'insert_before')
 })
 
 test('puts one pair of quotations around a numbered paragraph instead of each sentence', async () => {

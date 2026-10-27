@@ -764,6 +764,7 @@ function setup(ctx) {
     tab.root,
     "[data-glossary-default-scope]"
   );
+  const glossaryScopeNotice = requireElement(tab.root, "[data-glossary-scope-notice]");
   const glossarySaveButton = requireElement(tab.root, "[data-glossary-save]");
   const glossaryCancelButton = requireElement(tab.root, "[data-glossary-cancel]");
   const glossaryUndoButton = requireElement(tab.root, "[data-glossary-undo]");
@@ -796,6 +797,10 @@ function setup(ctx) {
   const floatingGlossaryDefaultScopeSelect = requireElement(
     floatingWidget.root,
     "[data-floating-glossary-default-scope]"
+  );
+  const floatingGlossaryScopeNotice = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-scope-notice]"
   );
   const floatingGlossarySaveButton = requireElement(
     floatingWidget.root,
@@ -1034,10 +1039,18 @@ function setup(ctx) {
     );
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
     grammarRepairSelect.value = state.settings.grammarRepairMode;
-    glossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope ?? "local";
-    floatingGlossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope ?? "local";
+    const hasActiveChat = Boolean(state.activeChatId);
+    const displayedGlossaryScope = hasActiveChat ? state.settings.glossaryDefaultScope ?? "local" : "global";
+    glossaryDefaultScopeSelect.value = displayedGlossaryScope;
+    floatingGlossaryDefaultScopeSelect.value = displayedGlossaryScope;
+    glossaryDefaultScopeSelect.disabled = !hasActiveChat;
+    floatingGlossaryDefaultScopeSelect.disabled = !hasActiveChat;
+    glossaryScopeNotice.hidden = hasActiveChat;
+    floatingGlossaryScopeNotice.hidden = hasActiveChat;
+    glossaryGlobalInput.disabled = !hasActiveChat;
+    floatingGlossaryGlobalInput.disabled = !hasActiveChat;
     if (!editingGlossaryEntryId && !glossaryCanonicalInput.value && !floatingGlossaryCanonicalInput.value) {
-      const useGlobal = (state.settings.glossaryDefaultScope ?? "local") === "global";
+      const useGlobal = !hasActiveChat || displayedGlossaryScope === "global";
       glossaryGlobalInput.checked = useGlobal;
       floatingGlossaryGlobalInput.checked = useGlobal;
     }
@@ -1073,8 +1086,8 @@ function setup(ctx) {
     floatingGlossarySaveButton.textContent = editingGlossaryEntryId ? "Update entry" : "Add entry";
     glossaryCancelButton.hidden = !editingGlossaryEntryId;
     floatingGlossaryCancelButton.hidden = !editingGlossaryEntryId;
-    renderGlossary(glossaryList, state.glossary, drawerGlossaryQuery);
-    renderGlossary(floatingGlossaryList, state.glossary, floatingGlossaryQuery);
+    renderGlossary(glossaryList, state.glossary, drawerGlossaryQuery, hasActiveChat);
+    renderGlossary(floatingGlossaryList, state.glossary, floatingGlossaryQuery, hasActiveChat);
     sendButton.disabled = !editorEnabled || state.saving || mismatch || desiredText.trim().length === 0 || desiredText !== state.snapshot?.cleanText || state.sendOutcomeUnknown || sendFlowActive || voiceBusy();
     scheduleFloatingContentFit();
   };
@@ -1780,6 +1793,7 @@ function setup(ctx) {
     const canonicalInput = surface === "floating" ? floatingGlossaryCanonicalInput : glossaryCanonicalInput;
     const variantsInput = surface === "floating" ? floatingGlossaryVariantsInput : glossaryVariantsInput;
     const hintInput = surface === "floating" ? floatingGlossaryHintInput : glossaryHintInput;
+    const editingEntry = editingGlossaryEntryId ? state.glossary.find((entry) => entry.id === editingGlossaryEntryId) : void 0;
     const canonical = canonicalInput.value.trim();
     if (!canonical) {
       state.phaseFourMessage = "Enter a canonical spelling before saving.";
@@ -1795,8 +1809,8 @@ function setup(ctx) {
       canonical,
       variants,
       hint: hintInput.value.trim(),
-      scope: (surface === "floating" ? floatingGlossaryGlobalInput : glossaryGlobalInput).checked ? "global" : "local",
-      chatId: state.activeChatId ?? void 0
+      scope: !state.activeChatId || (surface === "floating" ? floatingGlossaryGlobalInput : glossaryGlobalInput).checked ? editingEntry && !state.activeChatId ? editingEntry.scope ?? "global" : "global" : "local",
+      chatId: state.activeChatId ?? editingEntry?.chatId
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
       applyPhaseFourResponse(outcome.value);
@@ -1814,7 +1828,7 @@ function setup(ctx) {
     floatingGlossaryCanonicalInput.value = "";
     floatingGlossaryVariantsInput.value = "";
     floatingGlossaryHintInput.value = "";
-    const useGlobal = (state.settings.glossaryDefaultScope ?? "local") === "global";
+    const useGlobal = !state.activeChatId || (state.settings.glossaryDefaultScope ?? "local") === "global";
     glossaryGlobalInput.checked = useGlobal;
     floatingGlossaryGlobalInput.checked = useGlobal;
   };
@@ -2586,7 +2600,7 @@ function renderConnectionOptions(select, connections, selectedId, defaultLabel =
   }
   select.value = selectedId ?? "";
 }
-function renderGlossary(container, entries, query = "") {
+function renderGlossary(container, entries, query = "", hasActiveChat = true) {
   container.replaceChildren();
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleEntries = normalizedQuery ? entries.filter(
@@ -2613,6 +2627,8 @@ function renderGlossary(container, entries, query = "") {
     const globalToggle = document.createElement("input");
     globalToggle.type = "checkbox";
     globalToggle.checked = (entry.scope ?? "global") === "global";
+    globalToggle.disabled = !hasActiveChat;
+    if (!hasActiveChat) globalToggle.title = "Select a chat before changing entry scope.";
     globalToggle.dataset.glossaryAction = "toggle-global";
     globalToggle.dataset.entryId = entry.id;
     globalLabel.append(globalToggle, " Global");
@@ -2868,6 +2884,7 @@ function floatingMarkup() {
                 <label>Optional hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-floating-glossary-hint></label>
                 <label>Default glossary scope<select data-floating-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
                 <label><span><input type="checkbox" data-floating-glossary-global> Use this entry in all chats</span></label>
+                <small data-floating-glossary-scope-notice hidden>Select a chat to create a chat-specific glossary entry. New entries created here are global.</small>
               </div>
               <div class="jt-actions">
                 <button type="button" data-floating-glossary-save>Add entry</button>
@@ -3164,6 +3181,7 @@ function shellMarkup() {
           <label>Optional reference or hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-glossary-hint></label>
           <label>Default glossary scope<select data-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
           <label><span><input type="checkbox" data-glossary-global> Use this entry in all chats</span></label>
+          <small data-glossary-scope-notice hidden>Select a chat to create a chat-specific glossary entry. New entries created here are global.</small>
         </div>
         <div class="jt-actions">
           <button type="button" data-glossary-save>Add entry</button>

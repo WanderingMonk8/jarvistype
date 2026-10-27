@@ -1074,6 +1074,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const transitionId = changed ? ++chatTransitionId : chatTransitionId
     await refreshPermissions()
     if (!alive) return
+    if (changed) {
+      await loadPhaseFourState()
+      if (!alive || transitionId !== chatTransitionId) return
+    }
 
     if (!changed) {
       if (

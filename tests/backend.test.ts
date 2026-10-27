@@ -488,6 +488,54 @@ test('reports whether a decision model connection is available for the when-need
   decisionsEnabled = false
 })
 
+test('shows only global and active-chat glossary entries, but shows all entries on home', async () => {
+  const userId = 'scoped-glossary-user'
+  const add = async (
+    requestId: string,
+    canonical: string,
+    scope: 'local' | 'global',
+    chatId?: string,
+  ) =>
+    dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'glossary.upsert.request',
+        requestId,
+        canonical,
+        variants: [],
+        hint: '',
+        scope,
+        ...(chatId ? { chatId } : {}),
+      },
+      userId,
+    )
+
+  await add('scope-global', 'Everywhere', 'global')
+  await add('scope-chat-a', 'Only A', 'local', 'chat-a')
+  await add('scope-chat-b', 'Only B', 'local', 'chat-b')
+
+  const load = async (requestId: string, chatId?: string) => {
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'phase4.load.request',
+        requestId,
+        ...(chatId ? { chatId } : {}),
+      },
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'phase4.state.response')
+    return response?.type === 'phase4.state.response'
+      ? response.glossary.map((entry) => entry.canonical)
+      : []
+  }
+
+  assert.deepEqual(await load('scope-load-a', 'chat-a'), ['Everywhere', 'Only A'])
+  assert.deepEqual(await load('scope-load-b', 'chat-b'), ['Everywhere', 'Only B'])
+  assert.deepEqual(await load('scope-load-home'), ['Everywhere', 'Only A', 'Only B'])
+})
+
 test('uses local command context with compact conversational spelling references', async () => {
   decisionsEnabled = true
   const userId = 'split-context-user'

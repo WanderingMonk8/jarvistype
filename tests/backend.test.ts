@@ -599,6 +599,22 @@ test('uses an unambiguous recent-chat proper name when the model leaves the STT 
   }
 })
 
+test('submits consecutive capitalized chat words as one deduplicated Jev candidate', async () => {
+  decisionsEnabled = true
+  const userId = 'capitalized-phrase-jev-user'
+  const chatId = 'capitalized-phrase-jev-chat'
+  activeChatId = chatId
+  chatMessages = [{ id: 'phrase-message', role: 'assistant', content: 'The White Hawk arrives. The White Hawk waits.' }]
+  await dispatch(recordingAppendRequest(chatId, 'phrase-jev-first', 0, 'Ready.'), userId)
+  const references = decisionRequests.flatMap((request) =>
+    (request as { state?: { candidates?: Array<{ reference?: string }> } }).state?.candidates?.map((item) => item.reference) ?? [],
+  )
+  assert.equal(references.filter((reference) => reference === 'The White Hawk').length, 1)
+  const count = decisionRequests.length
+  await dispatch(recordingAppendRequest(chatId, 'phrase-jev-second', 0, 'Ready again.'), userId)
+  assert.equal(decisionRequests.length, count)
+})
+
 test('persists strict references in a bounded per-chat rolling cache', async () => {
   decisionsEnabled = true
   const userId = 'rolling-reference-cache-user'

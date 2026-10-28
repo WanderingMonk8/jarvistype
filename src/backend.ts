@@ -45,6 +45,7 @@ import {
   correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
   extractAuthoritativeCasingReferences,
+  extractCapitalizedPhraseCandidates,
   extractCardCasingReferences,
   extractCardCharacterReferences,
   extractConversationReferences,
@@ -336,16 +337,16 @@ async function handleTranscriptNormalization(
       chatMessageIdentity,
     )
     const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
-    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext.messages, {
+    const strictRecentReferences = mergeConversationReferences(extractCapitalizedPhraseCandidates(referenceContext.messages), extractAuthoritativeCasingReferences(referenceContext.messages, {
       lowercaseExemptions: glossaryReferenceExemptions,
       minimumOccurrences: settings.referenceAdmissionOccurrences,
-    })
+    }))
     const eligibleReferenceKeys = new Set(strictRecentReferences.map(referenceCacheKey))
-    const recentReferenceCandidates = cachedConversationReferences(
+    const recentReferenceCandidates = mergeConversationReferences(extractCapitalizedPhraseCandidates(referenceContext.messages), cachedConversationReferences(
       context.userId,
       request.chatId,
       referenceContext.messages,
-    ).filter((reference) => eligibleReferenceKeys.has(referenceCacheKey(reference)))
+    ).filter((reference) => eligibleReferenceKeys.has(referenceCacheKey(reference))))
     const draftReferenceCandidates = extractConversationReferences([
       { role: 'assistant', content: session.cleanText },
     ])
@@ -1032,16 +1033,16 @@ async function handleEditInterpretation(
     )
     const glossaryReferenceExemptions = glossaryReferenceTerms(glossary)
     const strictRecentReferences = settings.contextualNormalizationEnabled
-      ? extractAuthoritativeCasingReferences(referenceContext.messages, {
+      ? mergeConversationReferences(extractCapitalizedPhraseCandidates(referenceContext.messages), extractAuthoritativeCasingReferences(referenceContext.messages, {
           lowercaseExemptions: glossaryReferenceExemptions,
           minimumOccurrences: settings.referenceAdmissionOccurrences,
-        })
+        }))
       : []
     const eligibleReferenceKeys = new Set(strictRecentReferences.map(referenceCacheKey))
     const recentReferenceCandidates = settings.contextualNormalizationEnabled
-      ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages).filter(
+      ? mergeConversationReferences(extractCapitalizedPhraseCandidates(referenceContext.messages), cachedConversationReferences(context.userId, request.chatId, referenceContext.messages).filter(
           (reference) => eligibleReferenceKeys.has(referenceCacheKey(reference)),
-        )
+        ))
       : []
     const draftReferenceCandidates = extractConversationReferences([
       { role: 'assistant', content: session.cleanText },

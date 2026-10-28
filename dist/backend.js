@@ -2143,6 +2143,18 @@ function selectRecentReferenceContext(source, requestedCount, characterLimit = M
     truncated
   };
 }
+function extractCapitalizedPhraseCandidates(messages) {
+  const candidates = /* @__PURE__ */ new Map();
+  for (const message of messages) {
+    for (const match of message.content.matchAll(
+      /(?<![\p{L}\p{M}\p{N}])\p{Lu}[\p{L}\p{M}]*(?:[-'’][\p{L}\p{M}]+)*(?:[ \t]+\p{Lu}[\p{L}\p{M}]*(?:[-'’][\p{L}\p{M}]+)*)+(?![\p{L}\p{M}\p{N}])/gu
+    )) {
+      const phrase = normalizeReferenceCasing(match[0].replace(/[ \t]+/gu, " "));
+      if (phrase.length <= 200) candidates.set(referenceEvidenceKey(phrase), phrase);
+    }
+  }
+  return [...candidates.values()];
+}
 function extractConversationReferences(messages, characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS, lowercaseExemptions = []) {
   if (characterLimit <= 0) return [];
   const references = [];
@@ -4041,16 +4053,16 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       chatMessageIdentity
     );
     const glossaryReferenceExemptions = glossaryReferenceTerms(glossary2);
-    const strictRecentReferences = extractAuthoritativeCasingReferences(referenceContext2.messages, {
+    const strictRecentReferences = mergeConversationReferences(extractCapitalizedPhraseCandidates(referenceContext2.messages), extractAuthoritativeCasingReferences(referenceContext2.messages, {
       lowercaseExemptions: glossaryReferenceExemptions,
       minimumOccurrences: settings2.referenceAdmissionOccurrences
-    });
+    }));
     const eligibleReferenceKeys = new Set(strictRecentReferences.map(referenceCacheKey));
-    const recentReferenceCandidates = cachedConversationReferences(
+    const recentReferenceCandidates = mergeConversationReferences(extractCapitalizedPhraseCandidates(referenceContext2.messages), cachedConversationReferences(
       context.userId,
       request.chatId,
       referenceContext2.messages
-    ).filter((reference) => eligibleReferenceKeys.has(referenceCacheKey(reference)));
+    ).filter((reference) => eligibleReferenceKeys.has(referenceCacheKey(reference))));
     const draftReferenceCandidates = extractConversationReferences([
       { role: "assistant", content: session2.cleanText }
     ]);
@@ -4638,14 +4650,14 @@ async function handleEditInterpretation(request, context, activeRequest) {
       chatMessageIdentity
     );
     const glossaryReferenceExemptions = glossaryReferenceTerms(glossary);
-    const strictRecentReferences = settings.contextualNormalizationEnabled ? extractAuthoritativeCasingReferences(referenceContext.messages, {
+    const strictRecentReferences = settings.contextualNormalizationEnabled ? mergeConversationReferences(extractCapitalizedPhraseCandidates(referenceContext.messages), extractAuthoritativeCasingReferences(referenceContext.messages, {
       lowercaseExemptions: glossaryReferenceExemptions,
       minimumOccurrences: settings.referenceAdmissionOccurrences
-    }) : [];
+    })) : [];
     const eligibleReferenceKeys = new Set(strictRecentReferences.map(referenceCacheKey));
-    const recentReferenceCandidates = settings.contextualNormalizationEnabled ? cachedConversationReferences(context.userId, request.chatId, referenceContext.messages).filter(
+    const recentReferenceCandidates = settings.contextualNormalizationEnabled ? mergeConversationReferences(extractCapitalizedPhraseCandidates(referenceContext.messages), cachedConversationReferences(context.userId, request.chatId, referenceContext.messages).filter(
       (reference) => eligibleReferenceKeys.has(referenceCacheKey(reference))
-    ) : [];
+    )) : [];
     const draftReferenceCandidates = extractConversationReferences([
       { role: "assistant", content: session.cleanText }
     ]);

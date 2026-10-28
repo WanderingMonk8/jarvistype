@@ -138,6 +138,20 @@ export function selectRecentReferenceContext(
   }
 }
 
+/** Consecutive capitalized chat words are candidates, not automatic casing authority. */
+export function extractCapitalizedPhraseCandidates(messages: readonly ContextMessage[]): string[] {
+  const candidates = new Map<string, string>()
+  for (const message of messages) {
+    for (const match of message.content.matchAll(
+      /(?<![\p{L}\p{M}\p{N}])\p{Lu}[\p{L}\p{M}]*(?:[-'’][\p{L}\p{M}]+)*(?:[ \t]+\p{Lu}[\p{L}\p{M}]*(?:[-'’][\p{L}\p{M}]+)*)+(?![\p{L}\p{M}\p{N}])/gu,
+    )) {
+      const phrase = normalizeReferenceCasing(match[0].replace(/[ \t]+/gu, ' '))
+      if (phrase.length <= 200) candidates.set(referenceEvidenceKey(phrase), phrase)
+    }
+  }
+  return [...candidates.values()]
+}
+
 export function extractConversationReferences(
   messages: readonly ContextMessage[],
   characterLimit = MAX_CONVERSATION_REFERENCE_CHARACTERS,

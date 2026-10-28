@@ -301,6 +301,26 @@ test('rejects missing, duplicate, stale, and overlapping targets atomically', ()
   )
 })
 
+test('formats insertion and append against preceding punctuation edits in a multi-command plan', () => {
+  const text = 'First.\n\nSecond.'
+  const paragraphs = [
+    { id: 'p1', ordinal: 1, lineIndex: 0, text: 'First.' },
+    { id: 'p2', ordinal: 2, lineIndex: 2, text: 'Second.' },
+  ]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Change periods and insert continuations.',
+    operations: [
+      { id: 'comma-first', type: 'replace', target: { paragraphOrdinal: 1, exactText: '.' }, text: ',' },
+      { id: 'insert-first', type: 'insert_after', target: { paragraphOrdinal: 1, exactText: 'First.' }, text: 'continued.' },
+      { id: 'comma-second', type: 'replace', target: { paragraphOrdinal: 2, exactText: '.' }, text: ',' },
+      { id: 'append-second', type: 'append', target: { paragraphOrdinal: 2 }, text: 'continued' },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'First, continued.\n\nSecond, continued')
+})
+
 test('supports insert, append, prepend, delete, and casing through the same pipeline', () => {
   const session = fixture()
   const result = executeEditPlan(session.cleanText, session.paragraphs, 1, {

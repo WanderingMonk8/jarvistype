@@ -76,6 +76,7 @@ export interface EditProposal {
   explanation: string
   learningCandidates: SpellingLearningCandidate[]
   grammarRepairChanges?: string[]
+  failedCommand?: { index: number; operationId: string; reason: string }
   resultingParagraphIds?: string[]
 }
 

@@ -420,6 +420,11 @@ function isNormalizationProposal(value: unknown): boolean {
 function isEditProposal(value: unknown): boolean {
   return (
     isRecord(value) &&
+    (value.failedCommand === undefined ||
+      (isRecord(value.failedCommand) &&
+        isPositiveInteger(value.failedCommand.index) &&
+        isIdentifier(value.failedCommand.operationId) &&
+        isBoundedString(value.failedCommand.reason, 1, 1000))) &&
     isIdentifier(value.operationId) &&
     isIdentifier(value.chatId) &&
     isNonNegativeInteger(value.expectedVersion) &&

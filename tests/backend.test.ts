@@ -3740,6 +3740,41 @@ test('capitalizes append and insert-after text only after sentence-ending target
   assert.equal(response.proposal.afterText, 'First. Continued\n\nSecond. Quietly End.')
 })
 
+test('preserves lowercase insertions after non-terminal punctuation', async () => {
+  const userId = 'nonterminal-insertion-casing-user'
+  const chatId = 'nonterminal-insertion-casing-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First,\n\nSecond —\n\nThird.\n\nFourth,')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Insert continuations after punctuation.',
+    operations: [
+      { id: 'comma-phrase', type: 'insert_after', target: { paragraphOrdinal: 1, exactText: 'First,' }, text: 'continued' },
+      { id: 'dash-sentence', type: 'insert_after', target: { paragraphOrdinal: 2, exactText: 'Second —' }, text: 'continued here.' },
+      { id: 'period-control', type: 'insert_after', target: { paragraphOrdinal: 3, exactText: 'Third.' }, text: 'continued' },
+      { id: 'comma-append', type: 'append', target: { paragraphOrdinal: 4 }, text: 'continued' },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'nonterminal-insertion-casing-interpret',
+      operationId: 'nonterminal-insertion-casing-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Insert the continuations after each target.',
+    },
+    userId,
+  )
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.afterText, 'First, continued\n\nSecond — continued here.\n\nThird. Continued\n\nFourth, continued')
+})
+
 test('offers explicit choices for paragraph-resolvable ambiguity without mutating the draft', async () => {
   const userId = 'unsafe-edit-user'
   const chatId = 'unsafe-edit-chat'

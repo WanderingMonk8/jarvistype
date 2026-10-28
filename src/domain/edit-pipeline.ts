@@ -161,6 +161,29 @@ export function executeEditPlan(
       formatText,
     )
     if (typeof patch === 'string') return { ok: false, reason: patch }
+    if (
+      formatText &&
+      (operation.type === 'insert_after' || operation.type === 'append') &&
+      patches.length > 0
+    ) {
+      // Targets retain their original-draft coordinates, but formatting must see
+      // earlier edits in the same instruction (e.g. a period changed to a comma).
+      const preceding = patches
+        .filter((prior) => prior.end <= patch.start && prior.start !== prior.end)
+        .sort((left, right) => right.start - left.start)
+      let projectedText = cleanText
+      let projectedPoint = patch.start
+      for (const prior of preceding) {
+        projectedText = `${projectedText.slice(0, prior.start)}${prior.replacement}${projectedText.slice(prior.end)}`
+        projectedPoint += prior.replacement.length - (prior.end - prior.start)
+      }
+      const inserted = capitalizeReplacementAtSentenceOpening(
+        projectedText,
+        projectedPoint,
+        operation.text ?? '',
+      )
+      patch.replacement = addBoundarySpacing(projectedText, projectedPoint, inserted)
+    }
     patches.push(patch)
   }
   const sorted = [...patches].sort(
@@ -202,6 +225,7 @@ export function executeEditPlan(
     ),
   }
 }
+
 
 function parseOperation(value: unknown): EditOperation | null {
   if (!isRecord(value) || !isIdentifier(value.id) || !isRecord(value.target)) return null

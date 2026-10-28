@@ -1,4 +1,4 @@
-import { MAX_DRAFT_CHARACTERS, type DraftParagraph } from './draft-session'
+import { MAX_DRAFT_CHARACTERS, reconcileParagraphs, type DraftParagraph } from './draft-session'
 import { speechPhoneticKey } from './phonetics'
 
 export const EDIT_SCHEMA_VERSION = 2 as const
@@ -84,6 +84,7 @@ export type EditPipelineResult =
       operations: ResolvedEditOperation[]
       affectedParagraphOrdinals: number[]
       resultingParagraphIds?: string[]
+      failedCommand?: { index: number; operationId: string; reason: string }
     }
   | { ok: false; reason: string }
 
@@ -93,6 +94,81 @@ interface Patch {
   end: number
   replacement: string
   paragraphOrdinal: number
+}
+
+/** Run a chain against an in-memory draft, stopping at its first unsafe operation. */
+export function executeSequentialEditPlan(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  currentVersion: number,
+  plan: EditPlan,
+  protectedCasingTerms: readonly string[] = [],
+): EditPipelineResult {
+  if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
+  let text = cleanText
+  let currentParagraphs = [...paragraphs]
+  const operations: ResolvedEditOperation[] = []
+  const affected = new Set<number>()
+  let failedCommand: { index: number; operationId: string; reason: string } | undefined
+  let generated = 0
+  const usedIds = new Set(currentParagraphs.map((paragraph) => paragraph.id))
+  const createId = () => {
+    let id: string
+    do id = `chain:${plan.draftVersion}:${++generated}`
+    while (usedIds.has(id))
+    usedIds.add(id)
+    return id
+  }
+  for (const [index, operation] of plan.operations.entries()) {
+    let currentOperation = operation
+    const exact = operation.target.exactText
+    if (index > 0 && operation.type === 'insert_after' && exact && /[.!?…]$/u.test(exact)) {
+      const base = exact.replace(/[.!?…]+$/u, '')
+      const scoped = currentParagraphs.filter((paragraph) =>
+        (operation.target.paragraphId === undefined || paragraph.id === operation.target.paragraphId) &&
+        (operation.target.paragraphOrdinal === undefined || paragraph.ordinal === operation.target.paragraphOrdinal),
+      )
+      const search = operation.target.paragraphId !== undefined || operation.target.paragraphOrdinal !== undefined
+        ? scoped.map((paragraph) => paragraph.text).join('\n')
+        : text
+      const candidates = [...search.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(base)}[,;:—–-](?=\\s|$)`, 'giu'))]
+      if (candidates.length === 1 && !search.includes(exact))
+        currentOperation = { ...operation, target: { ...operation.target, exactText: candidates[0]![0] } }
+    }
+    const result = executeEditPlan(text, currentParagraphs, currentVersion, {
+      ...plan,
+      operations: [currentOperation],
+    }, protectedCasingTerms)
+    if (!result.ok) {
+      failedCommand = { index: index + 1, operationId: operation.id, reason: result.reason }
+      break
+    }
+    operations.push(...result.operations)
+    for (const ordinal of result.affectedParagraphOrdinals) affected.add(ordinal)
+    if (result.resultingParagraphIds) {
+      let paragraphIndex = 0
+      currentParagraphs = result.afterText.split('\n').flatMap((line, lineIndex) => {
+        if (!line.trim()) return []
+        const id = result.resultingParagraphIds![paragraphIndex]!
+        paragraphIndex += 1
+        return [{ id, ordinal: paragraphIndex, lineIndex, text: line }]
+      })
+      for (const paragraph of currentParagraphs) usedIds.add(paragraph.id)
+    } else {
+      currentParagraphs = reconcileParagraphs(currentParagraphs, result.afterText, createId)
+    }
+    text = result.afterText
+  }
+  if (!operations.length || text === cleanText)
+    return { ok: false, reason: failedCommand ? `Command ${failedCommand.index}: ${failedCommand.reason}` : 'edit would not change the draft' }
+  return {
+    ok: true,
+    afterText: text,
+    operations,
+    affectedParagraphOrdinals: [...affected].sort((a, b) => a - b),
+    resultingParagraphIds: currentParagraphs.map((paragraph) => paragraph.id),
+    ...(failedCommand ? { failedCommand } : {}),
+  }
 }
 
 export function parseEditPlan(value: unknown): EditPlan | null {

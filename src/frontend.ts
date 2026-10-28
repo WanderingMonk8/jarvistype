@@ -865,7 +865,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (activeReview && decisionBar.previousElementSibling !== activeReview)
       activeReview.after(decisionBar)
     decisionSummary.textContent = editProposal
-      ? `Review the edit: ${editProposal.explanation}`
+      ? editProposal.failedCommand
+        ? `Review the partial edit. Command ${editProposal.failedCommand.index} (${editProposal.plan.operations[editProposal.failedCommand.index - 1]?.type ?? 'edit'}) failed: ${editProposal.failedCommand.reason}. Later commands were not run.`
+        : `Review the edit: ${editProposal.explanation}`
       : proposal
         ? 'Review the normalized transcript before it is appended.'
         : ''

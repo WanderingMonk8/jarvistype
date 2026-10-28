@@ -654,7 +654,7 @@ export function createDiff(before: string, after: string): DraftDiff {
   }
 }
 
-function reconcileParagraphs(
+export function reconcileParagraphs(
   previous: DraftParagraph[],
   cleanText: string,
   createId: () => string,

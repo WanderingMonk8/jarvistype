@@ -4629,6 +4629,50 @@ test('keeps grammar repairs from moving a quotation mark outside the paragraph',
   )
 })
 
+test('partial sequential edits receive one final grammar check and commit as one undoable edit', async () => {
+  const userId = 'partial-grammar-user'
+  const chatId = 'partial-grammar-chat'
+  activeChatId = chatId
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request',
+    requestId: 'partial-grammar-settings',
+    settings: { contextMessageCount: 5, contextualNormalizationEnabled: false,
+      grammarRepairMode: 'always', normalizationConnectionId: null, normalizationModelOverride: '' },
+  }, userId)
+  await seedDraft(userId, chatId, 'Alpha beta gamma.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2, draftVersion: 1, explanation: 'Perform three edits.',
+    operations: [
+      { id: 'first', type: 'replace', target: { exactText: 'Alpha' }, text: 'Delta' },
+      { id: 'missing', type: 'delete', target: { exactText: 'missing' } },
+      { id: 'not-run', type: 'replace', target: { exactText: 'gamma' }, text: 'omega' },
+    ],
+  }
+  grammarRepairResponse = { edits: [] }
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'partial-grammar-interpret', operationId: 'partial-grammar-operation',
+    chatId, expectedVersion: 1, instructionTranscript: 'Perform three edits.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Delta beta gamma.')
+  assert.equal(proposal.proposal.failedCommand?.index, 2)
+  assert.equal(generationRequests.filter((request) => {
+    const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+    return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+  }).length, 1)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.confirm.request',
+    requestId: 'partial-grammar-confirm', operationId: 'partial-grammar-operation',
+    chatId, expectedVersion: 1 }, userId)
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type !== 'edit.proposal.response') return
+  assert.equal(committed.snapshot?.cleanText, 'Delta beta gamma.')
+  assert.equal(committed.snapshot?.canUndo, true)
+})
+
 test('applies and discloses an enabled conservative post-edit grammar repair', async () => {
   const userId = 'grammar-repair-user'
   const chatId = 'grammar-repair-chat'

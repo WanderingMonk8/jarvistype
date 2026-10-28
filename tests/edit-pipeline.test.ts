@@ -6,7 +6,7 @@ import {
   createDraftSession,
   applyManualEdit,
 } from '../src/domain/draft-session'
-import { executeEditPlan, parseEditPlan, type EditPlan } from '../src/domain/edit-pipeline'
+import { executeEditPlan, executeSequentialEditPlan, parseEditPlan, type EditPlan } from '../src/domain/edit-pipeline'
 
 function fixture() {
   const empty = createDraftSession('chat', '2026-01-01T00:00:00.000Z')
@@ -307,7 +307,7 @@ test('formats insertion and append against preceding punctuation edits in a mult
     { id: 'p1', ordinal: 1, lineIndex: 0, text: 'First.' },
     { id: 'p2', ordinal: 2, lineIndex: 2, text: 'Second.' },
   ]
-  const result = executeEditPlan(text, paragraphs, 1, {
+  const result = executeSequentialEditPlan(text, paragraphs, 1, {
     schemaVersion: 2,
     draftVersion: 1,
     explanation: 'Change periods and insert continuations.',
@@ -319,6 +319,44 @@ test('formats insertion and append against preceding punctuation edits in a mult
     ],
   })
   assert.equal(result.ok && result.afterText, 'First, continued.\n\nSecond, continued')
+})
+
+test('sequential edits stop at the first failure and preserve earlier changes', () => {
+  const text = 'Alpha beta gamma.'
+  const paragraphs = [{ id: 'p1', ordinal: 1, lineIndex: 0, text }]
+  const result = executeSequentialEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace, fail, then stop.',
+    operations: [
+      { id: 'first', type: 'replace', target: { exactText: 'Alpha' }, text: 'Delta' },
+      { id: 'missing', type: 'delete', target: { exactText: 'missing' } },
+      { id: 'not-run', type: 'replace', target: { exactText: 'gamma' }, text: 'omega' },
+    ],
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.afterText, 'Delta beta gamma.')
+  assert.equal(result.operations.length, 1)
+  assert.equal(result.failedCommand?.index, 2)
+  assert.equal(result.failedCommand?.operationId, 'missing')
+})
+
+test('sequential edits resolve targets after a paragraph split and retain paragraph identities', () => {
+  const text = 'First sentence. Second sentence.'
+  const result = executeSequentialEditPlan(text, [{ id: 'original', ordinal: 1, lineIndex: 0, text }], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'Split and edit the new paragraph.',
+    operations: [
+      { id: 'split', type: 'split', target: { paragraphOrdinal: 1, exactText: 'First sentence.' } },
+      { id: 'replace', type: 'replace', target: { paragraphOrdinal: 2, exactText: 'Second' }, text: 'Next' },
+    ],
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.afterText, 'First sentence.\n\nNext sentence.')
+  assert.equal(result.failedCommand, undefined)
+  assert.equal(result.resultingParagraphIds?.length, 2)
+  assert.equal(result.resultingParagraphIds?.[0], 'original')
 })
 
 test('supports insert, append, prepend, delete, and casing through the same pipeline', () => {

@@ -26,6 +26,7 @@ import {
 } from './domain/debug'
 import {
   executeEditPlan,
+  executeSequentialEditPlan,
   findTextTargetMatches,
   parseEditPlan,
   type EditPlan,
@@ -1173,7 +1174,7 @@ async function handleEditInterpretation(
       draftIdentificationReferences,
     )
     const executeStartedAt = performance.now()
-    const executed = executeEditPlan(
+    const executed = executeSequentialEditPlan(
       session.cleanText,
       session.paragraphs,
       session.draftVersion,
@@ -1231,6 +1232,7 @@ async function handleEditInterpretation(
       afterText: grammarRepair.text,
       affectedParagraphOrdinals: executed.affectedParagraphOrdinals,
       explanation: plan.explanation,
+      ...(executed.failedCommand ? { failedCommand: executed.failedCommand } : {}),
       learningCandidates,
       ...(grammarRepair.changes.length ? { grammarRepairChanges: grammarRepair.changes } : {}),
       ...(executed.resultingParagraphIds
@@ -1551,7 +1553,7 @@ async function handleEditCandidateSelection(
   )
   spindle.log.info('JarvisType edit candidate selection executing.')
   recordDebug(context.userId, 'edit.candidate', 'execute')
-  const executed = executeEditPlan(
+  const executed = executeSequentialEditPlan(
     session.cleanText,
     session.paragraphs,
     session.draftVersion,
@@ -1599,6 +1601,7 @@ async function handleEditCandidateSelection(
     afterText: grammarRepair.text,
     affectedParagraphOrdinals: executed.affectedParagraphOrdinals,
     explanation: plan.explanation,
+    ...(executed.failedCommand ? { failedCommand: executed.failedCommand } : {}),
     learningCandidates: reconcileEditLearningCandidateCasing(
       spelling.learningCandidates,
       executed.operations,

@@ -714,6 +714,71 @@ function editDistanceAtMost(left, right, maximum) {
 var EDIT_SCHEMA_VERSION = 2;
 var MAX_EDIT_OPERATIONS = 8;
 var MAX_EDIT_TEXT_LENGTH = 1e4;
+function executeSequentialEditPlan(cleanText, paragraphs, currentVersion, plan, protectedCasingTerms = []) {
+  if (plan.draftVersion !== currentVersion) return { ok: false, reason: "stale draft version" };
+  let text = cleanText;
+  let currentParagraphs = [...paragraphs];
+  const operations = [];
+  const affected = /* @__PURE__ */ new Set();
+  let failedCommand;
+  let generated = 0;
+  const usedIds = new Set(currentParagraphs.map((paragraph) => paragraph.id));
+  const createId = () => {
+    let id;
+    do
+      id = `chain:${plan.draftVersion}:${++generated}`;
+    while (usedIds.has(id));
+    usedIds.add(id);
+    return id;
+  };
+  for (const [index, operation] of plan.operations.entries()) {
+    let currentOperation = operation;
+    const exact = operation.target.exactText;
+    if (index > 0 && operation.type === "insert_after" && exact && /[.!?…]$/u.test(exact)) {
+      const base = exact.replace(/[.!?…]+$/u, "");
+      const scoped = currentParagraphs.filter(
+        (paragraph) => (operation.target.paragraphId === void 0 || paragraph.id === operation.target.paragraphId) && (operation.target.paragraphOrdinal === void 0 || paragraph.ordinal === operation.target.paragraphOrdinal)
+      );
+      const search = operation.target.paragraphId !== void 0 || operation.target.paragraphOrdinal !== void 0 ? scoped.map((paragraph) => paragraph.text).join("\n") : text;
+      const candidates = [...search.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(base)}[,;:\u2014\u2013-](?=\\s|$)`, "giu"))];
+      if (candidates.length === 1 && !search.includes(exact))
+        currentOperation = { ...operation, target: { ...operation.target, exactText: candidates[0][0] } };
+    }
+    const result = executeEditPlan(text, currentParagraphs, currentVersion, {
+      ...plan,
+      operations: [currentOperation]
+    }, protectedCasingTerms);
+    if (!result.ok) {
+      failedCommand = { index: index + 1, operationId: operation.id, reason: result.reason };
+      break;
+    }
+    operations.push(...result.operations);
+    for (const ordinal of result.affectedParagraphOrdinals) affected.add(ordinal);
+    if (result.resultingParagraphIds) {
+      let paragraphIndex = 0;
+      currentParagraphs = result.afterText.split("\n").flatMap((line, lineIndex) => {
+        if (!line.trim()) return [];
+        const id = result.resultingParagraphIds[paragraphIndex];
+        paragraphIndex += 1;
+        return [{ id, ordinal: paragraphIndex, lineIndex, text: line }];
+      });
+      for (const paragraph of currentParagraphs) usedIds.add(paragraph.id);
+    } else {
+      currentParagraphs = reconcileParagraphs(currentParagraphs, result.afterText, createId);
+    }
+    text = result.afterText;
+  }
+  if (!operations.length || text === cleanText)
+    return { ok: false, reason: failedCommand ? `Command ${failedCommand.index}: ${failedCommand.reason}` : "edit would not change the draft" };
+  return {
+    ok: true,
+    afterText: text,
+    operations,
+    affectedParagraphOrdinals: [...affected].sort((a, b) => a - b),
+    resultingParagraphIds: currentParagraphs.map((paragraph) => paragraph.id),
+    ...failedCommand ? { failedCommand } : {}
+  };
+}
 function parseEditPlan(value) {
   if (!isRecord2(value) || value.schemaVersion !== EDIT_SCHEMA_VERSION) return null;
   const allowedPlanKeys = /* @__PURE__ */ new Set(["schemaVersion", "draftVersion", "operations", "explanation"]);
@@ -4686,7 +4751,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
       draftIdentificationReferences
     );
     const executeStartedAt = performance.now();
-    const executed = executeEditPlan(
+    const executed = executeSequentialEditPlan(
       session.cleanText,
       session.paragraphs,
       session.draftVersion,
@@ -4744,6 +4809,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
       afterText: grammarRepair.text,
       affectedParagraphOrdinals: executed.affectedParagraphOrdinals,
       explanation: plan.explanation,
+      ...executed.failedCommand ? { failedCommand: executed.failedCommand } : {},
       learningCandidates,
       ...grammarRepair.changes.length ? { grammarRepairChanges: grammarRepair.changes } : {},
       ...executed.resultingParagraphIds ? { resultingParagraphIds: executed.resultingParagraphIds } : {}
@@ -5008,7 +5074,7 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
   );
   spindle.log.info("JarvisType edit candidate selection executing.");
   recordDebug(context.userId, "edit.candidate", "execute");
-  const executed = executeEditPlan(
+  const executed = executeSequentialEditPlan(
     session.cleanText,
     session.paragraphs,
     session.draftVersion,
@@ -5056,6 +5122,7 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
     afterText: grammarRepair.text,
     affectedParagraphOrdinals: executed.affectedParagraphOrdinals,
     explanation: plan.explanation,
+    ...executed.failedCommand ? { failedCommand: executed.failedCommand } : {},
     learningCandidates: reconcileEditLearningCandidateCasing(
       spelling.learningCandidates,
       executed.operations,

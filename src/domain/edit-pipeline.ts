@@ -560,7 +560,7 @@ function resolveOperation(
       return `${operation.type} does not accept an inline target`
     const point = operation.type === 'append' ? range.end : range.start
     const insertionText = formatText
-      ? capitalizeReplacementAtSentenceOpening(cleanText, point, operation.text ?? '')
+      ? formatInsertionCasing(cleanText, point, operation.text ?? '', protectedCasingTerms)
       : (operation.text ?? '')
     return {
       operation,
@@ -701,7 +701,7 @@ function resolveOperation(
             ? addBoundarySpacing(
                 cleanText,
                 insertAfterPoint,
-                capitalizeReplacementAtSentenceOpening(cleanText, insertAfterPoint, insertionText),
+                formatInsertionCasing(cleanText, insertAfterPoint, insertionText, protectedCasingTerms),
               )
             : insertionText
           : applyCase(cleanText.slice(start, end), operation.caseMode!)
@@ -1282,6 +1282,29 @@ function capitalizeReplacementAtSentenceOpening(
       return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`
     },
   )
+}
+
+function formatInsertionCasing(
+  text: string,
+  point: number,
+  insertion: string,
+  protectedCasingTerms: readonly string[],
+): string {
+  if (isSentenceOpeningAt(text, point))
+    return capitalizeReplacementAtSentenceOpening(text, point, insertion)
+  if (!/[,;:—–-][ \t]*$/u.test(text.slice(0, point))) return insertion
+  // Quoted speech can legitimately start a new sentence after a dialogue tag.
+  if (/^[ \t]*[“‘"'([{]/u.test(insertion)) return insertion
+  const first = insertion.match(/^[ \t]*(\p{Lu}[\p{L}\p{M}'’-]*)/u)?.[1]
+  if (!first || first === 'I') return insertion
+  const lowered = lowercaseOrdinarySentenceOpening(
+    insertion,
+    0,
+    `${insertion}\n\n${text}`,
+    0,
+    protectedCasingTerms,
+  )
+  return lowered ? `${lowered.text}${insertion.slice(lowered.end)}` : insertion
 }
 
 function alignReplacementInitialCasing(

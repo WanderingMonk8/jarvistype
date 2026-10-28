@@ -321,6 +321,27 @@ test('formats insertion and append against preceding punctuation edits in a mult
   assert.equal(result.ok && result.afterText, 'First, continued.\n\nSecond, continued')
 })
 
+test('lowercases ordinary provider-capitalized continuations after a comma while protecting names', () => {
+  for (const [insertion, expected] of [
+    ['She looks at me.', 'she looks at me.'],
+    ['I look at her.', 'I look at her.'],
+    ['Erbold looks at me.', 'Erbold looks at me.'],
+    ['“She looks at me.”', '“She looks at me.”'],
+  ] as const) {
+    const text = 'She makes no effort to hide it.'
+    const result = executeSequentialEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'Change punctuation and append.',
+      operations: [
+        { id: 'punctuation', type: 'replace', target: { paragraphOrdinal: 1, exactText: '.' }, text: ',' },
+        { id: 'append', type: 'append', target: { paragraphOrdinal: 1 }, text: insertion },
+      ],
+    }, ['Erbold'])
+    assert.equal(result.ok && result.afterText, `She makes no effort to hide it, ${expected}`)
+  }
+})
+
 test('sequential edits stop at the first failure and preserve earlier changes', () => {
   const text = 'Alpha beta gamma.'
   const paragraphs = [{ id: 'p1', ordinal: 1, lineIndex: 0, text }]

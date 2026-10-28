@@ -1039,7 +1039,7 @@ function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms
     if (hasInlineSelector(operation.target))
       return `${operation.type} does not accept an inline target`;
     const point = operation.type === "append" ? range.end : range.start;
-    const insertionText2 = formatText ? capitalizeReplacementAtSentenceOpening(cleanText, point, operation.text ?? "") : operation.text ?? "";
+    const insertionText2 = formatText ? formatInsertionCasing(cleanText, point, operation.text ?? "", protectedCasingTerms) : operation.text ?? "";
     return {
       operation,
       start: point,
@@ -1144,7 +1144,7 @@ ${formattedParagraph}`,
   const replacement = operation.type === "replace" ? formatText ? alignReplacementInitialCasing(cleanText, start, end, insertionText, protectedCasingTerms) : insertionText : operation.type === "delete" ? "" : operation.type === "insert_after" ? formatText ? addBoundarySpacing(
     cleanText,
     insertAfterPoint,
-    capitalizeReplacementAtSentenceOpening(cleanText, insertAfterPoint, insertionText)
+    formatInsertionCasing(cleanText, insertAfterPoint, insertionText, protectedCasingTerms)
   ) : insertionText : applyCase(cleanText.slice(start, end), operation.caseMode);
   if (operation.type === "insert_after") {
     start = insertAfterPoint;
@@ -1502,6 +1502,24 @@ function capitalizeReplacementAtSentenceOpening(text, start, replacement) {
       return `${prefix}${word.charAt(0).toLocaleUpperCase()}${word.slice(1)}`;
     }
   );
+}
+function formatInsertionCasing(text, point, insertion, protectedCasingTerms) {
+  if (isSentenceOpeningAt(text, point))
+    return capitalizeReplacementAtSentenceOpening(text, point, insertion);
+  if (!/[,;:—–-][ \t]*$/u.test(text.slice(0, point))) return insertion;
+  if (/^[ \t]*[“‘"'([{]/u.test(insertion)) return insertion;
+  const first = insertion.match(/^[ \t]*(\p{Lu}[\p{L}\p{M}'’-]*)/u)?.[1];
+  if (!first || first === "I") return insertion;
+  const lowered = lowercaseOrdinarySentenceOpening(
+    insertion,
+    0,
+    `${insertion}
+
+${text}`,
+    0,
+    protectedCasingTerms
+  );
+  return lowered ? `${lowered.text}${insertion.slice(lowered.end)}` : insertion;
 }
 function alignReplacementInitialCasing(text, start, end, replacement, protectedCasingTerms) {
   if (isSentenceOpeningAt(text, start))

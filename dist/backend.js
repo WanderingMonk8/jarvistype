@@ -1199,7 +1199,7 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
     withoutSource = capitalizeExistingSentenceOpening(withoutSource, removalStart);
   const originalInsertionPoint = operation.type === "move_before" ? destination.start : destination.end;
   const insertionPoint = originalInsertionPoint > removalStart ? originalInsertionPoint - (removalEnd - removalStart) : originalInsertionPoint;
-  const formattedMovedText = formatText ? capitalizeReplacementAtSentenceOpening(withoutSource, insertionPoint, movedText) : movedText;
+  const formattedMovedText = formatText ? formatInsertionCasing(withoutSource, insertionPoint, movedText, protectedCasingTerms) : movedText;
   const displacedOpening = formatText && operation.type === "move_before" && isSentenceOpeningAt(withoutSource, insertionPoint) && /\p{L}/u.test(formattedMovedText) ? lowercaseOrdinarySentenceOpening(
     withoutSource,
     insertionPoint,

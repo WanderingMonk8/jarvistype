@@ -1399,6 +1399,29 @@ test('moves paragraphs by captured identity and supports full-draft casing', () 
   assert.equal(cased.ok && cased.afterText, 'ONE.\n\nTWO.\n\nTHREE.')
 })
 
+test('adjusts moved sentence casing after non-terminal punctuation but protects names and quoted speech', () => {
+  for (const [moved, expected, protectedTerms] of [
+    ['She looks back', 'she looks back', []],
+    ['I look back', 'I look back', []],
+    ['Erbold looks back', 'Erbold looks back', ['Erbold']],
+    ['“She looks back”', '“She looks back”', []],
+  ] as const) {
+    for (const mark of [',', '—', ';', ':']) {
+      const text = `${moved}. We wait${mark} today.`
+      const result = executeEditPlan(text, [], 1, {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'Move text after punctuation.',
+        operations: [{
+          id: 'move', type: 'move_after', target: { exactText: moved },
+          destination: { exactText: `wait${mark}` },
+        }],
+      }, protectedTerms)
+      assert.equal(result.ok && result.afterText.includes(`wait${mark} ${expected}`), true)
+    }
+  }
+})
+
 test('moves an exact word or phrase before or after another text target', () => {
   const seeded = applyManualEdit(
     createDraftSession('inline-move-chat'),

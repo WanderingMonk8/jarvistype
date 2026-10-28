@@ -837,7 +837,7 @@ function executeInlineMove(
       ? originalInsertionPoint - (removalEnd - removalStart)
       : originalInsertionPoint
   const formattedMovedText = formatText
-    ? capitalizeReplacementAtSentenceOpening(withoutSource, insertionPoint, movedText)
+    ? formatInsertionCasing(withoutSource, insertionPoint, movedText, protectedCasingTerms)
     : movedText
   const displacedOpening =
     formatText &&

@@ -1705,15 +1705,34 @@ const EDIT_CLAUSE_VERB =
   '(?:replace|change|swap|substitute|delete|remove|take\\s+(?:off|out)|erase|cut|insert|add|place|put|append|prepend|tack|move|relocate|shift|split|break|divide|join|merge|combine|uppercase|lowercase|capitalize|make)'
 
 function splitEditClauses(instructionTranscript: string): string[] {
-  if (/["“”‘’]/u.test(instructionTranscript)) return [instructionTranscript]
+  const quoted = new Array<boolean>(instructionTranscript.length).fill(false)
+  let closing = ''
+  for (let index = 0; index < instructionTranscript.length; index += 1) {
+    const char = instructionTranscript[index]!
+    if (closing) {
+      quoted[index] = true
+      if (char === closing && !(char === "'" && /\p{L}/u.test(instructionTranscript[index - 1] ?? '') && /\p{L}/u.test(instructionTranscript[index + 1] ?? ''))) closing = ''
+    } else if (char === '“' || char === '‘' || char === '"' ||
+      (char === "'" && !/\p{L}/u.test(instructionTranscript[index - 1] ?? ''))) {
+      closing = char === '“' ? '”' : char === '‘' ? '’' : char
+      quoted[index] = true
+    }
+  }
+  if (closing) return [instructionTranscript]
   const separator = new RegExp(
     `\\s*[,.]?\\s*\\b(?:and\\s+)?then\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)|\\s*,?\\s+and\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)`,
-    'iu',
+    'giu',
   )
-  return instructionTranscript
-    .split(separator)
-    .map((clause) => clause.trim())
-    .filter(Boolean)
+  const clauses: string[] = []
+  let start = 0
+  for (const match of instructionTranscript.matchAll(separator)) {
+    const boundary = match.index
+    if ([...quoted.slice(boundary, boundary + match[0].length)].some(Boolean)) continue
+    clauses.push(instructionTranscript.slice(start, boundary).trim())
+    start = boundary + match[0].length
+  }
+  clauses.push(instructionTranscript.slice(start).trim())
+  return clauses.filter(Boolean)
 }
 
 function parseDeterministicCompoundEditPlan(
@@ -1923,8 +1942,9 @@ function parseDeterministicTextDeletion(
   )
     return null
 
-  const spokenTarget = unwrapEditArgument(stripUnquotedEditArgumentLabel(match[2] ?? ''))
-  if (!spokenTarget || isSemanticReplacementTarget(spokenTarget)) return null
+  const rawTarget = stripUnquotedEditArgumentLabel(match[2] ?? '')
+  const spokenTarget = unwrapEditArgument(rawTarget)
+  if (!spokenTarget || (isSemanticReplacementTarget(spokenTarget) && !/^["'“‘]/u.test(rawTarget))) return null
   const paragraphOrdinal = leadingParagraph ?? trailingParagraph
   const targetText = adoptUnambiguousDraftCasing(session, spokenTarget, paragraphOrdinal)
   return parseEditPlan({
@@ -3102,7 +3122,7 @@ function parseDeterministicQuotationRange(
   )
   const secondTarget = cleanQuotationRangeTarget(
     unwrapEditArgument(
-      stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[3] ?? '').trim())),
+      stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[3] ?? '').trim().replace(/([”’"'])[.!?]+$/u, '$1'))),
     ),
   )
   if (!firstTarget || !secondTarget) return null
@@ -3302,6 +3322,8 @@ function parseDeterministicSimpleReplacement(
     .replace(/[.!?]+$/u, '')
     .trim()
   const match = command.match(
+    /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:replace|change|swap|substitute)\s+(?:the\s+)?(?:word|words|phrase|text)\s+((?:“[^”]*”|‘[^’]*’|"[^"]*"|'[^']*'))\s+(?:with|to|into|for)\s+(.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu,
+  ) ?? command.match(
     /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:replace|change|swap|substitute)\s+(.+?)\s+(?:with|to|into|for)\s+(.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu,
   )
   if (!match) return null

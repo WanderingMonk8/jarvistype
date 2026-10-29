@@ -5242,12 +5242,33 @@ function parseDeterministicEditPlan(instructionTranscript, session) {
 }
 var EDIT_CLAUSE_VERB = "(?:replace|change|swap|substitute|delete|remove|take\\s+(?:off|out)|erase|cut|insert|add|place|put|append|prepend|tack|move|relocate|shift|split|break|divide|join|merge|combine|uppercase|lowercase|capitalize|make)";
 function splitEditClauses(instructionTranscript) {
-  if (/["“”‘’]/u.test(instructionTranscript)) return [instructionTranscript];
+  const quoted = new Array(instructionTranscript.length).fill(false);
+  let closing = "";
+  for (let index = 0; index < instructionTranscript.length; index += 1) {
+    const char = instructionTranscript[index];
+    if (closing) {
+      quoted[index] = true;
+      if (char === closing && !(char === "'" && /\p{L}/u.test(instructionTranscript[index - 1] ?? "") && /\p{L}/u.test(instructionTranscript[index + 1] ?? ""))) closing = "";
+    } else if (char === "\u201C" || char === "\u2018" || char === '"' || char === "'" && !/\p{L}/u.test(instructionTranscript[index - 1] ?? "")) {
+      closing = char === "\u201C" ? "\u201D" : char === "\u2018" ? "\u2019" : char;
+      quoted[index] = true;
+    }
+  }
+  if (closing) return [instructionTranscript];
   const separator = new RegExp(
     `\\s*[,.]?\\s*\\b(?:and\\s+)?then\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)|\\s*,?\\s+and\\s+(?=(?:please\\s+)?${EDIT_CLAUSE_VERB}\\b)`,
-    "iu"
+    "giu"
   );
-  return instructionTranscript.split(separator).map((clause) => clause.trim()).filter(Boolean);
+  const clauses = [];
+  let start = 0;
+  for (const match of instructionTranscript.matchAll(separator)) {
+    const boundary = match.index;
+    if ([...quoted.slice(boundary, boundary + match[0].length)].some(Boolean)) continue;
+    clauses.push(instructionTranscript.slice(start, boundary).trim());
+    start = boundary + match[0].length;
+  }
+  clauses.push(instructionTranscript.slice(start).trim());
+  return clauses.filter(Boolean);
 }
 function parseDeterministicCompoundEditPlan(clauses, session) {
   const plans = clauses.map((clause) => parseDeterministicEditPlan(clause, session));
@@ -5397,8 +5418,9 @@ function parseDeterministicTextDeletion(instructionTranscript, session) {
   const trailingParagraph = match[3] === void 0 ? void 0 : Number(match[3]);
   if (leadingParagraph !== void 0 && (!Number.isSafeInteger(leadingParagraph) || leadingParagraph < 1) || trailingParagraph !== void 0 && (!Number.isSafeInteger(trailingParagraph) || trailingParagraph < 1) || leadingParagraph !== void 0 && trailingParagraph !== void 0 && leadingParagraph !== trailingParagraph)
     return null;
-  const spokenTarget = unwrapEditArgument(stripUnquotedEditArgumentLabel(match[2] ?? ""));
-  if (!spokenTarget || isSemanticReplacementTarget(spokenTarget)) return null;
+  const rawTarget = stripUnquotedEditArgumentLabel(match[2] ?? "");
+  const spokenTarget = unwrapEditArgument(rawTarget);
+  if (!spokenTarget || isSemanticReplacementTarget(spokenTarget) && !/^["'“‘]/u.test(rawTarget)) return null;
   const paragraphOrdinal = leadingParagraph ?? trailingParagraph;
   const targetText = adoptUnambiguousDraftCasing(session, spokenTarget, paragraphOrdinal);
   return parseEditPlan({
@@ -6292,7 +6314,7 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   );
   const secondTarget = cleanQuotationRangeTarget(
     unwrapEditArgument(
-      stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[3] ?? "").trim()))
+      stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[3] ?? "").trim().replace(/([”’"'])[.!?]+$/u, "$1")))
     )
   );
   if (!firstTarget || !secondTarget) return null;
@@ -6443,6 +6465,8 @@ function parseDeterministicSimpleReplacement(instructionTranscript, session) {
     return null;
   const command = instructionTranscript.trim().replace(/[.!?]+$/u, "").trim();
   const match = command.match(
+    /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:replace|change|swap|substitute)\s+(?:the\s+)?(?:word|words|phrase|text)\s+((?:“[^”]*”|‘[^’]*’|"[^"]*"|'[^']*'))\s+(?:with|to|into|for)\s+(.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu
+  ) ?? command.match(
     /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:replace|change|swap|substitute)\s+(.+?)\s+(?:with|to|into|for)\s+(.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu
   );
   if (!match) return null;

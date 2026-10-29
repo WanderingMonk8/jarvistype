@@ -4310,6 +4310,65 @@ test('preserves sentence casing when replacing an opening phrase', async () => {
   assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
 })
 
+test('keeps command-looking words inside quoted replacement payloads literal', async () => {
+  const userId = 'quoted-command-words-user'
+  const chatId = 'quoted-command-words-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'I want to move. Stay here.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'quoted-command-words-interpret', operationId: 'quoted-command-words-operation',
+    chatId, expectedVersion: 1,
+    instructionTranscript: 'Replace the phrase “I want to move” with “I need to stay”.',
+  }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.afterText, 'I need to stay. Stay here.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('falls back for a compound instruction with an incomplete command', async () => {
+  const userId = 'incomplete-compound-parser-user'
+  const chatId = 'incomplete-compound-parser-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Quote, I am ready.')
+  generationRequests.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'incomplete-compound-parser-interpret', operationId: 'incomplete-compound-parser-operation',
+    chatId, expectedVersion: 1,
+    instructionTranscript: 'Remove the phrase “Quote”, then insert the phrase “until”.',
+  }, userId)
+  assert.equal(generationRequests.length, 1)
+})
+
+test('parses quoted compound command arguments without a provider call', async () => {
+  const userId = 'quoted-compound-parser-user'
+  const chatId = 'quoted-compound-parser-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Quote, Don’t worry, dear. It is endearing, in fact.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'edit.interpret.request',
+    requestId: 'quoted-compound-parser-interpret',
+    operationId: 'quoted-compound-parser-operation',
+    chatId,
+    expectedVersion: 1,
+    instructionTranscript: 'Remove the phrase “Quote”, then put quotations from “Don’t worry” to “in fact”.',
+  }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.failedCommand, undefined)
+  assert.equal(response.proposal.afterText, '“Don’t worry, dear. It is endearing, in fact.”')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('splits compound instructions into deterministic clauses without swallowing later commands', async () => {
   const userId = 'compound-clause-user'
   const chatId = 'compound-clause-chat'

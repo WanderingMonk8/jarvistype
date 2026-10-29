@@ -6013,7 +6013,7 @@ test('removes qualified as in references from every text-bearing edit operation'
   if (response?.type === 'edit.proposal.response') {
     assert.equal(
       response.proposal.afterText,
-      'Replace filled.\n\nI nod Prepend base.\n\nAppend base. I agree\n\nInsert walk before base.\n\nInsert after pause base.',
+      'Replace filled.\n\nI nod prepend base.\n\nAppend base. I agree\n\nInsert walk before base.\n\nInsert after pause base.',
     )
     assert.equal(response.proposal.afterText.includes('as in'), false)
   }

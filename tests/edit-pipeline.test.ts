@@ -380,6 +380,26 @@ test('sequential edits resolve targets after a paragraph split and retain paragr
   assert.equal(result.resultingParagraphIds?.[0], 'original')
 })
 
+test('prepend and insert-before adjust displaced ordinary sentence openings only for continuations', () => {
+  for (const [original, insertion, expected, protectedTerms] of [
+    ['Kiss for a long time.', 'We', 'We kiss for a long time.', []],
+    ['Kiss for a long time.', 'Hello.', 'Hello. Kiss for a long time.', []],
+    ['Erbold waits.', 'Then', 'Then Erbold waits.', ['Erbold']],
+    ['I wait.', 'Then', 'Then I wait.', []],
+  ] as const) {
+    const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: original }]
+    for (const operation of [
+      { id: 'prepend', type: 'prepend' as const, target: { paragraphOrdinal: 1 }, text: insertion },
+      { id: 'insert', type: 'insert_before' as const, target: { exactText: original }, text: insertion },
+    ]) {
+      const result = executeEditPlan(original, paragraphs, 1, {
+        schemaVersion: 2, draftVersion: 1, explanation: 'Insert before.', operations: [operation],
+      }, protectedTerms)
+      assert.equal(result.ok && result.afterText, expected)
+    }
+  }
+})
+
 test('supports insert, append, prepend, delete, and casing through the same pipeline', () => {
   const session = fixture()
   const result = executeEditPlan(session.cleanText, session.paragraphs, 1, {
@@ -427,7 +447,7 @@ test('adds missing word boundaries for prepend and append operations', () => {
     ],
   })
 
-  assert.equal(result.ok && result.afterText, 'Before Existing sentence. After')
+  assert.equal(result.ok && result.afterText, 'Before existing sentence. After')
 
   const continuation = executeEditPlan(
     'Existing fragment',

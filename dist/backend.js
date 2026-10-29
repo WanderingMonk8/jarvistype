@@ -1040,11 +1040,12 @@ function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms
       return `${operation.type} does not accept an inline target`;
     const point = operation.type === "append" ? range.end : range.start;
     const insertionText2 = formatText ? formatInsertionCasing(cleanText, point, operation.text ?? "", protectedCasingTerms) : operation.text ?? "";
+    const displacedOpening = formatText && operation.type === "prepend" && isContinuingInsertion(insertionText2) ? lowercaseOrdinarySentenceOpening(cleanText, point, cleanText, point, protectedCasingTerms) : null;
     return {
       operation,
       start: point,
-      end: point,
-      replacement: formatText ? addBoundarySpacing(cleanText, point, insertionText2) : insertionText2,
+      end: displacedOpening?.end ?? point,
+      replacement: formatText ? `${addBoundarySpacing(cleanText, point, insertionText2)}${displacedOpening?.text ?? ""}` : insertionText2,
       paragraphOrdinal: paragraph.ordinal
     };
   }
@@ -1131,7 +1132,7 @@ ${formattedParagraph}`,
   const insertionText = operation.text ?? "";
   if (operation.type === "insert_before") {
     const formattedInsertion = formatText ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText) : insertionText;
-    const displacedOpening = formatText && isSentenceOpeningAt(cleanText, start) && /\p{L}/u.test(formattedInsertion) ? lowercaseOrdinarySentenceOpening(cleanText, start, cleanText, start, protectedCasingTerms) : null;
+    const displacedOpening = formatText && isSentenceOpeningAt(cleanText, start) && isContinuingInsertion(formattedInsertion) ? lowercaseOrdinarySentenceOpening(cleanText, start, cleanText, start, protectedCasingTerms) : null;
     return {
       operation,
       start,
@@ -1521,6 +1522,9 @@ ${text}`,
   );
   return lowered ? `${lowered.text}${insertion.slice(lowered.end)}` : insertion;
 }
+function isContinuingInsertion(value) {
+  return /\p{L}/u.test(value) && !/[.!?…][”’"')\]]*\s*$/u.test(value);
+}
 function alignReplacementInitialCasing(text, start, end, replacement, protectedCasingTerms) {
   if (isSentenceOpeningAt(text, start))
     return capitalizeReplacementAtSentenceOpening(text, start, replacement);
@@ -1572,6 +1576,7 @@ function lowercaseOrdinarySentenceOpening(text, start, evidenceText, evidenceSta
   if (!match) return null;
   const prefix = match[1];
   const word = match[2];
+  if (word === "I") return null;
   if (looksLikeProperNoun(evidenceText, evidenceStart + prefix.length, word, protectedCasingTerms))
     return null;
   const loweredWord = `${word.charAt(0).toLocaleLowerCase()}${word.slice(1)}`;

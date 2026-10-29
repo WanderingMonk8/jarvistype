@@ -562,11 +562,17 @@ function resolveOperation(
     const insertionText = formatText
       ? formatInsertionCasing(cleanText, point, operation.text ?? '', protectedCasingTerms)
       : (operation.text ?? '')
+    const displacedOpening =
+      formatText && operation.type === 'prepend' && isContinuingInsertion(insertionText)
+        ? lowercaseOrdinarySentenceOpening(cleanText, point, cleanText, point, protectedCasingTerms)
+        : null
     return {
       operation,
       start: point,
-      end: point,
-      replacement: formatText ? addBoundarySpacing(cleanText, point, insertionText) : insertionText,
+      end: displacedOpening?.end ?? point,
+      replacement: formatText
+        ? `${addBoundarySpacing(cleanText, point, insertionText)}${displacedOpening?.text ?? ''}`
+        : insertionText,
       paragraphOrdinal: paragraph.ordinal,
     }
   }
@@ -672,7 +678,7 @@ function resolveOperation(
       ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
       : insertionText
     const displacedOpening =
-      formatText && isSentenceOpeningAt(cleanText, start) && /\p{L}/u.test(formattedInsertion)
+      formatText && isSentenceOpeningAt(cleanText, start) && isContinuingInsertion(formattedInsertion)
         ? lowercaseOrdinarySentenceOpening(cleanText, start, cleanText, start, protectedCasingTerms)
         : null
     return {
@@ -1307,6 +1313,10 @@ function formatInsertionCasing(
   return lowered ? `${lowered.text}${insertion.slice(lowered.end)}` : insertion
 }
 
+function isContinuingInsertion(value: string): boolean {
+  return /\p{L}/u.test(value) && !/[.!?…][”’"')\]]*\s*$/u.test(value)
+}
+
 function alignReplacementInitialCasing(
   text: string,
   start: number,
@@ -1386,6 +1396,7 @@ function lowercaseOrdinarySentenceOpening(
   if (!match) return null
   const prefix = match[1]!
   const word = match[2]!
+  if (word === 'I') return null
   if (looksLikeProperNoun(evidenceText, evidenceStart + prefix.length, word, protectedCasingTerms))
     return null
   const loweredWord = `${word.charAt(0).toLocaleLowerCase()}${word.slice(1)}`

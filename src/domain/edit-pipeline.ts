@@ -1,4 +1,5 @@
-import { MAX_DRAFT_CHARACTERS, type DraftParagraph } from './draft-session'
+import { MAX_DRAFT_CHARACTERS, reconcileParagraphs, type DraftParagraph } from './draft-session'
+import { speechPhoneticKey } from './phonetics'
 
 export const EDIT_SCHEMA_VERSION = 2 as const
 export const MAX_EDIT_OPERATIONS = 8
@@ -83,6 +84,7 @@ export type EditPipelineResult =
       operations: ResolvedEditOperation[]
       affectedParagraphOrdinals: number[]
       resultingParagraphIds?: string[]
+      failedCommand?: { index: number; operationId: string; reason: string }
     }
   | { ok: false; reason: string }
 
@@ -92,6 +94,81 @@ interface Patch {
   end: number
   replacement: string
   paragraphOrdinal: number
+}
+
+/** Run a chain against an in-memory draft, stopping at its first unsafe operation. */
+export function executeSequentialEditPlan(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  currentVersion: number,
+  plan: EditPlan,
+  protectedCasingTerms: readonly string[] = [],
+): EditPipelineResult {
+  if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
+  let text = cleanText
+  let currentParagraphs = [...paragraphs]
+  const operations: ResolvedEditOperation[] = []
+  const affected = new Set<number>()
+  let failedCommand: { index: number; operationId: string; reason: string } | undefined
+  let generated = 0
+  const usedIds = new Set(currentParagraphs.map((paragraph) => paragraph.id))
+  const createId = () => {
+    let id: string
+    do id = `chain:${plan.draftVersion}:${++generated}`
+    while (usedIds.has(id))
+    usedIds.add(id)
+    return id
+  }
+  for (const [index, operation] of plan.operations.entries()) {
+    let currentOperation = operation
+    const exact = operation.target.exactText
+    if (index > 0 && operation.type === 'insert_after' && exact && /[.!?…]$/u.test(exact)) {
+      const base = exact.replace(/[.!?…]+$/u, '')
+      const scoped = currentParagraphs.filter((paragraph) =>
+        (operation.target.paragraphId === undefined || paragraph.id === operation.target.paragraphId) &&
+        (operation.target.paragraphOrdinal === undefined || paragraph.ordinal === operation.target.paragraphOrdinal),
+      )
+      const search = operation.target.paragraphId !== undefined || operation.target.paragraphOrdinal !== undefined
+        ? scoped.map((paragraph) => paragraph.text).join('\n')
+        : text
+      const candidates = [...search.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(base)}[,;:—–-](?=\\s|$)`, 'giu'))]
+      if (candidates.length === 1 && !search.includes(exact))
+        currentOperation = { ...operation, target: { ...operation.target, exactText: candidates[0]![0] } }
+    }
+    const result = executeEditPlan(text, currentParagraphs, currentVersion, {
+      ...plan,
+      operations: [currentOperation],
+    }, protectedCasingTerms)
+    if (!result.ok) {
+      failedCommand = { index: index + 1, operationId: operation.id, reason: result.reason }
+      break
+    }
+    operations.push(...result.operations)
+    for (const ordinal of result.affectedParagraphOrdinals) affected.add(ordinal)
+    if (result.resultingParagraphIds) {
+      let paragraphIndex = 0
+      currentParagraphs = result.afterText.split('\n').flatMap((line, lineIndex) => {
+        if (!line.trim()) return []
+        const id = result.resultingParagraphIds![paragraphIndex]!
+        paragraphIndex += 1
+        return [{ id, ordinal: paragraphIndex, lineIndex, text: line }]
+      })
+      for (const paragraph of currentParagraphs) usedIds.add(paragraph.id)
+    } else {
+      currentParagraphs = reconcileParagraphs(currentParagraphs, result.afterText, createId)
+    }
+    text = result.afterText
+  }
+  if (!operations.length || text === cleanText)
+    return { ok: false, reason: failedCommand ? `Command ${failedCommand.index}: ${failedCommand.reason}` : 'edit would not change the draft' }
+  return {
+    ok: true,
+    afterText: text,
+    operations,
+    affectedParagraphOrdinals: [...affected].sort((a, b) => a - b),
+    resultingParagraphIds: currentParagraphs.map((paragraph) => paragraph.id),
+    ...(failedCommand ? { failedCommand } : {}),
+  }
 }
 
 export function parseEditPlan(value: unknown): EditPlan | null {
@@ -160,6 +237,29 @@ export function executeEditPlan(
       formatText,
     )
     if (typeof patch === 'string') return { ok: false, reason: patch }
+    if (
+      formatText &&
+      (operation.type === 'insert_after' || operation.type === 'append') &&
+      patches.length > 0
+    ) {
+      // Targets retain their original-draft coordinates, but formatting must see
+      // earlier edits in the same instruction (e.g. a period changed to a comma).
+      const preceding = patches
+        .filter((prior) => prior.end <= patch.start && prior.start !== prior.end)
+        .sort((left, right) => right.start - left.start)
+      let projectedText = cleanText
+      let projectedPoint = patch.start
+      for (const prior of preceding) {
+        projectedText = `${projectedText.slice(0, prior.start)}${prior.replacement}${projectedText.slice(prior.end)}`
+        projectedPoint += prior.replacement.length - (prior.end - prior.start)
+      }
+      const inserted = capitalizeReplacementAtSentenceOpening(
+        projectedText,
+        projectedPoint,
+        operation.text ?? '',
+      )
+      patch.replacement = addBoundarySpacing(projectedText, projectedPoint, inserted)
+    }
     patches.push(patch)
   }
   const sorted = [...patches].sort(
@@ -201,6 +301,7 @@ export function executeEditPlan(
     ),
   }
 }
+
 
 function parseOperation(value: unknown): EditOperation | null {
   if (!isRecord(value) || !isIdentifier(value.id) || !isRecord(value.target)) return null
@@ -455,15 +556,23 @@ function resolveOperation(
 
   if (operation.type === 'append' || operation.type === 'prepend') {
     if (!paragraph) return `${operation.type} requires one paragraph target`
+    if (hasInlineSelector(operation.target))
+      return `${operation.type} does not accept an inline target`
     const point = operation.type === 'append' ? range.end : range.start
     const insertionText = formatText
-      ? capitalizeReplacementAtSentenceOpening(cleanText, point, operation.text ?? '')
+      ? formatInsertionCasing(cleanText, point, operation.text ?? '', protectedCasingTerms)
       : (operation.text ?? '')
+    const displacedOpening =
+      formatText && operation.type === 'prepend' && isContinuingInsertion(insertionText)
+        ? lowercaseOrdinarySentenceOpening(cleanText, point, cleanText, point, protectedCasingTerms)
+        : null
     return {
       operation,
       start: point,
-      end: point,
-      replacement: formatText ? addBoundarySpacing(cleanText, point, insertionText) : insertionText,
+      end: displacedOpening?.end ?? point,
+      replacement: formatText
+        ? `${addBoundarySpacing(cleanText, point, insertionText)}${displacedOpening?.text ?? ''}`
+        : insertionText,
       paragraphOrdinal: paragraph.ordinal,
     }
   }
@@ -509,9 +618,7 @@ function resolveOperation(
   }
   const isParagraphInsertion =
     paragraph !== undefined &&
-    operation.target.exactText === undefined &&
-    operation.target.approximateText === undefined &&
-    operation.target.punctuation === undefined &&
+    !hasInlineSelector(operation.target) &&
     (operation.type === 'insert_before' || operation.type === 'insert_after')
   if (isParagraphInsertion) {
     const insertedParagraph = (operation.text ?? '').trim()
@@ -532,30 +639,37 @@ function resolveOperation(
     }
   }
   if (operation.type === 'delete') {
+    const wrapped = expandThroughPairedPunctuation(cleanText, start, end, range.start, range.end)
+    start = wrapped.start
+    end = wrapped.end
     if (operation.includeTrailingPunctuation) {
       end = extendThroughTerminalPunctuation(cleanText, end, range.end)
-    } else if (
-      isWholeSentenceSpan(cleanText, start, end, range.start) &&
-      /^\.(?!\.)/u.test(cleanText.slice(end, range.end))
-    ) {
-      end += 1
     } else if (isSentenceOpeningAt(cleanText, start)) {
-      const orphanedSeparator = cleanText.slice(end, range.end).match(/^[,;:](?=\s|$)/u)?.[0]
-      if (orphanedSeparator) end += orphanedSeparator.length
+      const orphanedPunctuation = attachedSentencePartPunctuation(cleanText, end, range.end)
+      if (orphanedPunctuation) end += orphanedPunctuation.length
     } else if (
-      /[,;:][ \t]*$/u.test(cleanText.slice(range.start, start)) &&
-      /^[,;:](?=\s|$)/u.test(cleanText.slice(end, range.end))
+      /[.,;:!?…—–-][ \t]*$/u.test(cleanText.slice(range.start, start)) &&
+      attachedSentencePartPunctuation(cleanText, end, range.end)
     ) {
       // A complete middle phrase has a separator on each side. Preserve the
       // leading separator and consume the now-duplicate trailing one.
-      end += 1
+      end += attachedSentencePartPunctuation(cleanText, end, range.end).length
     }
     if (formatText) {
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
       const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
       const endsLine = end >= range.end || /[\r\n]/.test(cleanText[end] ?? '')
-      if (hasSeparatorBefore && (hasSeparatorAfter || endsLine)) start -= 1
+      const endsBeforeClosingWrapper = /^[”’"')\]}]+(?=\s|$)/u.test(
+        cleanText.slice(end, range.end),
+      )
+      if (hasSeparatorBefore && (hasSeparatorAfter || endsLine || endsBeforeClosingWrapper))
+        start -= 1
       else if (hasSeparatorAfter && start === range.start) end += 1
+      else if (
+        hasSeparatorAfter &&
+        /[“‘"'([{<`*_]$/u.test(cleanText.slice(range.start, start))
+      )
+        end += 1
     }
   }
   const insertionText = operation.text ?? ''
@@ -564,7 +678,7 @@ function resolveOperation(
       ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
       : insertionText
     const displacedOpening =
-      formatText && isSentenceOpeningAt(cleanText, start) && /\p{L}/u.test(formattedInsertion)
+      formatText && isSentenceOpeningAt(cleanText, start) && isContinuingInsertion(formattedInsertion)
         ? lowercaseOrdinarySentenceOpening(cleanText, start, cleanText, start, protectedCasingTerms)
         : null
     return {
@@ -593,7 +707,7 @@ function resolveOperation(
             ? addBoundarySpacing(
                 cleanText,
                 insertAfterPoint,
-                capitalizeReplacementAtSentenceOpening(cleanText, insertAfterPoint, insertionText),
+                formatInsertionCasing(cleanText, insertAfterPoint, insertionText, protectedCasingTerms),
               )
             : insertionText
           : applyCase(cleanText.slice(start, end), operation.caseMode!)
@@ -729,7 +843,7 @@ function executeInlineMove(
       ? originalInsertionPoint - (removalEnd - removalStart)
       : originalInsertionPoint
   const formattedMovedText = formatText
-    ? capitalizeReplacementAtSentenceOpening(withoutSource, insertionPoint, movedText)
+    ? formatInsertionCasing(withoutSource, insertionPoint, movedText, protectedCasingTerms)
     : movedText
   const displacedOpening =
     formatText &&
@@ -775,19 +889,60 @@ function executeInlineMove(
   }
 }
 
+/** Sentence-part punctuation that becomes orphaned when the entire part is removed. */
+function attachedSentencePartPunctuation(text: string, end: number, limit: number): string {
+  return (
+    text
+      .slice(end, limit)
+      .match(/^((?:\.{3}|[.,;:!?…—–-])+)(?=[”’"')\]}]*(?:\s|$))/u)?.[1] ?? ''
+  )
+}
+
 /**
- * True when a span starts a sentence and ends a word, so removing it should also
- * remove the sentence's own terminal mark instead of leaving it orphaned.
+ * Include a paired wrapper only when the target is the wrapper's complete content.
+ * Optional inner whitespace and terminal punctuation inside a closing wrapper belong
+ * to that wrapped phrase. Longer Markdown markers are checked before single markers.
  */
-function isWholeSentenceSpan(
+function expandThroughPairedPunctuation(
   text: string,
   start: number,
   end: number,
-  rangeStart: number,
-): boolean {
-  const before = text.slice(rangeStart, start)
-  const startsSentence = before.trim() === '' || /[.!?…]["'’”)\]]?\s*$/u.test(before)
-  return startsSentence && /[\p{L}\p{N}]$/u.test(text.slice(0, end))
+  limitStart: number,
+  limitEnd: number,
+): { start: number; end: number } {
+  const before = text.slice(limitStart, start)
+  const after = text.slice(end, limitEnd)
+  const pairs: ReadonlyArray<readonly [string, string]> = [
+    ['***', '***'],
+    ['___', '___'],
+    ['**', '**'],
+    ['__', '__'],
+    ['“', '”'],
+    ['‘', '’'],
+    ['"', '"'],
+    ["'", "'"],
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+    ['`', '`'],
+    ['*', '*'],
+    ['_', '_'],
+  ]
+  for (const [opening, closing] of pairs) {
+    const left = before.match(new RegExp(`${escapeRegExp(opening)}[ \\t]*$`, 'u'))?.[0]
+    if (!left) continue
+    const right = after.match(
+      new RegExp(`^[ \\t]*(?:\\.{3}|[.,;:!?…—–-])*[ \\t]*${escapeRegExp(closing)}`, 'u'),
+    )?.[0]
+    if (!right) continue
+    return { start: start - left.length, end: end + right.length }
+  }
+  return { start, end }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function extendThroughTerminalPunctuation(text: string, end: number, limit: number): number {
@@ -1135,6 +1290,33 @@ function capitalizeReplacementAtSentenceOpening(
   )
 }
 
+function formatInsertionCasing(
+  text: string,
+  point: number,
+  insertion: string,
+  protectedCasingTerms: readonly string[],
+): string {
+  if (isSentenceOpeningAt(text, point))
+    return capitalizeReplacementAtSentenceOpening(text, point, insertion)
+  if (!/[,;:—–-][ \t]*$/u.test(text.slice(0, point))) return insertion
+  // Quoted speech can legitimately start a new sentence after a dialogue tag.
+  if (/^[ \t]*[“‘"'([{]/u.test(insertion)) return insertion
+  const first = insertion.match(/^[ \t]*(\p{Lu}[\p{L}\p{M}'’-]*)/u)?.[1]
+  if (!first || first === 'I') return insertion
+  const lowered = lowercaseOrdinarySentenceOpening(
+    insertion,
+    0,
+    `${insertion}\n\n${text}`,
+    0,
+    protectedCasingTerms,
+  )
+  return lowered ? `${lowered.text}${insertion.slice(lowered.end)}` : insertion
+}
+
+function isContinuingInsertion(value: string): boolean {
+  return /\p{L}/u.test(value) && !/[.!?…][”’"')\]]*\s*$/u.test(value)
+}
+
 function alignReplacementInitialCasing(
   text: string,
   start: number,
@@ -1149,6 +1331,12 @@ function alignReplacementInitialCasing(
     .slice(start, end)
     .match(/^[ \t]*[\u201c\u2018"'([{]*[ \t]*(\p{L})/u)?.[1]
   if (!replacedOpening || !/\p{Ll}/u.test(replacedOpening)) return replacement
+
+  // Only a sentence-like phrase inherits a spurious capital ("My response"). A single
+  // capitalized word or a name ("Erica", "Mary Jones") keeps the capital the user gave.
+  const sentenceLikeReplacement =
+    /^[\s\u201c\u2018"'([{]*\p{Lu}[\p{L}\p{M}'\u2019-]*\s+\p{Ll}/u.test(replacement)
+  if (!sentenceLikeReplacement) return replacement
 
   const evidenceText = `${replacement}\n\n${text}`
   const lowered = lowercaseOrdinarySentenceOpening(
@@ -1208,6 +1396,7 @@ function lowercaseOrdinarySentenceOpening(
   if (!match) return null
   const prefix = match[1]!
   const word = match[2]!
+  if (word === 'I') return null
   if (looksLikeProperNoun(evidenceText, evidenceStart + prefix.length, word, protectedCasingTerms))
     return null
   const loweredWord = `${word.charAt(0).toLocaleLowerCase()}${word.slice(1)}`
@@ -1427,7 +1616,9 @@ function findLexicallyBoundedExactMatches(
     const preceding = index > start ? text[index - 1] : undefined
     const following = index + search.length < end ? text[index + search.length] : undefined
     return (
-      (!searchStartsLexically || preceding === undefined || !/[\p{L}\p{M}\p{N}]/u.test(preceding)) &&
+      (!searchStartsLexically ||
+        preceding === undefined ||
+        !/[\p{L}\p{M}\p{N}]/u.test(preceding)) &&
       (!searchEndsLexically || following === undefined || !/[\p{L}\p{M}\p{N}]/u.test(following))
     )
   })
@@ -1614,7 +1805,7 @@ function findApproximateMatch(
   if (!available.length) return 'approximate text target was not found'
   const wantedText = wanted.map(({ value }) => value).join(' ')
   const wantedCompact = wantedText.replace(/\s+/gu, '')
-  const wantedPhonetic = phoneticKey(wantedCompact)
+  const wantedPhonetic = speechPhoneticKey(wantedCompact)
   const availableValues = available.map(({ value }) => value)
   const availableText = availableValues.join(' ')
   const availableCompact = availableValues.join('')
@@ -1666,7 +1857,7 @@ function findApproximateMatch(
       let scores = scoreCache.get(candidateText)
       if (!scores) {
         const compactScore = stringSimilarity(wantedCompact, candidateCompact)
-        const candidatePhonetic = phoneticKey(candidateCompact)
+        const candidatePhonetic = speechPhoneticKey(candidateCompact)
         scores = {
           compactScore,
           text: candidateText,
@@ -1695,7 +1886,8 @@ function findApproximateMatch(
           length === 1 &&
           Math.min(wantedCompact.length, candidateCompact.length) >= 4 &&
           Math.abs(wantedCompact.length - candidateCompact.length) <= 1 &&
-          scores.compactScore >= 0.75,
+          scores.compactScore >= 0.75 &&
+          scores.phonetic === wantedPhonetic,
         phoneticFallback: false,
       })
     }
@@ -1831,48 +2023,15 @@ function stringSimilarity(left: string, right: string): number {
   return 1 - distances[columns.length]! / Math.max(left.length, right.length, 1)
 }
 
-function phoneticKey(value: string): string {
-  const prepared = value
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .toLocaleLowerCase()
-    .replace(/ph/gu, 'f')
-    .replace(/ght/gu, 't')
-    .replace(/gh/gu, '')
-    .replace(/ck/gu, 'k')
-    .replace(/kn/gu, 'n')
-    .replace(/wr/gu, 'r')
-    .replace(/qu/gu, 'kw')
-  let key = ''
-  for (const character of prepared) {
-    const sound = phoneticSoundGroup(character)
-    if (sound && sound !== key.at(-1)) key += sound
-  }
-  return key
-}
-
-function phoneticSoundGroup(character: string): string {
-  if (/[aeiou]/u.test(character)) return 'A'
-  if (/[bp]/u.test(character)) return 'B'
-  if (/[fv]/u.test(character)) return 'F'
-  if (/[cgjkq]/u.test(character)) return 'K'
-  if (/[dt]/u.test(character)) return 'T'
-  if (/[sxz]/u.test(character)) return 'S'
-  if (character === 'l') return 'L'
-  if (character === 'm') return 'M'
-  if (character === 'n') return 'N'
-  if (character === 'r') return 'R'
-  if (/[hwy]/u.test(character)) return ''
-  return /[\p{L}\p{N}]/u.test(character) ? character : ''
-}
-
 function applyCase(value: string, mode: NonNullable<EditOperation['caseMode']>): string {
   if (mode === 'uppercase') return value.toLocaleUpperCase()
   if (mode === 'lowercase') return value.toLocaleLowerCase()
-  const index = value.search(/[\p{L}]/u)
-  return index < 0
-    ? value
-    : `${value.slice(0, index)}${value[index]!.toLocaleUpperCase()}${value.slice(index + 1)}`
+  return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {
+    const index = word.search(/\p{L}/u)
+    return index < 0
+      ? word
+      : `${word.slice(0, index)}${word[index]!.toLocaleUpperCase()}${word.slice(index + 1)}`
+  })
 }
 
 function paragraphOrdinalAtOffset(text: string, offset: number): number {

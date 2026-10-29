@@ -4,7 +4,7 @@ import type { SpellingLearningCandidate } from '../domain/normalization'
 import type { EditPlan, ResolvedEditOperation } from '../domain/edit-pipeline'
 
 export const PROTOCOL_VERSION = 7 as const
-export const APP_VERSION = '1.6.7'
+export const APP_VERSION = '1.6.15'
 export const REQUEST_TIMEOUT_MS = 15_000
 export const NORMALIZATION_TIMEOUT_MS = 120_000
 export const SEND_TIMEOUT_MS = 120_000
@@ -21,14 +21,26 @@ export type PermissionName = (typeof PHASE_FOUR_PERMISSIONS)[number]
 
 export interface PhaseFourSettings {
   contextMessageCount: number
+  referenceCacheLimit?: number
+  referenceAdmissionOccurrences?: number
   contextualNormalizationEnabled: boolean
   grammarRepairMode: 'off' | 'when_needed' | 'always'
+  glossaryDefaultScope?: 'local' | 'global'
+  decisionConnectionId?: string | null
   normalizationConnectionId: string | null
   normalizationModelOverride: string
   debugLoggingEnabled?: boolean
 }
 
 export interface NormalizationConnectionOption {
+  id: string
+  name: string
+  provider: string
+  model: string
+  isDefault: boolean
+}
+
+export interface DecisionConnectionOption {
   id: string
   name: string
   provider: string
@@ -64,6 +76,7 @@ export interface EditProposal {
   explanation: string
   learningCandidates: SpellingLearningCandidate[]
   grammarRepairChanges?: string[]
+  failedCommand?: { index: number; operationId: string; reason: string }
   resultingParagraphIds?: string[]
 }
 
@@ -170,10 +183,12 @@ export type FrontendRequest =
     })
   | (RequestEnvelope & {
       type: 'phase4.load.request'
+      chatId?: string
     })
   | (RequestEnvelope & {
       type: 'phase4.settings.update.request'
       settings: PhaseFourSettings
+      chatId?: string
     })
   | (RequestEnvelope & {
       type: 'glossary.upsert.request'
@@ -181,13 +196,17 @@ export type FrontendRequest =
       canonical: string
       variants: string[]
       hint: string
+      scope?: 'local' | 'global'
+      chatId?: string
     })
   | (RequestEnvelope & {
       type: 'glossary.delete.request'
       entryId: string
+      chatId?: string
     })
   | (RequestEnvelope & {
       type: 'glossary.undo.request'
+      chatId?: string
     })
   | (RequestEnvelope & {
       type: 'debug.log.request'
@@ -257,8 +276,10 @@ export type BackendResponse =
       ok: true
       settings: PhaseFourSettings
       connections: NormalizationConnectionOption[]
+      decisionConnections: DecisionConnectionOption[]
       glossary: GlossaryEntry[]
       canUndoGlossary: boolean
+      decisionModelAvailable: boolean
       notice?: string
     })
   | (RequestEnvelope & {
@@ -300,3 +321,4 @@ export type AppErrorCode =
 export function createRequestId(prefix = 'request'): string {
   return `${prefix}-${Date.now().toString(36)}-${crypto.randomUUID()}`
 }
+

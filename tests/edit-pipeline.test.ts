@@ -6,7 +6,7 @@ import {
   createDraftSession,
   applyManualEdit,
 } from '../src/domain/draft-session'
-import { executeEditPlan, parseEditPlan, type EditPlan } from '../src/domain/edit-pipeline'
+import { executeEditPlan, executeSequentialEditPlan, parseEditPlan, type EditPlan } from '../src/domain/edit-pipeline'
 
 function fixture() {
   const empty = createDraftSession('chat', '2026-01-01T00:00:00.000Z')
@@ -174,6 +174,19 @@ test('capitalizes replacement text only when it begins a sentence', () => {
     'She said my response was ready.',
   )
 
+  const singleCapitalizedWord = executeEditPlan('I turned towards erwin.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'keep a capitalized name after a lowercase target',
+    operations: [
+      { id: 'single-name', type: 'replace', target: { exactText: 'erwin' }, text: 'Erica' },
+    ],
+  })
+  assert.equal(
+    singleCapitalizedWord.ok && singleCapitalizedWord.afterText,
+    'I turned towards Erica.',
+  )
+
   const protectedMiddle = executeEditPlan(
     'She greeted the new arrival.',
     [],
@@ -288,6 +301,105 @@ test('rejects missing, duplicate, stale, and overlapping targets atomically', ()
   )
 })
 
+test('formats insertion and append against preceding punctuation edits in a multi-command plan', () => {
+  const text = 'First.\n\nSecond.'
+  const paragraphs = [
+    { id: 'p1', ordinal: 1, lineIndex: 0, text: 'First.' },
+    { id: 'p2', ordinal: 2, lineIndex: 2, text: 'Second.' },
+  ]
+  const result = executeSequentialEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Change periods and insert continuations.',
+    operations: [
+      { id: 'comma-first', type: 'replace', target: { paragraphOrdinal: 1, exactText: '.' }, text: ',' },
+      { id: 'insert-first', type: 'insert_after', target: { paragraphOrdinal: 1, exactText: 'First.' }, text: 'continued.' },
+      { id: 'comma-second', type: 'replace', target: { paragraphOrdinal: 2, exactText: '.' }, text: ',' },
+      { id: 'append-second', type: 'append', target: { paragraphOrdinal: 2 }, text: 'continued' },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'First, continued.\n\nSecond, continued')
+})
+
+test('lowercases ordinary provider-capitalized continuations after a comma while protecting names', () => {
+  for (const [insertion, expected] of [
+    ['She looks at me.', 'she looks at me.'],
+    ['I look at her.', 'I look at her.'],
+    ['Erbold looks at me.', 'Erbold looks at me.'],
+    ['“She looks at me.”', '“She looks at me.”'],
+  ] as const) {
+    const text = 'She makes no effort to hide it.'
+    const result = executeSequentialEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'Change punctuation and append.',
+      operations: [
+        { id: 'punctuation', type: 'replace', target: { paragraphOrdinal: 1, exactText: '.' }, text: ',' },
+        { id: 'append', type: 'append', target: { paragraphOrdinal: 1 }, text: insertion },
+      ],
+    }, ['Erbold'])
+    assert.equal(result.ok && result.afterText, `She makes no effort to hide it, ${expected}`)
+  }
+})
+
+test('sequential edits stop at the first failure and preserve earlier changes', () => {
+  const text = 'Alpha beta gamma.'
+  const paragraphs = [{ id: 'p1', ordinal: 1, lineIndex: 0, text }]
+  const result = executeSequentialEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace, fail, then stop.',
+    operations: [
+      { id: 'first', type: 'replace', target: { exactText: 'Alpha' }, text: 'Delta' },
+      { id: 'missing', type: 'delete', target: { exactText: 'missing' } },
+      { id: 'not-run', type: 'replace', target: { exactText: 'gamma' }, text: 'omega' },
+    ],
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.afterText, 'Delta beta gamma.')
+  assert.equal(result.operations.length, 1)
+  assert.equal(result.failedCommand?.index, 2)
+  assert.equal(result.failedCommand?.operationId, 'missing')
+})
+
+test('sequential edits resolve targets after a paragraph split and retain paragraph identities', () => {
+  const text = 'First sentence. Second sentence.'
+  const result = executeSequentialEditPlan(text, [{ id: 'original', ordinal: 1, lineIndex: 0, text }], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'Split and edit the new paragraph.',
+    operations: [
+      { id: 'split', type: 'split', target: { paragraphOrdinal: 1, exactText: 'First sentence.' } },
+      { id: 'replace', type: 'replace', target: { paragraphOrdinal: 2, exactText: 'Second' }, text: 'Next' },
+    ],
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.afterText, 'First sentence.\n\nNext sentence.')
+  assert.equal(result.failedCommand, undefined)
+  assert.equal(result.resultingParagraphIds?.length, 2)
+  assert.equal(result.resultingParagraphIds?.[0], 'original')
+})
+
+test('prepend and insert-before adjust displaced ordinary sentence openings only for continuations', () => {
+  for (const [original, insertion, expected, protectedTerms] of [
+    ['Kiss for a long time.', 'We', 'We kiss for a long time.', []],
+    ['Kiss for a long time.', 'Hello.', 'Hello. Kiss for a long time.', []],
+    ['Erbold waits.', 'Then', 'Then Erbold waits.', ['Erbold']],
+    ['I wait.', 'Then', 'Then I wait.', []],
+  ] as const) {
+    const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: original }]
+    for (const operation of [
+      { id: 'prepend', type: 'prepend' as const, target: { paragraphOrdinal: 1 }, text: insertion },
+      { id: 'insert', type: 'insert_before' as const, target: { exactText: original }, text: insertion },
+    ]) {
+      const result = executeEditPlan(original, paragraphs, 1, {
+        schemaVersion: 2, draftVersion: 1, explanation: 'Insert before.', operations: [operation],
+      }, protectedTerms)
+      assert.equal(result.ok && result.afterText, expected)
+    }
+  }
+})
+
 test('supports insert, append, prepend, delete, and casing through the same pipeline', () => {
   const session = fixture()
   const result = executeEditPlan(session.cleanText, session.paragraphs, 1, {
@@ -305,6 +417,23 @@ test('supports insert, append, prepend, delete, and casing through the same pipe
   )
 })
 
+test('capitalizes every word in a targeted phrase', () => {
+  const result = executeEditPlan('I watch the hawk-eyed scout.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'capitalize the phrase',
+    operations: [
+      {
+        id: 'capitalize-phrase',
+        type: 'case',
+        target: { exactText: 'the hawk-eyed scout' },
+        caseMode: 'capitalize',
+      },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'I watch The Hawk-Eyed Scout.')
+})
+
 test('adds missing word boundaries for prepend and append operations', () => {
   const text = 'Existing sentence.'
   const paragraphs = [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }]
@@ -318,7 +447,7 @@ test('adds missing word boundaries for prepend and append operations', () => {
     ],
   })
 
-  assert.equal(result.ok && result.afterText, 'Before Existing sentence. After')
+  assert.equal(result.ok && result.afterText, 'Before existing sentence. After')
 
   const continuation = executeEditPlan(
     'Existing fragment',
@@ -407,6 +536,81 @@ test('adds deterministic paragraph boundaries for paragraph-targeted insertions'
     afterFragment.ok && afterFragment.afterText,
     'unfinished fragment\n\ninserted paragraph.\n\nSecond paragraph.',
   )
+})
+
+test('keeps insertion after the last sentence inside its paragraph', () => {
+  const text = 'First sentence. You know?'
+  const result = executeEditPlan(
+    text,
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'Insert a sentence after the last sentence.',
+      operations: [
+        {
+          id: 'after-last-sentence',
+          type: 'insert_after',
+          target: { paragraphOrdinal: 1, sentenceFromEnd: 1 },
+          text: 'All right, I am going now.',
+        },
+      ],
+    },
+  )
+
+  assert.equal(
+    result.ok && result.afterText,
+    'First sentence. You know? All right, I am going now.',
+  )
+})
+
+test('keeps prepend and append inline and rejects inline selectors on them', () => {
+  const text = 'First paragraph.\n\nSecond paragraph.'
+  const paragraphs = [
+    { id: 'first', ordinal: 1, lineIndex: 0, text: 'First paragraph.' },
+    { id: 'second', ordinal: 2, lineIndex: 2, text: 'Second paragraph.' },
+  ]
+  const boundaryPlan: EditPlan = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Keep both additions in their paragraphs.',
+    operations: [
+      {
+        id: 'append-first',
+        type: 'append',
+        target: { paragraphOrdinal: 1 },
+        text: 'Appended sentence.',
+      },
+      {
+        id: 'prepend-second',
+        type: 'prepend',
+        target: { paragraphOrdinal: 2 },
+        text: 'Prepended sentence.',
+      },
+    ],
+  }
+  const boundaryResult = executeEditPlan(text, paragraphs, 1, boundaryPlan)
+  assert.equal(
+    boundaryResult.ok && boundaryResult.afterText,
+    'First paragraph. Appended sentence.\n\nPrepended sentence. Second paragraph.',
+  )
+
+  const invalid = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Do not silently ignore a sentence selector.',
+    operations: [
+      {
+        id: 'invalid-append',
+        type: 'append',
+        target: { paragraphOrdinal: 1, sentenceFromEnd: 1 },
+        text: 'Unsafe.',
+      },
+    ],
+  })
+  assert.equal(invalid.ok, false)
+  if (!invalid.ok) assert.equal(invalid.reason, 'append does not accept an inline target')
 })
 
 test('keeps exact-text insertions inline and adds only missing boundary spacing', () => {
@@ -792,6 +996,151 @@ test('deletion consumes one adjacent horizontal separator without touching other
   )
   assert.equal(openingPhrase.ok && openingPhrase.afterText, 'it can disrupt the bugs living there.')
 
+  const introductoryPhrase = executeEditPlan(
+    'Most of the time, I feel quite happy.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete an introductory phrase and its attached separator',
+      operations: [
+        {
+          id: 'delete-introductory-phrase',
+          type: 'delete',
+          target: { exactText: 'Most of the time' },
+        },
+      ],
+    },
+  )
+  assert.equal(introductoryPhrase.ok && introductoryPhrase.afterText, 'I feel quite happy.')
+
+  for (const [punctuation, expected] of [
+    ['.', 'I feel quite happy.'],
+    ['?', 'I feel quite happy.'],
+    ['!', 'I feel quite happy.'],
+    ['…', 'I feel quite happy.'],
+    ['—', 'I feel quite happy.'],
+  ] as const) {
+    const punctuatedPart = executeEditPlan(
+      `Most of the time${punctuation} I feel quite happy.`,
+      [],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'delete a complete sentence part with attached punctuation',
+        operations: [
+          {
+            id: `delete-punctuated-part-${punctuation}`,
+            type: 'delete',
+            target: { exactText: 'Most of the time' },
+          },
+        ],
+      },
+    )
+    assert.equal(punctuatedPart.ok && punctuatedPart.afterText, expected)
+  }
+
+  for (const [opening, closing] of [
+    ['"', '"'],
+    ['‘', '’'],
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+    ['`', '`'],
+    ['*', '*'],
+    ['**', '**'],
+  ] as const) {
+    const wrappedPhrase = executeEditPlan(
+      `This is the ${opening}who's who${closing} of staff.`,
+      [],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'delete a phrase occupying an entire paired wrapper',
+        operations: [
+          {
+            id: `delete-wrapped-phrase-${opening}`,
+            type: 'delete',
+            target: { exactText: "who's who" },
+          },
+        ],
+      },
+    )
+    assert.equal(wrappedPhrase.ok && wrappedPhrase.afterText, 'This is the of staff.')
+  }
+
+  const partiallyWrappedPhrase = executeEditPlan(
+    "This is the [who's who of staff] roster.",
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete only part of wrapped content',
+      operations: [
+        {
+          id: 'delete-partially-wrapped-phrase',
+          type: 'delete',
+          target: { exactText: "who's who" },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    partiallyWrappedPhrase.ok && partiallyWrappedPhrase.afterText,
+    'This is the [of staff] roster.',
+  )
+
+  const finalQuotedSentence = executeEditPlan(
+    '“I swear if I have to deal with these smug bastards again. Commonwealth.”',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'delete the final sentence inside a surrounding quotation',
+      operations: [
+        {
+          id: 'delete-final-quoted-sentence',
+          type: 'delete',
+          target: { exactText: 'Commonwealth' },
+        },
+      ],
+    },
+  )
+  assert.equal(
+    finalQuotedSentence.ok && finalQuotedSentence.afterText,
+    '“I swear if I have to deal with these smug bastards again.”',
+  )
+
+  for (const separator of [':', ';'] as const) {
+    const quotedSentencePart = executeEditPlan(
+      `"I swear if I have to deal with these smug bastards again. Commonwealth${separator}” I shake my head as I let out my snort.`,
+      [],
+      1,
+      {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'delete an entire quoted sentence part and its attached separator',
+        operations: [
+          {
+            id: `delete-quoted-part-${separator}`,
+            type: 'delete',
+            target: { exactText: 'Commonwealth' },
+          },
+        ],
+      },
+    )
+    assert.equal(
+      quotedSentencePart.ok && quotedSentencePart.afterText,
+      '"I swear if I have to deal with these smug bastards again.” I shake my head as I let out my snort.',
+    )
+  }
+
   const middlePhraseBeforeComma = executeEditPlan(
     'Everyday they are digging a hole, despite the rain.',
     [],
@@ -837,7 +1186,7 @@ test('deletion consumes one adjacent horizontal separator without touching other
   )
 })
 
-test('sentence deletion consumes adjacent terminal punctuation for short targets only when requested', () => {
+test('sentence-part deletion consumes adjacent terminal punctuation', () => {
   for (const [text, target, expected] of [
     ['Enough! Continue.', 'Enough', 'Continue.'],
     ['Not today? Continue.', 'Not today', 'Continue.'],
@@ -877,7 +1226,7 @@ test('sentence deletion consumes adjacent terminal punctuation for short targets
       ],
     },
   )
-  assert.equal(wordOnly.ok && wordOnly.afterText, '! Continue.')
+  assert.equal(wordOnly.ok && wordOnly.afterText, 'Continue.')
 })
 
 test('deleting a whole sentence without a flag removes its period, but not a word inside a sentence', () => {
@@ -1068,6 +1417,29 @@ test('moves paragraphs by captured identity and supports full-draft casing', () 
     ],
   })
   assert.equal(cased.ok && cased.afterText, 'ONE.\n\nTWO.\n\nTHREE.')
+})
+
+test('adjusts moved sentence casing after non-terminal punctuation but protects names and quoted speech', () => {
+  for (const [moved, expected, protectedTerms] of [
+    ['She looks back', 'she looks back', []],
+    ['I look back', 'I look back', []],
+    ['Erbold looks back', 'Erbold looks back', ['Erbold']],
+    ['“She looks back”', '“She looks back”', []],
+  ] as const) {
+    for (const mark of [',', '—', ';', ':']) {
+      const text = `${moved}. We wait${mark} today.`
+      const result = executeEditPlan(text, [], 1, {
+        schemaVersion: 2,
+        draftVersion: 1,
+        explanation: 'Move text after punctuation.',
+        operations: [{
+          id: 'move', type: 'move_after', target: { exactText: moved },
+          destination: { exactText: `wait${mark}` },
+        }],
+      }, protectedTerms)
+      assert.equal(result.ok && result.afterText.includes(`wait${mark} ${expected}`), true)
+    }
+  }
 })
 
 test('moves an exact word or phrase before or after another text target', () => {
@@ -1641,7 +2013,10 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
       },
     ],
   })
-  assert.equal(prefixOfLongerWord.ok && prefixOfLongerWord.afterText, 'A precious jewels rests nearby.')
+  assert.equal(
+    prefixOfLongerWord.ok && prefixOfLongerWord.afterText,
+    'A precious jewels rests nearby.',
+  )
 
   const deletedPrefixOfLongerWord = executeEditPlan('A precious sack rests nearby.', [], 1, {
     schemaVersion: 2,
@@ -1673,6 +2048,46 @@ test('falls back from a missing exact target to one unique fuzzy phrase', () => 
     ],
   })
   assert.deepEqual(ambiguous, { ok: false, reason: 'fuzzy text target is ambiguous' })
+})
+
+test('fuzzy target matching tolerates similar-sounding consonants', () => {
+  const result = executeEditPlan(
+    'Erbold checks the road.',
+    [],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'replace a provider-misheard name',
+      operations: [
+        {
+          id: 'phonetic-consonants',
+          type: 'replace',
+          target: { exactText: 'Ervode' },
+          text: 'the captain',
+        },
+      ],
+    },
+  )
+  assert.equal(result.ok, true)
+  if (result.ok) assert.equal(result.afterText, 'The captain checks the road.')
+})
+
+test('fuzzy target matching rejects short words with different consonant structures', () => {
+  const result = executeEditPlan('Watt checks the road.', [], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'do not conflate distinct short names',
+    operations: [
+      {
+        id: 'distinct-short-name',
+        type: 'replace',
+        target: { exactText: 'Walt' },
+        text: 'the scout',
+      },
+    ],
+  })
+  assert.deepEqual(result, { ok: false, reason: 'fuzzy text target was not found' })
 })
 
 test('ignores punctuation for unique text targets and uses it only to resolve lexical ties', () => {

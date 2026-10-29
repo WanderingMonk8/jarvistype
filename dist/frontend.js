@@ -47,7 +47,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.7";
+var APP_VERSION = "1.6.15";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var SEND_TIMEOUT_MS = 12e4;
@@ -294,7 +294,7 @@ function isBackendResponse(value) {
     return value.ok === true && value.outcome === "selection-required" && isEditCandidateSet(value.candidateSet);
   }
   if (value.type === "phase4.state.response") {
-    return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.connections) && value.connections.every(isNormalizationConnectionOption) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
+    return value.ok === true && isPhaseFourSettings(value.settings) && Array.isArray(value.connections) && value.connections.every(isNormalizationConnectionOption) && Array.isArray(value.decisionConnections) && value.decisionConnections.every(isNormalizationConnectionOption) && Array.isArray(value.glossary) && value.glossary.every(isGlossaryEntry) && typeof value.canUndoGlossary === "boolean" && typeof value.decisionModelAvailable === "boolean" && (value.notice === void 0 || isBoundedString(value.notice, 1, 1e3));
   }
   if (value.type === "debug.log.response") {
     return value.ok === true && Array.isArray(value.entries) && value.entries.length <= 2100 && value.entries.every((entry) => typeof entry === "string" && entry.length <= 2e3);
@@ -335,7 +335,7 @@ function isPermissionSnapshot(value) {
   return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function isPhaseFourSettings(value) {
-  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
+  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger2(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger2(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.glossaryDefaultScope === void 0 || value.glossaryDefaultScope === "local" || value.glossaryDefaultScope === "global") && (value.decisionConnectionId === void 0 || value.decisionConnectionId === null || isIdentifier2(value.decisionConnectionId)) && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function isNormalizationConnectionOption(value) {
   return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
@@ -346,7 +346,7 @@ function isNormalizationProposal(value) {
   ) && isNonNegativeInteger2(value.contextMessageCount) && isNonNegativeInteger2(value.contextCharacterCount) && typeof value.contextTruncated === "boolean" && typeof value.contextualModelUsed === "boolean";
 }
 function isEditProposal(value) {
-  return isRecord2(value) && isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger2(value.expectedVersion) && (value.grammarRepairChanges === void 0 || Array.isArray(value.grammarRepairChanges) && value.grammarRepairChanges.every((change) => isBoundedString(change, 1, 500))) && isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) && parseEditPlan(value.plan) !== null && Array.isArray(value.operations) && value.operations.length > 0 && value.operations.every(
+  return isRecord2(value) && (value.failedCommand === void 0 || isRecord2(value.failedCommand) && isPositiveInteger2(value.failedCommand.index) && isIdentifier2(value.failedCommand.operationId) && isBoundedString(value.failedCommand.reason, 1, 1e3)) && isIdentifier2(value.operationId) && isIdentifier2(value.chatId) && isNonNegativeInteger2(value.expectedVersion) && (value.grammarRepairChanges === void 0 || Array.isArray(value.grammarRepairChanges) && value.grammarRepairChanges.every((change) => isBoundedString(change, 1, 500))) && isBoundedString(value.instructionTranscript, 1, MAX_DRAFT_CHARACTERS) && parseEditPlan(value.plan) !== null && Array.isArray(value.operations) && value.operations.length > 0 && value.operations.every(
     (operation) => isRecord2(operation) && isIdentifier2(operation.id) && typeof operation.type === "string" && isNonNegativeInteger2(operation.startOffset) && isNonNegativeInteger2(operation.endOffset) && typeof operation.beforeText === "string" && typeof operation.afterText === "string" && isPositiveInteger2(operation.paragraphOrdinal)
   ) && typeof value.beforeText === "string" && value.beforeText.length <= MAX_DRAFT_CHARACTERS && typeof value.afterText === "string" && value.afterText.length <= MAX_DRAFT_CHARACTERS && Array.isArray(value.affectedParagraphOrdinals) && value.affectedParagraphOrdinals.every(isPositiveInteger2) && typeof value.explanation === "string" && value.explanation.length <= 1e3 && Array.isArray(value.learningCandidates) && value.learningCandidates.every(
     (candidate) => isRecord2(candidate) && isBoundedString(candidate.canonical, 1, 200) && typeof candidate.spokenVariant === "string" && candidate.spokenVariant.length <= 500
@@ -419,11 +419,11 @@ var COMMAND_GROUPS = [
     examples: [
       [
         "Spoken punctuation",
-        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen parenthesis\u201D or \u201Copen paren,\u201D \u201Cclose parenthesis\u201D or \u201Cclose paren,\u201D \u201Copen bracket,\u201D \u201Cclose bracket,\u201D \u201Cbegin bracket\u201D and \u201Cend bracket\u201D for angle brackets, \u201Cnew line,\u201D or \u201Cnew paragraph.\u201D"
+        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Casterisk,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen parenthesis\u201D or \u201Copen paren,\u201D \u201Cclose parenthesis\u201D or \u201Cclose paren,\u201D \u201Copen bracket,\u201D \u201Cclose bracket,\u201D \u201Cbegin bracket\u201D and \u201Cend bracket\u201D for angle brackets, \u201Cnew line,\u201D or \u201Cnew paragraph.\u201D"
       ],
       [
         "Quotations",
-        "Say \u201Cquote\u201D or \u201Cquotation\u201D at both ends of a quotation; use \u201Cbegin speech\u201D and \u201Cend speech,\u201D or \u201Cbeginning speech\u201D and \u201Cending speech.\u201D For single quotations, say \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D"
+        "Say \u201Cquote\u201D or \u201Cquotation\u201D at both ends of a quotation; use \u201Cbegin speech\u201D and \u201Cend speech,\u201D \u201Cbeginning speech\u201D and \u201Cending speech,\u201D or \u201Cbegins speech\u201D and \u201Cends speech.\u201D For single quotations, say \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D"
       ],
       ["Explicit punctuation", "Say \u201Cinsert period,\u201D \u201Cpunctuation colon,\u201D or \u201Ccommand new line.\u201D"],
       [
@@ -478,7 +478,7 @@ var COMMAND_GROUPS = [
     examples: [
       ["Uppercase", "Uppercase the draft, or make the entire draft all caps."],
       ["Lowercase", "Lowercase paragraph 2, or make paragraph 2 lowercase."],
-      ["Capitalize", "Capitalize \u201CProject Atlas,\u201D or capitalize its first letter."],
+      ["Capitalize", "Capitalize \u201Cthe hawk\u201D to make every word title-cased: \u201CThe Hawk.\u201D"],
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
       [
         "As in reference",
@@ -519,6 +519,38 @@ function describeEditDestination(destination) {
   }
   return destination.paragraphOrdinal ? ` \u2192 paragraph ${destination.paragraphOrdinal}` : "";
 }
+function sharesNearbyComposerAncestor(left, right) {
+  const leftAncestors = /* @__PURE__ */ new Set();
+  let current = left;
+  for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement)
+    leftAncestors.add(current);
+  current = right;
+  for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement) {
+    if (leftAncestors.has(current) && current !== document.body && current !== document.documentElement)
+      return true;
+  }
+  return false;
+}
+function isNativeSttComposerButton(button, composerLauncher) {
+  if (button.closest(".jt-shell, .jt-floating") || button.classList.contains("jt-composer-launcher"))
+    return false;
+  if (!sharesNearbyComposerAncestor(button, composerLauncher)) return false;
+  const accessibleText = [
+    button.getAttribute("aria-label"),
+    button.getAttribute("title"),
+    button.getAttribute("data-tooltip"),
+    button.getAttribute("data-tooltip-content")
+  ].filter((value) => Boolean(value)).join(" ");
+  if (/\b(?:speech[ -]?to[ -]?text|voice input|voice dictation|microphone|start (?:voice|dictation|recording)|record voice)\b/iu.test(
+    accessibleText
+  ))
+    return true;
+  return Boolean(
+    button.querySelector(
+      'svg[data-lucide="mic"], svg.lucide-mic, svg[class*="microphone" i], [data-icon="microphone" i], [data-icon="mic" i]'
+    )
+  );
+}
 function setup(ctx) {
   ctx.deferReady();
   const tab = ctx.ui.registerDrawerTab({
@@ -541,7 +573,8 @@ function setup(ctx) {
     .jt-composer-launcher { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; padding: .45rem; border: 0; border-radius: .5rem; background: transparent; color: inherit; line-height: 1; cursor: pointer; opacity: .78; }
     .jt-composer-launcher .jt-brand-icon { width: 1.35rem; height: 1.35rem; flex: 0 0 auto; }
     .jt-composer-launcher:hover { background: color-mix(in srgb, currentColor 9%, transparent); opacity: 1; }
-    .jt-composer-launcher:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; opacity: 1; }`;
+    .jt-composer-launcher:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; opacity: 1; }
+    .jt-native-stt-hidden { display: none !important; }`;
   const composerLauncher = document.createElement("button");
   composerLauncher.type = "button";
   composerLauncher.className = "jt-composer-launcher";
@@ -549,6 +582,23 @@ function setup(ctx) {
   composerLauncher.title = "Open JarvisType voice composer";
   composerLauncher.innerHTML = JARVISTYPE_ICON_SVG;
   composerToolsMount.append(composerLauncherStyle, composerLauncher);
+  const hideNativeSttButton = () => {
+    for (const button of document.querySelectorAll("button")) {
+      if (button === composerLauncher || button.contains(composerLauncher)) continue;
+      if (isNativeSttComposerButton(button, composerLauncher))
+        button.classList.add("jt-native-stt-hidden");
+    }
+  };
+  hideNativeSttButton();
+  let nativeSttScanFrame = null;
+  const nativeSttObserver = new MutationObserver(() => {
+    if (nativeSttScanFrame !== null) return;
+    nativeSttScanFrame = requestAnimationFrame(() => {
+      nativeSttScanFrame = null;
+      hideNativeSttButton();
+    });
+  });
+  nativeSttObserver.observe(document.documentElement, { childList: true, subtree: true });
   const initialFloatingSize = getFloatingWidgetSize();
   const initialViewport = getViewportSize();
   const floatingWidget = ctx.ui.createFloatWidget({
@@ -668,7 +718,19 @@ function setup(ctx) {
   const decisionBar = requireElement(tab.root, "[data-decision-bar]");
   const decisionSummary = requireElement(tab.root, "[data-decision-summary]");
   const contextCountInput = requireElement(tab.root, "[data-context-count]");
+  const referenceCacheLimitInput = requireElement(
+    tab.root,
+    "[data-reference-cache-limit]"
+  );
+  const referenceAdmissionOccurrencesInput = requireElement(
+    tab.root,
+    "[data-reference-admission-occurrences]"
+  );
   const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
+  const grammarRepairWarning = requireElement(
+    tab.root,
+    "[data-grammar-repair-warning]"
+  );
   const grammarRepairSelect = requireElement(
     tab.root,
     "[data-grammar-repair-mode]"
@@ -683,6 +745,10 @@ function setup(ctx) {
     tab.root,
     "[data-normalization-connection]"
   );
+  const decisionConnectionSelect = requireElement(
+    tab.root,
+    "[data-decision-connection]"
+  );
   const normalizationModelSlot = requireElement(tab.root, "[data-normalization-model]");
   const glossaryCanonicalInput = requireElement(
     tab.root,
@@ -693,6 +759,12 @@ function setup(ctx) {
     "[data-glossary-variants]"
   );
   const glossaryHintInput = requireElement(tab.root, "[data-glossary-hint]");
+  const glossaryGlobalInput = requireElement(tab.root, "[data-glossary-global]");
+  const glossaryDefaultScopeSelect = requireElement(
+    tab.root,
+    "[data-glossary-default-scope]"
+  );
+  const glossaryScopeNotice = requireElement(tab.root, "[data-glossary-scope-notice]");
   const glossarySaveButton = requireElement(tab.root, "[data-glossary-save]");
   const glossaryCancelButton = requireElement(tab.root, "[data-glossary-cancel]");
   const glossaryUndoButton = requireElement(tab.root, "[data-glossary-undo]");
@@ -717,6 +789,18 @@ function setup(ctx) {
   const floatingGlossaryHintInput = requireElement(
     floatingWidget.root,
     "[data-floating-glossary-hint]"
+  );
+  const floatingGlossaryGlobalInput = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-global]"
+  );
+  const floatingGlossaryDefaultScopeSelect = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-default-scope]"
+  );
+  const floatingGlossaryScopeNotice = requireElement(
+    floatingWidget.root,
+    "[data-floating-glossary-scope-notice]"
   );
   const floatingGlossarySaveButton = requireElement(
     floatingWidget.root,
@@ -762,15 +846,21 @@ function setup(ctx) {
     pendingEditCandidates: null,
     settings: {
       contextMessageCount: 5,
+      referenceCacheLimit: 30,
+      referenceAdmissionOccurrences: 1,
       contextualNormalizationEnabled: true,
       grammarRepairMode: "off",
+      glossaryDefaultScope: "local",
+      decisionConnectionId: null,
       normalizationConnectionId: null,
       normalizationModelOverride: "",
       debugLoggingEnabled: false
     },
     normalizationConnections: [],
+    decisionConnections: [],
     glossary: [],
     canUndoGlossary: false,
+    decisionModelAvailable: null,
     phaseFourMessage: "Loading context and glossary settings\u2026"
   };
   const normalizationModelPicker = ctx.components.mountModelCombobox(normalizationModelSlot, {
@@ -928,7 +1018,7 @@ function setup(ctx) {
     decisionBar.hidden = !activeReview;
     if (activeReview && decisionBar.previousElementSibling !== activeReview)
       activeReview.after(decisionBar);
-    decisionSummary.textContent = editProposal ? `Review the edit: ${editProposal.explanation}` : proposal ? "Review the normalized transcript before it is appended." : "";
+    decisionSummary.textContent = editProposal ? editProposal.failedCommand ? `Review the partial edit. Command ${editProposal.failedCommand.index} (${editProposal.plan.operations[editProposal.failedCommand.index - 1]?.type ?? "edit"}) failed: ${editProposal.failedCommand.reason}. Later commands were not run.` : `Review the edit: ${editProposal.explanation}` : proposal ? "Review the normalized transcript before it is appended." : "";
     const editCandidates = state.pendingEditCandidates;
     editCandidatesPanel.hidden = !editCandidates;
     editCandidatesInstruction.textContent = editCandidates?.instructionTranscript ?? "";
@@ -943,8 +1033,28 @@ function setup(ctx) {
     }
     cancelEditCandidatesButton.disabled = !editCandidates || state.automatedBusy;
     contextCountInput.value = String(state.settings.contextMessageCount);
+    referenceCacheLimitInput.value = String(state.settings.referenceCacheLimit ?? 30);
+    referenceAdmissionOccurrencesInput.value = String(
+      state.settings.referenceAdmissionOccurrences ?? 1
+    );
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
     grammarRepairSelect.value = state.settings.grammarRepairMode;
+    const hasActiveChat = Boolean(state.activeChatId);
+    const displayedGlossaryScope = hasActiveChat ? state.settings.glossaryDefaultScope ?? "local" : "global";
+    glossaryDefaultScopeSelect.value = displayedGlossaryScope;
+    floatingGlossaryDefaultScopeSelect.value = displayedGlossaryScope;
+    glossaryDefaultScopeSelect.disabled = !hasActiveChat;
+    floatingGlossaryDefaultScopeSelect.disabled = !hasActiveChat;
+    glossaryScopeNotice.hidden = hasActiveChat;
+    floatingGlossaryScopeNotice.hidden = hasActiveChat;
+    glossaryGlobalInput.disabled = !hasActiveChat;
+    floatingGlossaryGlobalInput.disabled = !hasActiveChat;
+    if (!editingGlossaryEntryId && !glossaryCanonicalInput.value && !floatingGlossaryCanonicalInput.value) {
+      const useGlobal = !hasActiveChat || displayedGlossaryScope === "global";
+      glossaryGlobalInput.checked = useGlobal;
+      floatingGlossaryGlobalInput.checked = useGlobal;
+    }
+    grammarRepairWarning.hidden = state.settings.grammarRepairMode !== "when_needed" || state.decisionModelAvailable !== false;
     debugEnabledToggle.checked = state.settings.debugLoggingEnabled === true;
     debugRefreshButton.disabled = state.settings.debugLoggingEnabled !== true;
     debugCopyButton.disabled = false;
@@ -953,6 +1063,12 @@ function setup(ctx) {
       normalizationConnectionSelect,
       state.normalizationConnections,
       state.settings.normalizationConnectionId
+    );
+    renderConnectionOptions(
+      decisionConnectionSelect,
+      state.decisionConnections,
+      state.settings.decisionConnectionId ?? null,
+      "Default decision connection"
     );
     if (modelPickerConnectionId !== state.settings.normalizationConnectionId) {
       modelPickerConnectionId = state.settings.normalizationConnectionId;
@@ -970,8 +1086,8 @@ function setup(ctx) {
     floatingGlossarySaveButton.textContent = editingGlossaryEntryId ? "Update entry" : "Add entry";
     glossaryCancelButton.hidden = !editingGlossaryEntryId;
     floatingGlossaryCancelButton.hidden = !editingGlossaryEntryId;
-    renderGlossary(glossaryList, state.glossary, drawerGlossaryQuery);
-    renderGlossary(floatingGlossaryList, state.glossary, floatingGlossaryQuery);
+    renderGlossary(glossaryList, state.glossary, drawerGlossaryQuery, hasActiveChat);
+    renderGlossary(floatingGlossaryList, state.glossary, floatingGlossaryQuery, hasActiveChat);
     sendButton.disabled = !editorEnabled || state.saving || mismatch || desiredText.trim().length === 0 || desiredText !== state.snapshot?.cleanText || state.sendOutcomeUnknown || sendFlowActive || voiceBusy();
     scheduleFloatingContentFit();
   };
@@ -1058,12 +1174,14 @@ function setup(ctx) {
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: "phase4.load.request",
-      requestId: createRequestId("phase4-load")
+      requestId: createRequestId("phase4-load"),
+      chatId: state.activeChatId ?? void 0
     });
     if (!alive) return;
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
       state.settings = outcome.value.settings;
       state.normalizationConnections = outcome.value.connections;
+      state.decisionConnections = outcome.value.decisionConnections;
       state.glossary = outcome.value.glossary;
       state.canUndoGlossary = outcome.value.canUndoGlossary;
       state.phaseFourMessage = outcome.value.notice ?? "Context and glossary settings ready.";
@@ -1088,6 +1206,10 @@ function setup(ctx) {
     const transitionId = changed ? ++chatTransitionId : chatTransitionId;
     await refreshPermissions();
     if (!alive) return;
+    if (changed) {
+      await loadPhaseFourState();
+      if (!alive || transitionId !== chatTransitionId) return;
+    }
     if (!changed) {
       if (!nextChatId || state.automatedBusy || state.sending || voiceBusy() || state.pendingProposal || state.pendingEditProposal || state.pendingEditCandidates)
         return;
@@ -1569,8 +1691,10 @@ function setup(ctx) {
   const applyPhaseFourResponse = (response) => {
     state.settings = response.settings;
     state.normalizationConnections = response.connections;
+    state.decisionConnections = response.decisionConnections;
     state.glossary = response.glossary;
     state.canUndoGlossary = response.canUndoGlossary;
+    state.decisionModelAvailable = response.decisionModelAvailable;
     state.phaseFourMessage = response.notice ?? "Context and glossary settings ready.";
   };
   const saveSettings = async () => {
@@ -1578,8 +1702,18 @@ function setup(ctx) {
       20,
       Math.max(0, Number.parseInt(contextCountInput.value, 10) || 0)
     );
+    const referenceCacheLimit = Math.min(
+      200,
+      Math.max(0, Number.parseInt(referenceCacheLimitInput.value, 10) || 0)
+    );
+    const referenceAdmissionOccurrences = Math.min(
+      5,
+      Math.max(1, Number.parseInt(referenceAdmissionOccurrencesInput.value, 10) || 1)
+    );
     const grammarRepairMode = grammarRepairSelect.value === "always" ? "always" : grammarRepairSelect.value === "when_needed" ? "when_needed" : "off";
     state.settings.contextMessageCount = contextMessageCount;
+    state.settings.referenceCacheLimit = referenceCacheLimit;
+    state.settings.referenceAdmissionOccurrences = referenceAdmissionOccurrences;
     state.settings.contextualNormalizationEnabled = contextualToggle.checked;
     state.settings.grammarRepairMode = grammarRepairMode;
     state.settings.debugLoggingEnabled = debugEnabledToggle.checked;
@@ -1590,12 +1724,17 @@ function setup(ctx) {
       requestId: createRequestId("settings-update"),
       settings: {
         contextMessageCount,
+        referenceCacheLimit,
+        referenceAdmissionOccurrences,
         contextualNormalizationEnabled: contextualToggle.checked,
         grammarRepairMode,
+        glossaryDefaultScope: state.settings.glossaryDefaultScope ?? "local",
+        decisionConnectionId: state.settings.decisionConnectionId ?? null,
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: state.settings.normalizationModelOverride,
         debugLoggingEnabled: debugEnabledToggle.checked
-      }
+      },
+      chatId: state.activeChatId ?? void 0
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
       applyPhaseFourResponse(outcome.value);
@@ -1612,6 +1751,8 @@ function setup(ctx) {
     }, delay);
   };
   const handleContextCountInput = () => scheduleSettingsSave(600);
+  const handleReferenceCacheLimitInput = () => scheduleSettingsSave(600);
+  const handleReferenceAdmissionOccurrencesInput = () => scheduleSettingsSave(600);
   const handleSettingToggleChange = () => scheduleSettingsSave(0);
   const refreshDebugLog = async (clear = false) => {
     if (state.settings.debugLoggingEnabled !== true) {
@@ -1652,6 +1793,7 @@ function setup(ctx) {
     const canonicalInput = surface === "floating" ? floatingGlossaryCanonicalInput : glossaryCanonicalInput;
     const variantsInput = surface === "floating" ? floatingGlossaryVariantsInput : glossaryVariantsInput;
     const hintInput = surface === "floating" ? floatingGlossaryHintInput : glossaryHintInput;
+    const editingEntry = editingGlossaryEntryId ? state.glossary.find((entry) => entry.id === editingGlossaryEntryId) : void 0;
     const canonical = canonicalInput.value.trim();
     if (!canonical) {
       state.phaseFourMessage = "Enter a canonical spelling before saving.";
@@ -1666,7 +1808,9 @@ function setup(ctx) {
       ...editingGlossaryEntryId ? { entryId: editingGlossaryEntryId } : {},
       canonical,
       variants,
-      hint: hintInput.value.trim()
+      hint: hintInput.value.trim(),
+      scope: !state.activeChatId || (surface === "floating" ? floatingGlossaryGlobalInput : glossaryGlobalInput).checked ? editingEntry && !state.activeChatId ? editingEntry.scope ?? "global" : "global" : "local",
+      chatId: state.activeChatId ?? editingEntry?.chatId
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response") {
       applyPhaseFourResponse(outcome.value);
@@ -1684,14 +1828,36 @@ function setup(ctx) {
     floatingGlossaryCanonicalInput.value = "";
     floatingGlossaryVariantsInput.value = "";
     floatingGlossaryHintInput.value = "";
+    const useGlobal = !state.activeChatId || (state.settings.glossaryDefaultScope ?? "local") === "global";
+    glossaryGlobalInput.checked = useGlobal;
+    floatingGlossaryGlobalInput.checked = useGlobal;
   };
   const handleGlossaryListClick = async (event) => {
     const button = event.target?.closest(
-      "button[data-glossary-action]"
+      "[data-glossary-action]"
     );
     if (!button) return;
     const entry = state.glossary.find((item) => item.id === button.dataset.entryId);
     if (!entry) return;
+    if (button.dataset.glossaryAction === "toggle-global") {
+      const global = button.checked;
+      const outcome2 = await performRequest({
+        protocolVersion: PROTOCOL_VERSION,
+        type: "glossary.upsert.request",
+        requestId: createRequestId("glossary-scope"),
+        entryId: entry.id,
+        canonical: entry.canonical,
+        variants: entry.variants,
+        hint: entry.hint,
+        scope: global ? "global" : "local",
+        chatId: state.activeChatId ?? void 0
+      });
+      if (outcome2.status === "resolved" && outcome2.value.type === "phase4.state.response")
+        applyPhaseFourResponse(outcome2.value);
+      else state.phaseFourMessage = "Glossary scope was not changed. Try again.";
+      render();
+      return;
+    }
     if (button.dataset.glossaryAction === "edit") {
       editingGlossaryEntryId = entry.id;
       glossaryCanonicalInput.value = entry.canonical;
@@ -1700,6 +1866,9 @@ function setup(ctx) {
       floatingGlossaryCanonicalInput.value = entry.canonical;
       floatingGlossaryVariantsInput.value = entry.variants.join(", ");
       floatingGlossaryHintInput.value = entry.hint;
+      const isGlobal = (entry.scope ?? "global") === "global";
+      glossaryGlobalInput.checked = isGlobal;
+      floatingGlossaryGlobalInput.checked = isGlobal;
       render();
       return;
     }
@@ -1707,7 +1876,8 @@ function setup(ctx) {
       protocolVersion: PROTOCOL_VERSION,
       type: "glossary.delete.request",
       requestId: createRequestId("glossary-delete"),
-      entryId: entry.id
+      entryId: entry.id,
+      chatId: state.activeChatId ?? void 0
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
       applyPhaseFourResponse(outcome.value);
@@ -1717,7 +1887,8 @@ function setup(ctx) {
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: "glossary.undo.request",
-      requestId: createRequestId("glossary-undo")
+      requestId: createRequestId("glossary-undo"),
+      chatId: state.activeChatId ?? void 0
     });
     if (outcome.status === "resolved" && outcome.value.type === "phase4.state.response")
       applyPhaseFourResponse(outcome.value);
@@ -2095,6 +2266,7 @@ function setup(ctx) {
   const handleCancelEditCandidatesClick = () => cancelEditCandidateSelection();
   const handleGrammarRepairModeChange = () => {
     state.settings.grammarRepairMode = grammarRepairSelect.value === "always" ? "always" : grammarRepairSelect.value === "when_needed" ? "when_needed" : "off";
+    render();
     scheduleSettingsSave(0);
   };
   const handleDebugEnabledChange = () => {
@@ -2109,6 +2281,22 @@ function setup(ctx) {
     state.settings.normalizationModelOverride = "";
     render();
     normalizationModelPicker.refresh();
+    scheduleSettingsSave(0);
+  };
+  const handleDecisionConnectionChange = () => {
+    state.settings.decisionConnectionId = decisionConnectionSelect.value || null;
+    scheduleSettingsSave(0);
+  };
+  const handleGlossaryDefaultScopeChange = (event) => {
+    const select = event.currentTarget;
+    state.settings.glossaryDefaultScope = select.value === "global" ? "global" : "local";
+    glossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope;
+    floatingGlossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope;
+    if (!editingGlossaryEntryId) {
+      const global = state.settings.glossaryDefaultScope === "global";
+      glossaryGlobalInput.checked = global;
+      floatingGlossaryGlobalInput.checked = global;
+    }
     scheduleSettingsSave(0);
   };
   const handleSaveGlossaryClick = () => void saveGlossaryEntry("drawer");
@@ -2270,11 +2458,19 @@ function setup(ctx) {
   grammarRepairSelect.addEventListener("change", handleGrammarRepairModeChange);
   debugEnabledToggle.addEventListener("change", handleDebugEnabledChange);
   contextCountInput.addEventListener("input", handleContextCountInput);
+  referenceCacheLimitInput.addEventListener("input", handleReferenceCacheLimitInput);
+  referenceAdmissionOccurrencesInput.addEventListener(
+    "input",
+    handleReferenceAdmissionOccurrencesInput
+  );
   contextualToggle.addEventListener("change", handleSettingToggleChange);
   debugRefreshButton.addEventListener("click", handleDebugRefreshClick);
   debugCopyButton.addEventListener("click", handleDebugCopyClick);
   debugClearButton.addEventListener("click", handleDebugClearClick);
   normalizationConnectionSelect.addEventListener("change", handleNormalizationConnectionChange);
+  decisionConnectionSelect.addEventListener("change", handleDecisionConnectionChange);
+  glossaryDefaultScopeSelect.addEventListener("change", handleGlossaryDefaultScopeChange);
+  floatingGlossaryDefaultScopeSelect.addEventListener("change", handleGlossaryDefaultScopeChange);
   glossarySaveButton.addEventListener("click", handleSaveGlossaryClick);
   glossaryCancelButton.addEventListener("click", handleCancelGlossaryClick);
   glossaryUndoButton.addEventListener("click", handleUndoGlossaryClick);
@@ -2334,6 +2530,11 @@ function setup(ctx) {
     cancelEditCandidatesButton.removeEventListener("click", handleCancelEditCandidatesClick);
     if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
     contextCountInput.removeEventListener("input", handleContextCountInput);
+    referenceCacheLimitInput.removeEventListener("input", handleReferenceCacheLimitInput);
+    referenceAdmissionOccurrencesInput.removeEventListener(
+      "input",
+      handleReferenceAdmissionOccurrencesInput
+    );
     contextualToggle.removeEventListener("change", handleSettingToggleChange);
     grammarRepairSelect.removeEventListener("change", handleGrammarRepairModeChange);
     debugEnabledToggle.removeEventListener("change", handleDebugEnabledChange);
@@ -2341,6 +2542,12 @@ function setup(ctx) {
     debugCopyButton.removeEventListener("click", handleDebugCopyClick);
     debugClearButton.removeEventListener("click", handleDebugClearClick);
     normalizationConnectionSelect.removeEventListener("change", handleNormalizationConnectionChange);
+    decisionConnectionSelect.removeEventListener("change", handleDecisionConnectionChange);
+    glossaryDefaultScopeSelect.removeEventListener("change", handleGlossaryDefaultScopeChange);
+    floatingGlossaryDefaultScopeSelect.removeEventListener(
+      "change",
+      handleGlossaryDefaultScopeChange
+    );
     glossarySaveButton.removeEventListener("click", handleSaveGlossaryClick);
     glossaryCancelButton.removeEventListener("click", handleCancelGlossaryClick);
     glossaryUndoButton.removeEventListener("click", handleUndoGlossaryClick);
@@ -2359,6 +2566,10 @@ function setup(ctx) {
     floatingWidget.root.removeEventListener("keydown", handleFloatingScrollKey);
     document.removeEventListener("keydown", handleFloatingFocusTrap, true);
     normalizationModelPicker.destroy();
+    nativeSttObserver.disconnect();
+    if (nativeSttScanFrame !== null) cancelAnimationFrame(nativeSttScanFrame);
+    for (const button of document.querySelectorAll(".jt-native-stt-hidden"))
+      button.classList.remove("jt-native-stt-hidden");
     composerLauncher.remove();
     composerLauncherStyle.remove();
     floatingWidget.destroy();
@@ -2369,11 +2580,11 @@ function setup(ctx) {
   if (removeTeardownListener) disposers.push(removeTeardownListener);
   return cleanup;
 }
-function renderConnectionOptions(select, connections, selectedId) {
+function renderConnectionOptions(select, connections, selectedId, defaultLabel = "Main connection") {
   select.replaceChildren();
   const main = document.createElement("option");
   main.value = "";
-  main.textContent = "Main connection";
+  main.textContent = defaultLabel;
   select.append(main);
   for (const connection of connections) {
     const option = document.createElement("option");
@@ -2389,7 +2600,7 @@ function renderConnectionOptions(select, connections, selectedId) {
   }
   select.value = selectedId ?? "";
 }
-function renderGlossary(container, entries, query = "") {
+function renderGlossary(container, entries, query = "", hasActiveChat = true) {
   container.replaceChildren();
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleEntries = normalizedQuery ? entries.filter(
@@ -2412,6 +2623,16 @@ function renderGlossary(container, entries, query = "") {
     text.textContent = `${entry.canonical}${entry.variants.length ? ` \u2014 heard as: ${entry.variants.join(", ")}` : ""}${entry.hint ? ` \u2014 ${entry.hint}` : ""} \u2014 source: ${entry.source === "explicit-spelling" ? "explicit spelling" : "manual"} \u2014 used ${entry.useCount} ${entry.useCount === 1 ? "time" : "times"}`;
     const actions = document.createElement("div");
     actions.className = "jt-actions";
+    const globalLabel = document.createElement("label");
+    const globalToggle = document.createElement("input");
+    globalToggle.type = "checkbox";
+    globalToggle.checked = (entry.scope ?? "global") === "global";
+    globalToggle.disabled = !hasActiveChat;
+    if (!hasActiveChat) globalToggle.title = "Select a chat before changing entry scope.";
+    globalToggle.dataset.glossaryAction = "toggle-global";
+    globalToggle.dataset.entryId = entry.id;
+    globalLabel.append(globalToggle, " Global");
+    actions.append(globalLabel);
     for (const action of ["edit", "delete"]) {
       const button = document.createElement("button");
       button.type = "button";
@@ -2571,9 +2792,7 @@ function joinTranscriptUpdates(finalSegments, interimText) {
 function detectQuotationBoundaryHint(input) {
   const trimmed = input.trim();
   if (/^begin\s+single\b[\s\S]*\bend\s+single[.,;:!?]*$/iu.test(trimmed)) return "single";
-  if (/^begin(?:ning)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing)?\s+speech[.,;:!?]*$/iu.test(
-    trimmed
-  ))
+  if (/^begin(?:ning|s)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing|s)?\s+speech[.,;:!?]*$/iu.test(trimmed))
     return "double";
   const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu;
   const doubleClosing = /\b(?:close\s+)?(?:quote|quotation)(?:\s+marks?)?[.,;:!?]*$/iu;
@@ -2663,6 +2882,9 @@ function floatingMarkup() {
                 <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-floating-glossary-canonical></label>
                 <label>Heard-as variants<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-floating-glossary-variants></label>
                 <label>Optional hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-floating-glossary-hint></label>
+                <label>Default glossary scope<select data-floating-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
+                <label><span><input type="checkbox" data-floating-glossary-global> Use this entry in all chats</span></label>
+                <small data-floating-glossary-scope-notice hidden>Select a chat to create a chat-specific glossary entry. New entries created here are global.</small>
               </div>
               <div class="jt-actions">
                 <button type="button" data-floating-glossary-save>Add entry</button>
@@ -2735,6 +2957,7 @@ function shellMarkup() {
       .jt-history { max-height: 12rem; overflow: auto; padding-inline-start: 1.4rem; }
       .jt-form-grid { display: grid; gap: .5rem; }
       .jt-form-grid label { display: grid; gap: .25rem; font-size: .85rem; }
+      .jt-setting-warning { color: #e53e3e; font-weight: 600; }
       .jt-form-grid input, .jt-form-grid select { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
       .jt-proposal { display: grid; gap: .55rem; padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
       .jt-proposal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .55rem; background: color-mix(in srgb, currentColor 6%, transparent); }
@@ -2925,12 +3148,15 @@ function shellMarkup() {
 
       <section class="jt-shell__card" aria-labelledby="jt-context-title">
         <h3 id="jt-context-title">Context and glossary</h3>
-        <p class="jt-shell__notice">The message count keeps that many recent assistant messages plus the ordinary recent-message window available for extracting names and proper nouns. Names and proper nouns extracted from the active character card are always included. Title names are corroborated against the card body when possible and used as a fallback when the body never names the character. After speech-to-text finishes, the normalization connection receives the current recording, the glossary, and only that list of names and proper nouns. It never receives the chat messages themselves, the working draft, the character card, or audio. Chat history cannot activate dictation commands; command detection stays local to the current recording. Lumiverse STT remains independently managed by the host and receives no added context. Set the count to 0 to exclude chat history; card-derived references remain available.</p>
+        <p class="jt-shell__notice">The message count controls the recent window scanned for names and proper nouns. Deduplicated chat and growing-draft candidates must pass the Lumiverse decision model before use; accepted and rejected verdicts are reused so unchanged chat history is not checked again across recordings. Existing rolling entries are validated once when upgraded. Card candidates are checked once for the lifetime of the chat cache, remain permanently available after approval, and do not consume rolling slots. After speech-to-text finishes, the normalization connection receives the current recording, glossary, and approved reference lists\u2014not chat messages, the draft, card text, or audio. Set the message count to 0 to stop scanning new history; set the cache limit to 0 to disable retained rolling references.</p>
         <div class="jt-form-grid">
           <label>Messages scanned for references (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
+          <label>Rolling name cache (0\u2013200, default 30)<input type="number" min="0" max="200" step="1" value="30" data-reference-cache-limit></label>
+          <label>Capitalized occurrences before Jev (1\u20135, default 1)<input type="number" min="1" max="5" step="1" value="1" data-reference-admission-occurrences></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
-          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small></label>
+          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. \u201CWhen needed\u201D needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose \u201CAlways\u201D to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
+          <label>Decision model connection<select data-decision-connection><option value="">Default decision connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
         <details class="jt-proposal__details">
@@ -2953,6 +3179,9 @@ function shellMarkup() {
           <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-glossary-canonical></label>
           <label>Heard-as variants, comma separated<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-glossary-variants></label>
           <label>Optional reference or hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-glossary-hint></label>
+          <label>Default glossary scope<select data-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
+          <label><span><input type="checkbox" data-glossary-global> Use this entry in all chats</span></label>
+          <small data-glossary-scope-notice hidden>Select a chat to create a chat-specific glossary entry. New entries created here are global.</small>
         </div>
         <div class="jt-actions">
           <button type="button" data-glossary-save>Add entry</button>

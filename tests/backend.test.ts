@@ -16,6 +16,10 @@ const generationRequests: Array<{
   parameters?: Record<string, unknown>
   messages?: Array<{ content: string }>
 }> = []
+const decisionRequests: unknown[] = []
+let decisionsEnabled = false
+let decisionProbability = 0
+let referenceDecisionProbability = 1
 let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
@@ -30,6 +34,7 @@ let grammarRepairHangs = false
 let grammarRepairIgnoresAbort = false
 let grammarRepairSignal: AbortSignal | undefined
 let chatMessages: Array<{
+  id?: string
   role: 'system' | 'user' | 'assistant'
   content: unknown
   metadata?: Record<string, unknown>
@@ -49,9 +54,57 @@ const spindleMock = {
   },
   permissions: {
     getGranted: () =>
-      Promise.resolve(['media', 'chats', 'chat_mutation', 'generation', 'characters']),
+      Promise.resolve([
+        'media',
+        'chats',
+        'chat_mutation',
+        'generation',
+        'characters',
+        ...(decisionsEnabled ? ['decisions'] : []),
+      ]),
     has: (permission: string) =>
-      ['media', 'chats', 'chat_mutation', 'generation', 'characters'].includes(permission),
+      ['media', 'chats', 'chat_mutation', 'generation', 'characters'].includes(permission) ||
+      (permission === 'decisions' && decisionsEnabled),
+  },
+  decisions: {
+    listConnections: () =>
+      Promise.resolve(
+        decisionsEnabled
+          ? [
+              {
+                id: 'jev-default',
+                name: 'Decision model',
+                provider: 'test',
+                api_url: 'http://localhost',
+                model: 'jev-test',
+                is_default: true,
+                has_api_key: true,
+                default_parameters: {},
+                metadata: {},
+                created_at: 0,
+                updated_at: 0,
+              },
+            ]
+          : [],
+      ),
+    evaluate: (request: unknown) => {
+      decisionRequests.push(request)
+      const questions = (request as { questions?: Record<string, unknown> }).questions ?? {}
+      const answers = Object.fromEntries(
+        Object.keys(questions).map((key) => [
+          key,
+          {
+            type: 'noul',
+            noul:
+              key === 'introducedGrammarError' ? decisionProbability : referenceDecisionProbability,
+          },
+        ]),
+      )
+      return Promise.resolve({
+        model: 'jev-test',
+        answers,
+      })
+    },
   },
   userStorage: {
     getJson: <T>(path: string, options?: { fallback?: T; userId?: string }) =>
@@ -198,6 +251,10 @@ test.beforeEach(() => {
   errors.length = 0
   appended.length = 0
   generationRequests.length = 0
+  decisionRequests.length = 0
+  decisionsEnabled = false
+  decisionProbability = 0
+  referenceDecisionProbability = 1
   activeChatId = 'chat-default'
   appendShouldFail = false
   appendAcknowledgementGate = null
@@ -391,7 +448,96 @@ test('lists safe normalization connections and dispatches with selected connecti
   assert.equal(generationRequests[0]?.parameters?.model, 'custom-text-model')
 })
 
+test('reports whether a decision model connection is available for the when-needed check', async () => {
+  const userId = 'decisions-availability-user'
+  const settingsRequest = (requestId: string) => ({
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'phase4.settings.update.request' as const,
+    requestId,
+    settings: {
+      contextMessageCount: 5,
+      contextualNormalizationEnabled: true,
+      grammarRepairMode: 'when_needed' as const,
+      normalizationConnectionId: null,
+      normalizationModelOverride: '',
+    },
+  })
+
+  decisionsEnabled = false
+  await dispatch(settingsRequest('decisions-availability-missing'), userId)
+  const missing = responses.at(-1)?.payload
+  assert.equal(missing?.type, 'phase4.state.response')
+  if (missing?.type === 'phase4.state.response') assert.equal(missing.decisionModelAvailable, false)
+
+  decisionsEnabled = true
+  await dispatch(settingsRequest('decisions-availability-present'), userId)
+  const present = responses.at(-1)?.payload
+  assert.equal(present?.type, 'phase4.state.response')
+  if (present?.type === 'phase4.state.response') {
+    assert.equal(present.decisionModelAvailable, true)
+    assert.deepEqual(present.decisionConnections, [
+      {
+        id: 'jev-default',
+        name: 'Decision model',
+        provider: 'test',
+        model: 'jev-test',
+        isDefault: true,
+      },
+    ])
+  }
+  decisionsEnabled = false
+})
+
+test('shows only global and active-chat glossary entries, but shows all entries on home', async () => {
+  const userId = 'scoped-glossary-user'
+  const add = async (
+    requestId: string,
+    canonical: string,
+    scope: 'local' | 'global',
+    chatId?: string,
+  ) =>
+    dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'glossary.upsert.request',
+        requestId,
+        canonical,
+        variants: [],
+        hint: '',
+        scope,
+        ...(chatId ? { chatId } : {}),
+      },
+      userId,
+    )
+
+  await add('scope-global', 'Everywhere', 'global')
+  await add('scope-chat-a', 'Only A', 'local', 'chat-a')
+  await add('scope-chat-b', 'Only B', 'local', 'chat-b')
+
+  const load = async (requestId: string, chatId?: string) => {
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'phase4.load.request',
+        requestId,
+        ...(chatId ? { chatId } : {}),
+      },
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'phase4.state.response')
+    return response?.type === 'phase4.state.response'
+      ? response.glossary.map((entry) => entry.canonical)
+      : []
+  }
+
+  assert.deepEqual(await load('scope-load-a', 'chat-a'), ['Everywhere', 'Only A'])
+  assert.deepEqual(await load('scope-load-b', 'chat-b'), ['Everywhere', 'Only B'])
+  assert.deepEqual(await load('scope-load-home'), ['Everywhere', 'Only A', 'Only B'])
+})
+
 test('uses local command context with compact conversational spelling references', async () => {
+  decisionsEnabled = true
   const userId = 'split-context-user'
   const chatId = 'split-context-chat'
   activeChatId = chatId
@@ -420,6 +566,7 @@ test('uses local command context with compact conversational spelling references
 })
 
 test('uses an unambiguous recent-chat proper name when the model leaves the STT spelling unchanged', async () => {
+  decisionsEnabled = true
   const userId = 'recent-name-user'
   const chatId = 'recent-name-chat'
   activeChatId = chatId
@@ -452,7 +599,172 @@ test('uses an unambiguous recent-chat proper name when the model leaves the STT 
   }
 })
 
+test('submits consecutive capitalized chat words as one deduplicated Jev candidate', async () => {
+  decisionsEnabled = true
+  const userId = 'capitalized-phrase-jev-user'
+  const chatId = 'capitalized-phrase-jev-chat'
+  activeChatId = chatId
+  chatMessages = [{ id: 'phrase-message', role: 'assistant', content: 'The White Hawk arrives. The White Hawk waits.' }]
+  await dispatch(recordingAppendRequest(chatId, 'phrase-jev-first', 0, 'Ready.'), userId)
+  const references = decisionRequests.flatMap((request) =>
+    (request as { state?: { candidates?: Array<{ reference?: string }> } }).state?.candidates?.map((item) => item.reference) ?? [],
+  )
+  assert.equal(references.filter((reference) => reference === 'The White Hawk').length, 1)
+  const count = decisionRequests.length
+  await dispatch(recordingAppendRequest(chatId, 'phrase-jev-second', 0, 'Ready again.'), userId)
+  assert.equal(decisionRequests.length, count)
+})
+
+test('persists strict references in a bounded per-chat rolling cache', async () => {
+  decisionsEnabled = true
+  const userId = 'rolling-reference-cache-user'
+  const chatId = 'rolling-reference-cache-chat'
+  activeChatId = chatId
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'rolling-reference-cache-settings',
+      settings: {
+        contextMessageCount: 1,
+        referenceCacheLimit: 2,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'off',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+
+  chatMessages = [
+    {
+      id: 'rolling-message-alpha',
+      role: 'assistant',
+      content: 'I spoke with Alpha beside the gate. Alpha waited.',
+    },
+  ]
+  await dispatch(recordingAppendRequest(chatId, 'rolling-alpha', 0, 'Ready.'), userId)
+  const firstDecision = decisionRequests[0] as {
+    state?: { candidates?: Array<{ reference?: string }> }
+  }
+  const submittedReferences =
+    firstDecision.state?.candidates?.map((candidate) => candidate.reference) ?? []
+  assert.equal(submittedReferences.filter((reference) => reference === 'Alpha').length, 1)
+
+  chatMessages = [
+    { id: 'rolling-message-ordinary', role: 'assistant', content: 'An ordinary sentence.' },
+  ]
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'rolling-alpha-recall', 0, 'Alfa arrives.'), userId)
+  const recalled = responses.at(-1)?.payload
+  assert.equal(recalled?.type, 'transcript.normalization.response')
+  if (recalled?.type === 'transcript.normalization.response')
+    assert.equal(recalled.proposal.candidateText, 'Alpha arrives.')
+
+  chatMessages = [
+    {
+      id: 'rolling-message-beta',
+      role: 'assistant',
+      content: 'Building stands nearby. I spoke with Beta beside it.',
+    },
+  ]
+  await dispatch(recordingAppendRequest(chatId, 'rolling-beta', 0, 'Ready.'), userId)
+  chatMessages = [
+    { id: 'rolling-message-gamma', role: 'assistant', content: 'I spoke with Gamma beside it.' },
+  ]
+  await dispatch(recordingAppendRequest(chatId, 'rolling-gamma', 0, 'Ready.'), userId)
+
+  const storedCache = stored.get(`${userId}:reference-cache-${encodeURIComponent(chatId)}.json`) as
+    { entries?: string[] } | undefined
+  assert.deepEqual(storedCache?.entries, ['Beta', 'Gamma'])
+  assert.equal(storedCache?.entries?.includes('Building'), false)
+
+  chatMessages = [
+    {
+      id: 'rolling-message-lowercase-beta',
+      role: 'assistant',
+      content: 'The beta release remains unstable.',
+    },
+  ]
+  await dispatch(recordingAppendRequest(chatId, 'rolling-lowercase-beta', 0, 'Ready.'), userId)
+  const prunedCache = stored.get(`${userId}:reference-cache-${encodeURIComponent(chatId)}.json`) as
+    { entries?: string[]; processedMessageIds?: string[] } | undefined
+  assert.deepEqual(prunedCache?.entries, ['Gamma'])
+  assert.deepEqual(prunedCache?.processedMessageIds, [
+    'rolling-message-alpha',
+    'rolling-message-ordinary',
+    'rolling-message-beta',
+    'rolling-message-gamma',
+    'rolling-message-lowercase-beta',
+  ])
+})
+
+test('uses a reference name when the provider splits its possessive pronunciation', async () => {
+  decisionsEnabled = true
+  const userId = 'split-possessive-reference-user'
+  const chatId = 'split-possessive-reference-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'I spoke with Erbold beside the gate.' }]
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'split-possessive-reference-segment',
+      0,
+      "Her boat's call alerted me to the gravity of the situation.",
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(
+      response.proposal.candidateText,
+      "Erbold's call alerted me to the gravity of the situation.",
+    )
+})
+
+test('uses structured card names as casing authority', async () => {
+  decisionsEnabled = true
+  const userId = 'card-casing-authority-user'
+  const chatId = 'card-casing-authority-chat'
+  activeChatId = chatId
+  chatMessages = []
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'card-casing-authority-segment', 0, 'I turn toward aiko.'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'I turn toward Aiko.')
+})
+
+test('uses strong temporary active-draft names as casing authority', async () => {
+  const userId = 'draft-casing-authority-user'
+  const chatId = 'draft-casing-authority-chat'
+  activeChatId = chatId
+  chatMessages = []
+  await seedDraft(userId, chatId, 'I turned toward Erbold.')
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'draft-casing-authority-segment', 1, 'I look at erbold.'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'I look at Erbold.')
+})
+
 test('recovers a unique recent-chat name with a stable prefix and mistranscribed ending', async () => {
+  decisionsEnabled = true
   const userId = 'recent-name-ending-user'
   const chatId = 'recent-name-ending-chat'
   activeChatId = chatId
@@ -485,6 +797,7 @@ test('recovers a unique recent-chat name with a stable prefix and mistranscribed
 })
 
 test('recovers a short possessive character name from recent chat', async () => {
+  decisionsEnabled = true
   const userId = 'recent-short-possessive-name-user'
   const chatId = 'recent-short-possessive-name-chat'
   activeChatId = chatId
@@ -3111,6 +3424,135 @@ test('keeps beginning and end insertions inside the targeted paragraph', async (
   }
 })
 
+test('normalizes before-beginning and after-end paragraph insertions to inline boundaries', async () => {
+  const cases = [
+    {
+      name: 'before-beginning',
+      instruction: 'Insert before the beginning of the second paragraph: New sentence.',
+      operation: {
+        id: 'before-beginning',
+        type: 'insert_before' as const,
+        target: { paragraphOrdinal: 2 },
+        text: 'New sentence.',
+      },
+      expected: 'First paragraph.\n\nNew sentence. Second paragraph.',
+      normalizedType: 'prepend',
+    },
+    {
+      name: 'after-end',
+      instruction: 'Insert after the end of the first paragraph: New sentence.',
+      operation: {
+        id: 'after-end',
+        type: 'insert_after' as const,
+        target: { paragraphOrdinal: 1 },
+        text: 'New sentence.',
+      },
+      expected: 'First paragraph. New sentence.\n\nSecond paragraph.',
+      normalizedType: 'append',
+    },
+    {
+      name: 'before-paragraph-without-explicit-new-paragraph',
+      instruction: 'Insert before the second paragraph: New sentence.',
+      operation: {
+        id: 'before-paragraph-inline',
+        type: 'insert_before' as const,
+        target: { paragraphOrdinal: 2 },
+        text: 'New sentence.',
+      },
+      expected: 'First paragraph.\n\nNew sentence. Second paragraph.',
+      normalizedType: 'prepend',
+    },
+    {
+      name: 'after-paragraph-without-explicit-new-paragraph',
+      instruction: 'Insert after the first paragraph: New sentence.',
+      operation: {
+        id: 'after-paragraph-inline',
+        type: 'insert_after' as const,
+        target: { paragraphOrdinal: 1 },
+        text: 'New sentence.',
+      },
+      expected: 'First paragraph. New sentence.\n\nSecond paragraph.',
+      normalizedType: 'append',
+    },
+  ]
+
+  for (const [index, testCase] of cases.entries()) {
+    const userId = `paragraph-inline-boundary-user-${index}`
+    const chatId = `paragraph-inline-boundary-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.')
+    responses.length = 0
+    editPlanResponse = {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'Insert at the requested boundary within the paragraph.',
+      operations: [testCase.operation],
+    }
+
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `paragraph-inline-boundary-interpret-${index}`,
+        operationId: `paragraph-inline-boundary-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript: testCase.instruction,
+      },
+      userId,
+    )
+
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', testCase.name)
+    if (response?.type !== 'edit.proposal.response') continue
+    assert.equal(response.proposal.afterText, testCase.expected, testCase.name)
+    assert.equal(response.proposal.plan.operations[0]?.type, testCase.normalizedType, testCase.name)
+  }
+})
+
+test('creates a paragraph only when paragraph insertion is explicit', async () => {
+  const userId = 'explicit-paragraph-insertion-user'
+  const chatId = 'explicit-paragraph-insertion-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Insert the requested new paragraph.',
+    operations: [
+      {
+        id: 'explicit-paragraph-before',
+        type: 'insert_before',
+        target: { paragraphOrdinal: 2 },
+        text: 'Inserted paragraph.',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'explicit-paragraph-insertion-interpret',
+      operationId: 'explicit-paragraph-insertion-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Insert a paragraph before the second paragraph: Inserted paragraph.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(
+    response.proposal.afterText,
+    'First paragraph.\n\nInserted paragraph.\n\nSecond paragraph.',
+  )
+  assert.equal(response.proposal.plan.operations[0]?.type, 'insert_before')
+})
+
 test('puts one pair of quotations around a numbered paragraph instead of each sentence', async () => {
   const userId = 'deterministic-paragraph-quotation-user'
   const chatId = 'deterministic-paragraph-quotation-chat'
@@ -3312,6 +3754,41 @@ test('capitalizes append and insert-after text only after sentence-ending target
   assert.equal(response?.type, 'edit.proposal.response')
   if (response?.type !== 'edit.proposal.response') return
   assert.equal(response.proposal.afterText, 'First. Continued\n\nSecond. Quietly End.')
+})
+
+test('preserves lowercase insertions after non-terminal punctuation', async () => {
+  const userId = 'nonterminal-insertion-casing-user'
+  const chatId = 'nonterminal-insertion-casing-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First,\n\nSecond —\n\nThird.\n\nFourth,')
+  responses.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Insert continuations after punctuation.',
+    operations: [
+      { id: 'comma-phrase', type: 'insert_after', target: { paragraphOrdinal: 1, exactText: 'First,' }, text: 'continued' },
+      { id: 'dash-sentence', type: 'insert_after', target: { paragraphOrdinal: 2, exactText: 'Second —' }, text: 'continued here.' },
+      { id: 'period-control', type: 'insert_after', target: { paragraphOrdinal: 3, exactText: 'Third.' }, text: 'continued' },
+      { id: 'comma-append', type: 'append', target: { paragraphOrdinal: 4 }, text: 'continued' },
+    ],
+  }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'nonterminal-insertion-casing-interpret',
+      operationId: 'nonterminal-insertion-casing-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Insert the continuations after each target.',
+    },
+    userId,
+  )
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.afterText, 'First, continued\n\nSecond — continued here.\n\nThird. Continued\n\nFourth, continued')
 })
 
 test('offers explicit choices for paragraph-resolvable ambiguity without mutating the draft', async () => {
@@ -3833,6 +4310,65 @@ test('preserves sentence casing when replacing an opening phrase', async () => {
   assert.equal(proposal.proposal.afterText, 'Replacement words continues into the draft.')
 })
 
+test('keeps command-looking words inside quoted replacement payloads literal', async () => {
+  const userId = 'quoted-command-words-user'
+  const chatId = 'quoted-command-words-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'I want to move. Stay here.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'quoted-command-words-interpret', operationId: 'quoted-command-words-operation',
+    chatId, expectedVersion: 1,
+    instructionTranscript: 'Replace the phrase “I want to move” with “I need to stay”.',
+  }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.afterText, 'I need to stay. Stay here.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('falls back for a compound instruction with an incomplete command', async () => {
+  const userId = 'incomplete-compound-parser-user'
+  const chatId = 'incomplete-compound-parser-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Quote, I am ready.')
+  generationRequests.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'incomplete-compound-parser-interpret', operationId: 'incomplete-compound-parser-operation',
+    chatId, expectedVersion: 1,
+    instructionTranscript: 'Remove the phrase “Quote”, then insert the phrase “until”.',
+  }, userId)
+  assert.equal(generationRequests.length, 1)
+})
+
+test('parses quoted compound command arguments without a provider call', async () => {
+  const userId = 'quoted-compound-parser-user'
+  const chatId = 'quoted-compound-parser-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Quote, Don’t worry, dear. It is endearing, in fact.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'edit.interpret.request',
+    requestId: 'quoted-compound-parser-interpret',
+    operationId: 'quoted-compound-parser-operation',
+    chatId,
+    expectedVersion: 1,
+    instructionTranscript: 'Remove the phrase “Quote”, then put quotations from “Don’t worry” to “in fact”.',
+  }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.failedCommand, undefined)
+  assert.equal(response.proposal.afterText, '“Don’t worry, dear. It is endearing, in fact.”')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('splits compound instructions into deterministic clauses without swallowing later commands', async () => {
   const userId = 'compound-clause-user'
   const chatId = 'compound-clause-chat'
@@ -4168,6 +4704,50 @@ test('keeps grammar repairs from moving a quotation mark outside the paragraph',
   )
 })
 
+test('partial sequential edits receive one final grammar check and commit as one undoable edit', async () => {
+  const userId = 'partial-grammar-user'
+  const chatId = 'partial-grammar-chat'
+  activeChatId = chatId
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request',
+    requestId: 'partial-grammar-settings',
+    settings: { contextMessageCount: 5, contextualNormalizationEnabled: false,
+      grammarRepairMode: 'always', normalizationConnectionId: null, normalizationModelOverride: '' },
+  }, userId)
+  await seedDraft(userId, chatId, 'Alpha beta gamma.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2, draftVersion: 1, explanation: 'Perform three edits.',
+    operations: [
+      { id: 'first', type: 'replace', target: { exactText: 'Alpha' }, text: 'Delta' },
+      { id: 'missing', type: 'delete', target: { exactText: 'missing' } },
+      { id: 'not-run', type: 'replace', target: { exactText: 'gamma' }, text: 'omega' },
+    ],
+  }
+  grammarRepairResponse = { edits: [] }
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'partial-grammar-interpret', operationId: 'partial-grammar-operation',
+    chatId, expectedVersion: 1, instructionTranscript: 'Perform three edits.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Delta beta gamma.')
+  assert.equal(proposal.proposal.failedCommand?.index, 2)
+  assert.equal(generationRequests.filter((request) => {
+    const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+    return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+  }).length, 1)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.confirm.request',
+    requestId: 'partial-grammar-confirm', operationId: 'partial-grammar-operation',
+    chatId, expectedVersion: 1 }, userId)
+  const committed = responses.at(-1)?.payload
+  assert.equal(committed?.type, 'edit.proposal.response')
+  if (committed?.type !== 'edit.proposal.response') return
+  assert.equal(committed.snapshot?.cleanText, 'Delta beta gamma.')
+  assert.equal(committed.snapshot?.canUndo, true)
+})
+
 test('applies and discloses an enabled conservative post-edit grammar repair', async () => {
   const userId = 'grammar-repair-user'
   const chatId = 'grammar-repair-chat'
@@ -4342,6 +4922,8 @@ test('skips a routine mid-sentence grammar call in when-needed mode', async () =
   const userId = 'conditional-grammar-repair-user'
   const chatId = 'conditional-grammar-repair-chat'
   activeChatId = chatId
+  decisionsEnabled = true
+  decisionProbability = 0.2
   await dispatch(
     {
       protocolVersion: PROTOCOL_VERSION,
@@ -4392,11 +4974,75 @@ test('skips a routine mid-sentence grammar call in when-needed mode', async () =
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'This is a wide entrance.')
   assert.equal(
+    decisionRequests.filter((request) =>
+      Object.hasOwn((request as { questions?: object }).questions ?? {}, 'introducedGrammarError'),
+    ).length,
+    1,
+  )
+  assert.equal(
     generationRequests.filter((request) => {
       const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
       return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
     }).length,
     0,
+  )
+})
+
+test('uses a high Jev probability to invoke bounded grammar repair', async () => {
+  const userId = 'jev-gated-grammar-repair-user'
+  const chatId = 'jev-gated-grammar-repair-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  decisionProbability = 0.9
+  grammarRepairResponse = { edits: [] }
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'phase4.settings.update.request',
+      requestId: 'jev-gated-grammar-settings',
+      settings: {
+        contextMessageCount: 5,
+        contextualNormalizationEnabled: true,
+        grammarRepairMode: 'when_needed',
+        normalizationConnectionId: null,
+        normalizationModelOverride: '',
+      },
+    },
+    userId,
+  )
+  await seedDraft(userId, chatId, 'This is a narrow entrance.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'jev-gated-grammar-interpret',
+      operationId: 'jev-gated-grammar-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace narrow with wide.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'This is a wide entrance.')
+  assert.equal(
+    decisionRequests.filter((request) =>
+      Object.hasOwn((request as { questions?: object }).questions ?? {}, 'introducedGrammarError'),
+    ).length,
+    1,
+  )
+  assert.equal(
+    generationRequests.filter((request) => {
+      const input = JSON.parse(request.messages?.at(-1)?.content ?? '{}') as { task?: string }
+      return input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.'
+    }).length,
+    1,
   )
 })
 
@@ -4804,6 +5450,54 @@ test('removes an orphaned opening separator and capitalizes the remaining senten
   assert.equal(generationRequests.length, 0)
 })
 
+test('capitalizes a conjunction promoted to the sentence opening by phrase deletion', async () => {
+  const userId = 'opening-conjunction-cleanup-user'
+  const chatId = 'opening-conjunction-cleanup-chat'
+  activeChatId = chatId
+  await seedDraft(
+    userId,
+    chatId,
+    "I will continue working on this project, and don't think I will slack off either.",
+  )
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Delete the opening phrase.',
+    operations: [
+      {
+        id: 'delete-opening-clause-before-conjunction',
+        type: 'delete',
+        target: {
+          paragraphOrdinal: 1,
+          exactText: 'I will continue working on this project',
+        },
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'opening-conjunction-cleanup-interpret',
+      operationId: 'opening-conjunction-cleanup-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript:
+        'Remove the phrase I will continue working on this project.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, "And don't think I will slack off either.")
+  assert.equal(generationRequests.length, 0)
+})
+
 test('removes the duplicate trailing separator when deleting a delimited middle phrase', async () => {
   const userId = 'middle-phrase-cleanup-user'
   const chatId = 'middle-phrase-cleanup-chat'
@@ -5154,6 +5848,35 @@ test('recovers a referential homophone when speech-to-text collapses target and 
   assert.equal(generationRequests.length, 0)
 })
 
+test('uses an active-draft name to canonicalize exact replacement casing', async () => {
+  const userId = 'draft-reference-payload-user'
+  const chatId = 'draft-reference-payload-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'I turned to Watt. I call out to watch.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'draft-reference-payload-interpret',
+      operationId: 'draft-reference-payload-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace to watch with to watt.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, 'I turned to Watt. I call out to Watt.')
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
 test('rejects an as in reference without an exact repetition or clear inflection', async () => {
   const userId = 'guarded-reference-user'
   const chatId = 'guarded-reference-chat'
@@ -5290,7 +6013,7 @@ test('removes qualified as in references from every text-bearing edit operation'
   if (response?.type === 'edit.proposal.response') {
     assert.equal(
       response.proposal.afterText,
-      'Replace filled.\n\nI nod Prepend base.\n\nAppend base. I agree\n\nInsert walk before base.\n\nInsert after pause base.',
+      'Replace filled.\n\nI nod prepend base.\n\nAppend base. I agree\n\nInsert walk before base.\n\nInsert after pause base.',
     )
     assert.equal(response.proposal.afterText.includes('as in'), false)
   }
@@ -5340,6 +6063,433 @@ test('rejects malformed messages without replying', async () => {
   await dispatch({ type: 'untrusted' }, 'malformed-user')
   assert.equal(responses.length, 0)
   assert.equal(warnings.length, 1)
+})
+
+test('defaults collapsed uppercase edit spellings to lowercase and honors an explicit casing cue', async () => {
+  const cases: Array<readonly [string, string, string]> = [
+    [
+      'I slide the arrow into the sheath.',
+      'Replace SHEATH with SHEAF.',
+      'I slide the arrow into the sheaf.',
+    ],
+    [
+      'I slide the arrow into the sheath.',
+      'Replace sheath with sheaf.',
+      'I slide the arrow into the sheaf.',
+    ],
+    ['She said erbold.', 'Replace ERBOLD with uppercase ERBOLD.', 'She said ERBOLD.'],
+    ['She said erbold.', 'Replace ERBOLD with capitalized ERBOLD.', 'She said Erbold.'],
+    ['She said ERBOLD.', 'Replace ERBOLD with lowercase ERBOLD.', 'She said erbold.'],
+    ['She said erbold.', 'Replace ERBOLD with all caps ERBOLD.', 'She said ERBOLD.'],
+  ]
+  for (const [index, [draft, instructionTranscript, expected]] of cases.entries()) {
+    const userId = `compact-edit-spelling-${index}`
+    const chatId = `compact-edit-spelling-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `compact-edit-spelling-interpret-${index}`,
+        operationId: `compact-edit-spelling-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instructionTranscript)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(proposal.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
+test('a learned glossary spelling does not keep a known proper noun lowercase', async () => {
+  const cases: Array<readonly [string, string]> = [
+    ['erbold', 'I turn towards E-R-B-O-L-D.'],
+    ['erbold', 'I turn towards E.R.B.O.L.D.'],
+    ['Erbold', 'I turn towards E.R.B.O.L.D.'],
+  ]
+  for (const [index, [canonical, rawTranscript]] of cases.entries()) {
+    const userId = `learned-glossary-spelling-${index}`
+    const chatId = `learned-glossary-spelling-chat-${index}`
+    activeChatId = chatId
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'glossary.upsert.request',
+        requestId: `learned-glossary-spelling-entry-${index}`,
+        canonical,
+        variants: ['E-R-B-O-L-D'],
+        hint: '',
+      },
+      userId,
+    )
+    await seedDraft(userId, chatId, 'Turns towards Erbold.')
+    responses.length = 0
+    await dispatch(
+      recordingAppendRequest(
+        chatId,
+        `learned-glossary-spelling-segment-${index}`,
+        1,
+        rawTranscript,
+      ),
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response', `case ${index}`)
+    if (response?.type !== 'transcript.normalization.response') return
+    assert.equal(response.proposal.candidateText, 'I turn towards Erbold.', `case ${index}`)
+  }
+})
+
+test('applies the strict casing words in a recording', async () => {
+  const cases: Array<readonly [string, string]> = [
+    ['I look to the capitalized white hawk.', 'I look to the White Hawk.'],
+    ['I look to the lowercase white hawk.', 'I look to the white hawk.'],
+    ['I look to the uppercase white hawk.', 'I look to the WHITE HAWK.'],
+    ['I look to the all caps white hawk.', 'I look to the WHITE HAWK.'],
+  ]
+  for (const [index, [rawTranscript, expected]] of cases.entries()) {
+    const userId = `recording-casing-${index}`
+    const chatId = `recording-casing-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, 'Earlier')
+    responses.length = 0
+    await dispatch(
+      recordingAppendRequest(chatId, `recording-casing-segment-${index}`, 1, rawTranscript),
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response', rawTranscript)
+    if (response?.type !== 'transcript.normalization.response') return
+    assert.equal(response.proposal.candidateText, expected, rawTranscript)
+  }
+})
+
+test('a learned glossary spelling does not keep a known proper noun lowercase in an edit', async () => {
+  const cases: Array<readonly [string, string]> = [
+    ['erbold', 'Replace ERWIN with E-R-B-O-L-D.'],
+    ['Erbold', 'Replace ERWIN with E.R.B.O.L.D.'],
+  ]
+  for (const [index, [canonical, instructionTranscript]] of cases.entries()) {
+    const userId = `edit-learned-glossary-${index}`
+    const chatId = `edit-learned-glossary-chat-${index}`
+    activeChatId = chatId
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'glossary.upsert.request',
+        requestId: `edit-learned-glossary-entry-${index}`,
+        canonical,
+        variants: ['E-R-B-O-L-D'],
+        hint: '',
+      },
+      userId,
+    )
+    await seedDraft(userId, chatId, 'Turns towards Erbold. I turned towards erwin.')
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `edit-learned-glossary-interpret-${index}`,
+        operationId: `edit-learned-glossary-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', `case ${index}`)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(
+      proposal.proposal.afterText,
+      'Turns towards Erbold. I turned towards Erbold.',
+      `case ${index}`,
+    )
+    assert.equal(generationRequests.length, 0, `case ${index}`)
+  }
+})
+
+test('restores a known proper noun after explicit spelling in an edit instruction', async () => {
+  decisionsEnabled = true
+  const cases: Array<
+    readonly [string, Array<{ role: 'assistant' | 'user'; content: string }>, string]
+  > = [
+    [
+      'Turns towards Erbold. I turned towards erwin.',
+      [],
+      'Turns towards Erbold. I turned towards Erbold.',
+    ],
+    [
+      'Earlier. I turned towards erwin.',
+      [{ role: 'assistant', content: 'Erbold hears it.' }],
+      'Earlier. I turned towards Erbold.',
+    ],
+    ['Earlier. I turned towards erwin.', [], 'Earlier. I turned towards erbold.'],
+  ]
+  for (const [index, [draft, chat, expected]] of cases.entries()) {
+    const userId = `edit-spelled-proper-noun-${index}`
+    const chatId = `edit-spelled-proper-noun-chat-${index}`
+    activeChatId = chatId
+    chatMessages = chat
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `edit-spelled-proper-noun-interpret-${index}`,
+        operationId: `edit-spelled-proper-noun-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript: 'Replace ERWIN with E-R-B-O-L-D.',
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', `case ${index}`)
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.equal(proposal.proposal.afterText, expected, `case ${index}`)
+    assert.equal(generationRequests.length, 0, `case ${index}`)
+  }
+})
+
+test('keeps the capital of a capitalized replacement word that is not a known reference', async () => {
+  const userId = 'capitalized-replacement-user'
+  const chatId = 'capitalized-replacement-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'I turned towards erwin.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'capitalized-replacement-interpret',
+      operationId: 'capitalized-replacement-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace ERWIN with Erica.',
+    },
+    userId,
+  )
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'I turned towards Erica.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('restores a known proper noun after explicit spelling in a recording', async () => {
+  decisionsEnabled = true
+  const cases: Array<
+    readonly [Array<{ role: 'assistant' | 'user'; content: string }>, string, string | null, string]
+  > = [
+    [
+      [{ role: 'assistant', content: 'Erbold hears it, and his jaw sets.' }],
+      'Earlier',
+      null,
+      'Turn towards Erbold.',
+    ],
+    [[], 'Earlier', null, 'Turn towards erbold.'],
+    [[], 'Turns towards Erbold.', 'I turn towards erbold.', 'I turn towards Erbold.'],
+  ]
+  for (const [index, [chat, draft, providerText, expected]] of cases.entries()) {
+    const userId = `spelled-proper-noun-${index}`
+    const chatId = `spelled-proper-noun-chat-${index}`
+    activeChatId = chatId
+    chatMessages = chat
+    generationNormalizedText = providerText
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      recordingAppendRequest(
+        chatId,
+        `spelled-proper-noun-segment-${index}`,
+        1,
+        'Turn towards E-R-B-O-L-D.',
+      ),
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response', `case ${index}`)
+    if (response?.type !== 'transcript.normalization.response') return
+    assert.equal(response.proposal.candidateText, expected, `case ${index}`)
+  }
+  generationNormalizedText = null
+})
+
+test('restores a known proper noun when a compact uppercase edit spelling defaults to lowercase', async () => {
+  decisionsEnabled = true
+  const draft =
+    "Brenner's voice comes up the lane raw and thin, and it is not an order. It is a report, and Erdl hears it, and his jaw sets."
+  const cases: Array<readonly [Array<{ role: 'assistant' | 'user'; content: string }>, string]> = [
+    [[{ role: 'assistant', content: 'Erbold hears it, and his jaw sets.' }], 'Erbold'],
+    [[], 'erbold'],
+  ]
+  for (const [index, [chat, expectedName]] of cases.entries()) {
+    const userId = `proper-noun-casing-${index}`
+    const chatId = `proper-noun-casing-chat-${index}`
+    activeChatId = chatId
+    chatMessages = chat
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `proper-noun-casing-interpret-${index}`,
+        operationId: `proper-noun-casing-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript: 'Replace ERDL with ERBOLD.',
+      },
+      userId,
+    )
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response')
+    if (proposal?.type !== 'edit.proposal.response') return
+    assert.match(proposal.proposal.afterText, new RegExp(`and ${expectedName} hears it`))
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('uses phonetic character references for recording normalization and edit targets', async () => {
+  decisionsEnabled = true
+  const userId = 'phonetic-character-reference-user'
+  const chatId = 'phonetic-character-reference-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'Erbold watches the road.' }]
+  generationNormalizedText = null
+  await seedDraft(userId, chatId, 'Erbold checks the road.')
+
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    recordingAppendRequest(chatId, 'phonetic-character-recording', 1, 'Ervode turns around.'),
+    userId,
+  )
+  const recording = responses.at(-1)?.payload
+  assert.equal(recording?.type, 'transcript.normalization.response')
+  if (recording?.type === 'transcript.normalization.response')
+    assert.equal(recording.proposal.candidateText, 'Erbold turns around.')
+
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'phonetic-character-edit',
+      operationId: 'phonetic-character-edit-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace Ervode with the captain.',
+    },
+    userId,
+  )
+  const edit = responses.at(-1)?.payload
+  assert.equal(edit?.type, 'edit.proposal.response')
+  if (edit?.type === 'edit.proposal.response')
+    assert.equal(edit.proposal.afterText, 'The captain checks the road.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('keeps broad active-draft references available for recording fuzzy identification', async () => {
+  decisionsEnabled = true
+  const userId = 'draft-fuzzy-recording-user'
+  const chatId = 'draft-fuzzy-recording-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'The road remains quiet.' }]
+  generationNormalizedText = null
+  await seedDraft(userId, chatId, 'I turn toward Herbold with a question.')
+
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    recordingAppendRequest(chatId, 'draft-fuzzy-recording', 1, 'Herbolt answers me.'),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.candidateText, 'Herbold answers me.')
+    assert.ok(response.proposal.reasons.includes('active draft spelling: Herbolt → Herbold'))
+  }
+})
+
+test('does not use repeated sentence openings in the active draft as casing authority', async () => {
+  decisionsEnabled = true
+  const userId = 'draft-repeated-opening-casing-user'
+  const chatId = 'draft-repeated-opening-casing-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'The road remains quiet.' }]
+  generationNormalizedText = null
+  await seedDraft(
+    userId,
+    chatId,
+    'Close enough to smell the leather. Close enough to count the stitches.',
+  )
+
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'draft-repeated-opening-casing',
+      1,
+      'All right, this is getting too close.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'All right, this is getting too close.')
+})
+
+test('keeps broad active-draft references available for edit payload fuzzy identification', async () => {
+  decisionsEnabled = true
+  const userId = 'draft-fuzzy-payload-user'
+  const chatId = 'draft-fuzzy-payload-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'The road remains quiet.' }]
+  await seedDraft(userId, chatId, 'I speak to Herbold and the captain.')
+
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'draft-fuzzy-payload-interpret',
+      operationId: 'draft-fuzzy-payload-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace the captain with Herbolt.',
+    },
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response')
+    assert.equal(response.proposal.afterText, 'I speak to Herbold and Herbold.')
+  assert.equal(generationRequests.length, 0)
 })
 
 async function seedDraft(userId: string, chatId: string, cleanText: string): Promise<void> {

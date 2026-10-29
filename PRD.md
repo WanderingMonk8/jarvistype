@@ -386,7 +386,7 @@ A bare spoken `period` or `full stop` immediately following provider-supplied `.
 
 **FR-CASE-002:** The initial capitalization command set shall include:
 
-- **Capitalize**: uppercase the first alphabetic character of the targeted word while preserving the remaining characters unless the user supplies an explicit replacement.
+- **Capitalize**: uppercase the first alphabetic character of every word in the targeted phrase while preserving the remaining characters unless the user supplies an explicit replacement.
 - **All caps** or **uppercase**: convert all cased letters in the target to uppercase.
 - **Lowercase**: convert all cased letters in the target to lowercase.
 

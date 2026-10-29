@@ -20,6 +20,7 @@ import {
   type EditCandidateSet,
   type FrontendRequest,
   type NormalizationConnectionOption,
+  type DecisionConnectionOption,
   type NormalizationProposal,
   type PhaseFourSettings,
   type PermissionSnapshot,
@@ -73,11 +74,11 @@ export const COMMAND_GROUPS = [
     examples: [
       [
         'Spoken punctuation',
-        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “begin bracket” and “end bracket” for angle brackets, “new line,” or “new paragraph.”',
+        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “asterisk,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “begin bracket” and “end bracket” for angle brackets, “new line,” or “new paragraph.”',
       ],
       [
         'Quotations',
-        'Say “quote” or “quotation” at both ends of a quotation; use “begin speech” and “end speech,” or “beginning speech” and “ending speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”',
+        'Say “quote” or “quotation” at both ends of a quotation; use “begin speech” and “end speech,” “beginning speech” and “ending speech,” or “begins speech” and “ends speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”',
       ],
       ['Explicit punctuation', 'Say “insert period,” “punctuation colon,” or “command new line.”'],
       [
@@ -132,7 +133,7 @@ export const COMMAND_GROUPS = [
     examples: [
       ['Uppercase', 'Uppercase the draft, or make the entire draft all caps.'],
       ['Lowercase', 'Lowercase paragraph 2, or make paragraph 2 lowercase.'],
-      ['Capitalize', 'Capitalize “Project Atlas,” or capitalize its first letter.'],
+      ['Capitalize', 'Capitalize “the hawk” to make every word title-cased: “The Hawk.”'],
       ['Spelled form', 'Replace Kalora with capitalized C-A-E-L-O-R-A.'],
       [
         'As in reference',
@@ -218,9 +219,56 @@ interface ComposerState {
   pendingEditCandidates: EditCandidateSet | null
   settings: PhaseFourSettings
   normalizationConnections: NormalizationConnectionOption[]
+  decisionConnections: DecisionConnectionOption[]
   glossary: GlossaryEntry[]
   canUndoGlossary: boolean
+  decisionModelAvailable: boolean | null
   phaseFourMessage: string
+}
+
+function sharesNearbyComposerAncestor(left: Element, right: Element): boolean {
+  const leftAncestors = new Set<Element>()
+  let current: Element | null = left
+  for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement)
+    leftAncestors.add(current)
+  current = right
+  for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement) {
+    if (
+      leftAncestors.has(current) &&
+      current !== document.body &&
+      current !== document.documentElement
+    )
+      return true
+  }
+  return false
+}
+
+function isNativeSttComposerButton(
+  button: HTMLButtonElement,
+  composerLauncher: HTMLButtonElement,
+): boolean {
+  if (button.closest('.jt-shell, .jt-floating') || button.classList.contains('jt-composer-launcher'))
+    return false
+  if (!sharesNearbyComposerAncestor(button, composerLauncher)) return false
+  const accessibleText = [
+    button.getAttribute('aria-label'),
+    button.getAttribute('title'),
+    button.getAttribute('data-tooltip'),
+    button.getAttribute('data-tooltip-content'),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' ')
+  if (
+    /\b(?:speech[ -]?to[ -]?text|voice input|voice dictation|microphone|start (?:voice|dictation|recording)|record voice)\b/iu.test(
+      accessibleText,
+    )
+  )
+    return true
+  return Boolean(
+    button.querySelector(
+      'svg[data-lucide="mic"], svg.lucide-mic, svg[class*="microphone" i], [data-icon="microphone" i], [data-icon="mic" i]',
+    ),
+  )
 }
 
 export function setup(ctx: SpindleFrontendContext): () => void {
@@ -246,7 +294,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     .jt-composer-launcher { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; padding: .45rem; border: 0; border-radius: .5rem; background: transparent; color: inherit; line-height: 1; cursor: pointer; opacity: .78; }
     .jt-composer-launcher .jt-brand-icon { width: 1.35rem; height: 1.35rem; flex: 0 0 auto; }
     .jt-composer-launcher:hover { background: color-mix(in srgb, currentColor 9%, transparent); opacity: 1; }
-    .jt-composer-launcher:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; opacity: 1; }`
+    .jt-composer-launcher:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; opacity: 1; }
+    .jt-native-stt-hidden { display: none !important; }`
   const composerLauncher = document.createElement('button')
   composerLauncher.type = 'button'
   composerLauncher.className = 'jt-composer-launcher'
@@ -254,6 +303,23 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   composerLauncher.title = 'Open JarvisType voice composer'
   composerLauncher.innerHTML = JARVISTYPE_ICON_SVG
   composerToolsMount.append(composerLauncherStyle, composerLauncher)
+  const hideNativeSttButton = () => {
+    for (const button of document.querySelectorAll<HTMLButtonElement>('button')) {
+      if (button === composerLauncher || button.contains(composerLauncher)) continue
+      if (isNativeSttComposerButton(button, composerLauncher))
+        button.classList.add('jt-native-stt-hidden')
+    }
+  }
+  hideNativeSttButton()
+  let nativeSttScanFrame: number | null = null
+  const nativeSttObserver = new MutationObserver(() => {
+    if (nativeSttScanFrame !== null) return
+    nativeSttScanFrame = requestAnimationFrame(() => {
+      nativeSttScanFrame = null
+      hideNativeSttButton()
+    })
+  })
+  nativeSttObserver.observe(document.documentElement, { childList: true, subtree: true })
 
   const initialFloatingSize = getFloatingWidgetSize()
   const initialViewport = getViewportSize()
@@ -375,7 +441,19 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const decisionBar = requireElement<HTMLElement>(tab.root, '[data-decision-bar]')
   const decisionSummary = requireElement<HTMLElement>(tab.root, '[data-decision-summary]')
   const contextCountInput = requireElement<HTMLInputElement>(tab.root, '[data-context-count]')
+  const referenceCacheLimitInput = requireElement<HTMLInputElement>(
+    tab.root,
+    '[data-reference-cache-limit]',
+  )
+  const referenceAdmissionOccurrencesInput = requireElement<HTMLInputElement>(
+    tab.root,
+    '[data-reference-admission-occurrences]',
+  )
   const contextualToggle = requireElement<HTMLInputElement>(tab.root, '[data-context-enabled]')
+  const grammarRepairWarning = requireElement<HTMLElement>(
+    tab.root,
+    '[data-grammar-repair-warning]',
+  )
   const grammarRepairSelect = requireElement<HTMLSelectElement>(
     tab.root,
     '[data-grammar-repair-mode]',
@@ -390,6 +468,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     tab.root,
     '[data-normalization-connection]',
   )
+  const decisionConnectionSelect = requireElement<HTMLSelectElement>(
+    tab.root,
+    '[data-decision-connection]',
+  )
   const normalizationModelSlot = requireElement<HTMLElement>(tab.root, '[data-normalization-model]')
   const glossaryCanonicalInput = requireElement<HTMLInputElement>(
     tab.root,
@@ -400,6 +482,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     '[data-glossary-variants]',
   )
   const glossaryHintInput = requireElement<HTMLInputElement>(tab.root, '[data-glossary-hint]')
+  const glossaryGlobalInput = requireElement<HTMLInputElement>(tab.root, '[data-glossary-global]')
+  const glossaryDefaultScopeSelect = requireElement<HTMLSelectElement>(
+    tab.root,
+    '[data-glossary-default-scope]',
+  )
+  const glossaryScopeNotice = requireElement<HTMLElement>(tab.root, '[data-glossary-scope-notice]')
   const glossarySaveButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-save]')
   const glossaryCancelButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-cancel]')
   const glossaryUndoButton = requireElement<HTMLButtonElement>(tab.root, '[data-glossary-undo]')
@@ -424,6 +512,18 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const floatingGlossaryHintInput = requireElement<HTMLInputElement>(
     floatingWidget.root,
     '[data-floating-glossary-hint]',
+  )
+  const floatingGlossaryGlobalInput = requireElement<HTMLInputElement>(
+    floatingWidget.root,
+    '[data-floating-glossary-global]',
+  )
+  const floatingGlossaryDefaultScopeSelect = requireElement<HTMLSelectElement>(
+    floatingWidget.root,
+    '[data-floating-glossary-default-scope]',
+  )
+  const floatingGlossaryScopeNotice = requireElement<HTMLElement>(
+    floatingWidget.root,
+    '[data-floating-glossary-scope-notice]',
   )
   const floatingGlossarySaveButton = requireElement<HTMLButtonElement>(
     floatingWidget.root,
@@ -473,15 +573,21 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     pendingEditCandidates: null,
     settings: {
       contextMessageCount: 5,
+      referenceCacheLimit: 30,
+      referenceAdmissionOccurrences: 1,
       contextualNormalizationEnabled: true,
       grammarRepairMode: 'off',
+      glossaryDefaultScope: 'local',
+      decisionConnectionId: null,
       normalizationConnectionId: null,
       normalizationModelOverride: '',
       debugLoggingEnabled: false,
     },
     normalizationConnections: [],
+    decisionConnections: [],
     glossary: [],
     canUndoGlossary: false,
+    decisionModelAvailable: null,
     phaseFourMessage: 'Loading context and glossary settings…',
   }
 
@@ -664,15 +770,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const recordingInProgress =
       activeRecording !== null &&
       (state.voicePhase === 'starting' || state.voicePhase === 'recording')
-    recordButton.disabled =
-      recordingInProgress
-        ? activeRecording?.mode !== 'message'
-        : !hasNativeStt() ||
-          !recordingOwnerReady ||
-          voiceBusy() ||
-          state.voicePhase === 'processing' ||
-          state.voicePhase === 'committing' ||
-          state.voicePhase === 'review'
+    recordButton.disabled = recordingInProgress
+      ? activeRecording?.mode !== 'message'
+      : !hasNativeStt() ||
+        !recordingOwnerReady ||
+        voiceBusy() ||
+        state.voicePhase === 'processing' ||
+        state.voicePhase === 'committing' ||
+        state.voicePhase === 'review'
     const editLive = activeRecording?.mode === 'edit'
     recordEditButton.dataset.recordingState =
       editLive && state.voicePhase === 'starting'
@@ -694,16 +799,15 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           : state.voicePhase === 'review' && state.pendingEditProposal
             ? 'Review required'
             : 'Edit'
-    recordEditButton.disabled =
-      recordingInProgress
-        ? activeRecording?.mode !== 'edit'
-        : !hasNativeStt() ||
-          !recordingOwnerReady ||
-          !desiredText.trim() ||
-          voiceBusy() ||
-          state.voicePhase === 'processing' ||
-          state.voicePhase === 'committing' ||
-          state.voicePhase === 'review'
+    recordEditButton.disabled = recordingInProgress
+      ? activeRecording?.mode !== 'edit'
+      : !hasNativeStt() ||
+        !recordingOwnerReady ||
+        !desiredText.trim() ||
+        voiceBusy() ||
+        state.voicePhase === 'processing' ||
+        state.voicePhase === 'committing' ||
+        state.voicePhase === 'review'
     cancelRecordingButton.style.visibility = messageIsLive ? 'visible' : 'hidden'
     cancelRecordingButton.disabled = !messageIsLive
     cancelEditRecordingButton.style.visibility = editIsLive ? 'visible' : 'hidden'
@@ -761,7 +865,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (activeReview && decisionBar.previousElementSibling !== activeReview)
       activeReview.after(decisionBar)
     decisionSummary.textContent = editProposal
-      ? `Review the edit: ${editProposal.explanation}`
+      ? editProposal.failedCommand
+        ? `Review the partial edit. Command ${editProposal.failedCommand.index} (${editProposal.plan.operations[editProposal.failedCommand.index - 1]?.type ?? 'edit'}) failed: ${editProposal.failedCommand.reason}. Later commands were not run.`
+        : `Review the edit: ${editProposal.explanation}`
       : proposal
         ? 'Review the normalized transcript before it is appended.'
         : ''
@@ -779,8 +885,31 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
     cancelEditCandidatesButton.disabled = !editCandidates || state.automatedBusy
     contextCountInput.value = String(state.settings.contextMessageCount)
+    referenceCacheLimitInput.value = String(state.settings.referenceCacheLimit ?? 30)
+    referenceAdmissionOccurrencesInput.value = String(
+      state.settings.referenceAdmissionOccurrences ?? 1,
+    )
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
     grammarRepairSelect.value = state.settings.grammarRepairMode
+    const hasActiveChat = Boolean(state.activeChatId)
+    const displayedGlossaryScope = hasActiveChat
+      ? (state.settings.glossaryDefaultScope ?? 'local')
+      : 'global'
+    glossaryDefaultScopeSelect.value = displayedGlossaryScope
+    floatingGlossaryDefaultScopeSelect.value = displayedGlossaryScope
+    glossaryDefaultScopeSelect.disabled = !hasActiveChat
+    floatingGlossaryDefaultScopeSelect.disabled = !hasActiveChat
+    glossaryScopeNotice.hidden = hasActiveChat
+    floatingGlossaryScopeNotice.hidden = hasActiveChat
+    glossaryGlobalInput.disabled = !hasActiveChat
+    floatingGlossaryGlobalInput.disabled = !hasActiveChat
+    if (!editingGlossaryEntryId && !glossaryCanonicalInput.value && !floatingGlossaryCanonicalInput.value) {
+      const useGlobal = !hasActiveChat || displayedGlossaryScope === 'global'
+      glossaryGlobalInput.checked = useGlobal
+      floatingGlossaryGlobalInput.checked = useGlobal
+    }
+    grammarRepairWarning.hidden =
+      state.settings.grammarRepairMode !== 'when_needed' || state.decisionModelAvailable !== false
     debugEnabledToggle.checked = state.settings.debugLoggingEnabled === true
     debugRefreshButton.disabled = state.settings.debugLoggingEnabled !== true
     debugCopyButton.disabled = false
@@ -789,6 +918,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       normalizationConnectionSelect,
       state.normalizationConnections,
       state.settings.normalizationConnectionId,
+    )
+    renderConnectionOptions(
+      decisionConnectionSelect,
+      state.decisionConnections,
+      state.settings.decisionConnectionId ?? null,
+      'Default decision connection',
     )
     if (modelPickerConnectionId !== state.settings.normalizationConnectionId) {
       modelPickerConnectionId = state.settings.normalizationConnectionId
@@ -808,8 +943,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     floatingGlossarySaveButton.textContent = editingGlossaryEntryId ? 'Update entry' : 'Add entry'
     glossaryCancelButton.hidden = !editingGlossaryEntryId
     floatingGlossaryCancelButton.hidden = !editingGlossaryEntryId
-    renderGlossary(glossaryList, state.glossary, drawerGlossaryQuery)
-    renderGlossary(floatingGlossaryList, state.glossary, floatingGlossaryQuery)
+    renderGlossary(glossaryList, state.glossary, drawerGlossaryQuery, hasActiveChat)
+    renderGlossary(floatingGlossaryList, state.glossary, floatingGlossaryQuery, hasActiveChat)
     sendButton.disabled =
       !editorEnabled ||
       state.saving ||
@@ -921,11 +1056,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       protocolVersion: PROTOCOL_VERSION,
       type: 'phase4.load.request',
       requestId: createRequestId('phase4-load'),
+      chatId: state.activeChatId ?? undefined,
     })
     if (!alive) return
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response') {
       state.settings = outcome.value.settings
       state.normalizationConnections = outcome.value.connections
+      state.decisionConnections = outcome.value.decisionConnections
       state.glossary = outcome.value.glossary
       state.canUndoGlossary = outcome.value.canUndoGlossary
       state.phaseFourMessage = outcome.value.notice ?? 'Context and glossary settings ready.'
@@ -954,6 +1091,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const transitionId = changed ? ++chatTransitionId : chatTransitionId
     await refreshPermissions()
     if (!alive) return
+    if (changed) {
+      await loadPhaseFourState()
+      if (!alive || transitionId !== chatTransitionId) return
+    }
 
     if (!changed) {
       if (
@@ -1553,8 +1694,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   ) => {
     state.settings = response.settings
     state.normalizationConnections = response.connections
+    state.decisionConnections = response.decisionConnections
     state.glossary = response.glossary
     state.canUndoGlossary = response.canUndoGlossary
+    state.decisionModelAvailable = response.decisionModelAvailable
     state.phaseFourMessage = response.notice ?? 'Context and glossary settings ready.'
   }
 
@@ -1563,6 +1706,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       20,
       Math.max(0, Number.parseInt(contextCountInput.value, 10) || 0),
     )
+    const referenceCacheLimit = Math.min(
+      200,
+      Math.max(0, Number.parseInt(referenceCacheLimitInput.value, 10) || 0),
+    )
+    const referenceAdmissionOccurrences = Math.min(
+      5,
+      Math.max(1, Number.parseInt(referenceAdmissionOccurrencesInput.value, 10) || 1),
+    )
     const grammarRepairMode =
       grammarRepairSelect.value === 'always'
         ? 'always'
@@ -1570,6 +1721,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           ? 'when_needed'
           : 'off'
     state.settings.contextMessageCount = contextMessageCount
+    state.settings.referenceCacheLimit = referenceCacheLimit
+    state.settings.referenceAdmissionOccurrences = referenceAdmissionOccurrences
     state.settings.contextualNormalizationEnabled = contextualToggle.checked
     state.settings.grammarRepairMode = grammarRepairMode
     state.settings.debugLoggingEnabled = debugEnabledToggle.checked
@@ -1580,12 +1733,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       requestId: createRequestId('settings-update'),
       settings: {
         contextMessageCount,
+        referenceCacheLimit,
+        referenceAdmissionOccurrences,
         contextualNormalizationEnabled: contextualToggle.checked,
         grammarRepairMode,
+        glossaryDefaultScope: state.settings.glossaryDefaultScope ?? 'local',
+        decisionConnectionId: state.settings.decisionConnectionId ?? null,
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: state.settings.normalizationModelOverride,
         debugLoggingEnabled: debugEnabledToggle.checked,
       },
+      chatId: state.activeChatId ?? undefined,
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response') {
       applyPhaseFourResponse(outcome.value)
@@ -1602,6 +1760,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }, delay)
   }
   const handleContextCountInput = () => scheduleSettingsSave(600)
+  const handleReferenceCacheLimitInput = () => scheduleSettingsSave(600)
+  const handleReferenceAdmissionOccurrencesInput = () => scheduleSettingsSave(600)
   const handleSettingToggleChange = () => scheduleSettingsSave(0)
 
   const refreshDebugLog = async (clear = false): Promise<void> => {
@@ -1650,6 +1810,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const variantsInput =
       surface === 'floating' ? floatingGlossaryVariantsInput : glossaryVariantsInput
     const hintInput = surface === 'floating' ? floatingGlossaryHintInput : glossaryHintInput
+    const editingEntry = editingGlossaryEntryId
+      ? state.glossary.find((entry) => entry.id === editingGlossaryEntryId)
+      : undefined
     const canonical = canonicalInput.value.trim()
     if (!canonical) {
       state.phaseFourMessage = 'Enter a canonical spelling before saving.'
@@ -1669,6 +1832,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       canonical,
       variants,
       hint: hintInput.value.trim(),
+      scope:
+        !state.activeChatId ||
+        (surface === 'floating' ? floatingGlossaryGlobalInput : glossaryGlobalInput).checked
+          ? editingEntry && !state.activeChatId
+            ? (editingEntry.scope ?? 'global')
+            : 'global'
+          : 'local',
+      chatId: state.activeChatId ?? editingEntry?.chatId,
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response') {
       applyPhaseFourResponse(outcome.value)
@@ -1687,15 +1858,37 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     floatingGlossaryCanonicalInput.value = ''
     floatingGlossaryVariantsInput.value = ''
     floatingGlossaryHintInput.value = ''
+    const useGlobal = !state.activeChatId || (state.settings.glossaryDefaultScope ?? 'local') === 'global'
+    glossaryGlobalInput.checked = useGlobal
+    floatingGlossaryGlobalInput.checked = useGlobal
   }
 
   const handleGlossaryListClick = async (event: Event) => {
-    const button = (event.target as Element | null)?.closest<HTMLButtonElement>(
-      'button[data-glossary-action]',
+    const button = (event.target as Element | null)?.closest<HTMLElement>(
+      '[data-glossary-action]',
     )
     if (!button) return
     const entry = state.glossary.find((item) => item.id === button.dataset.entryId)
     if (!entry) return
+    if (button.dataset.glossaryAction === 'toggle-global') {
+      const global = (button as HTMLInputElement).checked
+      const outcome = await performRequest({
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'glossary.upsert.request',
+        requestId: createRequestId('glossary-scope'),
+        entryId: entry.id,
+        canonical: entry.canonical,
+        variants: entry.variants,
+        hint: entry.hint,
+        scope: global ? 'global' : 'local',
+        chatId: state.activeChatId ?? undefined,
+      })
+      if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
+        applyPhaseFourResponse(outcome.value)
+      else state.phaseFourMessage = 'Glossary scope was not changed. Try again.'
+      render()
+      return
+    }
     if (button.dataset.glossaryAction === 'edit') {
       editingGlossaryEntryId = entry.id
       glossaryCanonicalInput.value = entry.canonical
@@ -1704,6 +1897,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       floatingGlossaryCanonicalInput.value = entry.canonical
       floatingGlossaryVariantsInput.value = entry.variants.join(', ')
       floatingGlossaryHintInput.value = entry.hint
+      const isGlobal = (entry.scope ?? 'global') === 'global'
+      glossaryGlobalInput.checked = isGlobal
+      floatingGlossaryGlobalInput.checked = isGlobal
       render()
       return
     }
@@ -1712,6 +1908,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       type: 'glossary.delete.request',
       requestId: createRequestId('glossary-delete'),
       entryId: entry.id,
+      chatId: state.activeChatId ?? undefined,
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
       applyPhaseFourResponse(outcome.value)
@@ -1723,6 +1920,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       protocolVersion: PROTOCOL_VERSION,
       type: 'glossary.undo.request',
       requestId: createRequestId('glossary-undo'),
+      chatId: state.activeChatId ?? undefined,
     })
     if (outcome.status === 'resolved' && outcome.value.type === 'phase4.state.response')
       applyPhaseFourResponse(outcome.value)
@@ -2163,6 +2361,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         : grammarRepairSelect.value === 'when_needed'
           ? 'when_needed'
           : 'off'
+    render()
     scheduleSettingsSave(0)
   }
   const handleDebugEnabledChange = () => {
@@ -2177,6 +2376,22 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.settings.normalizationModelOverride = ''
     render()
     normalizationModelPicker.refresh()
+    scheduleSettingsSave(0)
+  }
+  const handleDecisionConnectionChange = () => {
+    state.settings.decisionConnectionId = decisionConnectionSelect.value || null
+    scheduleSettingsSave(0)
+  }
+  const handleGlossaryDefaultScopeChange = (event: Event) => {
+    const select = event.currentTarget as HTMLSelectElement
+    state.settings.glossaryDefaultScope = select.value === 'global' ? 'global' : 'local'
+    glossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope
+    floatingGlossaryDefaultScopeSelect.value = state.settings.glossaryDefaultScope
+    if (!editingGlossaryEntryId) {
+      const global = state.settings.glossaryDefaultScope === 'global'
+      glossaryGlobalInput.checked = global
+      floatingGlossaryGlobalInput.checked = global
+    }
     scheduleSettingsSave(0)
   }
   const handleSaveGlossaryClick = () => void saveGlossaryEntry('drawer')
@@ -2318,8 +2533,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         Number.parseFloat(shellStyle.paddingBottom) +
         Number.parseFloat(shellStyle.borderBottomWidth)
       const contentBottom =
-        floatingTools.getBoundingClientRect().bottom -
-        floatingShell.getBoundingClientRect().top
+        floatingTools.getBoundingClientRect().bottom - floatingShell.getBoundingClientRect().top
       const fittedHeight = Math.min(
         Math.max(1, viewport.height - 24),
         Math.ceil(contentBottom + bottomInset),
@@ -2368,11 +2582,19 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   grammarRepairSelect.addEventListener('change', handleGrammarRepairModeChange)
   debugEnabledToggle.addEventListener('change', handleDebugEnabledChange)
   contextCountInput.addEventListener('input', handleContextCountInput)
+  referenceCacheLimitInput.addEventListener('input', handleReferenceCacheLimitInput)
+  referenceAdmissionOccurrencesInput.addEventListener(
+    'input',
+    handleReferenceAdmissionOccurrencesInput,
+  )
   contextualToggle.addEventListener('change', handleSettingToggleChange)
   debugRefreshButton.addEventListener('click', handleDebugRefreshClick)
   debugCopyButton.addEventListener('click', handleDebugCopyClick)
   debugClearButton.addEventListener('click', handleDebugClearClick)
   normalizationConnectionSelect.addEventListener('change', handleNormalizationConnectionChange)
+  decisionConnectionSelect.addEventListener('change', handleDecisionConnectionChange)
+  glossaryDefaultScopeSelect.addEventListener('change', handleGlossaryDefaultScopeChange)
+  floatingGlossaryDefaultScopeSelect.addEventListener('change', handleGlossaryDefaultScopeChange)
   glossarySaveButton.addEventListener('click', handleSaveGlossaryClick)
   glossaryCancelButton.addEventListener('click', handleCancelGlossaryClick)
   glossaryUndoButton.addEventListener('click', handleUndoGlossaryClick)
@@ -2434,6 +2656,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     cancelEditCandidatesButton.removeEventListener('click', handleCancelEditCandidatesClick)
     if (settingsSaveTimer) clearTimeout(settingsSaveTimer)
     contextCountInput.removeEventListener('input', handleContextCountInput)
+    referenceCacheLimitInput.removeEventListener('input', handleReferenceCacheLimitInput)
+    referenceAdmissionOccurrencesInput.removeEventListener(
+      'input',
+      handleReferenceAdmissionOccurrencesInput,
+    )
     contextualToggle.removeEventListener('change', handleSettingToggleChange)
     grammarRepairSelect.removeEventListener('change', handleGrammarRepairModeChange)
     debugEnabledToggle.removeEventListener('change', handleDebugEnabledChange)
@@ -2441,6 +2668,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     debugCopyButton.removeEventListener('click', handleDebugCopyClick)
     debugClearButton.removeEventListener('click', handleDebugClearClick)
     normalizationConnectionSelect.removeEventListener('change', handleNormalizationConnectionChange)
+    decisionConnectionSelect.removeEventListener('change', handleDecisionConnectionChange)
+    glossaryDefaultScopeSelect.removeEventListener('change', handleGlossaryDefaultScopeChange)
+    floatingGlossaryDefaultScopeSelect.removeEventListener(
+      'change',
+      handleGlossaryDefaultScopeChange,
+    )
     glossarySaveButton.removeEventListener('click', handleSaveGlossaryClick)
     glossaryCancelButton.removeEventListener('click', handleCancelGlossaryClick)
     glossaryUndoButton.removeEventListener('click', handleUndoGlossaryClick)
@@ -2459,6 +2692,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     floatingWidget.root.removeEventListener('keydown', handleFloatingScrollKey)
     document.removeEventListener('keydown', handleFloatingFocusTrap, true)
     normalizationModelPicker.destroy()
+    nativeSttObserver.disconnect()
+    if (nativeSttScanFrame !== null) cancelAnimationFrame(nativeSttScanFrame)
+    for (const button of document.querySelectorAll('.jt-native-stt-hidden'))
+      button.classList.remove('jt-native-stt-hidden')
     composerLauncher.remove()
     composerLauncherStyle.remove()
     floatingWidget.destroy()
@@ -2474,11 +2711,12 @@ function renderConnectionOptions(
   select: HTMLSelectElement,
   connections: readonly NormalizationConnectionOption[],
   selectedId: string | null,
+  defaultLabel = 'Main connection',
 ): void {
   select.replaceChildren()
   const main = document.createElement('option')
   main.value = ''
-  main.textContent = 'Main connection'
+  main.textContent = defaultLabel
   select.append(main)
   for (const connection of connections) {
     const option = document.createElement('option')
@@ -2499,6 +2737,7 @@ function renderGlossary(
   container: HTMLElement,
   entries: readonly GlossaryEntry[],
   query = '',
+  hasActiveChat = true,
 ): void {
   container.replaceChildren()
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -2526,6 +2765,16 @@ function renderGlossary(
     text.textContent = `${entry.canonical}${entry.variants.length ? ` — heard as: ${entry.variants.join(', ')}` : ''}${entry.hint ? ` — ${entry.hint}` : ''} — source: ${entry.source === 'explicit-spelling' ? 'explicit spelling' : 'manual'} — used ${entry.useCount} ${entry.useCount === 1 ? 'time' : 'times'}`
     const actions = document.createElement('div')
     actions.className = 'jt-actions'
+    const globalLabel = document.createElement('label')
+    const globalToggle = document.createElement('input')
+    globalToggle.type = 'checkbox'
+    globalToggle.checked = (entry.scope ?? 'global') === 'global'
+    globalToggle.disabled = !hasActiveChat
+    if (!hasActiveChat) globalToggle.title = 'Select a chat before changing entry scope.'
+    globalToggle.dataset.glossaryAction = 'toggle-global'
+    globalToggle.dataset.entryId = entry.id
+    globalLabel.append(globalToggle, ' Global')
+    actions.append(globalLabel)
     for (const action of ['edit', 'delete'] as const) {
       const button = document.createElement('button')
       button.type = 'button'
@@ -2728,9 +2977,7 @@ function detectQuotationBoundaryHint(input: string): 'double' | 'single' | null 
   const trimmed = input.trim()
   if (/^begin\s+single\b[\s\S]*\bend\s+single[.,;:!?]*$/iu.test(trimmed)) return 'single'
   if (
-    /^begin(?:ning)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing)?\s+speech[.,;:!?]*$/iu.test(
-      trimmed,
-    )
+    /^begin(?:ning|s)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing|s)?\s+speech[.,;:!?]*$/iu.test(trimmed)
   )
     return 'double'
   const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu
@@ -2838,6 +3085,9 @@ function floatingMarkup(): string {
                 <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-floating-glossary-canonical></label>
                 <label>Heard-as variants<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-floating-glossary-variants></label>
                 <label>Optional hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-floating-glossary-hint></label>
+                <label>Default glossary scope<select data-floating-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
+                <label><span><input type="checkbox" data-floating-glossary-global> Use this entry in all chats</span></label>
+                <small data-floating-glossary-scope-notice hidden>Select a chat to create a chat-specific glossary entry. New entries created here are global.</small>
               </div>
               <div class="jt-actions">
                 <button type="button" data-floating-glossary-save>Add entry</button>
@@ -2911,6 +3161,7 @@ function shellMarkup(): string {
       .jt-history { max-height: 12rem; overflow: auto; padding-inline-start: 1.4rem; }
       .jt-form-grid { display: grid; gap: .5rem; }
       .jt-form-grid label { display: grid; gap: .25rem; font-size: .85rem; }
+      .jt-setting-warning { color: #e53e3e; font-weight: 600; }
       .jt-form-grid input, .jt-form-grid select { width: 100%; min-width: 0; min-height: 2.3rem; padding: .4rem .55rem; }
       .jt-proposal { display: grid; gap: .55rem; padding: .7rem; border: 1px solid #d69e2e; border-radius: .5rem; }
       .jt-proposal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: .55rem; background: color-mix(in srgb, currentColor 6%, transparent); }
@@ -3101,12 +3352,15 @@ function shellMarkup(): string {
 
       <section class="jt-shell__card" aria-labelledby="jt-context-title">
         <h3 id="jt-context-title">Context and glossary</h3>
-        <p class="jt-shell__notice">The message count keeps that many recent assistant messages plus the ordinary recent-message window available for extracting names and proper nouns. Names and proper nouns extracted from the active character card are always included. Title names are corroborated against the card body when possible and used as a fallback when the body never names the character. After speech-to-text finishes, the normalization connection receives the current recording, the glossary, and only that list of names and proper nouns. It never receives the chat messages themselves, the working draft, the character card, or audio. Chat history cannot activate dictation commands; command detection stays local to the current recording. Lumiverse STT remains independently managed by the host and receives no added context. Set the count to 0 to exclude chat history; card-derived references remain available.</p>
+        <p class="jt-shell__notice">The message count controls the recent window scanned for names and proper nouns. Deduplicated chat and growing-draft candidates must pass the Lumiverse decision model before use; accepted and rejected verdicts are reused so unchanged chat history is not checked again across recordings. Existing rolling entries are validated once when upgraded. Card candidates are checked once for the lifetime of the chat cache, remain permanently available after approval, and do not consume rolling slots. After speech-to-text finishes, the normalization connection receives the current recording, glossary, and approved reference lists—not chat messages, the draft, card text, or audio. Set the message count to 0 to stop scanning new history; set the cache limit to 0 to disable retained rolling references.</p>
         <div class="jt-form-grid">
           <label>Messages scanned for references (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
+          <label>Rolling name cache (0–200, default 30)<input type="number" min="0" max="200" step="1" value="30" data-reference-cache-limit></label>
+          <label>Capitalized occurrences before Jev (1–5, default 1)<input type="number" min="1" max="5" step="1" value="1" data-reference-admission-occurrences></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
-          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small></label>
+          <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. “When needed” needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose “Always” to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
+          <label>Decision model connection<select data-decision-connection><option value="">Default decision connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
         </div>
         <details class="jt-proposal__details">
@@ -3129,6 +3383,9 @@ function shellMarkup(): string {
           <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-glossary-canonical></label>
           <label>Heard-as variants, comma separated<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-glossary-variants></label>
           <label>Optional reference or hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-glossary-hint></label>
+          <label>Default glossary scope<select data-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
+          <label><span><input type="checkbox" data-glossary-global> Use this entry in all chats</span></label>
+          <small data-glossary-scope-notice hidden>Select a chat to create a chat-specific glossary entry. New entries created here are global.</small>
         </div>
         <div class="jt-actions">
           <button type="button" data-glossary-save>Add entry</button>

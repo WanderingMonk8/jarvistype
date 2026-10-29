@@ -108,10 +108,15 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       isNonNegativeInteger(value.expectedVersion)
     )
   }
-  if (value.type === 'phase4.load.request' || value.type === 'glossary.undo.request') return true
+  if (value.type === 'phase4.load.request' || value.type === 'glossary.undo.request')
+    return value.chatId === undefined || isIdentifier(value.chatId)
   if (value.type === 'debug.log.request')
     return value.clear === undefined || typeof value.clear === 'boolean'
-  if (value.type === 'phase4.settings.update.request') return isPhaseFourSettings(value.settings)
+  if (value.type === 'phase4.settings.update.request')
+    return (
+      isPhaseFourSettings(value.settings) &&
+      (value.chatId === undefined || isIdentifier(value.chatId))
+    )
   if (value.type === 'glossary.upsert.request') {
     return (
       (value.entryId === undefined || isIdentifier(value.entryId)) &&
@@ -120,10 +125,13 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       value.variants.length <= 20 &&
       value.variants.every((variant) => isBoundedString(variant, 1, 200)) &&
       typeof value.hint === 'string' &&
-      value.hint.length <= 500
+      value.hint.length <= 500 &&
+      (value.scope === undefined || value.scope === 'local' || value.scope === 'global') &&
+      (value.chatId === undefined || isIdentifier(value.chatId))
     )
   }
-  if (value.type === 'glossary.delete.request') return isIdentifier(value.entryId)
+  if (value.type === 'glossary.delete.request')
+    return isIdentifier(value.entryId) && (value.chatId === undefined || isIdentifier(value.chatId))
   return false
 }
 
@@ -199,9 +207,12 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
       isPhaseFourSettings(value.settings) &&
       Array.isArray(value.connections) &&
       value.connections.every(isNormalizationConnectionOption) &&
+      Array.isArray(value.decisionConnections) &&
+      value.decisionConnections.every(isNormalizationConnectionOption) &&
       Array.isArray(value.glossary) &&
       value.glossary.every(isGlossaryEntry) &&
       typeof value.canUndoGlossary === 'boolean' &&
+      typeof value.decisionModelAvailable === 'boolean' &&
       (value.notice === undefined || isBoundedString(value.notice, 1, 1_000))
     )
   }
@@ -344,10 +355,22 @@ function isPhaseFourSettings(value: unknown): boolean {
     isRecord(value) &&
     isNonNegativeInteger(value.contextMessageCount) &&
     value.contextMessageCount <= 20 &&
+    (value.referenceCacheLimit === undefined ||
+      (isNonNegativeInteger(value.referenceCacheLimit) && value.referenceCacheLimit <= 200)) &&
+    (value.referenceAdmissionOccurrences === undefined ||
+      (isNonNegativeInteger(value.referenceAdmissionOccurrences) &&
+        value.referenceAdmissionOccurrences >= 1 &&
+        value.referenceAdmissionOccurrences <= 5)) &&
     typeof value.contextualNormalizationEnabled === 'boolean' &&
     (value.grammarRepairMode === 'off' ||
       value.grammarRepairMode === 'when_needed' ||
       value.grammarRepairMode === 'always') &&
+    (value.glossaryDefaultScope === undefined ||
+      value.glossaryDefaultScope === 'local' ||
+      value.glossaryDefaultScope === 'global') &&
+    (value.decisionConnectionId === undefined ||
+      value.decisionConnectionId === null ||
+      isIdentifier(value.decisionConnectionId)) &&
     (value.normalizationConnectionId === null || isIdentifier(value.normalizationConnectionId)) &&
     typeof value.normalizationModelOverride === 'string' &&
     value.normalizationModelOverride.length <= 200 &&
@@ -397,6 +420,11 @@ function isNormalizationProposal(value: unknown): boolean {
 function isEditProposal(value: unknown): boolean {
   return (
     isRecord(value) &&
+    (value.failedCommand === undefined ||
+      (isRecord(value.failedCommand) &&
+        isPositiveInteger(value.failedCommand.index) &&
+        isIdentifier(value.failedCommand.operationId) &&
+        isBoundedString(value.failedCommand.reason, 1, 1000))) &&
     isIdentifier(value.operationId) &&
     isIdentifier(value.chatId) &&
     isNonNegativeInteger(value.expectedVersion) &&

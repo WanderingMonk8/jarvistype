@@ -3360,8 +3360,8 @@ function shellMarkup(): string {
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. “When needed” needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose “Always” to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
-          <label>Decision model connection<select data-decision-connection><option value="">Default decision connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
+          <label>Decision model connection<select data-decision-connection><option value="">Default decision connection</option></select></label>
         </div>
         <details class="jt-proposal__details">
           <summary>Debug timing log</summary>

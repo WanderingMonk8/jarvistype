@@ -2273,6 +2273,24 @@ test('takes off identical first and last sentences in one compound instruction',
   )
 })
 
+test('deletes a dictated inclusive passage across paragraphs without provider interpretation', async () => {
+  const userId = 'delete-range-user'
+  const chatId = 'delete-range-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Before. I remember the time we met.\n\nMore words nearly in an instant she returned.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'delete-range-interpret', operationId: 'delete-range-operation', chatId,
+    expectedVersion: 1,
+    instructionTranscript: 'Remove the passage from I remember the time to nearly in an instant.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Before. She returned.')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('deletes one positional sentence without a provider interpretation', async () => {
   const userId = 'single-sentence-deletion-user'
   const chatId = 'single-sentence-deletion-chat'

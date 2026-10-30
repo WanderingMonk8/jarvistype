@@ -928,6 +928,56 @@ test('attaches inserted quotation marks directly to an exact sentence target', (
   }
 })
 
+test('deletes an inclusive range across paragraphs and joins the remaining text safely', () => {
+  const text = 'Before. I remember the time we met.\n\nMore words nearly in an instant she returned.'
+  const plan = {
+    schemaVersion: 2 as const, draftVersion: 1, explanation: 'Delete a passage.',
+    operations: [{ id: 'range', type: 'delete_range' as const,
+      target: { exactText: 'I remember the time' }, destination: { exactText: 'nearly in an instant' } }],
+  }
+  const result = executeEditPlan(text, [], 1, plan)
+  assert.equal(result.ok && result.afterText, 'Before. She returned.')
+  const comma = executeEditPlan('Before, start one.\n\nlast She returned.', [], 1, {
+    ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'last' } }],
+  })
+  assert.equal(comma.ok && comma.afterText, 'Before, she returned.')
+  const reversed = executeEditPlan(text, [], 1, {
+    ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'nearly in an instant' }, destination: { exactText: 'I remember the time' } }],
+  })
+  assert.equal(reversed.ok, false)
+  const ambiguous = executeEditPlan('start start end.', [], 1, {
+    ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+  })
+  assert.equal(ambiguous.ok, false)
+  for (const mark of ['.', '?', '!', '…', '...']) {
+    const terminal = executeEditPlan(`Before, start words end${mark} She returned.`, [], 1, {
+      ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+    })
+    assert.equal(terminal.ok && terminal.afterText, 'Before, she returned.')
+    if (terminal.ok) assert.equal(terminal.operations[0]?.beforeText, `start words end${mark}`)
+  }
+  const inner = executeEditPlan('Before, start words end, she returned.', [], 1, {
+    ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+  })
+  assert.equal(inner.ok && inner.afterText, 'Before, she returned.')
+  for (const [before, after] of [
+    [' ', ' '],
+    ['   ', '  '],
+    ['\t', '\t\t'],
+    ['\n\n', '\n\n'],
+    ['\n  ', '  \n'],
+  ] as const) {
+    const spaced = executeEditPlan(`Left${before}start removed end${after}right.`, [], 1, {
+      ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+    })
+    assert.equal(spaced.ok && spaced.afterText, 'Left right.')
+  }
+  const attachedPunctuation = executeEditPlan('Left start words end, right.', [], 1, {
+    ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+  })
+  assert.equal(attachedPunctuation.ok && attachedPunctuation.afterText, 'Left, right.')
+})
+
 test('deletion consumes one adjacent horizontal separator without touching other text', () => {
   const text = 'Keep this sentence. Remove this sentence.\n\nAnother paragraph.'
   const seeded = applyManualEdit(createDraftSession('delete-chat'), text, {

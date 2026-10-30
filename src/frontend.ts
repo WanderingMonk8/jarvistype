@@ -116,6 +116,7 @@ export const COMMAND_GROUPS = [
         'Delete',
         'Say “delete,” “remove,” “take off,” “take out,” “erase,” or “cut,” followed by the target—for example, “Take off the second sentence in paragraph 1.”',
       ],
+      ['Delete a range', 'Remove the passage from “I remember the time” to “nearly in an instant.” Both endpoint phrases and the text between them are removed.'],
       ['Move', 'Move, relocate, or shift “approved” before “pending” in paragraph 1.'],
       ['Move before', 'Move paragraph 3 before paragraph 1.'],
       ['Move after', 'Move paragraph 1 after paragraph 2.'],

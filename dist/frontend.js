@@ -97,7 +97,7 @@ function parseOperation(value) {
   ]);
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null;
   const type = value.type;
-  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "move_before" && type !== "move_after")
+  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "delete_range" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "move_before" && type !== "move_after")
     return null;
   const target = parseTarget(value.target);
   if (!target) return null;
@@ -119,6 +119,9 @@ function parseOperation(value) {
       return null;
     if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0 || target.scope !== void 0))
       return null;
+  } else if (type === "delete_range") {
+    if (text !== void 0 || caseMode !== void 0 || !destination || includeTrailingPunctuation !== void 0) return null;
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null;
   } else if (type === "move_before" || type === "move_after") {
     if (text !== void 0 || caseMode !== void 0 || !destination) return null;
     if (target.scope !== void 0 || destination.scope !== void 0) return null;
@@ -461,6 +464,7 @@ var COMMAND_GROUPS = [
         "Delete",
         "Say \u201Cdelete,\u201D \u201Cremove,\u201D \u201Ctake off,\u201D \u201Ctake out,\u201D \u201Cerase,\u201D or \u201Ccut,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
       ],
+      ["Delete a range", "Remove the passage from \u201CI remember the time\u201D to \u201Cnearly in an instant.\u201D Both endpoint phrases and the text between them are removed."],
       ["Move", "Move, relocate, or shift \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
       ["Move before", "Move paragraph 3 before paragraph 1."],
       ["Move after", "Move paragraph 1 after paragraph 2."]

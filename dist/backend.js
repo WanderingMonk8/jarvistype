@@ -800,6 +800,8 @@ function parseEditPlan(value) {
 function executeEditPlan(cleanText, paragraphs, currentVersion, plan, protectedCasingTerms = [], options = {}) {
   const formatText = options.skipOperationFormatting !== true;
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: "stale draft version" };
+  if (plan.operations.length === 1 && plan.operations[0]?.type === "delete_range")
+    return executeRangeDeletion(cleanText, paragraphs, plan.operations[0], protectedCasingTerms);
   const inlineMoves = plan.operations.filter(isInlineMoveOperation);
   if (inlineMoves.length) {
     if (inlineMoves.length !== plan.operations.length || inlineMoves.length > 1)
@@ -892,7 +894,7 @@ function parseOperation(value) {
   ]);
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null;
   const type = value.type;
-  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "move_before" && type !== "move_after")
+  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "delete_range" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "move_before" && type !== "move_after")
     return null;
   const target = parseTarget(value.target);
   if (!target) return null;
@@ -914,6 +916,9 @@ function parseOperation(value) {
       return null;
     if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0 || target.scope !== void 0))
       return null;
+  } else if (type === "delete_range") {
+    if (text !== void 0 || caseMode !== void 0 || !destination || includeTrailingPunctuation !== void 0) return null;
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null;
   } else if (type === "move_before" || type === "move_after") {
     if (text !== void 0 || caseMode !== void 0 || !destination) return null;
     if (target.scope !== void 0 || destination.scope !== void 0) return null;
@@ -1172,6 +1177,42 @@ function isInlineMoveOperation(operation) {
 }
 function hasInlineSelector(target) {
   return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0;
+}
+function executeRangeDeletion(text, paragraphs, operation, protectedCasingTerms) {
+  if (!operation.destination) return { ok: false, reason: "range end is required" };
+  const start = resolveTextTarget(text, paragraphs, operation.target, "range start");
+  if (typeof start === "string") return { ok: false, reason: start };
+  const end = resolveTextTarget(text, paragraphs, operation.destination, "range end");
+  if (typeof end === "string") return { ok: false, reason: end };
+  if (end.start < start.end) return { ok: false, reason: "range endpoints are reversed or overlap" };
+  const endingPunctuation = text.slice(end.end).match(/^(?:\.{3}|[.!?…]+)(?=[”’"')\]]*(?:\s|$))/u)?.[0] ?? "";
+  const deletionEnd = end.end + endingPunctuation.length;
+  const left = text.slice(0, start.start).replace(/\s+$/u, "");
+  let right = text.slice(deletionEnd).replace(/^\s+/u, "");
+  if (/[.!?…][”’"')\]]*$/u.test(left)) right = right.replace(/^[.!?…]+\s*/u, "");
+  else if (/[,;:—–-]$/u.test(left)) right = right.replace(/^[,;:—–-]+\s*/u, "");
+  if (right && /[.!?…][”’"')\]]*$/u.test(left))
+    right = capitalizeReplacementAtSentenceOpening(left, left.length, right);
+  else if (right && /[,;:—–-][”’"')\]]*$/u.test(left))
+    right = formatInsertionCasing(left, left.length, right, protectedCasingTerms);
+  const spacing = left && right && !/^[,.;:!?…)}\]”’]/u.test(right) ? " " : "";
+  const afterText = `${left}${spacing}${right}`;
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(text))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
+  if (afterText === text) return { ok: false, reason: "edit would not change the draft" };
+  return {
+    ok: true,
+    afterText,
+    operations: [{
+      ...operation,
+      startOffset: start.start,
+      endOffset: deletionEnd,
+      beforeText: text.slice(start.start, deletionEnd),
+      afterText: "",
+      paragraphOrdinal: start.paragraphOrdinal
+    }],
+    affectedParagraphOrdinals: [.../* @__PURE__ */ new Set([start.paragraphOrdinal, end.paragraphOrdinal])].sort((a, b) => a - b)
+  };
 }
 function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerms, formatText) {
   const source = resolveTextTarget(cleanText, paragraphs, operation.target, "move source");
@@ -5191,6 +5232,8 @@ function canonicalEditInstruction(instructionTranscript) {
   return instructionTranscript.replace(/^\s*please\s+/iu, "").replace(/^\s*(?:remove|take\s+(?:off|out)|erase|cut)\b/iu, "delete").replace(/[\s,]*\bplease\s*([.!?]*)\s*$/iu, "$1");
 }
 function parseDeterministicEditPlan(instructionTranscript, session) {
+  const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session.draftVersion);
+  if (rangeDeletion) return rangeDeletion;
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
     instructionTranscript,
     session.draftVersion
@@ -5244,6 +5287,29 @@ function parseDeterministicEditPlan(instructionTranscript, session) {
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session);
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement);
   return null;
+}
+function parseDeterministicRangeDeletion(instruction, draftVersion) {
+  const match = instruction.trim().match(
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')\s+(?:to|through|until)\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')[.!?]*$/iu
+  );
+  const unquoted = match ? null : instruction.trim().match(
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(.+?)\s+(?:to|through|until)\s+(.+?)[.!?]*$/iu
+  );
+  if (!match && (!unquoted || /\s(?:to|through|until)\s/iu.test(unquoted[2]))) return null;
+  const from = unwrapEditArgument((match ?? unquoted)[1]);
+  const to = unwrapEditArgument((match ?? unquoted)[2]);
+  if (!from || !to) return null;
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation: `Delete the passage from \u201C${from}\u201D through \u201C${to}\u201D.`,
+    operations: [{
+      id: "deterministic-delete-range",
+      type: "delete_range",
+      target: { exactText: from },
+      destination: { exactText: to }
+    }]
+  });
 }
 var EDIT_CLAUSE_VERB = "(?:replace|change|swap|substitute|delete|remove|take\\s+(?:off|out)|erase|cut|insert|add|place|put|append|prepend|tack|move|relocate|shift|split|break|divide|join|merge|combine|uppercase|lowercase|capitalize|make)";
 function splitEditClauses(instructionTranscript) {

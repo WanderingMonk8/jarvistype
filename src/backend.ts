@@ -1646,6 +1646,8 @@ function parseDeterministicEditPlan(
   instructionTranscript: string,
   session: PersistedDraftSession,
 ): EditPlan | null {
+  const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session.draftVersion)
+  if (rangeDeletion) return rangeDeletion
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
     instructionTranscript,
     session.draftVersion,
@@ -1699,6 +1701,25 @@ function parseDeterministicEditPlan(
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session)
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement)
   return null
+}
+
+function parseDeterministicRangeDeletion(instruction: string, draftVersion: number): EditPlan | null {
+  const match = instruction.trim().match(
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')\s+(?:to|through|until)\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')[.!?]*$/iu,
+  )
+  const unquoted = match ? null : instruction.trim().match(
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(.+?)\s+(?:to|through|until)\s+(.+?)[.!?]*$/iu,
+  )
+  if (!match && (!unquoted || /\s(?:to|through|until)\s/iu.test(unquoted[2]!))) return null
+  const from = unwrapEditArgument((match ?? unquoted)![1]!)
+  const to = unwrapEditArgument((match ?? unquoted)![2]!)
+  if (!from || !to) return null
+  return parseEditPlan({
+    schemaVersion: 2, draftVersion,
+    explanation: `Delete the passage from “${from}” through “${to}”.`,
+    operations: [{ id: 'deterministic-delete-range', type: 'delete_range',
+      target: { exactText: from }, destination: { exactText: to } }],
+  })
 }
 
 const EDIT_CLAUSE_VERB =

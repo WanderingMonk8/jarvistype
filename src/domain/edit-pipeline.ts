@@ -10,6 +10,7 @@ export type EditOperationType =
   | 'insert_before'
   | 'insert_after'
   | 'delete'
+  | 'delete_range'
   | 'append'
   | 'prepend'
   | 'case'
@@ -209,6 +210,8 @@ export function executeEditPlan(
 ): EditPipelineResult {
   const formatText = options.skipOperationFormatting !== true
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
+  if (plan.operations.length === 1 && plan.operations[0]?.type === 'delete_range')
+    return executeRangeDeletion(cleanText, paragraphs, plan.operations[0], protectedCasingTerms)
   const inlineMoves = plan.operations.filter(isInlineMoveOperation)
   if (inlineMoves.length) {
     if (inlineMoves.length !== plan.operations.length || inlineMoves.length > 1)
@@ -321,6 +324,7 @@ function parseOperation(value: unknown): EditOperation | null {
     type !== 'insert_before' &&
     type !== 'insert_after' &&
     type !== 'delete' &&
+    type !== 'delete_range' &&
     type !== 'append' &&
     type !== 'prepend' &&
     type !== 'case' &&
@@ -365,6 +369,9 @@ function parseOperation(value: unknown): EditOperation | null {
         target.scope !== undefined)
     )
       return null
+  } else if (type === 'delete_range') {
+    if (text !== undefined || caseMode !== undefined || !destination || includeTrailingPunctuation !== undefined) return null
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null
   } else if (type === 'move_before' || type === 'move_after') {
     if (text !== undefined || caseMode !== undefined || !destination) return null
     if (target.scope !== undefined || destination.scope !== undefined) return null
@@ -793,6 +800,42 @@ interface ResolvedTextTarget {
   paragraphOrdinal: number
   scopeStart: number
   scopeEnd: number
+}
+
+function executeRangeDeletion(
+  text: string,
+  paragraphs: readonly DraftParagraph[],
+  operation: EditOperation,
+  protectedCasingTerms: readonly string[],
+): EditPipelineResult {
+  if (!operation.destination) return { ok: false, reason: 'range end is required' }
+  const start = resolveTextTarget(text, paragraphs, operation.target, 'range start')
+  if (typeof start === 'string') return { ok: false, reason: start }
+  const end = resolveTextTarget(text, paragraphs, operation.destination, 'range end')
+  if (typeof end === 'string') return { ok: false, reason: end }
+  if (end.start < start.end) return { ok: false, reason: 'range endpoints are reversed or overlap' }
+  const endingPunctuation = text.slice(end.end).match(/^(?:\.{3}|[.!?…]+)(?=[”’"')\]]*(?:\s|$))/u)?.[0] ?? ''
+  const deletionEnd = end.end + endingPunctuation.length
+  const left = text.slice(0, start.start).replace(/\s+$/u, '')
+  let right = text.slice(deletionEnd).replace(/^\s+/u, '')
+  if (/[.!?…][”’"')\]]*$/u.test(left)) right = right.replace(/^[.!?…]+\s*/u, '')
+  else if (/[,;:—–-]$/u.test(left)) right = right.replace(/^[,;:—–-]+\s*/u, '')
+  if (right && /[.!?…][”’"')\]]*$/u.test(left))
+    right = capitalizeReplacementAtSentenceOpening(left, left.length, right)
+  else if (right && /[,;:—–-][”’"')\]]*$/u.test(left))
+    right = formatInsertionCasing(left, left.length, right, protectedCasingTerms)
+  const spacing = left && right && !/^[,.;:!?…)}\]”’]/u.test(right) ? ' ' : ''
+  const afterText = `${left}${spacing}${right}`
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(text))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  if (afterText === text) return { ok: false, reason: 'edit would not change the draft' }
+  return {
+    ok: true,
+    afterText,
+    operations: [{ ...operation, startOffset: start.start, endOffset: deletionEnd,
+      beforeText: text.slice(start.start, deletionEnd), afterText: '', paragraphOrdinal: start.paragraphOrdinal }],
+    affectedParagraphOrdinals: [...new Set([start.paragraphOrdinal, end.paragraphOrdinal])].sort((a, b) => a - b),
+  }
 }
 
 function executeInlineMove(

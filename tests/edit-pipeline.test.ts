@@ -2192,6 +2192,32 @@ test('ignores punctuation for unique text targets and uses it only to resolve le
   })
 })
 
+test('matches spoken possessives as whole tokens and rejects repeated or unrelated candidates', () => {
+  for (const [text, target, expected] of [
+    ["Max's book is here.", 'Maxis', 'Meg’s book is here.'],
+    ['Max’s book is here.', 'Maxis', 'Meg’s book is here.'],
+    ['Erbold’s book is here.', 'Erbolds', 'Meg’s book is here.'],
+    ['Lucas’s book is here.', 'Lucases', 'Meg’s book is here.'],
+    ["Max's book is here.", 'Maxes', 'Meg’s book is here.'],
+  ] as const) {
+    const result = executeEditPlan(text, [], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Replace possessive.',
+      operations: [{ id: 'replace', type: 'replace', target: { exactText: target }, text: 'Meg’s' }],
+    })
+    assert.equal(result.ok && result.afterText, expected)
+  }
+  const repeated = executeEditPlan("Max's book and Max’s coat.", [], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'Replace possessive.',
+    operations: [{ id: 'replace', type: 'replace', target: { exactText: 'Maxis' }, text: 'Meg’s' }],
+  })
+  assert.deepEqual(repeated, { ok: false, reason: 'possessive text target is ambiguous' })
+  const unrelated = executeEditPlan("Maxwell's book.", [], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'Replace possessive.',
+    operations: [{ id: 'replace', type: 'replace', target: { exactText: 'Maxis' }, text: 'Meg’s' }],
+  })
+  assert.equal(unrelated.ok, false)
+})
+
 test('matches an expanded contraction against contracted draft text', () => {
   const expanded = executeEditPlan(
     "I set the groceries down, and before turning on the light, we're viewing an apartment that is modest.",

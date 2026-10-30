@@ -1808,9 +1808,26 @@ function findExactOrFuzzyMatch(text, search, start, end, occurrence) {
   const lexicalMatch = findPunctuationInsensitiveMatch(text, search, start, end);
   if (typeof lexicalMatch !== "string") return lexicalMatch;
   if (lexicalMatch.includes("ambiguous")) return lexicalMatch;
+  const possessiveMatch = findSpokenPossessiveMatch(text, search, start, end);
+  if (typeof possessiveMatch !== "string") return possessiveMatch;
+  if (possessiveMatch.includes("ambiguous")) return possessiveMatch;
   const approximate = findApproximateMatch(text, search, start, end);
   if (typeof approximate !== "string") return approximate;
   return approximate.includes("ambiguous") ? "fuzzy text target is ambiguous" : "text target was not found";
+}
+function findSpokenPossessiveMatch(text, search, start, end) {
+  const wanted = tokenizeWithOffsets(search, 0, search.length);
+  if (wanted.length !== 1 || wanted[0].start !== 0 || wanted[0].end !== search.length)
+    return "possessive target was not found";
+  const spoken = wanted[0].value.replace(/[’']/gu, "");
+  const matches = tokenizeCachedDraftRange(text, start, end).filter((token) => {
+    const match = token.value.match(/^([\p{L}\p{N}]{2,})['’]s$/u);
+    if (!match || CONTRACTIONS[token.value.replace(/’/gu, "'")]) return false;
+    const stem = match[1];
+    return spoken === `${stem}s` || /[sxz]$/u.test(stem) && (spoken === `${stem}is` || spoken === `${stem}es`);
+  });
+  if (matches.length > 1) return "possessive text target is ambiguous";
+  return matches.length === 1 ? { start: matches[0].start, end: matches[0].end } : "possessive target was not found";
 }
 var CONTRACTIONS = {
   gotta: ["got", "to"],
@@ -2432,6 +2449,17 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
       const baseKey = base.toLocaleLowerCase();
       if (base.length < 3 || requireInitialUppercase && !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
         return heard;
+      if (!possessive && !hasProtectedOrdinaryWordUsage(correctedText, offset, offset + heard.length, baseKey)) {
+        const possessiveNames = [...referenceByKey.values()].filter((reference) => {
+          const key = reference.toLocaleLowerCase();
+          return !protectedKeys.has(key) && (baseKey === `${key}s` || /[sxz]$/u.test(key) && (baseKey === `${key}is` || baseKey === `${key}es`));
+        });
+        if (possessiveNames.length === 1) {
+          const canonical2 = possessiveNames[0];
+          correctedTerms.push({ heard, canonical: `${canonical2}\u2019s` });
+          return `${canonical2}\u2019s`;
+        }
+      }
       if (requireInitialUppercase && !possessive && (MODAL_WORDS.has(baseKey) || baseKey === "then") && !hasPositiveNameSignal(text, offset))
         return heard;
       const candidates = [...referenceByKey.values()].filter((reference) => {

@@ -4048,6 +4048,24 @@ test('preserves natural punctuation words inside newly inserted edit content', a
   }
 })
 
+test('replaces a spoken possessive with a capitalized explicit spelling', async () => {
+  const userId = 'spoken-possessive-edit-user'
+  const chatId = 'spoken-possessive-edit-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Max’s book is here.')
+  responses.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'spoken-possessive-interpret', operationId: 'spoken-possessive-operation',
+    chatId, expectedVersion: 1,
+    instructionTranscript: 'Replace Maxis with capitalized M-E-G-apostrophe-S.',
+  }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.afterText, 'Meg’s book is here.')
+})
+
 test('learns explicit spelling from an approved edit but not from its proposal', async () => {
   const userId = 'edit-spelling-user'
   const chatId = 'edit-spelling-chat'

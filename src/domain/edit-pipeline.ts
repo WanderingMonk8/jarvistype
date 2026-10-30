@@ -1689,11 +1689,38 @@ function findExactOrFuzzyMatch(
   if (typeof lexicalMatch !== 'string') return lexicalMatch
   if (lexicalMatch.includes('ambiguous')) return lexicalMatch
 
+  const possessiveMatch = findSpokenPossessiveMatch(text, search, start, end)
+  if (typeof possessiveMatch !== 'string') return possessiveMatch
+  if (possessiveMatch.includes('ambiguous')) return possessiveMatch
+
   const approximate = findApproximateMatch(text, search, start, end)
   if (typeof approximate !== 'string') return approximate
   return approximate.includes('ambiguous')
     ? 'fuzzy text target is ambiguous'
     : 'text target was not found'
+}
+
+/** Match a fully spelled possessive as one complete token, never a word prefix. */
+function findSpokenPossessiveMatch(
+  text: string,
+  search: string,
+  start: number,
+  end: number,
+): { start: number; end: number } | string {
+  const wanted = tokenizeWithOffsets(search, 0, search.length)
+  if (wanted.length !== 1 || wanted[0]!.start !== 0 || wanted[0]!.end !== search.length)
+    return 'possessive target was not found'
+  const spoken = wanted[0]!.value.replace(/[’']/gu, '')
+  const matches = tokenizeCachedDraftRange(text, start, end).filter((token) => {
+    const match = token.value.match(/^([\p{L}\p{N}]{2,})['’]s$/u)
+    if (!match || CONTRACTIONS[token.value.replace(/’/gu, "'")]) return false
+    const stem = match[1]!
+    return spoken === `${stem}s` || (/[sxz]$/u.test(stem) && (spoken === `${stem}is` || spoken === `${stem}es`))
+  })
+  if (matches.length > 1) return 'possessive text target is ambiguous'
+  return matches.length === 1
+    ? { start: matches[0]!.start, end: matches[0]!.end }
+    : 'possessive target was not found'
 }
 
 const CONTRACTIONS: Readonly<Record<string, readonly string[]>> = {

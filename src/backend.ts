@@ -3724,17 +3724,19 @@ function enforceAuthoritativeEditSpellings(
         // An explicit casing cue is authoritative: the payload normalizer must still see it,
         // otherwise the default spelling casing would overwrite the requested case.
         const cuedPayloadPattern = new RegExp(
-          `^\\s*(?<casing>capitalized|uppercase|lowercase|all caps)\\s+${spellingPayload}[.!?]?\\s*$`,
+          `^\\s*(?<casing>capitalized|uppercase|lowercase|all caps)\\s+${spellingPayload}(?<possessive>['’]s)?[.!?]?\\s*$`,
           'i',
         )
         const cuedPayload = text.match(cuedPayloadPattern)
         if (cuedPayload) {
           const casing = cuedPayload.groups?.casing ?? ''
+          const possessive = cuedPayload.groups?.possessive ?? ''
+          const canonical = `${candidate.canonical}${possessive}`
           const normalizedCasing = casing.toLocaleLowerCase()
           text =
             normalizedCasing === 'uppercase' || normalizedCasing === 'all caps'
-              ? `${casing} ${candidate.canonical.toUpperCase()}`
-              : applySpellingCasing(candidate.canonical, casing)
+              ? `${casing} ${canonical.toUpperCase()}`
+              : applySpellingCasing(canonical, casing)
           break
         }
         const wholePayloadPattern = new RegExp(`^\\s*${spellingPayload}[.!?]?\\s*$`, 'i')

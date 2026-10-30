@@ -4048,6 +4048,24 @@ test('preserves natural punctuation words inside newly inserted edit content', a
   }
 })
 
+test('consumes the casing command before a provider-rendered uppercase possessive replacement', async () => {
+  const userId = 'compact-possessive-cue-user'
+  const chatId = 'compact-possessive-cue-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She looks at Max’s book.')
+  responses.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'compact-possessive-cue-interpret', operationId: 'compact-possessive-cue-operation',
+    chatId, expectedVersion: 1,
+    instructionTranscript: 'Replace maxes with capitalized MEG’s.',
+  }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.afterText, 'She looks at Meg’s book.')
+})
+
 test('replaces a spoken possessive with a capitalized explicit spelling', async () => {
   const userId = 'spoken-possessive-edit-user'
   const chatId = 'spoken-possessive-edit-chat'

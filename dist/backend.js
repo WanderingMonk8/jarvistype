@@ -6861,14 +6861,16 @@ function enforceAuthoritativeEditSpellings(plan, candidates) {
       for (const candidate of candidates) {
         const spellingPayload = `${escapeRegularExpression(candidate.spokenVariant)}(?:\\s*[,;:]\\s*[A-Za-z][A-Za-z'-]*)?`;
         const cuedPayloadPattern = new RegExp(
-          `^\\s*(?<casing>capitalized|uppercase|lowercase|all caps)\\s+${spellingPayload}[.!?]?\\s*$`,
+          `^\\s*(?<casing>capitalized|uppercase|lowercase|all caps)\\s+${spellingPayload}(?<possessive>['\u2019]s)?[.!?]?\\s*$`,
           "i"
         );
         const cuedPayload = text.match(cuedPayloadPattern);
         if (cuedPayload) {
           const casing = cuedPayload.groups?.casing ?? "";
+          const possessive = cuedPayload.groups?.possessive ?? "";
+          const canonical = `${candidate.canonical}${possessive}`;
           const normalizedCasing = casing.toLocaleLowerCase();
-          text = normalizedCasing === "uppercase" || normalizedCasing === "all caps" ? `${casing} ${candidate.canonical.toUpperCase()}` : applySpellingCasing(candidate.canonical, casing);
+          text = normalizedCasing === "uppercase" || normalizedCasing === "all caps" ? `${casing} ${canonical.toUpperCase()}` : applySpellingCasing(canonical, casing);
           break;
         }
         const wholePayloadPattern = new RegExp(`^\\s*${spellingPayload}[.!?]?\\s*$`, "i");

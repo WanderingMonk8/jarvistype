@@ -3219,7 +3219,7 @@ var TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
   "\\.+(?=\\s*\\b(?:question mark|exclamation(?: (?:mark|point))?|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)",
   "giu"
 );
-var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk";
+var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?(?!\\s+(?:mark|point)\\b)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk";
 var LITERAL_PUNCTUATION_CONTEXTS = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
   /\btime\s+period\b/gi,
@@ -4847,7 +4847,8 @@ async function handleEditInterpretation(request, context, activeRequest) {
         authoritativeConversationReferences,
         spelling.learningCandidates.map((candidate) => candidate.canonical),
         session.cleanText,
-        draftIdentificationReferences
+        draftIdentificationReferences,
+        request.instructionTranscript
       ),
       session.cleanText,
       cardCharacterReferences,
@@ -6926,7 +6927,10 @@ function stripQualifiedAsInEditPayloads(plan) {
     })
   };
 }
-function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, conversationReferences, authoritativeConversationReferences, protectedTerms, draftText, draftIdentificationReferences) {
+function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, conversationReferences, authoritativeConversationReferences, protectedTerms, draftText, draftIdentificationReferences, instructionTranscript) {
+  const explicitLowercaseKeys = new Set(
+    [...instructionTranscript.matchAll(/\b(?:with|to|into|for)\s+lowercase\s+([\p{L}\p{M}\d]+(?:['’][\p{L}\p{M}\d]+)*)/giu)].map((match) => match[1].toLocaleLowerCase())
+  );
   const draftReferences = extractAuthoritativeCasingReferences(
     [{ role: "assistant", content: draftText }],
     {
@@ -6962,7 +6966,7 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
         const hasTitleReference = exactReferences.some(
           (reference) => /^\p{Lu}\p{Ll}/u.test(reference) && reference.toLocaleLowerCase() === key
         );
-        if (!hasTitleReference) return true;
+        if (!hasTitleReference || explicitLowercaseKeys.has(key)) return true;
         return /\p{Lu}{2,}/u.test(term) && term === term.toUpperCase();
       });
       const exactNormalized = canonicalizeExactConversationReferences(

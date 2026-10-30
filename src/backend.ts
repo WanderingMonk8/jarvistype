@@ -1168,6 +1168,7 @@ async function handleEditInterpretation(
         spelling.learningCandidates.map((candidate) => candidate.canonical),
         session.cleanText,
         draftIdentificationReferences,
+        request.instructionTranscript,
       ),
       session.cleanText,
       cardCharacterReferences,
@@ -3811,7 +3812,12 @@ function normalizeEditInputPayloads(
   protectedTerms: string[],
   draftText: string,
   draftIdentificationReferences: string[],
+  instructionTranscript: string,
 ): EditPlan {
+  const explicitLowercaseKeys = new Set(
+    [...instructionTranscript.matchAll(/\b(?:with|to|into|for)\s+lowercase\s+([\p{L}\p{M}\d]+(?:['’][\p{L}\p{M}\d]+)*)/giu)]
+      .map((match) => match[1]!.toLocaleLowerCase()),
+  )
   const draftReferences = extractAuthoritativeCasingReferences(
     [{ role: 'assistant', content: draftText }],
     {
@@ -3849,7 +3855,7 @@ function normalizeEditInputPayloads(
         const hasTitleReference = exactReferences.some(
           (reference) => /^\p{Lu}\p{Ll}/u.test(reference) && reference.toLocaleLowerCase() === key,
         )
-        if (!hasTitleReference) return true
+        if (!hasTitleReference || explicitLowercaseKeys.has(key)) return true
         return /\p{Lu}{2,}/u.test(term) && term === term.toUpperCase()
       })
       const exactNormalized = canonicalizeExactConversationReferences(

@@ -486,6 +486,20 @@ function correctReferenceTerms(
       )
         return heard
 
+      // A provider may omit the apostrophe from a spoken possessive ("Megs").
+      if (!possessive && !hasProtectedOrdinaryWordUsage(correctedText, offset, offset + heard.length, baseKey)) {
+        const possessiveNames = [...referenceByKey.values()].filter((reference) => {
+          const key = reference.toLocaleLowerCase()
+          return !protectedKeys.has(key) &&
+            (baseKey === `${key}s` || (/[sxz]$/u.test(key) && (baseKey === `${key}is` || baseKey === `${key}es`)))
+        })
+        if (possessiveNames.length === 1) {
+          const canonical = possessiveNames[0]!
+          correctedTerms.push({ heard, canonical: `${canonical}’s` })
+          return `${canonical}’s`
+        }
+      }
+
       if (
         requireInitialUppercase &&
         !possessive &&

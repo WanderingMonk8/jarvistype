@@ -800,6 +800,8 @@ function parseEditPlan(value) {
 function executeEditPlan(cleanText, paragraphs, currentVersion, plan, protectedCasingTerms = [], options = {}) {
   const formatText = options.skipOperationFormatting !== true;
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: "stale draft version" };
+  if (plan.operations.length === 1 && plan.operations[0]?.type === "delete_range")
+    return executeRangeDeletion(cleanText, paragraphs, plan.operations[0], protectedCasingTerms);
   const inlineMoves = plan.operations.filter(isInlineMoveOperation);
   if (inlineMoves.length) {
     if (inlineMoves.length !== plan.operations.length || inlineMoves.length > 1)
@@ -892,7 +894,7 @@ function parseOperation(value) {
   ]);
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null;
   const type = value.type;
-  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "move_before" && type !== "move_after")
+  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "delete_range" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "move_before" && type !== "move_after")
     return null;
   const target = parseTarget(value.target);
   if (!target) return null;
@@ -914,6 +916,9 @@ function parseOperation(value) {
       return null;
     if (type === "join_next" && (target.exactText !== void 0 || target.approximateText !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0 || target.scope !== void 0))
       return null;
+  } else if (type === "delete_range") {
+    if (text !== void 0 || caseMode !== void 0 || !destination || includeTrailingPunctuation !== void 0) return null;
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null;
   } else if (type === "move_before" || type === "move_after") {
     if (text !== void 0 || caseMode !== void 0 || !destination) return null;
     if (target.scope !== void 0 || destination.scope !== void 0) return null;
@@ -1172,6 +1177,42 @@ function isInlineMoveOperation(operation) {
 }
 function hasInlineSelector(target) {
   return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0;
+}
+function executeRangeDeletion(text, paragraphs, operation, protectedCasingTerms) {
+  if (!operation.destination) return { ok: false, reason: "range end is required" };
+  const start = resolveTextTarget(text, paragraphs, operation.target, "range start");
+  if (typeof start === "string") return { ok: false, reason: start };
+  const end = resolveTextTarget(text, paragraphs, operation.destination, "range end");
+  if (typeof end === "string") return { ok: false, reason: end };
+  if (end.start < start.end) return { ok: false, reason: "range endpoints are reversed or overlap" };
+  const endingPunctuation = text.slice(end.end).match(/^(?:\.{3}|[.!?…]+)(?=[”’"')\]]*(?:\s|$))/u)?.[0] ?? "";
+  const deletionEnd = end.end + endingPunctuation.length;
+  const left = text.slice(0, start.start).replace(/\s+$/u, "");
+  let right = text.slice(deletionEnd).replace(/^\s+/u, "");
+  if (/[.!?…][”’"')\]]*$/u.test(left)) right = right.replace(/^[.!?…]+\s*/u, "");
+  else if (/[,;:—–-]$/u.test(left)) right = right.replace(/^[,;:—–-]+\s*/u, "");
+  if (right && /[.!?…][”’"')\]]*$/u.test(left))
+    right = capitalizeReplacementAtSentenceOpening(left, left.length, right);
+  else if (right && /[,;:—–-][”’"')\]]*$/u.test(left))
+    right = formatInsertionCasing(left, left.length, right, protectedCasingTerms);
+  const spacing = left && right && !/^[,.;:!?…)}\]”’]/u.test(right) ? " " : "";
+  const afterText = `${left}${spacing}${right}`;
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(text))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
+  if (afterText === text) return { ok: false, reason: "edit would not change the draft" };
+  return {
+    ok: true,
+    afterText,
+    operations: [{
+      ...operation,
+      startOffset: start.start,
+      endOffset: deletionEnd,
+      beforeText: text.slice(start.start, deletionEnd),
+      afterText: "",
+      paragraphOrdinal: start.paragraphOrdinal
+    }],
+    affectedParagraphOrdinals: [.../* @__PURE__ */ new Set([start.paragraphOrdinal, end.paragraphOrdinal])].sort((a, b) => a - b)
+  };
 }
 function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerms, formatText) {
   const source = resolveTextTarget(cleanText, paragraphs, operation.target, "move source");
@@ -1767,9 +1808,26 @@ function findExactOrFuzzyMatch(text, search, start, end, occurrence) {
   const lexicalMatch = findPunctuationInsensitiveMatch(text, search, start, end);
   if (typeof lexicalMatch !== "string") return lexicalMatch;
   if (lexicalMatch.includes("ambiguous")) return lexicalMatch;
+  const possessiveMatch = findSpokenPossessiveMatch(text, search, start, end);
+  if (typeof possessiveMatch !== "string") return possessiveMatch;
+  if (possessiveMatch.includes("ambiguous")) return possessiveMatch;
   const approximate = findApproximateMatch(text, search, start, end);
   if (typeof approximate !== "string") return approximate;
   return approximate.includes("ambiguous") ? "fuzzy text target is ambiguous" : "text target was not found";
+}
+function findSpokenPossessiveMatch(text, search, start, end) {
+  const wanted = tokenizeWithOffsets(search, 0, search.length);
+  if (wanted.length !== 1 || wanted[0].start !== 0 || wanted[0].end !== search.length)
+    return "possessive target was not found";
+  const spoken = wanted[0].value.replace(/[’']/gu, "");
+  const matches = tokenizeCachedDraftRange(text, start, end).filter((token) => {
+    const match = token.value.match(/^([\p{L}\p{N}]{2,})['’]s$/u);
+    if (!match || CONTRACTIONS[token.value.replace(/’/gu, "'")]) return false;
+    const stem = match[1];
+    return spoken === `${stem}s` || /[sxz]$/u.test(stem) && (spoken === `${stem}is` || spoken === `${stem}es`);
+  });
+  if (matches.length > 1) return "possessive text target is ambiguous";
+  return matches.length === 1 ? { start: matches[0].start, end: matches[0].end } : "possessive target was not found";
 }
 var CONTRACTIONS = {
   gotta: ["got", "to"],
@@ -2391,6 +2449,17 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
       const baseKey = base.toLocaleLowerCase();
       if (base.length < 3 || requireInitialUppercase && !/^\p{Lu}/u.test(base) || protectedKeys.has(baseKey) || referenceByKey.has(baseKey))
         return heard;
+      if (!possessive && !hasProtectedOrdinaryWordUsage(correctedText, offset, offset + heard.length, baseKey)) {
+        const possessiveNames = [...referenceByKey.values()].filter((reference) => {
+          const key = reference.toLocaleLowerCase();
+          return !protectedKeys.has(key) && (baseKey === `${key}s` || /[sxz]$/u.test(key) && (baseKey === `${key}is` || baseKey === `${key}es`));
+        });
+        if (possessiveNames.length === 1) {
+          const canonical2 = possessiveNames[0];
+          correctedTerms.push({ heard, canonical: `${canonical2}\u2019s` });
+          return `${canonical2}\u2019s`;
+        }
+      }
       if (requireInitialUppercase && !possessive && (MODAL_WORDS.has(baseKey) || baseKey === "then") && !hasPositiveNameSignal(text, offset))
         return heard;
       const candidates = [...referenceByKey.values()].filter((reference) => {
@@ -3150,7 +3219,7 @@ var TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
   "\\.+(?=\\s*\\b(?:question mark|exclamation(?: (?:mark|point))?|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)",
   "giu"
 );
-var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk";
+var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?(?!\\s+(?:mark|point)\\b)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk";
 var LITERAL_PUNCTUATION_CONTEXTS = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
   /\btime\s+period\b/gi,
@@ -4778,7 +4847,8 @@ async function handleEditInterpretation(request, context, activeRequest) {
         authoritativeConversationReferences,
         spelling.learningCandidates.map((candidate) => candidate.canonical),
         session.cleanText,
-        draftIdentificationReferences
+        draftIdentificationReferences,
+        request.instructionTranscript
       ),
       session.cleanText,
       cardCharacterReferences,
@@ -5191,6 +5261,8 @@ function canonicalEditInstruction(instructionTranscript) {
   return instructionTranscript.replace(/^\s*please\s+/iu, "").replace(/^\s*(?:remove|take\s+(?:off|out)|erase|cut)\b/iu, "delete").replace(/[\s,]*\bplease\s*([.!?]*)\s*$/iu, "$1");
 }
 function parseDeterministicEditPlan(instructionTranscript, session) {
+  const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session.draftVersion);
+  if (rangeDeletion) return rangeDeletion;
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
     instructionTranscript,
     session.draftVersion
@@ -5244,6 +5316,29 @@ function parseDeterministicEditPlan(instructionTranscript, session) {
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session);
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement);
   return null;
+}
+function parseDeterministicRangeDeletion(instruction, draftVersion) {
+  const match = instruction.trim().match(
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')\s+(?:to|through|until)\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')[.!?]*$/iu
+  );
+  const unquoted = match ? null : instruction.trim().match(
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(.+?)\s+(?:to|through|until)\s+(.+?)[.!?]*$/iu
+  );
+  if (!match && (!unquoted || /\s(?:to|through|until)\s/iu.test(unquoted[2]))) return null;
+  const from = unwrapEditArgument((match ?? unquoted)[1]);
+  const to = unwrapEditArgument((match ?? unquoted)[2]);
+  if (!from || !to) return null;
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation: `Delete the passage from \u201C${from}\u201D through \u201C${to}\u201D.`,
+    operations: [{
+      id: "deterministic-delete-range",
+      type: "delete_range",
+      target: { exactText: from },
+      destination: { exactText: to }
+    }]
+  });
 }
 var EDIT_CLAUSE_VERB = "(?:replace|change|swap|substitute|delete|remove|take\\s+(?:off|out)|erase|cut|insert|add|place|put|append|prepend|tack|move|relocate|shift|split|break|divide|join|merge|combine|uppercase|lowercase|capitalize|make)";
 function splitEditClauses(instructionTranscript) {
@@ -6767,14 +6862,16 @@ function enforceAuthoritativeEditSpellings(plan, candidates) {
       for (const candidate of candidates) {
         const spellingPayload = `${escapeRegularExpression(candidate.spokenVariant)}(?:\\s*[,;:]\\s*[A-Za-z][A-Za-z'-]*)?`;
         const cuedPayloadPattern = new RegExp(
-          `^\\s*(?<casing>capitalized|uppercase|lowercase|all caps)\\s+${spellingPayload}[.!?]?\\s*$`,
+          `^\\s*(?<casing>capitalized|uppercase|lowercase|all caps)\\s+${spellingPayload}(?<possessive>['\u2019]s)?[.!?]?\\s*$`,
           "i"
         );
         const cuedPayload = text.match(cuedPayloadPattern);
         if (cuedPayload) {
           const casing = cuedPayload.groups?.casing ?? "";
+          const possessive = cuedPayload.groups?.possessive ?? "";
+          const canonical = `${candidate.canonical}${possessive}`;
           const normalizedCasing = casing.toLocaleLowerCase();
-          text = normalizedCasing === "uppercase" || normalizedCasing === "all caps" ? `${casing} ${candidate.canonical.toUpperCase()}` : applySpellingCasing(candidate.canonical, casing);
+          text = normalizedCasing === "uppercase" || normalizedCasing === "all caps" ? `${casing} ${canonical.toUpperCase()}` : applySpellingCasing(canonical, casing);
           break;
         }
         const wholePayloadPattern = new RegExp(`^\\s*${spellingPayload}[.!?]?\\s*$`, "i");
@@ -6830,7 +6927,10 @@ function stripQualifiedAsInEditPayloads(plan) {
     })
   };
 }
-function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, conversationReferences, authoritativeConversationReferences, protectedTerms, draftText, draftIdentificationReferences) {
+function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, conversationReferences, authoritativeConversationReferences, protectedTerms, draftText, draftIdentificationReferences, instructionTranscript) {
+  const explicitLowercaseKeys = new Set(
+    [...instructionTranscript.matchAll(/\b(?:with|to|into|for)\s+lowercase\s+([\p{L}\p{M}\d]+(?:['’][\p{L}\p{M}\d]+)*)/giu)].map((match) => match[1].toLocaleLowerCase())
+  );
   const draftReferences = extractAuthoritativeCasingReferences(
     [{ role: "assistant", content: draftText }],
     {
@@ -6866,7 +6966,7 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
         const hasTitleReference = exactReferences.some(
           (reference) => /^\p{Lu}\p{Ll}/u.test(reference) && reference.toLocaleLowerCase() === key
         );
-        if (!hasTitleReference) return true;
+        if (!hasTitleReference || explicitLowercaseKeys.has(key)) return true;
         return /\p{Lu}{2,}/u.test(term) && term === term.toUpperCase();
       });
       const exactNormalized = canonicalizeExactConversationReferences(

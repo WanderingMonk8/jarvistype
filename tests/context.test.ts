@@ -446,6 +446,19 @@ test('corrects a unique short phonetic name and preserves its possessive apostro
   assert.equal(correctFromConversationReferences("Cat's coat", ['Kat', 'Qat']).text, "Cat's coat")
 })
 
+test('restores omitted possessive apostrophes using unique named references', () => {
+  assert.equal(correctFromConversationReferences('Megs coat is blue.', ['Meg']).text, 'Meg’s coat is blue.')
+  assert.equal(correctEditTargetFromConversationReferences('megs', ['Meg']).text, 'Meg’s')
+  assert.equal(correctFromConversationReferences('Maxis coat is blue.', ['Max']).text, 'Max’s coat is blue.')
+  assert.equal(correctFromConversationReferences('Lucases coat is blue.', ['Lucas']).text, 'Lucas’s coat is blue.')
+  assert.equal(correctEditTargetFromConversationReferences('lucases', ['Lucas']).text, 'Lucas’s')
+  assert.equal(correctFromConversationReferences('Lucases coat is blue.', ['Lucas', 'Lucases']).text, 'Lucases coat is blue.')
+  assert.equal(correctFromConversationReferences('lucases coat is blue.', ['Lucas']).text, 'lucases coat is blue.')
+  assert.equal(correctFromConversationReferences('megs coat is blue.', ['Meg']).text, 'megs coat is blue.')
+  assert.equal(correctFromConversationReferences('Megs coat is blue.', ['Meg', 'Megs']).text, 'Megs coat is blue.')
+  assert.equal(correctFromConversationReferences('Megs coat is blue.', ['Meg'], ['Megs']).text, 'Megs coat is blue.')
+})
+
 test('collapses a provider-split possessive into one unique phonetic name', () => {
   assert.deepEqual(
     correctFromConversationReferences("Her boat's call alerted me.", ['Erbold']),

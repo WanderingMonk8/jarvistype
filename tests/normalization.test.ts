@@ -31,6 +31,18 @@ test('keeps ordinary as-in prose literal', () => {
   }
 })
 
+test('recognized command handlers consume their own cues and preserve literal vocabulary', () => {
+  for (const [raw, expected] of [
+    ['Alpha comma beta period', 'Alpha, beta.'],
+    ['Begin speech hello end speech', '“Hello”'],
+    ['I see capitalized white hawk.', 'I see White Hawk.'],
+    ['I saw an asterisk symbol.', 'I saw an asterisk symbol.'],
+    ['We discussed the use of capitalized words.', 'We discussed the use of capitalized words.'],
+  ] as const) {
+    assert.equal(normalizeDeterministically(raw, []).text, expected, raw)
+  }
+})
+
 test('supports spoken punctuation and paragraph commands', () => {
   const result = normalizeDeterministically(
     'Hello comma world question mark new paragraph Next period',

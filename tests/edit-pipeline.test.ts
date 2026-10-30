@@ -928,6 +928,56 @@ test('attaches inserted quotation marks directly to an exact sentence target', (
   }
 })
 
+test('deletes an inclusive range across paragraphs and joins the remaining text safely', () => {
+  const text = 'Before. I remember the time we met.\n\nMore words nearly in an instant she returned.'
+  const plan = {
+    schemaVersion: 2 as const, draftVersion: 1, explanation: 'Delete a passage.',
+    operations: [{ id: 'range', type: 'delete_range' as const,
+      target: { exactText: 'I remember the time' }, destination: { exactText: 'nearly in an instant' } }],
+  }
+  const result = executeEditPlan(text, [], 1, plan)
+  assert.equal(result.ok && result.afterText, 'Before. She returned.')
+  const comma = executeEditPlan('Before, start one.\n\nlast She returned.', [], 1, {
+    ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'last' } }],
+  })
+  assert.equal(comma.ok && comma.afterText, 'Before, she returned.')
+  const reversed = executeEditPlan(text, [], 1, {
+    ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'nearly in an instant' }, destination: { exactText: 'I remember the time' } }],
+  })
+  assert.equal(reversed.ok, false)
+  const ambiguous = executeEditPlan('start start end.', [], 1, {
+    ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+  })
+  assert.equal(ambiguous.ok, false)
+  for (const mark of ['.', '?', '!', '…', '...']) {
+    const terminal = executeEditPlan(`Before, start words end${mark} She returned.`, [], 1, {
+      ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+    })
+    assert.equal(terminal.ok && terminal.afterText, 'Before, she returned.')
+    if (terminal.ok) assert.equal(terminal.operations[0]?.beforeText, `start words end${mark}`)
+  }
+  const inner = executeEditPlan('Before, start words end, she returned.', [], 1, {
+    ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+  })
+  assert.equal(inner.ok && inner.afterText, 'Before, she returned.')
+  for (const [before, after] of [
+    [' ', ' '],
+    ['   ', '  '],
+    ['\t', '\t\t'],
+    ['\n\n', '\n\n'],
+    ['\n  ', '  \n'],
+  ] as const) {
+    const spaced = executeEditPlan(`Left${before}start removed end${after}right.`, [], 1, {
+      ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+    })
+    assert.equal(spaced.ok && spaced.afterText, 'Left right.')
+  }
+  const attachedPunctuation = executeEditPlan('Left start words end, right.', [], 1, {
+    ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+  })
+  assert.equal(attachedPunctuation.ok && attachedPunctuation.afterText, 'Left, right.')
+})
+
 test('deletion consumes one adjacent horizontal separator without touching other text', () => {
   const text = 'Keep this sentence. Remove this sentence.\n\nAnother paragraph.'
   const seeded = applyManualEdit(createDraftSession('delete-chat'), text, {
@@ -2140,6 +2190,32 @@ test('ignores punctuation for unique text targets and uses it only to resolve le
     ok: false,
     reason: 'punctuation-insensitive text target is ambiguous',
   })
+})
+
+test('matches spoken possessives as whole tokens and rejects repeated or unrelated candidates', () => {
+  for (const [text, target, expected] of [
+    ["Max's book is here.", 'Maxis', 'Meg’s book is here.'],
+    ['Max’s book is here.', 'Maxis', 'Meg’s book is here.'],
+    ['Erbold’s book is here.', 'Erbolds', 'Meg’s book is here.'],
+    ['Lucas’s book is here.', 'Lucases', 'Meg’s book is here.'],
+    ["Max's book is here.", 'Maxes', 'Meg’s book is here.'],
+  ] as const) {
+    const result = executeEditPlan(text, [], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Replace possessive.',
+      operations: [{ id: 'replace', type: 'replace', target: { exactText: target }, text: 'Meg’s' }],
+    })
+    assert.equal(result.ok && result.afterText, expected)
+  }
+  const repeated = executeEditPlan("Max's book and Max’s coat.", [], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'Replace possessive.',
+    operations: [{ id: 'replace', type: 'replace', target: { exactText: 'Maxis' }, text: 'Meg’s' }],
+  })
+  assert.deepEqual(repeated, { ok: false, reason: 'possessive text target is ambiguous' })
+  const unrelated = executeEditPlan("Maxwell's book.", [], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'Replace possessive.',
+    operations: [{ id: 'replace', type: 'replace', target: { exactText: 'Maxis' }, text: 'Meg’s' }],
+  })
+  assert.equal(unrelated.ok, false)
 })
 
 test('matches an expanded contraction against contracted draft text', () => {

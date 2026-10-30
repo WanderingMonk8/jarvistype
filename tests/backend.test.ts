@@ -2273,6 +2273,24 @@ test('takes off identical first and last sentences in one compound instruction',
   )
 })
 
+test('deletes a dictated inclusive passage across paragraphs without provider interpretation', async () => {
+  const userId = 'delete-range-user'
+  const chatId = 'delete-range-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Before. I remember the time we met.\n\nMore words nearly in an instant she returned.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'delete-range-interpret', operationId: 'delete-range-operation', chatId,
+    expectedVersion: 1,
+    instructionTranscript: 'Remove the passage from I remember the time to nearly in an instant.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(proposal.proposal.afterText, 'Before. She returned.')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('deletes one positional sentence without a provider interpretation', async () => {
   const userId = 'single-sentence-deletion-user'
   const chatId = 'single-sentence-deletion-chat'
@@ -4028,6 +4046,42 @@ test('preserves natural punctuation words inside newly inserted edit content', a
       'First paragraph.\n\nThe period of growth challenged everyone.',
     )
   }
+})
+
+test('consumes the casing command before a provider-rendered uppercase possessive replacement', async () => {
+  const userId = 'compact-possessive-cue-user'
+  const chatId = 'compact-possessive-cue-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She looks at Max’s book.')
+  responses.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'compact-possessive-cue-interpret', operationId: 'compact-possessive-cue-operation',
+    chatId, expectedVersion: 1,
+    instructionTranscript: 'Replace maxes with capitalized MEG’s.',
+  }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.afterText, 'She looks at Meg’s book.')
+})
+
+test('replaces a spoken possessive with a capitalized explicit spelling', async () => {
+  const userId = 'spoken-possessive-edit-user'
+  const chatId = 'spoken-possessive-edit-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Max’s book is here.')
+  responses.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request',
+    requestId: 'spoken-possessive-interpret', operationId: 'spoken-possessive-operation',
+    chatId, expectedVersion: 1,
+    instructionTranscript: 'Replace Maxis with capitalized M-E-G-apostrophe-S.',
+  }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+  if (response?.type !== 'edit.proposal.response') return
+  assert.equal(response.proposal.afterText, 'Meg’s book is here.')
 })
 
 test('learns explicit spelling from an approved edit but not from its proposal', async () => {

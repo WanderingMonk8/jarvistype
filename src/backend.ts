@@ -1168,6 +1168,7 @@ async function handleEditInterpretation(
         spelling.learningCandidates.map((candidate) => candidate.canonical),
         session.cleanText,
         draftIdentificationReferences,
+        request.instructionTranscript,
       ),
       session.cleanText,
       cardCharacterReferences,
@@ -1646,6 +1647,8 @@ function parseDeterministicEditPlan(
   instructionTranscript: string,
   session: PersistedDraftSession,
 ): EditPlan | null {
+  const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session.draftVersion)
+  if (rangeDeletion) return rangeDeletion
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
     instructionTranscript,
     session.draftVersion,
@@ -1699,6 +1702,25 @@ function parseDeterministicEditPlan(
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session)
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement)
   return null
+}
+
+function parseDeterministicRangeDeletion(instruction: string, draftVersion: number): EditPlan | null {
+  const match = instruction.trim().match(
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')\s+(?:to|through|until)\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')[.!?]*$/iu,
+  )
+  const unquoted = match ? null : instruction.trim().match(
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(.+?)\s+(?:to|through|until)\s+(.+?)[.!?]*$/iu,
+  )
+  if (!match && (!unquoted || /\s(?:to|through|until)\s/iu.test(unquoted[2]!))) return null
+  const from = unwrapEditArgument((match ?? unquoted)![1]!)
+  const to = unwrapEditArgument((match ?? unquoted)![2]!)
+  if (!from || !to) return null
+  return parseEditPlan({
+    schemaVersion: 2, draftVersion,
+    explanation: `Delete the passage from “${from}” through “${to}”.`,
+    operations: [{ id: 'deterministic-delete-range', type: 'delete_range',
+      target: { exactText: from }, destination: { exactText: to } }],
+  })
 }
 
 const EDIT_CLAUSE_VERB =
@@ -3703,17 +3725,19 @@ function enforceAuthoritativeEditSpellings(
         // An explicit casing cue is authoritative: the payload normalizer must still see it,
         // otherwise the default spelling casing would overwrite the requested case.
         const cuedPayloadPattern = new RegExp(
-          `^\\s*(?<casing>capitalized|uppercase|lowercase|all caps)\\s+${spellingPayload}[.!?]?\\s*$`,
+          `^\\s*(?<casing>capitalized|uppercase|lowercase|all caps)\\s+${spellingPayload}(?<possessive>['’]s)?[.!?]?\\s*$`,
           'i',
         )
         const cuedPayload = text.match(cuedPayloadPattern)
         if (cuedPayload) {
           const casing = cuedPayload.groups?.casing ?? ''
+          const possessive = cuedPayload.groups?.possessive ?? ''
+          const canonical = `${candidate.canonical}${possessive}`
           const normalizedCasing = casing.toLocaleLowerCase()
           text =
             normalizedCasing === 'uppercase' || normalizedCasing === 'all caps'
-              ? `${casing} ${candidate.canonical.toUpperCase()}`
-              : applySpellingCasing(candidate.canonical, casing)
+              ? `${casing} ${canonical.toUpperCase()}`
+              : applySpellingCasing(canonical, casing)
           break
         }
         const wholePayloadPattern = new RegExp(`^\\s*${spellingPayload}[.!?]?\\s*$`, 'i')
@@ -3788,7 +3812,12 @@ function normalizeEditInputPayloads(
   protectedTerms: string[],
   draftText: string,
   draftIdentificationReferences: string[],
+  instructionTranscript: string,
 ): EditPlan {
+  const explicitLowercaseKeys = new Set(
+    [...instructionTranscript.matchAll(/\b(?:with|to|into|for)\s+lowercase\s+([\p{L}\p{M}\d]+(?:['’][\p{L}\p{M}\d]+)*)/giu)]
+      .map((match) => match[1]!.toLocaleLowerCase()),
+  )
   const draftReferences = extractAuthoritativeCasingReferences(
     [{ role: 'assistant', content: draftText }],
     {
@@ -3826,7 +3855,7 @@ function normalizeEditInputPayloads(
         const hasTitleReference = exactReferences.some(
           (reference) => /^\p{Lu}\p{Ll}/u.test(reference) && reference.toLocaleLowerCase() === key,
         )
-        if (!hasTitleReference) return true
+        if (!hasTitleReference || explicitLowercaseKeys.has(key)) return true
         return /\p{Lu}{2,}/u.test(term) && term === term.toUpperCase()
       })
       const exactNormalized = canonicalizeExactConversationReferences(

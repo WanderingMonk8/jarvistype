@@ -1671,6 +1671,27 @@ test('supports synonymous hint descriptions when the semantic decision is confid
   if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'Find the chirurgeon.')
 })
 
+test('passes extra hint modifiers to semantic evaluation without treating natural hence as a command', async () => {
+  const userId = 'modified-hint-user'
+  const chatId = 'modified-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'modified-hint-entry', canonical: 'Tudor', variants: [], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.99
+  for (const [index, raw, expected] of [
+    [0, "They faced the Tudor army hint Midland's long-term enemy.", 'They faced the Tudor army.'],
+    [1, "They faced the Tudor army, hence Midland's long-term enemy.", "They faced the Tudor army, hence Midland's long-term enemy."],
+  ] as const) {
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `modified-hint-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+  assert.ok(decisionRequests.some((request) => JSON.stringify(request).includes('extra descriptive modifiers')))
+})
+
 test('uses a semantic glossary hint to disambiguate a dictated term', async () => {
   const userId = 'hint-as-in-user'
   const chatId = 'hint-as-in-chat'

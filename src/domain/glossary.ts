@@ -1,6 +1,23 @@
 export const GLOSSARY_SCHEMA_VERSION = 1 as const
 export const MAX_GLOSSARY_ENTRIES = 500
 
+/** Conservative wording comparison only; this does not classify spoken intent. */
+export function hasNearIdenticalHintWording(spoken: string, hint: string): boolean {
+  const words = (value: string): string[] => {
+    const tokens = value.normalize('NFKC').toLocaleLowerCase().replace(/[’]/gu, "'")
+      .match(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)?/gu) ?? []
+    if (['a', 'an', 'the'].includes(tokens[0] ?? '')) tokens.shift()
+    return tokens.map((word) => word.length > 4 && word.endsWith('ies')
+      ? `${word.slice(0, -3)}y`
+      : word.length > 4 && word.endsWith('s') && !word.endsWith('ss')
+        ? word.slice(0, -1)
+        : word)
+  }
+  const left = words(spoken)
+  const right = words(hint)
+  return left.length > 0 && left.length === right.length && left.every((word, index) => word === right[index])
+}
+
 export interface GlossaryEntry {
   id: string
   canonical: string

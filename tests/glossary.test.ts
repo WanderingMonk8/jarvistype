@@ -4,10 +4,18 @@ import test from 'node:test'
 import {
   createGlossaryState,
   glossaryEntriesForChat,
+  hasNearIdenticalHintWording,
   learnExplicitSpelling,
   undoGlossaryMutation,
   upsertGlossaryEntry,
 } from '../src/domain/glossary'
+
+test('compares near-identical hint wording without treating partial matches as equivalent', () => {
+  assert.equal(hasNearIdenticalHintWording("Midland's enemies", "Midland's enemy"), true)
+  assert.equal(hasNearIdenticalHintWording('the battlefield doctors', 'a battlefield doctor'), true)
+  assert.equal(hasNearIdenticalHintWording('a battlefield doctor', 'a medieval battlefield doctor'), false)
+  assert.equal(hasNearIdenticalHintWording('', ''), false)
+})
 
 test('learns confirmed explicit spelling immediately and supports undo', () => {
   const learned = learnExplicitSpelling(

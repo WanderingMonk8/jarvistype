@@ -1645,6 +1645,8 @@ test('finds a unique delayed hinted term in the current clause', async () => {
     [3, "Tudor left. I face the army hint Midland's enemy.", "Tudor left. I face the army hint Midland's enemy."],
     [4, "You may know that I intend to face the Tudor army (hint: Midland's enemy).", 'You may know that I intend to face the Tudor army.'],
     [5, "I face the two-door army hint: Midland's enemy.", 'I face the Tudor army.'],
+    [6, "The Tudor is an enemy that we have faced for such a long time. Hint: Midland's enemy.", 'The Tudor is an enemy that we have faced for such a long time.'],
+    [7, "We face the two-door army! Hint: Midland's enemy. We must prepare.", 'We face the Tudor army! We must prepare.'],
   ] as const) {
     responses.length = 0
     await dispatch(recordingAppendRequest(chatId, `delayed-hint-${index}`, 1, raw), userId)

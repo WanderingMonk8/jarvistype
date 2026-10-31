@@ -7378,9 +7378,9 @@ var JEV_REFERENCE_ADMISSION_THRESHOLD = 0.85;
 var MAX_REFERENCE_VERDICTS = 500;
 async function resolveGlossaryHintReferences(input, glossary, userId, connectionId, signal) {
   const startedAt2 = performance.now();
-  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:\s*,\s*|\s+)(?:\(?hint|as\s+in)\s*[:,]?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^);.!?\n]{3,160})(?=[);.!?\n]|$)/giu)].filter((match) => {
+  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:(?:\s*[,;:.!?]\s*|\s+)\(?hint|(?:\s*,\s*|\s+)as\s+in)\s*[:,]?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^);.!?\n]{3,160})(?=[);.!?\n]|$)/giu)].filter((match) => {
     const cue = match[0].slice(match[1].length);
-    return !/^\s*,?\s*\(?hint\b/iu.test(cue) || !/^(?:a|an|the|any|another|some|one|me|you|us|her|him|them|no|your|my|a\s+little)$/iu.test(match[1]);
+    return !/^\s*[,;:.!?]?\s*\(?hint\b/iu.test(cue) || !/^(?:a|an|the|any|another|some|one|me|you|us|her|him|them|no|your|my|a\s+little)$/iu.test(match[1]);
   });
   const entries = glossary.entries.filter((entry) => entry.hint.trim());
   const logOutcome = (outcome, details = "") => recordDebug(userId, "glossary.hint", `outcome=${outcome} matches=${matches.length} hints=${entries.length}${details ? ` ${details}` : ""} duration=${debugDuration(startedAt2)}`);
@@ -7455,8 +7455,9 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
     for (let mi = matches.length - 1; mi >= 0; mi--) {
       const match = matches[mi];
       const cueText = match[0].slice(match[1].length, match[0].length - match[2].length);
-      const explicitHint = /^\s*,?\s*\(?hint\b/iu.test(cueText);
-      const parenthesizedHint = explicitHint && /^\s*,?\s*\(hint\b/iu.test(cueText);
+      const explicitHint = /^\s*[,;:.!?]?\s*\(?hint\b/iu.test(cueText);
+      const parenthesizedHint = explicitHint && /^\s*[,;:.!?]?\s*\(hint\b/iu.test(cueText);
+      const priorSentenceEnding = explicitHint ? cueText.match(/^\s*([.!?])/u)?.[1] : void 0;
       const afterMatch = input.slice(match.index + match[0].length);
       const singleSentenceBoundary = !match[2].includes(",") && (parenthesizedHint ? /^\)[.!?]/u.test(afterMatch) : /^[.!?]/u.test(afterMatch));
       const scored = candidates.filter((candidate) => candidate.matchIndex === mi).map((candidate) => {
@@ -7486,6 +7487,7 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
       let end = explanationStart + best.candidate.boundary;
       if (input[end] === ",") end++;
       if (parenthesizedHint && input[end] === ")") end++;
+      if (priorSentenceEnding && /[.!?]/u.test(input[end] ?? "")) end++;
       const cueStart = match.index + match[1].length;
       if (explicitHint) {
         const preceding = input.slice(0, cueStart);
@@ -7499,7 +7501,7 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
         if (hits.length === 1) {
           const hit = hits[0];
           const between = text.slice(hit.end, cueStart).replace(/[ \t]*,?[ \t]*$/u, "");
-          text = `${text.slice(0, hit.start)}${best.candidate.canonical}${between}${text.slice(end)}`;
+          text = `${text.slice(0, hit.start)}${best.candidate.canonical}${between}${priorSentenceEnding ?? ""}${text.slice(end)}`;
           changed = true;
           continue;
         }

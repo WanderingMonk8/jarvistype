@@ -6749,6 +6749,7 @@ test('logs glossary hint decisions without recording transcript or hint text', a
   if (response?.type !== 'debug.log.response') return
   const log = response.entries.join('\n')
   assert.match(log, /\[glossary\.hint\] start matches=1 hints=1 candidates=1/u)
+  assert.match(log, /\[glossary\.hint\.candidate\] id=reference_0_0_0 semantic=1\.000 boundary=1\.000 command=1\.000 phonetic=no/u)
   assert.match(log, /\[glossary\.hint\] decision=1 semantic=1\.000 boundary=1\.000 command=1\.000 phonetic=no singleBoundary=yes best=1\.000/u)
   assert.match(log, /\[glossary\.hint\] outcome=resolved/u)
   assert.doesNotMatch(log, /chirurgeon|battlefield|surgeon/iu)

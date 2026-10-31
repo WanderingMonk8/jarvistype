@@ -7439,6 +7439,7 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
         const alreadyCanonical = candidate.canonical.toLocaleLowerCase() === candidate.heard?.toLocaleLowerCase();
         const confirmedCanonicalCommand = singleSentenceBoundary && alreadyCanonical && semanticScore >= 0.8 && commandScore >= 0.9;
         const combinedEvidence = singleSentenceBoundary && phonetic && semanticScore >= 0.9 && commandScore >= 0.55;
+        recordDebug(userId, "glossary.hint.candidate", `id=${candidate.id} semantic=${semanticScore.toFixed(3)} boundary=${boundaryScore.toFixed(3)} command=${commandScore.toFixed(3)} phonetic=${phonetic ? "yes" : "no"}`);
         return { candidate, boundaryScore, semanticScore, commandScore, phonetic, score: boundaryScore >= 0.9 || strongHintWithSingleBoundary || confirmedCanonicalCommand || combinedEvidence ? Math.max(semanticScore, phonetic ? 1 : 0) : 0 };
       }).sort((a, b) => b.score - a.score);
       const best = scored[0];

@@ -4356,7 +4356,7 @@ async function resolveGlossaryHintReferences(
   signal: AbortSignal,
 ): Promise<{ text: string; changed: boolean; unresolved: boolean }> {
   const startedAt = performance.now()
-  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)\s*,\s*as\s+in\s*,?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^;.!?\n]{3,160})(?=[;.!?\n]|$)/giu)]
+  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:\s*,\s*|\s+)as\s+in\s*,?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^;.!?\n]{3,160})(?=[;.!?\n]|$)/giu)]
   const entries = glossary.entries.filter((entry) => entry.hint.trim())
   const logOutcome = (outcome: string, details = '') => recordDebug(userId, 'glossary.hint', `outcome=${outcome} matches=${matches.length} hints=${entries.length}${details ? ` ${details}` : ''} duration=${debugDuration(startedAt)}`)
   if (!matches.length || !entries.length) {

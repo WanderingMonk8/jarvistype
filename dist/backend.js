@@ -7353,7 +7353,7 @@ var JEV_REFERENCE_ADMISSION_THRESHOLD = 0.85;
 var MAX_REFERENCE_VERDICTS = 500;
 async function resolveGlossaryHintReferences(input, glossary, userId, connectionId, signal) {
   const startedAt2 = performance.now();
-  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)\s*,\s*as\s+in\s*,?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^;.!?\n]{3,160})(?=[;.!?\n]|$)/giu)];
+  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:\s*,\s*|\s+)as\s+in\s*,?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^;.!?\n]{3,160})(?=[;.!?\n]|$)/giu)];
   const entries = glossary.entries.filter((entry) => entry.hint.trim());
   const logOutcome = (outcome, details = "") => recordDebug(userId, "glossary.hint", `outcome=${outcome} matches=${matches.length} hints=${entries.length}${details ? ` ${details}` : ""} duration=${debugDuration(startedAt2)}`);
   if (!matches.length || !entries.length) {

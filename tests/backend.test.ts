@@ -1569,6 +1569,30 @@ test('does not let contextual normalization replace an authoritative literal pun
   }
 })
 
+test('detects glossary hint references without a provider-inserted comma', async () => {
+  const userId = 'hint-no-comma-user'
+  const chatId = 'hint-no-comma-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-no-comma-entry', canonical: 'Tudor', variants: [], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  const raw = "I intend to face the Tudor as in Midland's enemy."
+  hintBoundaryDecision = () => 0.1
+  hintCommandDecision = () => 0.1
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-no-comma-uncertain', 1, raw), userId)
+  const uncertain = responses.at(-1)?.payload
+  assert.equal(uncertain?.type, 'transcript.normalization.response')
+  if (uncertain?.type === 'transcript.normalization.response') assert.equal(uncertain.proposal.candidateText, raw)
+  assert.ok(decisionRequests.some((request) => JSON.stringify(request).includes("Midland's enemy")))
+  hintBoundaryDecision = () => 1
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-no-comma-resolved', 1, raw), userId)
+  const resolved = responses.at(-1)?.payload
+  assert.equal(resolved?.type, 'transcript.normalization.response')
+  if (resolved?.type === 'transcript.normalization.response') assert.equal(resolved.proposal.candidateText, 'I intend to face the Tudor.')
+})
+
 test('uses a semantic glossary hint to disambiguate a dictated term', async () => {
   const userId = 'hint-as-in-user'
   const chatId = 'hint-as-in-chat'

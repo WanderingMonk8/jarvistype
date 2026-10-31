@@ -3,6 +3,14 @@ import test from 'node:test'
 
 import { RequestRegistry } from '../src/domain/request-registry'
 
+test('supports a per-request timeout without changing the default', async () => {
+  const registry = new RequestRegistry<string>(100)
+  assert.equal((await registry.wait('short', 5)).status, 'timed-out')
+  const pending = registry.wait('default')
+  assert.equal(registry.resolve('default', 'ok'), true)
+  assert.deepEqual(await pending, { status: 'resolved', value: 'ok' })
+})
+
 test('resolves a matching request and rejects stale responses', async () => {
   const registry = new RequestRegistry<string>(100)
   const outcome = registry.wait('current')

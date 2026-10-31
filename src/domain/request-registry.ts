@@ -14,14 +14,14 @@ export class RequestRegistry<T> {
     private readonly onTimeout?: (requestId: string) => void,
   ) {}
 
-  wait(requestId: string): Promise<RequestOutcome<T>> {
+  wait(requestId: string, timeoutMs = this.timeoutMs): Promise<RequestOutcome<T>> {
     this.cancel(requestId)
     return new Promise((settle) => {
       const timer = setTimeout(() => {
         if (!this.pending.delete(requestId)) return
         this.onTimeout?.(requestId)
         settle({ status: 'timed-out' })
-      }, this.timeoutMs)
+      }, timeoutMs)
       this.pending.set(requestId, { timer, settle })
     })
   }

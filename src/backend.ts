@@ -76,6 +76,9 @@ import {
 } from './domain/normalization'
 import {
   APP_VERSION,
+  DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
+  MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
+  MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
   PROTOCOL_VERSION,
   type NormalizationProposal,
   type EditProposal,
@@ -168,6 +171,7 @@ const DEFAULT_SETTINGS: PhaseFourSettings = {
   decisionConnectionId: null,
   normalizationConnectionId: null,
   normalizationModelOverride: '',
+  normalizationModelTimeoutSeconds: DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
   debugLoggingEnabled: false,
 }
 
@@ -3947,7 +3951,11 @@ function apostropheFlexiblePattern(value: string): string {
   return escapeRegularExpression(value).replace(/['\u2019]/gu, "['\\u2019]")
 }
 
-const CONTEXTUAL_NORMALIZATION_TIMEOUT_MS = 12_000
+function clampNormalizationModelTimeoutSeconds(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.min(MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.round(value)))
+    : DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS
+}
 const FLOOR_PROBE_TIMEOUT_MS = 30_000
 
 /**
@@ -4018,7 +4026,7 @@ async function normalizeWithContext(
   glossary: GlossaryState,
   settings: PhaseFourSettings,
   userId: string,
-  timeoutMs = CONTEXTUAL_NORMALIZATION_TIMEOUT_MS,
+  timeoutMs = clampNormalizationModelTimeoutSeconds(settings.normalizationModelTimeoutSeconds) * 1000,
 ): Promise<{
   text: string
   reasons: string[]
@@ -4906,6 +4914,7 @@ async function handleSettingsUpdate(
     decisionConnectionId: request.settings.decisionConnectionId ?? null,
     normalizationConnectionId: request.settings.normalizationConnectionId,
     normalizationModelOverride: request.settings.normalizationModelOverride.trim(),
+    normalizationModelTimeoutSeconds: clampNormalizationModelTimeoutSeconds(request.settings.normalizationModelTimeoutSeconds),
     debugLoggingEnabled: request.settings.debugLoggingEnabled === true,
   }
   if (settings.normalizationConnectionId) {
@@ -5567,6 +5576,7 @@ async function loadSettings(userId: string): Promise<PhaseFourSettings> {
             typeof raw.normalizationModelOverride === 'string'
               ? raw.normalizationModelOverride.trim().slice(0, 200)
               : '',
+          normalizationModelTimeoutSeconds: clampNormalizationModelTimeoutSeconds(raw.normalizationModelTimeoutSeconds),
           debugLoggingEnabled: raw.debugLoggingEnabled === true,
         }
       : { ...DEFAULT_SETTINGS }

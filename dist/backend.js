@@ -3910,6 +3910,9 @@ function escapeRegExp2(value) {
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
 var APP_VERSION = "1.6.15";
+var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 40;
+var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
+var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;
 var PHASE_FOUR_PERMISSIONS = [
   "media",
   "chats",
@@ -3967,7 +3970,7 @@ function sanitizeGrantedPermissions(granted) {
   };
 }
 function isPhaseFourSettings(value) {
-  return isRecord4(value) && isNonNegativeInteger3(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger3(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger3(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.glossaryDefaultScope === void 0 || value.glossaryDefaultScope === "local" || value.glossaryDefaultScope === "global") && (value.decisionConnectionId === void 0 || value.decisionConnectionId === null || isIdentifier2(value.decisionConnectionId)) && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
+  return isRecord4(value) && isNonNegativeInteger3(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger3(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger3(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.glossaryDefaultScope === void 0 || value.glossaryDefaultScope === "local" || value.glossaryDefaultScope === "global") && (value.decisionConnectionId === void 0 || value.decisionConnectionId === null || isIdentifier2(value.decisionConnectionId)) && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.normalizationModelTimeoutSeconds === void 0 || isNonNegativeInteger3(value.normalizationModelTimeoutSeconds) && value.normalizationModelTimeoutSeconds >= 5 && value.normalizationModelTimeoutSeconds <= 180) && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function hasEnvelope(value) {
   return isRecord4(value) && value.protocolVersion === PROTOCOL_VERSION && isBoundedString(value.type, 1, 128) && isIdentifier2(value.requestId);
@@ -4031,6 +4034,7 @@ var DEFAULT_SETTINGS = {
   decisionConnectionId: null,
   normalizationConnectionId: null,
   normalizationModelOverride: "",
+  normalizationModelTimeoutSeconds: DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
   debugLoggingEnabled: false
 };
 function send(response, context) {
@@ -7099,7 +7103,9 @@ function escapeRegularExpression(value) {
 function apostropheFlexiblePattern(value) {
   return escapeRegularExpression(value).replace(/['\u2019]/gu, "['\\u2019]");
 }
-var CONTEXTUAL_NORMALIZATION_TIMEOUT_MS = 12e3;
+function clampNormalizationModelTimeoutSeconds(value) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.min(MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.round(value))) : DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS;
+}
 var FLOOR_PROBE_TIMEOUT_MS = 3e4;
 async function measureProviderFloor(userId, settings) {
   const startedAt2 = performance.now();
@@ -7149,7 +7155,7 @@ async function measureProviderFloor(userId, settings) {
   );
   endDebugCapture(userId);
 }
-async function normalizeWithContext(rawTranscript, deterministicCandidate, conversationReferences, authoritativeCasingReferences, glossary, settings, userId, timeoutMs = CONTEXTUAL_NORMALIZATION_TIMEOUT_MS) {
+async function normalizeWithContext(rawTranscript, deterministicCandidate, conversationReferences, authoritativeCasingReferences, glossary, settings, userId, timeoutMs = clampNormalizationModelTimeoutSeconds(settings.normalizationModelTimeoutSeconds) * 1e3) {
   const startedAt2 = performance.now();
   recordDebug(
     userId,
@@ -7856,6 +7862,7 @@ async function handleSettingsUpdate(request, context, activeRequest) {
     decisionConnectionId: request.settings.decisionConnectionId ?? null,
     normalizationConnectionId: request.settings.normalizationConnectionId,
     normalizationModelOverride: request.settings.normalizationModelOverride.trim(),
+    normalizationModelTimeoutSeconds: clampNormalizationModelTimeoutSeconds(request.settings.normalizationModelTimeoutSeconds),
     debugLoggingEnabled: request.settings.debugLoggingEnabled === true
   };
   if (settings.normalizationConnectionId) {
@@ -8385,6 +8392,7 @@ async function loadSettings(userId) {
     decisionConnectionId: typeof raw.decisionConnectionId === "string" && raw.decisionConnectionId.length > 0 ? raw.decisionConnectionId.slice(0, 256) : null,
     normalizationConnectionId: typeof raw.normalizationConnectionId === "string" && raw.normalizationConnectionId.length > 0 ? raw.normalizationConnectionId.slice(0, 256) : null,
     normalizationModelOverride: typeof raw.normalizationModelOverride === "string" ? raw.normalizationModelOverride.trim().slice(0, 200) : "",
+    normalizationModelTimeoutSeconds: clampNormalizationModelTimeoutSeconds(raw.normalizationModelTimeoutSeconds),
     debugLoggingEnabled: raw.debugLoggingEnabled === true
   } : { ...DEFAULT_SETTINGS };
   settingsCache.set(userId, settings);

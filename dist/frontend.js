@@ -10,14 +10,14 @@ var RequestRegistry = class {
     this.onTimeout = onTimeout;
   }
   pending = /* @__PURE__ */ new Map();
-  wait(requestId) {
+  wait(requestId, timeoutMs = this.timeoutMs) {
     this.cancel(requestId);
     return new Promise((settle) => {
       const timer = setTimeout(() => {
         if (!this.pending.delete(requestId)) return;
         this.onTimeout?.(requestId);
         settle({ status: "timed-out" });
-      }, this.timeoutMs);
+      }, timeoutMs);
       this.pending.set(requestId, { timer, settle });
     });
   }
@@ -50,6 +50,9 @@ var PROTOCOL_VERSION = 7;
 var APP_VERSION = "1.6.15";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
+var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 40;
+var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
+var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;
 var SEND_TIMEOUT_MS = 12e4;
 var PHASE_FOUR_PERMISSIONS = [
   "media",
@@ -338,7 +341,7 @@ function isPermissionSnapshot(value) {
   return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function isPhaseFourSettings(value) {
-  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger2(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger2(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.glossaryDefaultScope === void 0 || value.glossaryDefaultScope === "local" || value.glossaryDefaultScope === "global") && (value.decisionConnectionId === void 0 || value.decisionConnectionId === null || isIdentifier2(value.decisionConnectionId)) && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
+  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger2(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger2(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.glossaryDefaultScope === void 0 || value.glossaryDefaultScope === "local" || value.glossaryDefaultScope === "global") && (value.decisionConnectionId === void 0 || value.decisionConnectionId === null || isIdentifier2(value.decisionConnectionId)) && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.normalizationModelTimeoutSeconds === void 0 || isNonNegativeInteger2(value.normalizationModelTimeoutSeconds) && value.normalizationModelTimeoutSeconds >= 5 && value.normalizationModelTimeoutSeconds <= 180) && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function isNormalizationConnectionOption(value) {
   return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
@@ -732,6 +735,7 @@ function setup(ctx) {
     "[data-reference-admission-occurrences]"
   );
   const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
+  const normalizationTimeoutInput = requireElement(tab.root, "[data-normalization-timeout]");
   const grammarRepairWarning = requireElement(
     tab.root,
     "[data-grammar-repair-warning]"
@@ -859,6 +863,7 @@ function setup(ctx) {
       decisionConnectionId: null,
       normalizationConnectionId: null,
       normalizationModelOverride: "",
+      normalizationModelTimeoutSeconds: DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
       debugLoggingEnabled: false
     },
     normalizationConnections: [],
@@ -1043,6 +1048,7 @@ function setup(ctx) {
       state.settings.referenceAdmissionOccurrences ?? 1
     );
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
+    normalizationTimeoutInput.value = String(state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS);
     grammarRepairSelect.value = state.settings.grammarRepairMode;
     const hasActiveChat = Boolean(state.activeChatId);
     const displayedGlossaryScope = hasActiveChat ? state.settings.glossaryDefaultScope ?? "local" : "global";
@@ -1106,7 +1112,8 @@ function setup(ctx) {
     return outcome;
   };
   const performNormalizationRequest = async (request) => {
-    const outcome = normalizationRegistry.wait(request.requestId);
+    const timeoutMs = request.type === "transcript.normalize.request" ? (state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS) * 1e3 + 3e4 : NORMALIZATION_TIMEOUT_MS;
+    const outcome = normalizationRegistry.wait(request.requestId, timeoutMs);
     send(request);
     return outcome;
   };
@@ -1723,6 +1730,7 @@ function setup(ctx) {
     state.settings.grammarRepairMode = grammarRepairMode;
     state.settings.debugLoggingEnabled = debugEnabledToggle.checked;
     state.settings.normalizationModelOverride = normalizationModelPicker.getValue().trim();
+    state.settings.normalizationModelTimeoutSeconds = Math.max(MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.min(MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Number.parseInt(normalizationTimeoutInput.value, 10) || DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS));
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: "phase4.settings.update.request",
@@ -1737,6 +1745,7 @@ function setup(ctx) {
         decisionConnectionId: state.settings.decisionConnectionId ?? null,
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: state.settings.normalizationModelOverride,
+        normalizationModelTimeoutSeconds: state.settings.normalizationModelTimeoutSeconds,
         debugLoggingEnabled: debugEnabledToggle.checked
       },
       chatId: state.activeChatId ?? void 0
@@ -1758,6 +1767,7 @@ function setup(ctx) {
   const handleContextCountInput = () => scheduleSettingsSave(600);
   const handleReferenceCacheLimitInput = () => scheduleSettingsSave(600);
   const handleReferenceAdmissionOccurrencesInput = () => scheduleSettingsSave(600);
+  const handleNormalizationTimeoutInput = () => scheduleSettingsSave(600);
   const handleSettingToggleChange = () => scheduleSettingsSave(0);
   const refreshDebugLog = async (clear = false) => {
     if (state.settings.debugLoggingEnabled !== true) {
@@ -2469,6 +2479,7 @@ function setup(ctx) {
     handleReferenceAdmissionOccurrencesInput
   );
   contextualToggle.addEventListener("change", handleSettingToggleChange);
+  normalizationTimeoutInput.addEventListener("input", handleNormalizationTimeoutInput);
   debugRefreshButton.addEventListener("click", handleDebugRefreshClick);
   debugCopyButton.addEventListener("click", handleDebugCopyClick);
   debugClearButton.addEventListener("click", handleDebugClearClick);
@@ -2541,6 +2552,7 @@ function setup(ctx) {
       handleReferenceAdmissionOccurrencesInput
     );
     contextualToggle.removeEventListener("change", handleSettingToggleChange);
+    normalizationTimeoutInput.removeEventListener("input", handleNormalizationTimeoutInput);
     grammarRepairSelect.removeEventListener("change", handleGrammarRepairModeChange);
     debugEnabledToggle.removeEventListener("change", handleDebugEnabledChange);
     debugRefreshButton.removeEventListener("click", handleDebugRefreshClick);
@@ -3162,6 +3174,7 @@ function shellMarkup() {
           <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. \u201CWhen needed\u201D needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose \u201CAlways\u201D to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
+          <label>Normalization model timeout in seconds (5\u2013180, default 40)<input type="number" min="5" max="180" step="1" value="40" data-normalization-timeout><small>Limits the LLM normalization call; other processing may take additional time.</small></label>
           <label>Decision model connection<select data-decision-connection><option value="">Default decision connection</option></select></label>
         </div>
         <details class="jt-proposal__details">

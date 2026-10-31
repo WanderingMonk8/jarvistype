@@ -10,6 +10,9 @@ import type { GlossaryEntry } from './domain/glossary'
 import { RequestRegistry, type RequestOutcome } from './domain/request-registry'
 import {
   APP_VERSION,
+  DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
+  MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
+  MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
   NORMALIZATION_TIMEOUT_MS,
   PROTOCOL_VERSION,
   REQUEST_TIMEOUT_MS,
@@ -452,6 +455,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     '[data-reference-admission-occurrences]',
   )
   const contextualToggle = requireElement<HTMLInputElement>(tab.root, '[data-context-enabled]')
+  const normalizationTimeoutInput = requireElement<HTMLInputElement>(tab.root, '[data-normalization-timeout]')
   const grammarRepairWarning = requireElement<HTMLElement>(
     tab.root,
     '[data-grammar-repair-warning]',
@@ -583,6 +587,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       decisionConnectionId: null,
       normalizationConnectionId: null,
       normalizationModelOverride: '',
+      normalizationModelTimeoutSeconds: DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
       debugLoggingEnabled: false,
     },
     normalizationConnections: [],
@@ -892,6 +897,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.settings.referenceAdmissionOccurrences ?? 1,
     )
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
+    normalizationTimeoutInput.value = String(state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS)
     grammarRepairSelect.value = state.settings.grammarRepairMode
     const hasActiveChat = Boolean(state.activeChatId)
     const displayedGlossaryScope = hasActiveChat
@@ -976,7 +982,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const performNormalizationRequest = async (
     request: FrontendRequest,
   ): Promise<RequestOutcome<BackendResponse>> => {
-    const outcome = normalizationRegistry.wait(request.requestId)
+    const timeoutMs = request.type === 'transcript.normalize.request'
+      ? (state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS) * 1000 + 30_000
+      : NORMALIZATION_TIMEOUT_MS
+    const outcome = normalizationRegistry.wait(request.requestId, timeoutMs)
     send(request)
     return outcome
   }
@@ -1729,6 +1738,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.settings.grammarRepairMode = grammarRepairMode
     state.settings.debugLoggingEnabled = debugEnabledToggle.checked
     state.settings.normalizationModelOverride = normalizationModelPicker.getValue().trim()
+    state.settings.normalizationModelTimeoutSeconds = Math.max(MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.min(MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Number.parseInt(normalizationTimeoutInput.value, 10) || DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS))
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: 'phase4.settings.update.request',
@@ -1743,6 +1753,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         decisionConnectionId: state.settings.decisionConnectionId ?? null,
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: state.settings.normalizationModelOverride,
+        normalizationModelTimeoutSeconds: state.settings.normalizationModelTimeoutSeconds,
         debugLoggingEnabled: debugEnabledToggle.checked,
       },
       chatId: state.activeChatId ?? undefined,
@@ -1764,6 +1775,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const handleContextCountInput = () => scheduleSettingsSave(600)
   const handleReferenceCacheLimitInput = () => scheduleSettingsSave(600)
   const handleReferenceAdmissionOccurrencesInput = () => scheduleSettingsSave(600)
+  const handleNormalizationTimeoutInput = () => scheduleSettingsSave(600)
   const handleSettingToggleChange = () => scheduleSettingsSave(0)
 
   const refreshDebugLog = async (clear = false): Promise<void> => {
@@ -2590,6 +2602,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     handleReferenceAdmissionOccurrencesInput,
   )
   contextualToggle.addEventListener('change', handleSettingToggleChange)
+  normalizationTimeoutInput.addEventListener('input', handleNormalizationTimeoutInput)
   debugRefreshButton.addEventListener('click', handleDebugRefreshClick)
   debugCopyButton.addEventListener('click', handleDebugCopyClick)
   debugClearButton.addEventListener('click', handleDebugClearClick)
@@ -2664,6 +2677,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       handleReferenceAdmissionOccurrencesInput,
     )
     contextualToggle.removeEventListener('change', handleSettingToggleChange)
+    normalizationTimeoutInput.removeEventListener('input', handleNormalizationTimeoutInput)
     grammarRepairSelect.removeEventListener('change', handleGrammarRepairModeChange)
     debugEnabledToggle.removeEventListener('change', handleDebugEnabledChange)
     debugRefreshButton.removeEventListener('click', handleDebugRefreshClick)
@@ -3363,6 +3377,7 @@ function shellMarkup(): string {
           <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. “When needed” needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose “Always” to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>
           <label><span>Normalization model (optional override)</span><div data-normalization-model></div></label>
+          <label>Normalization model timeout in seconds (5–180, default 40)<input type="number" min="5" max="180" step="1" value="40" data-normalization-timeout><small>Limits the LLM normalization call; other processing may take additional time.</small></label>
           <label>Decision model connection<select data-decision-connection><option value="">Default decision connection</option></select></label>
         </div>
         <details class="jt-proposal__details">

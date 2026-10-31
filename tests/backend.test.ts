@@ -34,6 +34,8 @@ let generationCommandDecisions: unknown[] = []
 let editPlanResponse: unknown = null
 let grammarRepairResponse: unknown = null
 let grammarRepairHangs = false
+let normalizationHangs = false
+let normalizationSignal: AbortSignal | undefined
 let grammarRepairIgnoresAbort = false
 let grammarRepairSignal: AbortSignal | undefined
 let chatMessages: Array<{
@@ -197,6 +199,10 @@ const spindleMock = {
           )
         })
       }
+      if (normalizationHangs && input.rawTranscript !== undefined) {
+        normalizationSignal = request.signal
+        return new Promise(() => undefined)
+      }
       if (generationEditsOverride)
         return Promise.resolve({
           content: JSON.stringify({ edits: generationEditsOverride, commandDecisions: [] }),
@@ -271,6 +277,8 @@ test.beforeEach(() => {
   editPlanResponse = null
   grammarRepairResponse = null
   grammarRepairHangs = false
+  normalizationHangs = false
+  normalizationSignal = undefined
   grammarRepairIgnoresAbort = false
   grammarRepairSignal = undefined
   chatMessages = []
@@ -406,6 +414,37 @@ test('undoes and redoes a draft mutation through the backend protocol', async ()
     assert.equal(redone.snapshot.canRedo, false)
     assert.equal(redone.snapshot.canUndo, true)
   }
+})
+
+test('saves normalization timeout settings and defaults legacy settings to forty seconds', async () => {
+  const userId = 'normalization-timeout-settings-user'
+  const settings = { contextMessageCount: 5, contextualNormalizationEnabled: true, grammarRepairMode: 'off' as const, normalizationConnectionId: null, normalizationModelOverride: '' }
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'timeout-default', settings }, userId)
+  let response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'phase4.state.response')
+  if (response?.type === 'phase4.state.response') assert.equal(response.settings.normalizationModelTimeoutSeconds, 40)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'timeout-custom', settings: { ...settings, normalizationModelTimeoutSeconds: 75 } }, userId)
+  response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'phase4.state.response')
+  if (response?.type === 'phase4.state.response') assert.equal(response.settings.normalizationModelTimeoutSeconds, 75)
+  assert.equal((stored.get(`${userId}:phase4-settings.json`) as { normalizationModelTimeoutSeconds?: number }).normalizationModelTimeoutSeconds, 75)
+})
+
+test('aborts a stalled normalization provider at the configured timeout and returns a proposal', async () => {
+  const userId = 'normalization-timeout-runtime-user'
+  const chatId = 'normalization-timeout-runtime-chat'
+  activeChatId = chatId
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'timeout-runtime-settings', settings: { contextMessageCount: 0, contextualNormalizationEnabled: true, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', normalizationModelTimeoutSeconds: 5 } }, userId)
+  await seedDraft(userId, chatId, '')
+  normalizationHangs = true
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'timeout-runtime-segment', 1, 'Hello there.'), userId)
+  for (let attempt = 0; attempt < 60 && !responses.length; attempt++)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'Hello there.')
+  assert.equal(normalizationSignal?.aborted, true)
 })
 
 test('lists safe normalization connections and dispatches with selected connection and model', async () => {

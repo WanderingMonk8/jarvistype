@@ -4425,7 +4425,8 @@ async function resolveGlossaryHintReferences(
         const strongHintWithSingleBoundary = singleSentenceBoundary && semanticScore >= 0.95 && boundaryScore >= 0.7
         const alreadyCanonical = candidate.canonical.toLocaleLowerCase() === candidate.heard?.toLocaleLowerCase()
         const confirmedCanonicalCommand = singleSentenceBoundary && alreadyCanonical && semanticScore >= 0.8 && commandScore >= 0.9
-        return { candidate, boundaryScore, semanticScore, commandScore, phonetic, score: boundaryScore >= 0.9 || strongHintWithSingleBoundary || confirmedCanonicalCommand ? Math.max(semanticScore, phonetic ? 1 : 0) : 0 }
+        const combinedEvidence = singleSentenceBoundary && phonetic && semanticScore >= 0.9 && commandScore >= 0.55
+        return { candidate, boundaryScore, semanticScore, commandScore, phonetic, score: boundaryScore >= 0.9 || strongHintWithSingleBoundary || confirmedCanonicalCommand || combinedEvidence ? Math.max(semanticScore, phonetic ? 1 : 0) : 0 }
       }).sort((a, b) => b.score - a.score)
       const best = scored[0]
       recordDebug(userId, 'glossary.hint', `decision=${mi + 1} semantic=${(best?.semanticScore ?? 0).toFixed(3)} boundary=${(best?.boundaryScore ?? 0).toFixed(3)} command=${(best?.commandScore ?? 0).toFixed(3)} phonetic=${best?.phonetic ? 'yes' : 'no'} singleBoundary=${singleSentenceBoundary ? 'yes' : 'no'} best=${(best?.score ?? 0).toFixed(3)} runnerUp=${(scored[1]?.score ?? 0).toFixed(3)} threshold=0.900 margin=0.150`)

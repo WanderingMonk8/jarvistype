@@ -1611,8 +1611,8 @@ test('removes a confirmed hint after an already canonical term without swallowin
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-canonical-command-entry', canonical: 'Tudor', variants: [], hint: 'Midland’s enemy', scope: 'global' }, userId)
   await seedDraft(userId, chatId, '')
   const raw = 'We need to face the Tudor, as in Midland’s enemy.'
-  for (const [index, command, expected] of [[0, 0.99, 'We need to face the Tudor.'], [1, 0.2, raw]] as const) {
-    hintSemanticDecision = () => 0.84
+  for (const [index, semantic, command, expected] of [[0, 0.84, 0.99, 'We need to face the Tudor.'], [1, 0.84, 0.2, raw], [2, 0.93, 0.57, 'We need to face the Tudor.'], [3, 0.93, 0.54, raw], [4, 0.89, 0.57, raw]] as const) {
+    hintSemanticDecision = () => semantic
     hintBoundaryDecision = () => 0.31
     hintCommandDecision = () => command
     responses.length = 0

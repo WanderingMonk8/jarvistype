@@ -6674,6 +6674,26 @@ function sendRequest(chatId: string, operationId: string) {
   }
 }
 
+test('logs glossary hint decisions without recording transcript or hint text', async () => {
+  const userId = 'debug-hint-user'
+  const chatId = 'debug-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'debug-hint-settings', settings: { contextMessageCount: 5, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', debugLoggingEnabled: true } }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'debug-hint-entry', canonical: 'chirurgeon', variants: [], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  await dispatch(recordingAppendRequest(chatId, 'debug-hint-segment', 1, 'I need a surgeon, as in a medieval battlefield doctor.'), userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'debug.log.request', requestId: 'debug-hint-read' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'debug.log.response')
+  if (response?.type !== 'debug.log.response') return
+  const log = response.entries.join('\n')
+  assert.match(log, /\[glossary\.hint\] start matches=1 hints=1 candidates=1/u)
+  assert.match(log, /\[glossary\.hint\] decision=1 best=1\.000/u)
+  assert.match(log, /\[glossary\.hint\] outcome=resolved/u)
+  assert.doesNotMatch(log, /chirurgeon|battlefield|surgeon/iu)
+})
+
 test('collects a copiable backend timing log when debug logging is enabled', async () => {
   const userId = 'debug-log-user'
   const chatId = 'debug-log-chat'

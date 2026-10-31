@@ -7352,11 +7352,22 @@ var JEV_REFERENCE_TIMEOUT_MS = 2500;
 var JEV_REFERENCE_ADMISSION_THRESHOLD = 0.85;
 var MAX_REFERENCE_VERDICTS = 500;
 async function resolveGlossaryHintReferences(input, glossary, userId, connectionId, signal) {
+  const startedAt2 = performance.now();
   const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)\s*,\s*as\s+in\s*,?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^;.!?\n]{3,160})(?=[;.!?\n]|$)/giu)];
   const entries = glossary.entries.filter((entry) => entry.hint.trim());
-  if (!matches.length || !entries.length) return { text: input, changed: false, unresolved: false };
-  if (entries.length > 30 || matches.length > 4) return { text: input, changed: false, unresolved: true };
-  if (!spindle.permissions.has("decisions") || signal.aborted) return { text: input, changed: false, unresolved: true };
+  const logOutcome = (outcome, details = "") => recordDebug(userId, "glossary.hint", `outcome=${outcome} matches=${matches.length} hints=${entries.length}${details ? ` ${details}` : ""} duration=${debugDuration(startedAt2)}`);
+  if (!matches.length || !entries.length) {
+    logOutcome(!matches.length ? "no-reference" : "no-hints");
+    return { text: input, changed: false, unresolved: false };
+  }
+  if (entries.length > 30 || matches.length > 4) {
+    logOutcome("input-limit");
+    return { text: input, changed: false, unresolved: true };
+  }
+  if (!spindle.permissions.has("decisions") || signal.aborted) {
+    logOutcome(signal.aborted ? "cancelled" : "permission-unavailable");
+    return { text: input, changed: false, unresolved: true };
+  }
   const questions = {};
   const candidates = matches.flatMap((match, mi) => {
     const explanation = match[2];
@@ -7375,12 +7386,16 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
       return { id, matchIndex: mi, canonical: entry.canonical, variants: entry.variants, hint: entry.hint, heard: match[1], explanation: explanation.slice(0, boundary).trim(), remaining: explanation.slice(boundary), boundary };
     }));
   });
-  if (candidates.length > 120) return { text: input, changed: false, unresolved: true };
+  if (candidates.length > 120) {
+    logOutcome("candidate-limit", `candidates=${candidates.length}`);
+    return { text: input, changed: false, unresolved: true };
+  }
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal.addEventListener("abort", abort, { once: true });
   let timeout;
   try {
+    recordDebug(userId, "glossary.hint", `start matches=${matches.length} hints=${entries.length} candidates=${candidates.length} connection=${connectionId ? "selected" : "default"}`);
     const result = await Promise.race([
       spindle.decisions.evaluate({ userId, ...connectionId ? { connection_id: connectionId } : {}, state: { task: "Evaluate glossary hint references independently and conservatively.", candidates }, questions }, { signal: controller.signal }),
       new Promise((resolve) => {
@@ -7390,7 +7405,10 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
         }, JEV_REFERENCE_TIMEOUT_MS);
       })
     ]);
-    if (!result || signal.aborted) return { text: input, changed: false, unresolved: true };
+    if (!result || signal.aborted) {
+      logOutcome(signal.aborted ? "cancelled" : "timeout", `candidates=${candidates.length}`);
+      return { text: input, changed: false, unresolved: true };
+    }
     let text = input;
     let changed = false;
     let unresolved = false;
@@ -7400,6 +7418,7 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
         return { candidate, score: answer?.type === "noul" && Number.isFinite(answer.noul) ? answer.noul : 0 };
       }).sort((a, b) => b.score - a.score);
       const best = scored[0];
+      recordDebug(userId, "glossary.hint", `decision=${mi + 1} best=${(best?.score ?? 0).toFixed(3)} runnerUp=${(scored[1]?.score ?? 0).toFixed(3)} threshold=0.900 margin=0.150`);
       if (!best || best.score < 0.9 || (scored[1]?.score ?? 0) > best.score - 0.15) {
         unresolved = true;
         continue;
@@ -7411,8 +7430,10 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
       text = `${text.slice(0, match.index)}${best.candidate.canonical}${text.slice(end)}`;
       changed = true;
     }
+    logOutcome(unresolved ? changed ? "partially-resolved" : "unresolved" : "resolved", `candidates=${candidates.length}`);
     return { text, changed, unresolved };
   } catch {
+    logOutcome(signal.aborted ? "cancelled" : "decision-error", `candidates=${candidates.length}`);
     return { text: input, changed: false, unresolved: true };
   } finally {
     if (timeout) clearTimeout(timeout);

@@ -2769,6 +2769,16 @@ function editDistanceAtMost2(left, right, maximum) {
 // src/domain/glossary.ts
 var GLOSSARY_SCHEMA_VERSION = 1;
 var MAX_GLOSSARY_ENTRIES = 500;
+function hasNearIdenticalHintWording(spoken, hint) {
+  const words = (value) => {
+    const tokens = value.normalize("NFKC").toLocaleLowerCase().replace(/[’]/gu, "'").match(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)?/gu) ?? [];
+    if (["a", "an", "the"].includes(tokens[0] ?? "")) tokens.shift();
+    return tokens.map((word) => word.length > 4 && word.endsWith("ies") ? `${word.slice(0, -3)}y` : word.length > 4 && word.endsWith("s") && !word.endsWith("ss") ? word.slice(0, -1) : word);
+  };
+  const left = words(spoken);
+  const right = words(hint);
+  return left.length > 0 && left.length === right.length && left.every((word, index) => word === right[index]);
+}
 function createGlossaryState() {
   return { schemaVersion: GLOSSARY_SCHEMA_VERSION, entries: [], undoStack: [] };
 }
@@ -4345,7 +4355,7 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       candidateText,
       contextual.text,
       deterministic.authoritativePunctuationMarks
-    ) && preservesLiteralAsIn(candidateText, contextual.text)) {
+    ) && preservesLiteralAsIn(candidateText, contextual.text) && (candidateText.match(/\bhint\b/giu)?.length ?? 0) <= (contextual.text.match(/\bhint\b/giu)?.length ?? 0)) {
       const enforced = normalizeDeterministically(contextual.text, glossary.entries, {
         capitalizeOpening
       });
@@ -7353,7 +7363,10 @@ var JEV_REFERENCE_ADMISSION_THRESHOLD = 0.85;
 var MAX_REFERENCE_VERDICTS = 500;
 async function resolveGlossaryHintReferences(input, glossary, userId, connectionId, signal) {
   const startedAt2 = performance.now();
-  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:\s*,\s*|\s+)as\s+in\s*,?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^;.!?\n]{3,160})(?=[;.!?\n]|$)/giu)];
+  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:\s*,\s*|\s+)(?:as\s+in|hint)\s*,?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^;.!?\n]{3,160})(?=[;.!?\n]|$)/giu)].filter((match) => {
+    const cue = match[0].slice(match[1].length);
+    return !/^\s*,?\s*hint\b/iu.test(cue) || !/^(?:a|an|the|any|another|some|one|me|you|us|her|him|them|no|your|my|a\s+little)$/iu.test(match[1]);
+  });
   const entries = glossary.entries.filter((entry) => entry.hint.trim());
   const logOutcome = (outcome, details = "") => recordDebug(userId, "glossary.hint", `outcome=${outcome} matches=${matches.length} hints=${entries.length}${details ? ` ${details}` : ""} duration=${debugDuration(startedAt2)}`);
   if (!matches.length || !entries.length) {
@@ -7426,6 +7439,7 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
     let unresolved = false;
     for (let mi = matches.length - 1; mi >= 0; mi--) {
       const match = matches[mi];
+      const explicitHint = /^\s*,?\s*hint\b/iu.test(match[0].slice(match[1].length));
       const singleSentenceBoundary = !match[2].includes(",") && /[.!?]/u.test(input[match.index + match[0].length] ?? "");
       const scored = candidates.filter((candidate) => candidate.matchIndex === mi).map((candidate) => {
         const boundaryAnswer = result.answers[candidate.id];
@@ -7439,8 +7453,10 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
         const alreadyCanonical = candidate.canonical.toLocaleLowerCase() === candidate.heard?.toLocaleLowerCase();
         const confirmedCanonicalCommand = singleSentenceBoundary && alreadyCanonical && semanticScore >= 0.8 && commandScore >= 0.9;
         const combinedEvidence = singleSentenceBoundary && phonetic && semanticScore >= 0.9 && commandScore >= 0.55;
+        const nearHint = hasNearIdenticalHintWording(candidate.explanation, candidate.hint);
+        const explicitHintMatch = explicitHint && singleSentenceBoundary && (semanticScore >= 0.9 || nearHint);
         recordDebug(userId, "glossary.hint.candidate", `id=${candidate.id} semantic=${semanticScore.toFixed(3)} boundary=${boundaryScore.toFixed(3)} command=${commandScore.toFixed(3)} phonetic=${phonetic ? "yes" : "no"}`);
-        return { candidate, boundaryScore, semanticScore, commandScore, phonetic, score: boundaryScore >= 0.9 || strongHintWithSingleBoundary || confirmedCanonicalCommand || combinedEvidence ? Math.max(semanticScore, phonetic ? 1 : 0) : 0 };
+        return { candidate, boundaryScore, semanticScore, commandScore, phonetic, score: explicitHint ? explicitHintMatch ? nearHint ? 1 : semanticScore : 0 : boundaryScore >= 0.9 || strongHintWithSingleBoundary || confirmedCanonicalCommand || combinedEvidence ? Math.max(semanticScore, phonetic ? 1 : 0) : 0 };
       }).sort((a, b) => b.score - a.score);
       const best = scored[0];
       recordDebug(userId, "glossary.hint", `decision=${mi + 1} semantic=${(best?.semanticScore ?? 0).toFixed(3)} boundary=${(best?.boundaryScore ?? 0).toFixed(3)} command=${(best?.commandScore ?? 0).toFixed(3)} phonetic=${best?.phonetic ? "yes" : "no"} singleBoundary=${singleSentenceBoundary ? "yes" : "no"} best=${(best?.score ?? 0).toFixed(3)} runnerUp=${(scored[1]?.score ?? 0).toFixed(3)} threshold=0.900 margin=0.150`);

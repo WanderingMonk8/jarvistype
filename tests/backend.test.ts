@@ -1593,6 +1593,43 @@ test('detects glossary hint references without a provider-inserted comma', async
   if (resolved?.type === 'transcript.normalization.response') assert.equal(resolved.proposal.candidateText, 'I intend to face the Tudor.')
 })
 
+test('resolves the explicit hint cue with or without a comma and preserves ordinary hint prose', async () => {
+  const userId = 'explicit-hint-user'
+  const chatId = 'explicit-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'explicit-hint-entry', canonical: 'Tudor', variants: [], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintBoundaryDecision = () => 0.1
+  hintCommandDecision = () => 0.1
+  hintSemanticDecision = () => 0.1
+  for (const [index, raw, expected] of [
+    [0, "We face Tudor hint Midland's enemies.", 'We face Tudor.'],
+    [1, "We face Tudor, hint Midland's enemy.", 'We face Tudor.'],
+    [2, "Give me a hint about Midland's enemy.", "Give me a hint about Midland's enemy."],
+  ] as const) {
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `explicit-hint-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+})
+
+test('resolves the hint cue in replacement instructions', async () => {
+  const userId = 'explicit-hint-edit-user'
+  const chatId = 'explicit-hint-edit-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'explicit-hint-edit-entry', canonical: 'Tudor', variants: [], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, 'We face enemies.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'explicit-hint-edit', operationId: 'explicit-hint-edit-op', chatId, expectedVersion: 1, instructionTranscript: "Replace enemies with Tudor hint Midland's enemy." }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, 'We face Tudor.')
+})
+
 test('uses a semantic glossary hint to disambiguate a dictated term', async () => {
   const userId = 'hint-as-in-user'
   const chatId = 'hint-as-in-chat'

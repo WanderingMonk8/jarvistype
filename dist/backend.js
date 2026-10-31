@@ -3539,6 +3539,22 @@ function normalizeQualifiedAsInReferences(input) {
     changed = true;
     searchFrom = match.index + replacement.length;
   }
+  const delayed = /,\s*as\s+in\s+([\p{L}\p{M}][\p{L}\p{M}'’-]{3,})\b([^.!?\n]*)/giu;
+  let delayedMatch;
+  while (delayedMatch = delayed.exec(text)) {
+    const reference = delayedMatch[1];
+    const prefix = text.slice(0, delayedMatch.index);
+    const boundary = Math.max(prefix.lastIndexOf("."), prefix.lastIndexOf("!"), prefix.lastIndexOf("?"), prefix.lastIndexOf(";"), prefix.lastIndexOf("\n"), prefix.lastIndexOf(",")) + 1;
+    const words = [...prefix.slice(boundary).matchAll(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu)];
+    const targets = words.filter((word) => word[0].toLocaleLowerCase() === reference.toLocaleLowerCase());
+    if (targets.length !== 1 || targets[0].index + targets[0][0].length === prefix.length) continue;
+    const suffix = delayedMatch[2];
+    const continuation = suffix.search(/,\s+|\s+(?:and|but|so|then)\s+(?=(?:the|a|an|my|your|his|her|our|their|I|we|you|he|she|it|they)\b)/iu);
+    const end = continuation < 0 ? delayedMatch.index + delayedMatch[0].length : delayedMatch.index + delayedMatch[0].length - suffix.length + continuation;
+    text = `${text.slice(0, delayedMatch.index)}${text.slice(end)}`;
+    changed = true;
+    delayed.lastIndex = delayedMatch.index;
+  }
   return { text, changed };
 }
 function restoreHighConfidenceSentenceBoundaries(input) {
@@ -7378,7 +7394,7 @@ var JEV_REFERENCE_ADMISSION_THRESHOLD = 0.85;
 var MAX_REFERENCE_VERDICTS = 500;
 async function resolveGlossaryHintReferences(input, glossary, userId, connectionId, signal) {
   const startedAt2 = performance.now();
-  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:(?:\s*[,;:.!?]\s*|\s+)\(?(?:hint|clue)|(?:\s*,\s*|\s+)as\s+in)\s*[:,]?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^);.!?\n]{3,160})(?=[);.!?\n]|$)/giu)].filter((match) => {
+  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:\s*[,;:.!?]\s*|\s+)\(?(?:hint|clue)\s*[:,]?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^);.!?\n]{3,160})(?=[);.!?\n]|$)/giu)].filter((match) => {
     const cue = match[0].slice(match[1].length);
     return !/^\s*[,;:.!?]?\s*\(?(?:hint|clue)\b/iu.test(cue) || !/^(?:a|an|the|any|another|some|one|me|you|us|her|him|them|no|your|my|a\s+little)$/iu.test(match[1]);
   });

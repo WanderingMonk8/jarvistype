@@ -1856,6 +1856,18 @@ test('leaves glossary hint wording intact when the decision model is unavailable
   if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need a surgeon, as in a medieval battlefield doctor.')
 })
 
+test('resolves delayed repeated as-in references without glossary hints', async () => {
+  const userId = 'delayed-repeated-reference-user'
+  const chatId = 'delayed-repeated-reference-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, '')
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'delayed-repeated-reference-segment', 1, 'Oh, Jenga is my favorite, as in Jenga the game.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'Oh, Jenga is my favorite.')
+})
+
 test('does not let contextual normalization discard literal as in wording', async () => {
   const userId = 'literal-as-in-user'
   const chatId = 'literal-as-in-chat'

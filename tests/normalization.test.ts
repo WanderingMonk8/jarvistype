@@ -31,6 +31,12 @@ test('keeps ordinary as-in prose literal', () => {
   }
 })
 
+test('resolves a unique delayed repeated-word reference without a glossary', () => {
+  assert.equal(normalizeQualifiedAsInReferences('Oh, Jenga is my favorite, as in Jenga the game.').text, 'Oh, Jenga is my favorite.')
+  assert.equal(normalizeQualifiedAsInReferences('Jenga and Jenga are favorites, as in Jenga the game.').text, 'Jenga and Jenga are favorites, as in Jenga the game.')
+  assert.equal(normalizeQualifiedAsInReferences('Jenga is fun. Other games matter, as in Jenga the game.').text, 'Jenga is fun. Other games matter, as in Jenga the game.')
+})
+
 test('recognized command handlers consume their own cues and preserve literal vocabulary', () => {
   for (const [raw, expected] of [
     ['Alpha comma beta period', 'Alpha, beta.'],

@@ -484,6 +484,25 @@ export function normalizeQualifiedAsInReferences(input: string): QualifiedAsInNo
     searchFrom = match.index + replacement.length
   }
 
+  // Delayed references repeat the intended term later, after intervening prose:
+  // “Jenga is my favorite, as in Jenga the game.” Resolve only a unique,
+  // substantial exact repetition within the same sentence or clause.
+  const delayed = /,\s*as\s+in\s+([\p{L}\p{M}][\p{L}\p{M}'’-]{3,})\b([^.!?\n]*)/giu
+  let delayedMatch: RegExpExecArray | null
+  while ((delayedMatch = delayed.exec(text))) {
+    const reference = delayedMatch[1]!
+    const prefix = text.slice(0, delayedMatch.index)
+    const boundary = Math.max(prefix.lastIndexOf('.'), prefix.lastIndexOf('!'), prefix.lastIndexOf('?'), prefix.lastIndexOf(';'), prefix.lastIndexOf('\n'), prefix.lastIndexOf(',')) + 1
+    const words = [...prefix.slice(boundary).matchAll(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu)]
+    const targets = words.filter((word) => word[0].toLocaleLowerCase() === reference.toLocaleLowerCase())
+    if (targets.length !== 1 || targets[0]!.index! + targets[0]![0].length === prefix.length) continue
+    const suffix = delayedMatch[2]!
+    const continuation = suffix.search(/,\s+|\s+(?:and|but|so|then)\s+(?=(?:the|a|an|my|your|his|her|our|their|I|we|you|he|she|it|they)\b)/iu)
+    const end = continuation < 0 ? delayedMatch.index + delayedMatch[0].length : delayedMatch.index + delayedMatch[0].length - suffix.length + continuation
+    text = `${text.slice(0, delayedMatch.index)}${text.slice(end)}`
+    changed = true
+    delayed.lastIndex = delayedMatch.index
+  }
   return { text, changed }
 }
 

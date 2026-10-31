@@ -487,7 +487,7 @@ var COMMAND_GROUPS = [
       ["Glossary hint", "Say \u201Chint\u201D or \u201Cclue\u201D and a description after the term, immediately or later in the same clause: \u201Ctwo-door army clue Midland\u2019s enemy.\u201D A comma is optional; synonyms, plurals, and inflected forms can match the hint. The earlier term must have one identifiable spelling or phonetic match to the glossary entry. Ambiguous terms or explanation endpoints are left for review."],
       [
         "As in reference",
-        "Clarify a dictated term by repeating it or a clear inflection after \u201Cas in,\u201D or by describing a saved glossary hint in your own words. A qualified glossary reference can target a term earlier in the same clause. Separate the explanation from surrounding text with commas or sentence punctuation. The explanation is removed only when the entry, target, and command boundary are clear; otherwise it remains for review. Works in dictation and editing."
+        "Clarify a dictated term by repeating it or a clear inflection after \u201Cas in,\u201D for example \u201CJenga is my favorite, as in Jenga the game.\u201D The repeated term can appear earlier in the same clause. A unique target and clear boundary are required; otherwise the wording remains for review. Use \u201Chint\u201D or \u201Cclue\u201D for glossary descriptions."
       ]
     ]
   },

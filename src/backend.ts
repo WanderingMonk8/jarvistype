@@ -4358,7 +4358,7 @@ async function resolveGlossaryHintReferences(
   signal: AbortSignal,
 ): Promise<{ text: string; changed: boolean; unresolved: boolean }> {
   const startedAt = performance.now()
-  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:(?:\s*[,;:.!?]\s*|\s+)\(?(?:hint|clue)|(?:\s*,\s*|\s+)as\s+in)\s*[:,]?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^);.!?\n]{3,160})(?=[);.!?\n]|$)/giu)].filter((match) => {
+  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:\s*[,;:.!?]\s*|\s+)\(?(?:hint|clue)\s*[:,]?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^);.!?\n]{3,160})(?=[);.!?\n]|$)/giu)].filter((match) => {
     const cue = match[0].slice(match[1]!.length)
     return !/^\s*[,;:.!?]?\s*\(?(?:hint|clue)\b/iu.test(cue) || !/^(?:a|an|the|any|another|some|one|me|you|us|her|him|them|no|your|my|a\s+little)$/iu.test(match[1]!)
   })

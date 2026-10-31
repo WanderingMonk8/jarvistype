@@ -139,7 +139,7 @@ export const COMMAND_GROUPS = [
       ['Glossary hint', 'Say “hint” or “clue” and a description after the term, immediately or later in the same clause: “two-door army clue Midland’s enemy.” A comma is optional; synonyms, plurals, and inflected forms can match the hint. The earlier term must have one identifiable spelling or phonetic match to the glossary entry. Ambiguous terms or explanation endpoints are left for review.'],
       [
         'As in reference',
-        'Clarify a dictated term by repeating it or a clear inflection after “as in,” or by describing a saved glossary hint in your own words. A qualified glossary reference can target a term earlier in the same clause. Separate the explanation from surrounding text with commas or sentence punctuation. The explanation is removed only when the entry, target, and command boundary are clear; otherwise it remains for review. Works in dictation and editing.',
+        'Clarify a dictated term by repeating it or a clear inflection after “as in,” for example “Jenga is my favorite, as in Jenga the game.” The repeated term can appear earlier in the same clause. A unique target and clear boundary are required; otherwise the wording remains for review. Use “hint” or “clue” for glossary descriptions.',
       ],
     ],
   },

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { applyManualEdit, restoreDraftSession } from '../src/domain/draft-session'
+import { applyManualEdit, clearDraftAfterSend, restoreDraftSession } from '../src/domain/draft-session'
 import { PROTOCOL_VERSION, type BackendResponse } from '../src/protocol/messages'
 
 type FrontendHandler = (payload: unknown, userId: string, frontendSessionId?: string) => void
@@ -370,6 +370,30 @@ test('an explicit load refreshes a draft changed through shared storage on anoth
   if (refreshed?.type === 'draft.snapshot.response') {
     assert.equal(refreshed.snapshot.cleanText, 'Mobile draft')
     assert.equal(refreshed.snapshot.draftVersion, 2)
+  }
+})
+
+test('refreshes a cached draft cleared by sending in another instance', async () => {
+  const userId = 'cross-device-sent-user'
+  const chatId = 'cross-device-sent-chat'
+  await seedDraft(userId, chatId, 'Already submitted')
+  const storageKey = `${userId}:draft-${encodeURIComponent(chatId)}.json`
+  const original = restoreDraftSession(stored.get(storageKey), chatId)
+  assert.ok(original)
+  stored.set(storageKey, structuredClone(clearDraftAfterSend(original)))
+  activeChatId = chatId
+  responses.length = 0
+  await dispatch(sendRequest(chatId, 'stale-device-send'), userId)
+  assert.equal(appended.length, 0)
+  assert.equal(responses.at(-1)?.payload.type, 'app.error')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'draft.load.request', requestId: 'cross-device-sent-refresh', chatId }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'draft.snapshot.response')
+  if (response?.type === 'draft.snapshot.response') {
+    assert.equal(response.snapshot.cleanText, '')
+    assert.equal(response.snapshot.draftVersion, original.draftVersion + 1)
+    assert.equal(response.snapshot.dirty, false)
   }
 })
 
@@ -897,6 +921,10 @@ test('sends exactly clean text once, triggers generation, and clears only after 
   await dispatch({ ...request, requestId: 'send-duplicate-request' }, userId)
 
   assert.equal(appended.length, 1)
+  const cleared = restoreDraftSession(stored.get(`${userId}:draft-${encodeURIComponent(chatId)}.json`), chatId)
+  assert.ok(cleared)
+  assert.equal(cleared.cleanText, '')
+  assert.equal(cleared.draftVersion, 2)
   assert.deepEqual(appended[0], {
     chatId,
     content: 'First\n\nSecond',

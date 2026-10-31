@@ -358,7 +358,7 @@ export function clearDraftAfterSend(
   session: PersistedDraftSession,
   now = new Date().toISOString(),
 ): PersistedDraftSession {
-  return createDraftSession(session.chatId, now)
+  return { ...createDraftSession(session.chatId, now), draftVersion: session.draftVersion + 1 }
 }
 
 export function toDraftSnapshot(session: PersistedDraftSession): DraftSnapshot {

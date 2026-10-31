@@ -5233,7 +5233,7 @@ async function handleDraftMutation(
 ): Promise<void> {
   const mutateStartedAt = performance.now()
   const result = await withDraftLock(context.userId, request.chatId, async () => {
-    const session = await loadDraft(context.userId, request.chatId)
+    const session = await loadDraft(context.userId, request.chatId, true)
     const mutation = applyManualEdit(session, request.cleanText, {
       expectedVersion: request.expectedVersion,
       editGroupId: request.editGroupId,
@@ -5351,7 +5351,7 @@ async function handleDraftSend(
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const alreadyCompleted = completedSends.get(sendKey)
     if (alreadyCompleted) return { completed: alreadyCompleted }
-    const session = await loadDraft(context.userId, request.chatId)
+    const session = await loadDraft(context.userId, request.chatId, true)
     if (session.draftVersion !== request.expectedVersion) {
       return { error: 'stale' as const, session }
     }
@@ -5631,13 +5631,11 @@ async function clearPersistedDraft(
   cleared: PersistedDraftSession,
 ): Promise<void> {
   try {
-    await spindle.userStorage.delete(draftPath(chatId), userId)
-  } catch {
-    try {
-      await spindle.userStorage.setJson(draftPath(chatId), cleared, { userId })
-    } catch (error) {
-      logSafeFailure('error', 'POST_SEND_DRAFT_CLEAR', error)
-    }
+    // Persist a newer empty version so another instance cannot prefer its stale
+    // cached pre-send draft over a missing or version-zero storage record.
+    await spindle.userStorage.setJson(draftPath(chatId), cleared, { userId })
+  } catch (error) {
+    logSafeFailure('error', 'POST_SEND_DRAFT_CLEAR', error)
   }
 }
 

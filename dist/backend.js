@@ -227,7 +227,7 @@ function redoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
   };
 }
 function clearDraftAfterSend(session, now = (/* @__PURE__ */ new Date()).toISOString()) {
-  return createDraftSession(session.chatId, now);
+  return { ...createDraftSession(session.chatId, now), draftVersion: session.draftVersion + 1 };
 }
 function toDraftSnapshot(session) {
   return {
@@ -8123,7 +8123,7 @@ async function handleDraftLoad(request, context, activeRequest) {
 async function handleDraftMutation(request, context, activeRequest) {
   const mutateStartedAt = performance.now();
   const result = await withDraftLock(context.userId, request.chatId, async () => {
-    const session = await loadDraft(context.userId, request.chatId);
+    const session = await loadDraft(context.userId, request.chatId, true);
     const mutation = applyManualEdit(session, request.cleanText, {
       expectedVersion: request.expectedVersion,
       editGroupId: request.editGroupId
@@ -8214,7 +8214,7 @@ async function handleDraftSend(request, context) {
   const result = await withDraftLock(context.userId, request.chatId, async () => {
     const alreadyCompleted = completedSends.get(sendKey);
     if (alreadyCompleted) return { completed: alreadyCompleted };
-    const session = await loadDraft(context.userId, request.chatId);
+    const session = await loadDraft(context.userId, request.chatId, true);
     if (session.draftVersion !== request.expectedVersion) {
       return { error: "stale", session };
     }
@@ -8438,13 +8438,9 @@ async function persistGlossary(userId, glossary) {
 }
 async function clearPersistedDraft(userId, chatId, cleared) {
   try {
-    await spindle.userStorage.delete(draftPath(chatId), userId);
-  } catch {
-    try {
-      await spindle.userStorage.setJson(draftPath(chatId), cleared, { userId });
-    } catch (error) {
-      logSafeFailure("error", "POST_SEND_DRAFT_CLEAR", error);
-    }
+    await spindle.userStorage.setJson(draftPath(chatId), cleared, { userId });
+  } catch (error) {
+    logSafeFailure("error", "POST_SEND_DRAFT_CLEAR", error);
   }
 }
 async function withDraftLock(userId, chatId, task) {

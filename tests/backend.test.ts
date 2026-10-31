@@ -1563,6 +1563,78 @@ test('does not let contextual normalization replace an authoritative literal pun
   }
 })
 
+test('uses a semantic glossary hint to disambiguate a dictated term', async () => {
+  const userId = 'hint-as-in-user'
+  const chatId = 'hint-as-in-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-entry', canonical: 'chirurgeon', variants: ['chi-rur-gion'], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-segment', 1, 'I need a surgeon, as in a medieval battlefield doctor.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need a chirurgeon.')
+  assert.ok(decisionRequests.some((request) => JSON.stringify(request).includes('medieval battlefield doctor')))
+})
+
+test('uses a semantic glossary hint in an edit instruction', async () => {
+  const userId = 'hint-as-in-edit-user'
+  const chatId = 'hint-as-in-edit-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-edit-entry', canonical: 'chirurgeon', variants: [], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, 'I need a doctor.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'hint-edit-request', operationId: 'hint-edit-operation', chatId, expectedVersion: 1, instructionTranscript: 'Replace doctor with surgeon, as in a medieval battlefield doctor.' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, 'I need a chirurgeon.')
+})
+
+test('consumes hesitation fillers within a resolved glossary hint command', async () => {
+  const userId = 'hint-as-in-filler-user'
+  const chatId = 'hint-as-in-filler-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-filler-entry', canonical: 'chirurgeon', variants: [], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-filler-segment', 1, 'The children, as in, um, a battlefield doctor.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'The chirurgeon.')
+  assert.ok(decisionRequests.some((request) => JSON.stringify(request).includes('a battlefield doctor')))
+})
+
+test('leaves ambiguous glossary hint references unchanged', async () => {
+  const userId = 'hint-as-in-ambiguous-user'
+  const chatId = 'hint-as-in-ambiguous-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  for (const canonical of ['chirurgeon', 'physician'])
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: `hint-${canonical}`, canonical, variants: [], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'ambiguous-hint-segment', 1, 'I need a surgeon, as in a medieval battlefield doctor.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need a surgeon, as in a medieval battlefield doctor.')
+})
+
+test('leaves glossary hint wording intact when the decision model is unavailable', async () => {
+  const userId = 'hint-as-in-offline-user'
+  const chatId = 'hint-as-in-offline-chat'
+  activeChatId = chatId
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-offline-entry', canonical: 'chirurgeon', variants: [], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'offline-hint-segment', 1, 'I need a surgeon, as in a medieval battlefield doctor.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need a surgeon, as in a medieval battlefield doctor.')
+})
+
 test('does not let contextual normalization discard literal as in wording', async () => {
   const userId = 'literal-as-in-user'
   const chatId = 'literal-as-in-chat'

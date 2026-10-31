@@ -486,7 +486,7 @@ var COMMAND_GROUPS = [
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
       [
         "As in reference",
-        "Use a qualified \u201Cas in\u201D reference anywhere you dictate new edit text: replace, insert before or after, prepend, or append. For example, \u201CPrepend \u2018I nod,\u2019 as in nodding one\u2019s head, to the first sentence.\u201D The intended word must occur immediately before \u201Cas in\u201D and repeat afterward exactly or as a clear inflection; otherwise the wording remains literal."
+        "Use \u201Cas in\u201D to clarify a dictated term: repeat the word or a clear inflection, or describe the meaning of a saved glossary hint (for example, \u201Csurgeon, as in a medieval battlefield doctor\u201D). Glossary hints require a confident, unambiguous decision-model match; otherwise the wording remains literal. Separate the explanation with punctuation."
       ]
     ]
   },

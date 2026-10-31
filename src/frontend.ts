@@ -138,7 +138,7 @@ export const COMMAND_GROUPS = [
       ['Spelled form', 'Replace Kalora with capitalized C-A-E-L-O-R-A.'],
       [
         'As in reference',
-        'Use a qualified “as in” reference anywhere you dictate new edit text: replace, insert before or after, prepend, or append. For example, “Prepend ‘I nod,’ as in nodding one’s head, to the first sentence.” The intended word must occur immediately before “as in” and repeat afterward exactly or as a clear inflection; otherwise the wording remains literal.',
+        'Use “as in” to clarify a dictated term: repeat the word or a clear inflection, or describe the meaning of a saved glossary hint (for example, “surgeon, as in a medieval battlefield doctor”). Glossary hints require a confident, unambiguous decision-model match; otherwise the wording remains literal. Separate the explanation with punctuation.',
       ],
     ],
   },

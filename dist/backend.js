@@ -1043,7 +1043,11 @@ function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms
     if (!paragraph) return `${operation.type} requires one paragraph target`;
     if (hasInlineSelector(operation.target))
       return `${operation.type} does not accept an inline target`;
-    const point = operation.type === "append" ? range.end : range.start;
+    let point = operation.type === "append" ? range.end : range.start;
+    if (formatText && operation.type === "prepend") {
+      const quotedOpening = cleanText.slice(point, range.end).match(/^([“‘"'][ \t]*)(?=\p{Lu})/u);
+      if (quotedOpening) point += quotedOpening[0].length;
+    }
     const insertionText2 = formatText ? formatInsertionCasing(cleanText, point, operation.text ?? "", protectedCasingTerms) : operation.text ?? "";
     const displacedOpening = formatText && operation.type === "prepend" && isContinuingInsertion(insertionText2) ? lowercaseOrdinarySentenceOpening(cleanText, point, cleanText, point, protectedCasingTerms) : null;
     return {
@@ -1155,6 +1159,23 @@ ${formattedParagraph}`,
   if (operation.type === "insert_after") {
     start = insertAfterPoint;
     end = insertAfterPoint;
+  }
+  if (operation.type === "replace" && formatText && /[.!?…,;:—–-][”’"')\]]*\s*$/u.test(replacement)) {
+    const following = cleanText.slice(end, range.end).match(/^([ \t]+)([“‘"'([{]*)(\p{L})/u);
+    if (following) {
+      const wordStart = end + following[1].length + following[2].length;
+      const terminal = /[.!?…][”’"')\]]*\s*$/u.test(replacement);
+      const isPriorOpening = isSentenceOpeningAt(cleanText, wordStart);
+      const lower = !terminal && isPriorOpening ? lowercaseOrdinarySentenceOpening(cleanText, wordStart, cleanText, wordStart, protectedCasingTerms) : null;
+      if (terminal && /\p{Ll}/u.test(following[3])) {
+        const prefix = cleanText.slice(end, wordStart);
+        const letter = cleanText[wordStart];
+        return { operation, start, end: wordStart + 1, replacement: `${replacement}${prefix}${letter.toLocaleUpperCase()}`, paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset2(cleanText, start) };
+      }
+      if (lower) {
+        return { operation, start, end: lower.end, replacement: `${replacement}${cleanText.slice(end, wordStart)}${lower.text}`, paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset2(cleanText, start) };
+      }
+    }
   }
   return {
     operation,
@@ -1532,11 +1553,7 @@ function addBoundarySpacing(text, point, insertion) {
   return result;
 }
 function capitalizeReplacementAtSentenceOpening(text, start, replacement) {
-  const before = text.slice(0, start);
-  const isSentenceOpening = /(?:^|\n{2,}|[.?!…][”’"']?(?:[ \t]+|$))[ \t]*[“‘"'([{]*[ \t]*$/u.test(
-    before
-  );
-  if (!isSentenceOpening) return replacement;
+  if (!isSentenceOpeningAt(text, start)) return replacement;
   return replacement.replace(
     /^([ \t]*[“‘"'([{]*[ \t]*)([\p{Ll}][\p{L}\p{M}'’-]*)/u,
     (whole, prefix, word) => {
@@ -1587,9 +1604,9 @@ ${text}`;
 }
 function isSentenceOpeningAt(text, point) {
   const before = text.slice(0, point);
-  return /(?:^|\n{2,}|[.?!\u2026][\u201d\u2019"']?(?:[ \t]+|$))[ \t]*[\u201c\u2018"'([{]*[ \t]*$/u.test(
-    before
-  );
+  if (/(?:^|\n{2,}|[.?!\u2026][\u201d\u2019"']?(?:[ \t]+|$))[ \t]*[\u201c\u2018"'([{]*[ \t]*$/u.test(before))
+    return true;
+  return /(?:^|[\s,;:\u2014\u2013-])[\u201c\u2018"'][ \t]*$/u.test(before) && /^\p{Lu}/u.test(text.slice(point));
 }
 var CALENDAR_PROPER_NOUNS = /* @__PURE__ */ new Set([
   "Monday",

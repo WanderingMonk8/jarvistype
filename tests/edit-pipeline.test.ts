@@ -400,6 +400,51 @@ test('prepend and insert-before adjust displaced ordinary sentence openings only
   }
 })
 
+test('preserves quoted speech openings after a dialogue tag', () => {
+  for (const [open, close] of [['“', '”'], ['‘', '’'], ['"', '"'], ["'", "'"]] as const) {
+    const original = `She said, ${open}Hello there.${close}`
+    const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: original }]
+    for (const [operation, expected] of [
+      [{ id: 'replace', type: 'replace' as const, target: { exactText: 'Hello' }, text: 'come' }, `She said, ${open}Come there.${close}`],
+      [{ id: 'insert', type: 'insert_before' as const, target: { exactText: 'Hello' }, text: 'please' }, `She said, ${open}Please hello there.${close}`],
+    ] as const) {
+      const result = executeEditPlan(original, paragraphs, 1, { schemaVersion: 2, draftVersion: 1, explanation: 'Edit.', operations: [operation] })
+      assert.equal(result.ok && result.afterText, expected, `${open} ${operation.type}`)
+    }
+    const incomplete = `She said, ${open}`
+    const result = executeEditPlan(incomplete, [{ id: 'p', ordinal: 1, lineIndex: 0, text: incomplete }], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Append.', operations: [{ id: 'append', type: 'append', target: { paragraphOrdinal: 1 }, text: 'hello' }],
+    })
+    assert.equal(result.ok && result.afterText, `${incomplete}hello`, `${open} append without existing capitalized text`)
+    const fragment = `She mentioned ${open}hello there${close} in passing.`
+    const fragmentResult = executeEditPlan(fragment, [{ id: 'p', ordinal: 1, lineIndex: 0, text: fragment }], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Replace.', operations: [{ id: 'replace', type: 'replace', target: { exactText: 'hello' }, text: 'goodbye' }],
+    })
+    assert.equal(fragmentResult.ok && fragmentResult.afterText, `She mentioned ${open}goodbye there${close} in passing.`, `${open} lowercase fragment`)
+    for (const [word, expectedWord, protectedTerms] of [['Hello', 'hello', []], ['Erbold', 'Erbold', ['Erbold']], ['I', 'I', []]] as const) {
+      const quoted = `${open}${word} waits.${close}`
+      const prepended = executeEditPlan(quoted, [{ id: 'p', ordinal: 1, lineIndex: 0, text: quoted }], 1, {
+        schemaVersion: 2, draftVersion: 1, explanation: 'Prepend.', operations: [{ id: 'prepend', type: 'prepend', target: { paragraphOrdinal: 1 }, text: 'please' }],
+      }, protectedTerms)
+      assert.equal(prepended.ok && prepended.afterText, `${open}Please ${expectedWord} waits.${close}`, `${open} prepend ${word}`)
+    }
+  }
+})
+
+test('splices punctuation-ending replacements with the following sentence', () => {
+  for (const [original, target, replacement, expected, protectedTerms] of [
+    ['We walked, then rested.', 'walked,', 'stopped.', 'We stopped. Then rested.', []],
+    ['We stopped. Then rested.', 'stopped.', 'walked,', 'We walked, then rested.', []],
+    ['We stopped. Erbold rested.', 'stopped.', 'walked,', 'We walked, Erbold rested.', ['Erbold']],
+    ['We stopped. I rested.', 'stopped.', 'walked,', 'We walked, I rested.', []],
+  ] as const) {
+    const result = executeEditPlan(original, [{ id: 'p', ordinal: 1, lineIndex: 0, text: original }], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Replace.', operations: [{ id: 'replace', type: 'replace', target: { exactText: target }, text: replacement }],
+    }, protectedTerms)
+    assert.equal(result.ok && result.afterText, expected)
+  }
+})
+
 test('supports insert, append, prepend, delete, and casing through the same pipeline', () => {
   const session = fixture()
   const result = executeEditPlan(session.cleanText, session.paragraphs, 1, {

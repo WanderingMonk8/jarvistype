@@ -1689,7 +1689,11 @@ test('passes extra hint modifiers to semantic evaluation without treating natura
     assert.equal(response?.type, 'transcript.normalization.response')
     if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
   }
-  assert.ok(decisionRequests.some((request) => JSON.stringify(request).includes('extra descriptive modifiers')))
+  assert.ok(decisionRequests.some((request) => {
+    const questions = (request as { questions?: Record<string, { instructions?: string }> }).questions ?? {}
+    return questions.semantic_0_0_0?.instructions?.includes('candidate reference_0_0_0') &&
+      questions.semantic_0_0_0.instructions.includes('extra descriptive modifiers')
+  }))
 })
 
 test('uses a semantic glossary hint to disambiguate a dictated term', async () => {

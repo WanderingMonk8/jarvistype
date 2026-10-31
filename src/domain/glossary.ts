@@ -15,7 +15,22 @@ export function hasNearIdenticalHintWording(spoken: string, hint: string): boole
   }
   const left = words(spoken)
   const right = words(hint)
-  return left.length > 0 && left.length === right.length && left.every((word, index) => word === right[index])
+  const forms = (word: string): Set<string> => {
+    const result = new Set([word])
+    for (const suffix of ['ing', 'ed']) {
+      if (word.length < suffix.length + 3 || !word.endsWith(suffix)) continue
+      const stem = word.slice(0, -suffix.length)
+      result.add(stem)
+      result.add(`${stem}e`)
+      if (/([^aeiou])\1$/u.test(stem)) result.add(stem.slice(0, -1))
+    }
+    return result
+  }
+  return left.length > 0 && left.length === right.length && left.every((word, index) => {
+    const other = right[index]!
+    const otherForms = forms(other)
+    return [...forms(word)].some((form) => otherForms.has(form))
+  })
 }
 
 export interface GlossaryEntry {

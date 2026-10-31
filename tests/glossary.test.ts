@@ -13,6 +13,9 @@ import {
 test('compares near-identical hint wording without treating partial matches as equivalent', () => {
   assert.equal(hasNearIdenticalHintWording("Midland's enemies", "Midland's enemy"), true)
   assert.equal(hasNearIdenticalHintWording('the battlefield doctors', 'a battlefield doctor'), true)
+  assert.equal(hasNearIdenticalHintWording('soldiers marching', 'soldier marched'), true)
+  assert.equal(hasNearIdenticalHintWording('a soldier stopping', 'the soldier stopped'), true)
+  assert.equal(hasNearIdenticalHintWording('a soldier caring', 'a soldier cared'), true)
   assert.equal(hasNearIdenticalHintWording('a battlefield doctor', 'a medieval battlefield doctor'), false)
   assert.equal(hasNearIdenticalHintWording('', ''), false)
 })

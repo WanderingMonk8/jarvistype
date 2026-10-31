@@ -484,7 +484,7 @@ var COMMAND_GROUPS = [
       ["Lowercase", "Lowercase paragraph 2, or make paragraph 2 lowercase."],
       ["Capitalize", "Capitalize \u201Cthe hawk\u201D to make every word title-cased: \u201CThe Hawk.\u201D"],
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
-      ["Glossary hint", "Say the term followed by \u201Chint\u201D and a description of a saved glossary hint, for example \u201CTudor hint Midland\u2019s enemy.\u201D A comma is optional. A unique, confident match and clear explanation endpoint are required; uncertain wording is left for review."],
+      ["Glossary hint", "Say \u201Chint\u201D and a description after the term, immediately or later in the same clause: \u201Ctwo-door army hint Midland\u2019s enemy.\u201D A comma is optional; synonyms, plurals, and inflected forms can match the hint. The earlier term must have one identifiable spelling or phonetic match to the glossary entry. Ambiguous terms or explanation endpoints are left for review."],
       [
         "As in reference",
         "Clarify a dictated term by repeating it or a clear inflection after \u201Cas in,\u201D or by describing a saved glossary hint in your own words: \u201Csurgeon, as in a medieval battlefield doctor, near the gate.\u201D A strong hint match or a phonetic match to a glossary term or heard-as variant can identify the entry; both are not required. Separate the explanation from surrounding text with commas or sentence punctuation. The explanation is removed only when the entry and command boundary are clear; otherwise it remains for review. Works in dictation and editing."

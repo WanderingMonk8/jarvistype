@@ -1630,6 +1630,43 @@ test('resolves the hint cue in replacement instructions', async () => {
   if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, 'We face Tudor.')
 })
 
+test('finds a unique delayed hinted term in the current clause', async () => {
+  const userId = 'delayed-hint-user'
+  const chatId = 'delayed-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'delayed-hint-entry', canonical: 'Tudor', variants: [], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.99
+  for (const [index, raw, expected] of [
+    [0, "I face the two-door army hint Midland's enemy.", 'I face the Tudor army.'],
+    [1, "I face the Tudor army, hint Midland's enemy.", 'I face the Tudor army.'],
+    [2, "I face the Tudor and the two-door army hint Midland's enemy.", "I face the Tudor and the two-door army hint Midland's enemy."],
+    [3, "Tudor left. I face the army hint Midland's enemy.", "Tudor left. I face the army hint Midland's enemy."],
+  ] as const) {
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `delayed-hint-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+})
+
+test('supports synonymous hint descriptions when the semantic decision is confident', async () => {
+  const userId = 'synonym-hint-user'
+  const chatId = 'synonym-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'synonym-hint-entry', canonical: 'chirurgeon', variants: ['surgeon'], hint: 'a battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.99
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'synonym-hint-segment', 1, 'Find the surgeon hint a war zone physician.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'Find the chirurgeon.')
+})
+
 test('uses a semantic glossary hint to disambiguate a dictated term', async () => {
   const userId = 'hint-as-in-user'
   const chatId = 'hint-as-in-chat'

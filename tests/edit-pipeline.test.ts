@@ -445,6 +445,19 @@ test('splices punctuation-ending replacements with the following sentence', () =
   }
 })
 
+test('wrapping text includes all immediately attached punctuation', () => {
+  for (const punctuation of [',', ':', ';', '?!', '...', '—', '!?;']) {
+    const original = `She said hello${punctuation} then left.`
+    const plan = { schemaVersion: 2 as const, draftVersion: 1, explanation: 'Quote.', operations: [
+      { id: 'open', type: 'insert_before' as const, target: { exactText: 'hello' }, text: '“' },
+      { id: 'close', type: 'insert_after' as const, target: { exactText: 'hello' }, text: '”' },
+    ] }
+    const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: original }]
+    for (const result of [executeEditPlan(original, paragraphs, 1, plan), executeSequentialEditPlan(original, paragraphs, 1, plan)])
+      assert.equal(result.ok && result.afterText, `She said “hello${punctuation}” then left.`, punctuation)
+  }
+})
+
 test('supports insert, append, prepend, delete, and casing through the same pipeline', () => {
   const session = fixture()
   const result = executeEditPlan(session.cleanText, session.paragraphs, 1, {

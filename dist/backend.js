@@ -747,7 +747,9 @@ function executeSequentialEditPlan(cleanText, paragraphs, currentVersion, plan, 
     const result = executeEditPlan(text, currentParagraphs, currentVersion, {
       ...plan,
       operations: [currentOperation]
-    }, protectedCasingTerms);
+    }, protectedCasingTerms, {
+      quotationWrap: operation.type === "insert_after" && /^[”’"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_before" && /^[“‘"']$/u.test(candidate.text ?? ""))
+    });
     if (!result.ok) {
       failedCommand = { index: index + 1, operationId: operation.id, reason: result.reason };
       break;
@@ -827,7 +829,8 @@ function executeEditPlan(cleanText, paragraphs, currentVersion, plan, protectedC
       paragraphs,
       operation,
       protectedCasingTerms,
-      formatText
+      formatText,
+      options.quotationWrap === true || operation.type === "insert_after" && /^[”’"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_before" && /^[“‘"']$/u.test(candidate.text ?? ""))
     );
     if (typeof patch === "string") return { ok: false, reason: patch };
     if (formatText && (operation.type === "insert_after" || operation.type === "append") && patches.length > 0) {
@@ -1030,7 +1033,7 @@ function parseTarget(value) {
     return null;
   return Object.keys(target).length ? target : null;
 }
-function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms, formatText) {
+function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms, formatText, quotationWrap) {
   const paragraphMatches = paragraphs.filter(
     (paragraph2) => (operation.target.paragraphId === void 0 || paragraph2.id === operation.target.paragraphId) && (operation.target.paragraphOrdinal === void 0 || paragraph2.ordinal === operation.target.paragraphOrdinal)
   );
@@ -1150,7 +1153,7 @@ ${formattedParagraph}`,
       paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset2(cleanText, start)
     };
   }
-  const insertAfterPoint = formatText && operation.type === "insert_after" ? advancePastAdjacentSentenceEnding(cleanText, end, range.end, insertionText) : end;
+  const insertAfterPoint = formatText && operation.type === "insert_after" ? quotationWrap ? end + (cleanText.slice(end, range.end).match(/^[\p{P}]+/u)?.[0].length ?? 0) : advancePastAdjacentSentenceEnding(cleanText, end, range.end, insertionText) : end;
   const replacement = operation.type === "replace" ? formatText ? alignReplacementInitialCasing(cleanText, start, end, insertionText, protectedCasingTerms) : insertionText : operation.type === "delete" ? "" : operation.type === "insert_after" ? formatText ? addBoundarySpacing(
     cleanText,
     insertAfterPoint,
@@ -6502,7 +6505,7 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
     const endText = adoptUnambiguousDraftCasing(session, spokenEnd, void 0);
     const endIndex = session.cleanText.lastIndexOf(endText);
     if (endIndex < startIndex) return null;
-    const endTerminal = session.cleanText.slice(endIndex + endText.length).match(/^(?:\.{3}|[.!?\u2026])["'\u201d\u2019)\]]*/u)?.[0];
+    const endTerminal = session.cleanText.slice(endIndex + endText.length).match(/^[\p{P}]+/u)?.[0];
     const effectiveEndText = endTerminal ? `${endText}${endTerminal}` : endText;
     const endOccurrence = countExactOccurrences(session.cleanText.slice(0, endIndex), effectiveEndText) + 1;
     closeOperation = {

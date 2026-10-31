@@ -139,7 +139,10 @@ export function executeSequentialEditPlan(
     const result = executeEditPlan(text, currentParagraphs, currentVersion, {
       ...plan,
       operations: [currentOperation],
-    }, protectedCasingTerms)
+    }, protectedCasingTerms, {
+      quotationWrap: operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? '')),
+    })
     if (!result.ok) {
       failedCommand = { index: index + 1, operationId: operation.id, reason: result.reason }
       break
@@ -192,6 +195,7 @@ export function parseEditPlan(value: unknown): EditPlan | null {
 }
 
 export interface EditExecutionOptions {
+  quotationWrap?: boolean
   /**
    * Diagnostic switch used by the isolation tests: skip per-operation casing,
    * boundary spacing, and separator trimming so the raw patch can be compared
@@ -238,6 +242,8 @@ export function executeEditPlan(
       operation,
       protectedCasingTerms,
       formatText,
+      options.quotationWrap === true || (operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))),
     )
     if (typeof patch === 'string') return { ok: false, reason: patch }
     if (
@@ -542,6 +548,7 @@ function resolveOperation(
   operation: EditOperation,
   protectedCasingTerms: readonly string[],
   formatText: boolean,
+  quotationWrap: boolean,
 ): Patch | string {
   const paragraphMatches = paragraphs.filter(
     (paragraph) =>
@@ -704,7 +711,9 @@ function resolveOperation(
   }
   const insertAfterPoint =
     formatText && operation.type === 'insert_after'
-      ? advancePastAdjacentSentenceEnding(cleanText, end, range.end, insertionText)
+      ? quotationWrap
+        ? end + (cleanText.slice(end, range.end).match(/^[\p{P}]+/u)?.[0].length ?? 0)
+        : advancePastAdjacentSentenceEnding(cleanText, end, range.end, insertionText)
       : end
   const replacement =
     operation.type === 'replace'

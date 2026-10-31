@@ -2628,6 +2628,18 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('quotes a spoken range including its attached punctuation run', async () => {
+  const userId = 'quotation-punctuation-run-user'
+  const chatId = 'quotation-punctuation-run-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She says hello, then goodbye?! Next.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-punctuation-run', operationId: 'quotation-punctuation-run-op', chatId, expectedVersion: 1, instructionTranscript: 'Put quotations from hello to goodbye.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'She says “hello, then goodbye?!” Next.')
+})
+
 test('puts quotation marks around a spoken text range without a provider call', async () => {
   const userId = 'quotation-range-user'
   const chatId = 'quotation-range-chat'

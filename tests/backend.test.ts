@@ -22,6 +22,7 @@ let decisionProbability = 0
 let referenceDecisionProbability = 1
 let hintBoundaryDecision: ((id: string) => number) | null = null
 let hintSemanticDecision: ((id: string) => number) | null = null
+let hintCommandDecision: ((id: string) => number) | null = null
 let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
@@ -98,7 +99,7 @@ const spindleMock = {
           {
             type: 'noul',
             noul:
-              key === 'introducedGrammarError' ? decisionProbability : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : key.startsWith('semantic_') && hintSemanticDecision ? hintSemanticDecision(key) : referenceDecisionProbability,
+              key === 'introducedGrammarError' ? decisionProbability : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : key.startsWith('semantic_') && hintSemanticDecision ? hintSemanticDecision(key) : key.startsWith('command_') && hintCommandDecision ? hintCommandDecision(key) : referenceDecisionProbability,
           },
         ]),
       )
@@ -259,6 +260,7 @@ test.beforeEach(() => {
   referenceDecisionProbability = 1
   hintBoundaryDecision = null
   hintSemanticDecision = null
+  hintCommandDecision = null
   activeChatId = 'chat-default'
   appendShouldFail = false
   appendAcknowledgementGate = null
@@ -1580,6 +1582,45 @@ test('uses a semantic glossary hint to disambiguate a dictated term', async () =
   assert.equal(response?.type, 'transcript.normalization.response')
   if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need a chirurgeon.')
   assert.ok(decisionRequests.some((request) => JSON.stringify(request).includes('medieval battlefield doctor')))
+})
+
+test('accepts a strong unique hint with a clear sentence-ending boundary', async () => {
+  const userId = 'hint-single-boundary-user'
+  const chatId = 'hint-single-boundary-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-single-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  const raw = 'I need to see the surgeon, as in a medieval battlefield doctor.'
+  for (const [index, semantic, boundary, expected] of [[0, 0.99, 0.75, 'I need to see the chirurgeon.'], [1, 0.94, 0.75, raw], [2, 0.99, 0.69, raw]] as const) {
+    hintSemanticDecision = () => semantic
+    hintBoundaryDecision = () => boundary
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `hint-single-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+})
+
+test('removes a confirmed hint after an already canonical term without swallowing literal prose', async () => {
+  const userId = 'hint-canonical-command-user'
+  const chatId = 'hint-canonical-command-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-canonical-command-entry', canonical: 'Tudor', variants: [], hint: 'Midland’s enemy', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  const raw = 'We need to face the Tudor, as in Midland’s enemy.'
+  for (const [index, command, expected] of [[0, 0.99, 'We need to face the Tudor.'], [1, 0.2, raw]] as const) {
+    hintSemanticDecision = () => 0.84
+    hintBoundaryDecision = () => 0.31
+    hintCommandDecision = () => command
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `hint-canonical-command-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
 })
 
 test('uses a semantic glossary hint in an edit instruction', async () => {
@@ -6708,7 +6749,7 @@ test('logs glossary hint decisions without recording transcript or hint text', a
   if (response?.type !== 'debug.log.response') return
   const log = response.entries.join('\n')
   assert.match(log, /\[glossary\.hint\] start matches=1 hints=1 candidates=1/u)
-  assert.match(log, /\[glossary\.hint\] decision=1 semantic=1\.000 boundary=1\.000 phonetic=no best=1\.000/u)
+  assert.match(log, /\[glossary\.hint\] decision=1 semantic=1\.000 boundary=1\.000 command=1\.000 phonetic=no singleBoundary=yes best=1\.000/u)
   assert.match(log, /\[glossary\.hint\] outcome=resolved/u)
   assert.doesNotMatch(log, /chirurgeon|battlefield|surgeon/iu)
 })

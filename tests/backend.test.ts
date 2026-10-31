@@ -21,6 +21,7 @@ let decisionsEnabled = false
 let decisionProbability = 0
 let referenceDecisionProbability = 1
 let hintBoundaryDecision: ((id: string) => number) | null = null
+let hintSemanticDecision: ((id: string) => number) | null = null
 let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
@@ -97,7 +98,7 @@ const spindleMock = {
           {
             type: 'noul',
             noul:
-              key === 'introducedGrammarError' ? decisionProbability : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : referenceDecisionProbability,
+              key === 'introducedGrammarError' ? decisionProbability : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : key.startsWith('semantic_') && hintSemanticDecision ? hintSemanticDecision(key) : referenceDecisionProbability,
           },
         ]),
       )
@@ -257,6 +258,7 @@ test.beforeEach(() => {
   decisionProbability = 0
   referenceDecisionProbability = 1
   hintBoundaryDecision = null
+  hintSemanticDecision = null
   activeChatId = 'chat-default'
   appendShouldFail = false
   appendAcknowledgementGate = null
@@ -1592,6 +1594,23 @@ test('uses a semantic glossary hint in an edit instruction', async () => {
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'edit.proposal.response')
   if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, 'I need a chirurgeon.')
+})
+
+test('allows either a semantic hint or a phonetic term without requiring both', async () => {
+  const userId = 'hint-either-route-user'
+  const chatId = 'hint-either-route-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-either-entry', canonical: 'chirurgeon', variants: ['children'], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  for (const [index, spoken, semantic] of [[0, 'stranger', 1], [1, 'children', 0.1]] as const) {
+    hintSemanticDecision = () => semantic
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `hint-either-${index}`, 1, `I need the ${spoken}, as in the battlefield doctor.`), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need the chirurgeon.')
+  }
 })
 
 test('consumes hesitation fillers within a resolved glossary hint command', async () => {
@@ -6689,7 +6708,7 @@ test('logs glossary hint decisions without recording transcript or hint text', a
   if (response?.type !== 'debug.log.response') return
   const log = response.entries.join('\n')
   assert.match(log, /\[glossary\.hint\] start matches=1 hints=1 candidates=1/u)
-  assert.match(log, /\[glossary\.hint\] decision=1 best=1\.000/u)
+  assert.match(log, /\[glossary\.hint\] decision=1 semantic=1\.000 boundary=1\.000 phonetic=no best=1\.000/u)
   assert.match(log, /\[glossary\.hint\] outcome=resolved/u)
   assert.doesNotMatch(log, /chirurgeon|battlefield|surgeon/iu)
 })

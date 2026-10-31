@@ -4358,9 +4358,9 @@ async function resolveGlossaryHintReferences(
   signal: AbortSignal,
 ): Promise<{ text: string; changed: boolean; unresolved: boolean }> {
   const startedAt = performance.now()
-  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:\s*,\s*|\s+)(?:as\s+in|hint)\s*,?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^;.!?\n]{3,160})(?=[;.!?\n]|$)/giu)].filter((match) => {
+  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:\s*,\s*|\s+)(?:\(?hint|as\s+in)\s*[:,]?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^);.!?\n]{3,160})(?=[);.!?\n]|$)/giu)].filter((match) => {
     const cue = match[0].slice(match[1]!.length)
-    return !/^\s*,?\s*hint\b/iu.test(cue) || !/^(?:a|an|the|any|another|some|one|me|you|us|her|him|them|no|your|my|a\s+little)$/iu.test(match[1]!)
+    return !/^\s*,?\s*\(?hint\b/iu.test(cue) || !/^(?:a|an|the|any|another|some|one|me|you|us|her|him|them|no|your|my|a\s+little)$/iu.test(match[1]!)
   })
   const entries = glossary.entries.filter((entry) => entry.hint.trim())
   const logOutcome = (outcome: string, details = '') => recordDebug(userId, 'glossary.hint', `outcome=${outcome} matches=${matches.length} hints=${entries.length}${details ? ` ${details}` : ''} duration=${debugDuration(startedAt)}`)
@@ -4418,8 +4418,11 @@ async function resolveGlossaryHintReferences(
     let unresolved = false
     for (let mi = matches.length - 1; mi >= 0; mi--) {
       const match = matches[mi]!
-      const explicitHint = /^\s*,?\s*hint\b/iu.test(match[0].slice(match[1]!.length))
-      const singleSentenceBoundary = !match[2]!.includes(',') && /[.!?]/u.test(input[match.index! + match[0].length] ?? '')
+      const cueText = match[0].slice(match[1]!.length, match[0].length - match[2]!.length)
+      const explicitHint = /^\s*,?\s*\(?hint\b/iu.test(cueText)
+      const parenthesizedHint = explicitHint && /^\s*,?\s*\(hint\b/iu.test(cueText)
+      const afterMatch = input.slice(match.index! + match[0].length)
+      const singleSentenceBoundary = !match[2]!.includes(',') && (parenthesizedHint ? /^\)[.!?]/u.test(afterMatch) : /^[.!?]/u.test(afterMatch))
       const scored = candidates.filter((candidate) => candidate.matchIndex === mi).map((candidate) => {
         const boundaryAnswer = result.answers[candidate.id]
         const semanticAnswer = result.answers[candidate.semanticId]
@@ -4443,6 +4446,7 @@ async function resolveGlossaryHintReferences(
       const explanationStart = match.index! + match[0].length - match[2]!.length
       let end = explanationStart + best.candidate.boundary
       if (input[end] === ',') end++
+      if (parenthesizedHint && input[end] === ')') end++
       const cueStart = match.index! + match[1]!.length
       if (explicitHint) {
         const preceding = input.slice(0, cueStart)

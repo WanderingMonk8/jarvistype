@@ -136,10 +136,10 @@ export const COMMAND_GROUPS = [
       ['Lowercase', 'Lowercase paragraph 2, or make paragraph 2 lowercase.'],
       ['Capitalize', 'Capitalize “the hawk” to make every word title-cased: “The Hawk.”'],
       ['Spelled form', 'Replace Kalora with capitalized C-A-E-L-O-R-A.'],
-      ['Glossary hint', 'Say “hint” and a description after the term, immediately or later in the same clause: “two-door army hint Midland’s enemy.” A comma is optional; synonyms, plurals, and inflected forms can match the hint. The earlier term must have one identifiable spelling or phonetic match to the glossary entry. Ambiguous terms or explanation endpoints are left for review.'],
+      ['Glossary hint', 'Say “hint” or “clue” and a description after the term, immediately or later in the same clause: “two-door army clue Midland’s enemy.” A comma is optional; synonyms, plurals, and inflected forms can match the hint. The earlier term must have one identifiable spelling or phonetic match to the glossary entry. Ambiguous terms or explanation endpoints are left for review.'],
       [
         'As in reference',
-        'Clarify a dictated term by repeating it or a clear inflection after “as in,” or by describing a saved glossary hint in your own words: “surgeon, as in a medieval battlefield doctor, near the gate.” A strong hint match or a phonetic match to a glossary term or heard-as variant can identify the entry; both are not required. Separate the explanation from surrounding text with commas or sentence punctuation. The explanation is removed only when the entry and command boundary are clear; otherwise it remains for review. Works in dictation and editing.',
+        'Clarify a dictated term by repeating it or a clear inflection after “as in,” or by describing a saved glossary hint in your own words. A qualified glossary reference can target a term earlier in the same clause. Separate the explanation from surrounding text with commas or sentence punctuation. The explanation is removed only when the entry, target, and command boundary are clear; otherwise it remains for review. Works in dictation and editing.',
       ],
     ],
   },

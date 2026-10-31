@@ -557,7 +557,7 @@ async function handleTranscriptNormalization(
         deterministic.authoritativePunctuationMarks,
       ) &&
       preservesLiteralAsIn(candidateText, contextual.text) &&
-      (candidateText.match(/\bhint\b/giu)?.length ?? 0) <= (contextual.text.match(/\bhint\b/giu)?.length ?? 0)
+      (candidateText.match(/\b(?:hint|clue)\b/giu)?.length ?? 0) <= (contextual.text.match(/\b(?:hint|clue)\b/giu)?.length ?? 0)
     ) {
       const enforced = normalizeDeterministically(contextual.text, glossary.entries, {
         capitalizeOpening,
@@ -4358,9 +4358,9 @@ async function resolveGlossaryHintReferences(
   signal: AbortSignal,
 ): Promise<{ text: string; changed: boolean; unresolved: boolean }> {
   const startedAt = performance.now()
-  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:(?:\s*[,;:.!?]\s*|\s+)\(?hint|(?:\s*,\s*|\s+)as\s+in)\s*[:,]?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^);.!?\n]{3,160})(?=[);.!?\n]|$)/giu)].filter((match) => {
+  const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:(?:\s*[,;:.!?]\s*|\s+)\(?(?:hint|clue)|(?:\s*,\s*|\s+)as\s+in)\s*[:,]?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^);.!?\n]{3,160})(?=[);.!?\n]|$)/giu)].filter((match) => {
     const cue = match[0].slice(match[1]!.length)
-    return !/^\s*[,;:.!?]?\s*\(?hint\b/iu.test(cue) || !/^(?:a|an|the|any|another|some|one|me|you|us|her|him|them|no|your|my|a\s+little)$/iu.test(match[1]!)
+    return !/^\s*[,;:.!?]?\s*\(?(?:hint|clue)\b/iu.test(cue) || !/^(?:a|an|the|any|another|some|one|me|you|us|her|him|them|no|your|my|a\s+little)$/iu.test(match[1]!)
   })
   const entries = glossary.entries.filter((entry) => entry.hint.trim())
   const logOutcome = (outcome: string, details = '') => recordDebug(userId, 'glossary.hint', `outcome=${outcome} matches=${matches.length} hints=${entries.length}${details ? ` ${details}` : ''} duration=${debugDuration(startedAt)}`)
@@ -4419,8 +4419,8 @@ async function resolveGlossaryHintReferences(
     for (let mi = matches.length - 1; mi >= 0; mi--) {
       const match = matches[mi]!
       const cueText = match[0].slice(match[1]!.length, match[0].length - match[2]!.length)
-      const explicitHint = /^\s*[,;:.!?]?\s*\(?hint\b/iu.test(cueText)
-      const parenthesizedHint = explicitHint && /^\s*[,;:.!?]?\s*\(hint\b/iu.test(cueText)
+      const explicitHint = /^\s*[,;:.!?]?\s*\(?(?:hint|clue)\b/iu.test(cueText)
+      const parenthesizedHint = explicitHint && /^\s*[,;:.!?]?\s*\((?:hint|clue)\b/iu.test(cueText)
       const priorSentenceEnding = explicitHint ? cueText.match(/^\s*([.!?])/u)?.[1] : undefined
       const afterMatch = input.slice(match.index! + match[0].length)
       const singleSentenceBoundary = !match[2]!.includes(',') && (parenthesizedHint ? /^\)[.!?]/u.test(afterMatch) : /^[.!?]/u.test(afterMatch))
@@ -4450,14 +4450,14 @@ async function resolveGlossaryHintReferences(
       if (parenthesizedHint && input[end] === ')') end++
       if (priorSentenceEnding && /[.!?]/u.test(input[end] ?? '')) end++
       const cueStart = match.index! + match[1]!.length
-      if (explicitHint) {
+      {
         const preceding = input.slice(0, cueStart)
         const boundary = Math.max(preceding.lastIndexOf('.'), preceding.lastIndexOf('!'), preceding.lastIndexOf('?'), preceding.lastIndexOf(';'), preceding.lastIndexOf('\n'), preceding.lastIndexOf(',')) + 1
         const terms = [best.candidate.canonical, ...best.candidate.variants]
         const hits = [...input.slice(boundary, cueStart).matchAll(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu)]
           .map((word) => ({ start: boundary + word.index!, end: boundary + word.index! + word[0].length, word: word[0] }))
           .filter((word) => terms.some((term) => term.toLocaleLowerCase() === word.word.toLocaleLowerCase() || areSpeechPhoneticNeighbors(term, word.word)))
-        if (hits.length !== 1) { unresolved = true; continue }
+        if (hits.length > 1 || (explicitHint && hits.length === 0)) { unresolved = true; continue }
         if (hits.length === 1) {
           const hit = hits[0]!
           const between = text.slice(hit.end, cueStart).replace(/[ \t]*,?[ \t]*$/u, '')

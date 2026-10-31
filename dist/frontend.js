@@ -486,7 +486,7 @@ var COMMAND_GROUPS = [
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
       [
         "As in reference",
-        "Use \u201Cas in\u201D to clarify a dictated term: repeat the word or a clear inflection, or describe the meaning of a saved glossary hint (for example, \u201Csurgeon, as in a medieval battlefield doctor\u201D). Glossary hints require a confident, unambiguous decision-model match; otherwise the wording remains literal. Separate the explanation with punctuation."
+        "Clarify a dictated term by repeating it or a clear inflection after \u201Cas in,\u201D or by describing a saved glossary hint in your own words: \u201Csurgeon, as in a medieval battlefield doctor, near the gate.\u201D Separate the explanation from surrounding text with commas or sentence punctuation. When the decision model confidently identifies the entry and the complete explanation, the explanation is removed; otherwise it remains for review. Works in dictation and editing."
       ]
     ]
   },

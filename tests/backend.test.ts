@@ -20,6 +20,7 @@ const decisionRequests: unknown[] = []
 let decisionsEnabled = false
 let decisionProbability = 0
 let referenceDecisionProbability = 1
+let hintBoundaryDecision: ((id: string) => number) | null = null
 let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
@@ -96,7 +97,7 @@ const spindleMock = {
           {
             type: 'noul',
             noul:
-              key === 'introducedGrammarError' ? decisionProbability : referenceDecisionProbability,
+              key === 'introducedGrammarError' ? decisionProbability : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : referenceDecisionProbability,
           },
         ]),
       )
@@ -255,6 +256,7 @@ test.beforeEach(() => {
   decisionsEnabled = false
   decisionProbability = 0
   referenceDecisionProbability = 1
+  hintBoundaryDecision = null
   activeChatId = 'chat-default'
   appendShouldFail = false
   appendAcknowledgementGate = null
@@ -1605,6 +1607,33 @@ test('consumes hesitation fillers within a resolved glossary hint command', asyn
   assert.equal(response?.type, 'transcript.normalization.response')
   if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'The chirurgeon.')
   assert.ok(decisionRequests.some((request) => JSON.stringify(request).includes('a battlefield doctor')))
+})
+
+test('uses the selected hint boundary and retains subsequent prose', async () => {
+  const userId = 'hint-boundary-user'
+  const chatId = 'hint-boundary-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-boundary-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  for (const [index, raw, expected, boundary] of [
+    [0, 'I found the surgeon, as in a battlefield doctor, near the gate.', 'I found the chirurgeon near the gate.', 0],
+    [1, 'I found the surgeon, as in a doctor, one who treats soldiers, near the gate.', 'I found the chirurgeon near the gate.', 1],
+  ] as const) {
+    hintBoundaryDecision = (id) => id.endsWith(`_${boundary}`) ? 0.99 : 0.1
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `hint-boundary-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+  hintBoundaryDecision = () => 0.99
+  responses.length = 0
+  const ambiguous = 'I found the surgeon, as in a battlefield doctor, near the gate.'
+  await dispatch(recordingAppendRequest(chatId, 'hint-boundary-ambiguous', 1, ambiguous), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, ambiguous)
 })
 
 test('leaves ambiguous glossary hint references unchanged', async () => {

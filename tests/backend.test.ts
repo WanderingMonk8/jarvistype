@@ -1569,7 +1569,7 @@ test('does not let contextual normalization replace an authoritative literal pun
   }
 })
 
-test('detects glossary hint references without a provider-inserted comma', async () => {
+test('does not use glossary hints to interpret as-in wording', async () => {
   const userId = 'hint-no-comma-user'
   const chatId = 'hint-no-comma-chat'
   activeChatId = chatId
@@ -1584,13 +1584,7 @@ test('detects glossary hint references without a provider-inserted comma', async
   const uncertain = responses.at(-1)?.payload
   assert.equal(uncertain?.type, 'transcript.normalization.response')
   if (uncertain?.type === 'transcript.normalization.response') assert.equal(uncertain.proposal.candidateText, raw)
-  assert.ok(decisionRequests.some((request) => JSON.stringify(request).includes("Midland's enemy")))
-  hintBoundaryDecision = () => 1
-  responses.length = 0
-  await dispatch(recordingAppendRequest(chatId, 'hint-no-comma-resolved', 1, raw), userId)
-  const resolved = responses.at(-1)?.payload
-  assert.equal(resolved?.type, 'transcript.normalization.response')
-  if (resolved?.type === 'transcript.normalization.response') assert.equal(resolved.proposal.candidateText, 'I intend to face the Tudor.')
+  assert.equal(decisionRequests.some((request) => JSON.stringify(request).includes("Midland's enemy")), false)
 })
 
 test('resolves the explicit hint cue with or without a comma and preserves ordinary hint prose', async () => {
@@ -1649,7 +1643,7 @@ test('finds a unique delayed hinted term in the current clause', async () => {
     [7, "We face the two-door army! Hint: Midland's enemy. We must prepare.", 'We face the Tudor army! We must prepare.'],
     [8, "I face the two-door army clue Midland's enemy.", 'I face the Tudor army.'],
     [9, "I face the two-door army (clue: Midland's enemy).", 'I face the Tudor army.'],
-    [10, "I face the two-door army, as in Midland's enemy.", 'I face the Tudor army.'],
+    [10, "I face the two-door army, as in Midland's enemy.", "I face the two-door army, as in Midland's enemy."],
     [11, "I face the Tudor and two-door army, as in Midland's enemy.", "I face the Tudor and two-door army, as in Midland's enemy."],
     [12, "Give me a clue about Midland's enemy.", "Give me a clue about Midland's enemy."],
   ] as const) {
@@ -1701,7 +1695,7 @@ test('passes extra hint modifiers to semantic evaluation without treating natura
   }))
 })
 
-test('uses a semantic glossary hint to disambiguate a dictated term', async () => {
+test('does not use semantic glossary hints for as-in dictation', async () => {
   const userId = 'hint-as-in-user'
   const chatId = 'hint-as-in-chat'
   activeChatId = chatId
@@ -1712,11 +1706,11 @@ test('uses a semantic glossary hint to disambiguate a dictated term', async () =
   await dispatch(recordingAppendRequest(chatId, 'hint-segment', 1, 'I need a surgeon, as in a medieval battlefield doctor.'), userId)
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'transcript.normalization.response')
-  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need a chirurgeon.')
-  assert.ok(decisionRequests.some((request) => JSON.stringify(request).includes('medieval battlefield doctor')))
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need a surgeon, as in a medieval battlefield doctor.')
+  assert.equal(decisionRequests.some((request) => JSON.stringify(request).includes('medieval battlefield doctor')), false)
 })
 
-test('accepts a strong unique hint with a clear sentence-ending boundary', async () => {
+test('leaves non-repeating as-in wording literal regardless of glossary scores', async () => {
   const userId = 'hint-single-boundary-user'
   const chatId = 'hint-single-boundary-chat'
   activeChatId = chatId
@@ -1724,7 +1718,7 @@ test('accepts a strong unique hint with a clear sentence-ending boundary', async
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-single-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
   await seedDraft(userId, chatId, '')
   const raw = 'I need to see the surgeon, as in a medieval battlefield doctor.'
-  for (const [index, semantic, boundary, expected] of [[0, 0.99, 0.75, 'I need to see the chirurgeon.'], [1, 0.94, 0.75, raw], [2, 0.99, 0.69, raw]] as const) {
+  for (const [index, semantic, boundary, expected] of [[0, 0.99, 0.75, raw], [1, 0.94, 0.75, raw], [2, 0.99, 0.69, raw]] as const) {
     hintSemanticDecision = () => semantic
     hintBoundaryDecision = () => boundary
     responses.length = 0
@@ -1735,7 +1729,7 @@ test('accepts a strong unique hint with a clear sentence-ending boundary', async
   }
 })
 
-test('removes a confirmed hint after an already canonical term without swallowing literal prose', async () => {
+test('keeps as-in wording literal after an already canonical glossary term', async () => {
   const userId = 'hint-canonical-command-user'
   const chatId = 'hint-canonical-command-chat'
   activeChatId = chatId
@@ -1743,7 +1737,7 @@ test('removes a confirmed hint after an already canonical term without swallowin
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-canonical-command-entry', canonical: 'Tudor', variants: [], hint: 'Midland’s enemy', scope: 'global' }, userId)
   await seedDraft(userId, chatId, '')
   const raw = 'We need to face the Tudor, as in Midland’s enemy.'
-  for (const [index, semantic, command, expected] of [[0, 0.84, 0.99, 'We need to face the Tudor.'], [1, 0.84, 0.2, raw], [2, 0.93, 0.57, 'We need to face the Tudor.'], [3, 0.93, 0.54, raw], [4, 0.89, 0.57, raw]] as const) {
+  for (const [index, semantic, command, expected] of [[0, 0.84, 0.99, raw], [1, 0.84, 0.2, raw], [2, 0.93, 0.57, raw], [3, 0.93, 0.54, raw], [4, 0.89, 0.57, raw]] as const) {
     hintSemanticDecision = () => semantic
     hintBoundaryDecision = () => 0.31
     hintCommandDecision = () => command
@@ -1760,16 +1754,16 @@ test('uses a semantic glossary hint in an edit instruction', async () => {
   const chatId = 'hint-as-in-edit-chat'
   activeChatId = chatId
   decisionsEnabled = true
-  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-edit-entry', canonical: 'chirurgeon', variants: [], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-edit-entry', canonical: 'chirurgeon', variants: ['surgeon'], hint: 'a battlefield surgeon', scope: 'global' }, userId)
   await seedDraft(userId, chatId, 'I need a doctor.')
   responses.length = 0
-  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'hint-edit-request', operationId: 'hint-edit-operation', chatId, expectedVersion: 1, instructionTranscript: 'Replace doctor with surgeon, as in a medieval battlefield doctor.' }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'hint-edit-request', operationId: 'hint-edit-operation', chatId, expectedVersion: 1, instructionTranscript: 'Replace doctor with surgeon hint a medieval battlefield doctor.' }, userId)
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'edit.proposal.response')
   if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, 'I need a chirurgeon.')
 })
 
-test('allows either a semantic hint or a phonetic term without requiring both', async () => {
+test('does not apply glossary matching to as-in references', async () => {
   const userId = 'hint-either-route-user'
   const chatId = 'hint-either-route-chat'
   activeChatId = chatId
@@ -1782,11 +1776,11 @@ test('allows either a semantic hint or a phonetic term without requiring both', 
     await dispatch(recordingAppendRequest(chatId, `hint-either-${index}`, 1, `I need the ${spoken}, as in the battlefield doctor.`), userId)
     const response = responses.at(-1)?.payload
     assert.equal(response?.type, 'transcript.normalization.response')
-    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need the chirurgeon.')
+    if (response?.type === 'transcript.normalization.response') assert.match(response.proposal.candidateText, /as in the battlefield doctor\./u)
   }
 })
 
-test('consumes hesitation fillers within a resolved glossary hint command', async () => {
+test('preserves unqualified as-in wording with hesitation fillers', async () => {
   const userId = 'hint-as-in-filler-user'
   const chatId = 'hint-as-in-filler-chat'
   activeChatId = chatId
@@ -1797,11 +1791,11 @@ test('consumes hesitation fillers within a resolved glossary hint command', asyn
   await dispatch(recordingAppendRequest(chatId, 'hint-filler-segment', 1, 'The children, as in, um, a battlefield doctor.'), userId)
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'transcript.normalization.response')
-  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'The chirurgeon.')
-  assert.ok(decisionRequests.some((request) => JSON.stringify(request).includes('a battlefield doctor')))
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'The children, as in, um, a battlefield doctor.')
+  assert.equal(decisionRequests.some((request) => JSON.stringify(request).includes('a battlefield doctor')), false)
 })
 
-test('uses the selected hint boundary and retains subsequent prose', async () => {
+test('preserves non-repeating as-in explanations and subsequent prose', async () => {
   const userId = 'hint-boundary-user'
   const chatId = 'hint-boundary-chat'
   activeChatId = chatId
@@ -1809,8 +1803,8 @@ test('uses the selected hint boundary and retains subsequent prose', async () =>
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-boundary-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
   await seedDraft(userId, chatId, '')
   for (const [index, raw, expected, boundary] of [
-    [0, 'I found the surgeon, as in a battlefield doctor, near the gate.', 'I found the chirurgeon near the gate.', 0],
-    [1, 'I found the surgeon, as in a doctor, one who treats soldiers, near the gate.', 'I found the chirurgeon near the gate.', 1],
+    [0, 'I found the surgeon, as in a battlefield doctor, near the gate.', 'I found the surgeon, as in a battlefield doctor, near the gate.', 0],
+    [1, 'I found the surgeon, as in a doctor, one who treats soldiers, near the gate.', 'I found the surgeon, as in a doctor, one who treats soldiers, near the gate.', 1],
   ] as const) {
     hintBoundaryDecision = (id) => id.endsWith(`_${boundary}`) ? 0.99 : 0.1
     responses.length = 0
@@ -6886,15 +6880,15 @@ test('logs glossary hint decisions without recording transcript or hint text', a
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'debug-hint-settings', settings: { contextMessageCount: 5, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', debugLoggingEnabled: true } }, userId)
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'debug-hint-entry', canonical: 'chirurgeon', variants: [], hint: 'a battlefield surgeon', scope: 'global' }, userId)
   await seedDraft(userId, chatId, '')
-  await dispatch(recordingAppendRequest(chatId, 'debug-hint-segment', 1, 'I need a surgeon, as in a medieval battlefield doctor.'), userId)
+  await dispatch(recordingAppendRequest(chatId, 'debug-hint-segment', 1, 'I need a chirurgeon hint a medieval battlefield doctor.'), userId)
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'debug.log.request', requestId: 'debug-hint-read' }, userId)
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'debug.log.response')
   if (response?.type !== 'debug.log.response') return
   const log = response.entries.join('\n')
   assert.match(log, /\[glossary\.hint\] start matches=1 hints=1 candidates=1/u)
-  assert.match(log, /\[glossary\.hint\.candidate\] id=reference_0_0_0 semantic=1\.000 boundary=1\.000 command=1\.000 phonetic=no/u)
-  assert.match(log, /\[glossary\.hint\] decision=1 semantic=1\.000 boundary=1\.000 command=1\.000 phonetic=no singleBoundary=yes best=1\.000/u)
+  assert.match(log, /\[glossary\.hint\.candidate\] id=reference_0_0_0 semantic=1\.000 boundary=1\.000 command=1\.000 phonetic=yes/u)
+  assert.match(log, /\[glossary\.hint\] decision=1 semantic=1\.000 boundary=1\.000 command=1\.000 phonetic=yes singleBoundary=yes best=1\.000/u)
   assert.match(log, /\[glossary\.hint\] outcome=resolved/u)
   assert.doesNotMatch(log, /chirurgeon|battlefield|surgeon/iu)
 })

@@ -4508,6 +4508,7 @@ async function resolveGlossaryHintReferences(
           unresolved = true; continue
         }
         let hit = hits[0]
+        let pluralTarget = false
         if (explicitHint && !hit) {
           const words = [...input.slice(boundary, cueStart).matchAll(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu)]
           // Do not silently truncate the search: uniqueness must cover the entire clause.
@@ -4550,12 +4551,38 @@ async function resolveGlossaryHintReferences(
           const winner = ranked[0]
           const runnerUp = ranked[1]?.score ?? 0
           recordDebug(userId, 'glossary.hint.span', `candidates=${spans.length} best=${(winner?.score ?? 0).toFixed(3)} runnerUp=${runnerUp.toFixed(3)} threshold=0.950 margin=0.150`)
-          if (!winner || winner.score < 0.95 || runnerUp > winner.score - 0.15) { unresolved = true; continue }
+          if (!winner || winner.score < 0.5 || runnerUp > winner.score - 0.15) { unresolved = true; continue }
+          // A moderate span score is not sufficient by itself: independently verify the
+          // selected span, and ask for grammatical number before applying the replacement.
+          const needsConfirmation = winner.score < 0.95
+          if (needsConfirmation && (best.semanticScore < 0.95 || best.boundaryScore < 0.8 || runnerUp > winner.score - 0.4)) { unresolved = true; continue }
+          const verifyQuestions = {
+            ...(needsConfirmation ? { confirm_span: { type: 'noul' as const, instructions: 'Is the selected span exactly the unique term the explicit glossary hint identifies in the sentence? Reject surrounding words, different referents, and uncertainty.', criteria: { true: 'The selected span is exactly the intended term.', false: 'The selected span is wrong, incomplete, too broad, or uncertain.' } } } : {}),
+            plural_span: { type: 'noul' as const, instructions: 'In this sentence, is the selected span a plural noun referring to more than one of the hinted glossary term? Do not count a singular word or a name ending in s as plural.', criteria: { true: 'The selected term is grammatically plural.', false: 'The selected term is singular, not a noun, or uncertain.' } },
+          }
+          const verification = await Promise.race([
+            spindle.decisions.evaluate({ userId, ...(connectionId ? { connection_id: connectionId } : {}), state: { task: 'Verify the selected hint referent and grammatical number.', sentence: input.slice(boundary, cueStart), canonical: best.candidate.canonical, hint: best.candidate.hint, explanation: best.candidate.explanation, selected: winner.text }, questions: verifyQuestions }, { signal: controller.signal }),
+            new Promise<null>((resolve) => { timeout = setTimeout(() => { controller.abort(); resolve(null) }, JEV_REFERENCE_TIMEOUT_MS) }),
+          ])
+          if (timeout) clearTimeout(timeout)
+          timeout = undefined
+          if (!verification || signal.aborted) { unresolved = true; continue }
+          const confirmation = verification.answers.confirm_span
+          const plural = verification.answers.plural_span
+          const confirmScore = confirmation?.type === 'noul' && Number.isFinite(confirmation.noul) ? confirmation.noul : 0
+          const pluralScore = plural?.type === 'noul' && Number.isFinite(plural.noul) ? plural.noul : 0
+          recordDebug(userId, 'glossary.hint.verify', `confirmation=${needsConfirmation ? confirmScore.toFixed(3) : 'not-needed'} plural=${pluralScore.toFixed(3)}`)
+          if (needsConfirmation && confirmScore < 0.95) { unresolved = true; continue }
+          if (plural?.type !== 'noul' || !Number.isFinite(plural.noul) || (pluralScore > 0.1 && pluralScore < 0.9)) { unresolved = true; continue }
+          pluralTarget = pluralScore >= 0.9
           hit = { ...winner, word: winner.text }
         }
         if (hit) {
           const between = text.slice(hit.end, cueStart).replace(/[ \t]*,?[ \t]*$/u, '')
-          text = `${text.slice(0, hit.start)}${best.candidate.canonical}${between}${priorSentenceEnding ?? ''}${text.slice(end)}`
+          const canonical = best.candidate.canonical
+          const replacement = pluralTarget ? pluralizeHintTerm(canonical) : canonical
+          if (!replacement) { unresolved = true; continue }
+          text = `${text.slice(0, hit.start)}${replacement}${between}${priorSentenceEnding ?? ''}${text.slice(end)}`
           changed = true
           continue
         }
@@ -4572,6 +4599,14 @@ async function resolveGlossaryHintReferences(
     if (timeout) clearTimeout(timeout)
     signal.removeEventListener('abort', abort)
   }
+}
+
+/** Only inflect predictable single-word forms; leave unusual terms for review. */
+function pluralizeHintTerm(term: string): string | null {
+  if (!/^[\p{L}]+$/u.test(term) || /s$/iu.test(term) && !/(?:ss|us)$/iu.test(term)) return null
+  if (/[^aeiou]y$/iu.test(term)) return `${term.slice(0, -1)}ies`
+  if (/(?:s|x|z|ch|sh)$/iu.test(term)) return `${term}es`
+  return `${term}s`
 }
 
 async function approveReferenceCandidatesWithJev(

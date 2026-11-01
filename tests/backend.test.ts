@@ -24,6 +24,8 @@ let hintBoundaryDecision: ((id: string) => number) | null = null
 let hintSemanticDecision: ((id: string) => number) | null = null
 let hintCommandDecision: ((id: string) => number) | null = null
 let hintSpanDecision: ((id: string) => number) | null = null
+let hintPluralDecision = 0
+let hintConfirmDecision = 1
 let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
@@ -104,7 +106,7 @@ const spindleMock = {
           {
             type: 'noul',
             noul:
-              key === 'introducedGrammarError' ? decisionProbability : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : key.startsWith('semantic_') && hintSemanticDecision ? hintSemanticDecision(key) : key.startsWith('command_') && hintCommandDecision ? hintCommandDecision(key) : key.startsWith('span_') && hintSpanDecision ? hintSpanDecision(key) : referenceDecisionProbability,
+              key === 'introducedGrammarError' ? decisionProbability : key === 'plural_span' ? hintPluralDecision : key === 'confirm_span' ? hintConfirmDecision : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : key.startsWith('semantic_') && hintSemanticDecision ? hintSemanticDecision(key) : key.startsWith('command_') && hintCommandDecision ? hintCommandDecision(key) : key.startsWith('span_') && hintSpanDecision ? hintSpanDecision(key) : referenceDecisionProbability,
           },
         ]),
       )
@@ -271,6 +273,8 @@ test.beforeEach(() => {
   decisionsEnabled = false
   decisionProbability = 0
   hintSpanDecision = null
+  hintPluralDecision = 0
+  hintConfirmDecision = 1
   referenceDecisionProbability = 1
   hintBoundaryDecision = null
   hintSemanticDecision = null
@@ -1794,6 +1798,34 @@ test('uses Jev to locate a semantically identified hint term when phonetic match
   assert.equal(ambiguous?.type, 'transcript.normalization.response')
   if (ambiguous?.type === 'transcript.normalization.response')
     assert.equal(ambiguous.proposal.candidateText, raw)
+})
+
+test('verifies a moderate span match and preserves plural and quotation punctuation', async () => {
+  const userId = 'plural-hint-span-user'
+  const chatId = 'plural-hint-span-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'plural-hint-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.97
+  hintBoundaryDecision = () => 0.82
+  hintSpanDecision = (id) => id === 'span_4_1' ? 0.51 : 0.04
+  hintPluralDecision = 0.99
+  const raw = 'Begin speech: Look, we need all the surgeons we can get. Hint: a medieval field doctor. End speech.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'plural-hint-span', 1, raw), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, '“Look, we need all the chirurgeons we can get.”')
+
+  hintConfirmDecision = 0.4
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'plural-hint-unconfirmed', 1, raw), userId)
+  const unconfirmed = responses.at(-1)?.payload
+  assert.equal(unconfirmed?.type, 'transcript.normalization.response')
+  if (unconfirmed?.type === 'transcript.normalization.response')
+    assert.match(unconfirmed.proposal.candidateText, /surgeons.*Hint:/u)
 })
 
 test('supports synonymous hint descriptions when the semantic decision is confident', async () => {

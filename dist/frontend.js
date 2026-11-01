@@ -487,7 +487,7 @@ var COMMAND_GROUPS = [
       ["Lowercase", "Lowercase paragraph 2, or make paragraph 2 lowercase."],
       ["Capitalize", "Capitalize \u201Cthe hawk\u201D to make every word title-cased: \u201CThe Hawk.\u201D"],
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
-      ["Glossary hint", "Say \u201Chint\u201D or \u201Cclue\u201D and a description after the term, immediately or later in the same clause: \u201Ctwo-door army clue Midland\u2019s enemy.\u201D A comma is optional; synonyms, plurals, and inflected forms can match the hint. The earlier term must have one identifiable spelling or phonetic match to the glossary entry. Ambiguous terms or explanation endpoints are left for review."],
+      ["Glossary hint", "Say \u201Chint\u201D or \u201Cclue\u201D and a description after the term, immediately or later in the same sentence: \u201Ctwo-door army clue Midland\u2019s enemy.\u201D Commas are optional; synonyms, plurals, and inflected forms can match the hint. The earlier term must be uniquely identifiable, including by spelling, sound, or a confident semantic match. Ambiguous terms or explanation endpoints are left for review."],
       [
         "As in reference",
         "Clarify a dictated term by repeating it or a clear inflection after \u201Cas in,\u201D for example \u201CJenga is my favorite, as in Jenga the game.\u201D The repeated term can appear earlier in the same clause. A unique target and clear boundary are required; otherwise the wording remains for review. Use \u201Chint\u201D or \u201Cclue\u201D for glossary descriptions."

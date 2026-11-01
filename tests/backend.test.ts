@@ -1809,7 +1809,7 @@ test('verifies a moderate span match and preserves plural and quotation punctuat
   await seedDraft(userId, chatId, '')
   hintSemanticDecision = () => 0.97
   hintBoundaryDecision = () => 0.82
-  hintSpanDecision = (id) => id === 'span_4_1' ? 0.51 : 0.04
+  hintSpanDecision = (id) => id === 'span_5_1' ? 0.51 : 0.04
   hintPluralDecision = 0.99
   const raw = 'Begin speech: Look, we need all the surgeons we can get. Hint: a medieval field doctor. End speech.'
   responses.length = 0
@@ -1826,6 +1826,38 @@ test('verifies a moderate span match and preserves plural and quotation punctuat
   assert.equal(unconfirmed?.type, 'transcript.normalization.response')
   if (unconfirmed?.type === 'transcript.normalization.response')
     assert.match(unconfirmed.proposal.candidateText, /surgeons.*Hint:/u)
+})
+
+test('resolves delayed hints across commas without guessing between repeated matches', async () => {
+  const userId = 'hint-across-commas-user'
+  const chatId = 'hint-across-commas-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-across-commas-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  const raw = 'Look, we need the chirurgeon, as many as we can. Hint: a medieval field doctor.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-across-commas', 1, raw), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'Look, we need the chirurgeon, as many as we can.')
+
+  hintSpanDecision = (id) => id === 'span_4_1' ? 0.99 : 0.1
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-across-commas-fuzzy', 1, 'Look, we need the surgeon, as many as we can. Hint: a medieval field doctor.'), userId)
+  const fuzzy = responses.at(-1)?.payload
+  assert.equal(fuzzy?.type, 'transcript.normalization.response')
+  if (fuzzy?.type === 'transcript.normalization.response')
+    assert.equal(fuzzy.proposal.candidateText, 'Look, we need the chirurgeon, as many as we can.')
+
+  const ambiguous = 'The chirurgeon saw a chirurgeon, then left. Hint: a medieval field doctor.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-across-commas-ambiguous', 1, ambiguous), userId)
+  const second = responses.at(-1)?.payload
+  assert.equal(second?.type, 'transcript.normalization.response')
+  if (second?.type === 'transcript.normalization.response')
+    assert.equal(second.proposal.candidateText, ambiguous)
 })
 
 test('supports synonymous hint descriptions when the semantic decision is confident', async () => {

@@ -4497,7 +4497,7 @@ async function resolveGlossaryHintReferences(
       const cueStart = match.index! + match[1]!.length
       {
         const preceding = input.slice(0, cueStart)
-        const boundary = Math.max(preceding.lastIndexOf('.'), preceding.lastIndexOf('!'), preceding.lastIndexOf('?'), preceding.lastIndexOf(';'), preceding.lastIndexOf('\n'), preceding.lastIndexOf(',')) + 1
+        const boundary = Math.max(preceding.lastIndexOf('.'), preceding.lastIndexOf('!'), preceding.lastIndexOf('?'), preceding.lastIndexOf(';'), preceding.lastIndexOf('\n')) + 1
         const terms = [best.candidate.canonical, ...best.candidate.variants]
         const hits = [...input.slice(boundary, cueStart).matchAll(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu)]
           .map((word) => ({ start: boundary + word.index!, end: boundary + word.index! + word[0].length, word: word[0] }))

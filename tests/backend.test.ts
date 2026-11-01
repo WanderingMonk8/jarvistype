@@ -1846,6 +1846,19 @@ test('verifies a clearly separated span below the old score cutoff', async () =>
   assert.equal(response?.type, 'transcript.normalization.response')
   if (response?.type === 'transcript.normalization.response')
     assert.equal(response.proposal.candidateText, 'Look, we need as many chirurgeons as we can find.')
+  const spanRequest = decisionRequests.find((request) =>
+    Boolean((request as { questions?: Record<string, unknown> }).questions?.span_5_1),
+  ) as { questions: Record<string, { instructions: string }>; state: { sentence: string; hint: string } } | undefined
+  assert.ok(spanRequest)
+  assert.match(spanRequest.questions.span_5_1!.instructions, /same kind of person, place, thing, or concept/u)
+  assert.match(spanRequest.questions.span_5_1!.instructions, /singular or plural/u)
+  assert.equal(spanRequest.state.sentence, 'Look, we need as many surgeons as we can find')
+  const verificationRequest = decisionRequests.find((request) =>
+    Boolean((request as { questions?: Record<string, unknown> }).questions?.confirm_span),
+  ) as { questions: Record<string, { instructions: string }>; state: { selected: string } } | undefined
+  assert.ok(verificationRequest)
+  assert.equal(verificationRequest.state.selected, 'surgeons')
+  assert.match(verificationRequest.questions.confirm_span!.instructions, /semantic relationship/u)
 
   hintConfirmDecision = 0.4
   responses.length = 0

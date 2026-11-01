@@ -630,7 +630,13 @@ async function handleTranscriptNormalization(
   const glossaryHintResult = await resolveGlossaryHintReferences(candidateText, glossary, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal)
   candidateText = glossaryHintResult.text
   if (glossaryHintResult.changed) reasons.push('glossary hint disambiguation')
-  if (glossaryHintResult.unresolved) ambiguities.push('Glossary “as in” reference could not be resolved confidently; the wording was retained.')
+  if (glossaryHintResult.unresolved) {
+    ambiguities.push('Glossary hint could not be resolved confidently; the wording was retained.')
+    for (const review of glossaryHintResult.spanReviews ?? []) {
+      const runnerUp = review.runnerUp ? `; runner-up: “${review.runnerUp.text}” (position ${review.runnerUp.position}, score ${review.runnerUp.score.toFixed(2)})` : ''
+      ambiguities.push(`Jev’s highest-scoring hint span: “${review.best.text}” (position ${review.best.position}, score ${review.best.score.toFixed(2)})${runnerUp}. These are unaccepted candidates, not corrections.`)
+    }
+  }
   const qualifiedAsIn = normalizeQualifiedAsInReferences(candidateText)
   if (qualifiedAsIn.changed) {
     candidateText = qualifiedAsIn.text
@@ -4396,7 +4402,7 @@ async function resolveGlossaryHintReferences(
   userId: string,
   connectionId: string | null,
   signal: AbortSignal,
-): Promise<{ text: string; changed: boolean; unresolved: boolean }> {
+): Promise<{ text: string; changed: boolean; unresolved: boolean; spanReviews?: Array<{ best: { text: string; score: number; position: number }; runnerUp?: { text: string; score: number; position: number } }> }> {
   const startedAt = performance.now()
   const matches = [...input.matchAll(/([\p{L}\p{M}][\p{L}\p{M}'’-]*)(?:\s*[,;:.!?]\s*|\s+)\(?(?:hint|clue)\s*[:,]?\s*(?:(?:um|uh|erm|er)\s*,?\s+)*([^);.!?\n]{3,160})(?=[);.!?\n]|$)/giu)].filter((match) => {
     const cue = match[0].slice(match[1]!.length)
@@ -4458,6 +4464,7 @@ async function resolveGlossaryHintReferences(
     let text = input
     let changed = false
     let unresolved = false
+    const spanReviews: Array<{ best: { text: string; score: number; position: number }; runnerUp?: { text: string; score: number; position: number } }> = []
     for (let mi = matches.length - 1; mi >= 0; mi--) {
       const match = matches[mi]!
       const cueText = match[0].slice(match[1]!.length, match[0].length - match[2]!.length)
@@ -4550,6 +4557,7 @@ async function resolveGlossaryHintReferences(
           }).sort((a, b) => b.score - a.score)
           const winner = ranked[0]
           const runnerUp = ranked[1]?.score ?? 0
+          if (winner) spanReviews.push({ best: { text: winner.text, score: winner.score, position: winner.start + 1 }, ...(ranked[1] ? { runnerUp: { text: ranked[1].text, score: ranked[1].score, position: ranked[1].start + 1 } } : {}) })
           recordDebug(userId, 'glossary.hint.span', `candidates=${spans.length} best=${(winner?.score ?? 0).toFixed(3)} runnerUp=${runnerUp.toFixed(3)} threshold=0.950 margin=0.150`)
           if (!winner || runnerUp > winner.score - 0.15) { unresolved = true; continue }
           // A moderate span score is not sufficient by itself: independently verify the
@@ -4591,7 +4599,7 @@ async function resolveGlossaryHintReferences(
       changed = true
     }
     logOutcome(unresolved ? (changed ? 'partially-resolved' : 'unresolved') : 'resolved', `candidates=${candidates.length}`)
-    return { text, changed, unresolved }
+    return { text, changed, unresolved, spanReviews }
   } catch {
     logOutcome(signal.aborted ? 'cancelled' : 'decision-error', `candidates=${candidates.length}`)
     return { text: input, changed: false, unresolved: true }

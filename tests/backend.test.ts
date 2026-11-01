@@ -1796,8 +1796,10 @@ test('uses Jev to locate a semantically identified hint term when phonetic match
   await dispatch(recordingAppendRequest(chatId, 'semantic-hint-span-ambiguous', 1, raw), userId)
   const ambiguous = responses.at(-1)?.payload
   assert.equal(ambiguous?.type, 'transcript.normalization.response')
-  if (ambiguous?.type === 'transcript.normalization.response')
+  if (ambiguous?.type === 'transcript.normalization.response') {
     assert.equal(ambiguous.proposal.candidateText, raw)
+    assert.ok(ambiguous.proposal.ambiguities.some((message) => message.includes('Jev’s highest-scoring hint span:') && message.includes('surgeon') && message.includes('unaccepted candidates')))
+  }
 })
 
 test('verifies a moderate span match and preserves plural and quotation punctuation', async () => {

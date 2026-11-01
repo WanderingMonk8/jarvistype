@@ -4474,7 +4474,13 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
   const glossaryHintResult = await resolveGlossaryHintReferences(candidateText, glossary, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal);
   candidateText = glossaryHintResult.text;
   if (glossaryHintResult.changed) reasons.push("glossary hint disambiguation");
-  if (glossaryHintResult.unresolved) ambiguities.push("Glossary \u201Cas in\u201D reference could not be resolved confidently; the wording was retained.");
+  if (glossaryHintResult.unresolved) {
+    ambiguities.push("Glossary hint could not be resolved confidently; the wording was retained.");
+    for (const review of glossaryHintResult.spanReviews ?? []) {
+      const runnerUp = review.runnerUp ? `; runner-up: \u201C${review.runnerUp.text}\u201D (position ${review.runnerUp.position}, score ${review.runnerUp.score.toFixed(2)})` : "";
+      ambiguities.push(`Jev\u2019s highest-scoring hint span: \u201C${review.best.text}\u201D (position ${review.best.position}, score ${review.best.score.toFixed(2)})${runnerUp}. These are unaccepted candidates, not corrections.`);
+    }
+  }
   const qualifiedAsIn = normalizeQualifiedAsInReferences(candidateText);
   if (qualifiedAsIn.changed) {
     candidateText = qualifiedAsIn.text;
@@ -7537,6 +7543,7 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
     let text = input;
     let changed = false;
     let unresolved = false;
+    const spanReviews = [];
     for (let mi = matches.length - 1; mi >= 0; mi--) {
       const match = matches[mi];
       const cueText = match[0].slice(match[1].length, match[0].length - match[2].length);
@@ -7636,6 +7643,7 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
           }).sort((a, b) => b.score - a.score);
           const winner = ranked[0];
           const runnerUp = ranked[1]?.score ?? 0;
+          if (winner) spanReviews.push({ best: { text: winner.text, score: winner.score, position: winner.start + 1 }, ...ranked[1] ? { runnerUp: { text: ranked[1].text, score: ranked[1].score, position: ranked[1].start + 1 } } : {} });
           recordDebug(userId, "glossary.hint.span", `candidates=${spans.length} best=${(winner?.score ?? 0).toFixed(3)} runnerUp=${runnerUp.toFixed(3)} threshold=0.950 margin=0.150`);
           if (!winner || runnerUp > winner.score - 0.15) {
             unresolved = true;
@@ -7698,7 +7706,7 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
       changed = true;
     }
     logOutcome(unresolved ? changed ? "partially-resolved" : "unresolved" : "resolved", `candidates=${candidates.length}`);
-    return { text, changed, unresolved };
+    return { text, changed, unresolved, spanReviews };
   } catch {
     logOutcome(signal.aborted ? "cancelled" : "decision-error", `candidates=${candidates.length}`);
     return { text: input, changed: false, unresolved: true };

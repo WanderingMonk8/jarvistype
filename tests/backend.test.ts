@@ -7072,6 +7072,27 @@ test('logs glossary hint decisions without recording transcript or hint text', a
   assert.doesNotMatch(log, /chirurgeon|battlefield|surgeon/iu)
 })
 
+test('logs semantic hint span fallback metadata without recording its text', async () => {
+  const userId = 'debug-hint-span-user'
+  const chatId = 'debug-hint-span-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'debug-hint-span-settings', settings: { contextMessageCount: 5, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', debugLoggingEnabled: true } }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'debug-hint-span-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSpanDecision = (id) => id === 'span_4_1' ? 0.99 : 0.1
+  await dispatch(recordingAppendRequest(chatId, 'debug-hint-span-segment', 1, 'I look at the surgeon. Hint: A medieval field doctor.'), userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'debug.log.request', requestId: 'debug-hint-span-read' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'debug.log.response')
+  if (response?.type !== 'debug.log.response') return
+  const log = response.entries.join('\n')
+  assert.match(log, /\[glossary\.hint\.resolve\] explicit=yes localHits=0/u)
+  assert.match(log, /\[glossary\.hint\.span\] start words=5 candidates=12/u)
+  assert.match(log, /\[glossary\.hint\.span\] candidates=12 best=0\.990 runnerUp=0\.100/u)
+  assert.doesNotMatch(log, /chirurgeon|battlefield|surgeon|medieval/iu)
+})
+
 test('collects a copiable backend timing log when debug logging is enabled', async () => {
   const userId = 'debug-log-user'
   const chatId = 'debug-log-chat'

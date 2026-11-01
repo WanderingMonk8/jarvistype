@@ -32,6 +32,8 @@ let generationNormalizedText: string | null = null
 let generationEditsOverride: unknown[] | null = null
 let generationCommandDecisions: unknown[] = []
 let editPlanResponse: unknown = null
+let editInterpretationHangs = false
+let editInterpretationSignal: AbortSignal | undefined
 let grammarRepairResponse: unknown = null
 let grammarRepairHangs = false
 let normalizationHangs = false
@@ -180,6 +182,10 @@ const spindleMock = {
         rawTranscript?: string
         task?: string
       }
+      if (input.task === 'Interpret this edit instruction against the numbered draft.' && editInterpretationHangs) {
+        editInterpretationSignal = request.signal
+        return new Promise(() => undefined)
+      }
       if (input.task === 'Interpret this edit instruction against the numbered draft.')
         return Promise.resolve({ content: JSON.stringify(editPlanResponse) })
       if (input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.') {
@@ -275,6 +281,8 @@ test.beforeEach(() => {
   generationEditsOverride = null
   generationCommandDecisions = []
   editPlanResponse = null
+  editInterpretationHangs = false
+  editInterpretationSignal = undefined
   grammarRepairResponse = null
   grammarRepairHangs = false
   normalizationHangs = false
@@ -469,6 +477,44 @@ test('aborts a stalled normalization provider at the configured timeout and retu
   assert.equal(response?.type, 'transcript.normalization.response')
   if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'Hello there.')
   assert.equal(normalizationSignal?.aborted, true)
+})
+
+test('times out an unresponsive edit provider and releases the draft lock', async () => {
+  const userId = 'edit-provider-timeout-user'
+  const chatId = 'edit-provider-timeout-chat'
+  activeChatId = chatId
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'edit-timeout-settings', settings: { contextMessageCount: 0, contextualNormalizationEnabled: true, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', normalizationModelTimeoutSeconds: 5 } }, userId)
+  await seedDraft(userId, chatId, 'Keep this draft.')
+  editInterpretationHangs = true
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'edit-timeout-interpret', operationId: 'edit-timeout-op', chatId, expectedVersion: 1, instructionTranscript: 'Please reshape this prose somehow.' }, userId)
+  for (let attempt = 0; attempt < 80 && !responses.length; attempt++) await new Promise((resolve) => setTimeout(resolve, 100))
+  const error = responses.at(-1)?.payload
+  assert.equal(error?.type, 'app.error')
+  if (error?.type === 'app.error') assert.match(error.message, /timed out/u)
+  assert.equal(editInterpretationSignal?.aborted, true)
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'draft.load.request', requestId: 'edit-timeout-load', chatId }, userId)
+  const loaded = responses.at(-1)?.payload
+  assert.equal(loaded?.type, 'draft.snapshot.response')
+  if (loaded?.type === 'draft.snapshot.response') assert.equal(loaded.snapshot.cleanText, 'Keep this draft.')
+})
+
+test('cancelling an unresponsive edit provider releases the draft lock', async () => {
+  const userId = 'cancel-edit-provider-user'
+  const chatId = 'cancel-edit-provider-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Keep this draft.')
+  editInterpretationHangs = true
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'cancel-edit-provider-request', operationId: 'cancel-edit-provider-op', chatId, expectedVersion: 1, instructionTranscript: 'Please reshape this prose somehow.' }, userId)
+  assert.ok(editInterpretationSignal)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'app.operation.cancel', requestId: 'cancel-edit-provider-cancel', targetRequestId: 'cancel-edit-provider-request' }, userId)
+  assert.equal(editInterpretationSignal.aborted, true)
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'draft.load.request', requestId: 'cancel-edit-provider-load', chatId }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'draft.snapshot.response')
 })
 
 test('lists safe normalization connections and dispatches with selected connection and model', async () => {
@@ -5644,6 +5690,7 @@ test('bounds candidate selection when the grammar provider ignores abort', async
         grammarRepairMode: 'always',
         normalizationConnectionId: null,
         normalizationModelOverride: '',
+        normalizationModelTimeoutSeconds: 5,
       },
     },
     userId,
@@ -5672,6 +5719,7 @@ test('bounds candidate selection when the grammar provider ignores abort', async
   assert.equal(candidates?.type, 'edit.candidates.response')
   if (candidates?.type !== 'edit.candidates.response') return
 
+  grammarRepairHangs = true
   grammarRepairIgnoresAbort = true
   const startedAt = Date.now()
   await dispatch(

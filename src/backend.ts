@@ -1149,6 +1149,7 @@ async function handleEditInterpretation(
     const interpretStartedAt = performance.now()
     recordDebug(context.userId, 'edit.interpret', 'start')
     const glossaryHintResult = await resolveGlossaryHintReferences(request.instructionTranscript, glossary, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal)
+    let interpretationTimedOut = false
     const interpretedPlan = await interpretEditInstruction(
       canonicalEditInstruction(glossaryHintResult.text),
       session,
@@ -1157,6 +1158,8 @@ async function handleEditInterpretation(
       conversationReferences,
       authoritativeConversationReferences,
       context.userId,
+      activeRequest.abort.signal,
+      () => { interpretationTimedOut = true },
     )
     recordDebug(
       context.userId,
@@ -1164,7 +1167,7 @@ async function handleEditInterpretation(
       `end plan=${Boolean(interpretedPlan)} duration=${debugDuration(interpretStartedAt)}`,
     )
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
-    if (!interpretedPlan) return { error: 'interpretation' as const, session }
+    if (!interpretedPlan) return { error: interpretationTimedOut ? 'interpretation-timeout' as const : 'interpretation' as const, session }
     const plan = normalizeEditReferenceTargets(
       normalizeEditInputPayloads(
         stripQualifiedAsInEditPayloads(
@@ -1288,6 +1291,8 @@ async function handleEditInterpretation(
     const message =
       result.error === 'target'
         ? `The edit target could not be resolved safely: ${result.detail}. Nothing changed.`
+        : result.error === 'interpretation-timeout'
+          ? 'The edit interpretation timed out. Nothing changed; you can try again.'
         : result.error === 'interpretation'
           ? 'The edit instruction did not produce a valid structured edit. Nothing changed.'
           : 'The edit could not be prepared because the chat, draft, or permissions changed.'
@@ -1601,7 +1606,6 @@ async function handleEditCandidateSelection(
     [],
     context.userId,
     activeRequest.abort.signal,
-    CANDIDATE_GRAMMAR_TIMEOUT_MS,
   )
   if (activeRequest.cancelled) return
   const proposal: EditProposal = {
@@ -1796,6 +1800,8 @@ async function interpretEditInstruction(
   conversationReferences: string[],
   authoritativeCasingReferences: string[],
   userId: string,
+  signal: AbortSignal,
+  onTimeout: () => void,
 ) {
   const clauses = splitEditClauses(instructionTranscript)
   const deterministicPlan =
@@ -1812,14 +1818,21 @@ async function interpretEditInstruction(
       'provider.edit-interpretation',
       `end outcome=${outcome} duration=${debugDuration(providerStartedAt)}`,
     )
+  const controller = new AbortController()
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  let finishCancellation: (() => void) | undefined
+  const cancelled = new Promise<null>((resolve) => { finishCancellation = () => { resolve(null); controller.abort() } })
+  if (signal.aborted) finishCancellation?.()
+  else signal.addEventListener('abort', finishCancellation!, { once: true })
   try {
-    const response = await spindle.generate.quiet({
+    const response = await Promise.race([spindle.generate.quiet({
       type: 'quiet',
       userId,
       ...(settings.normalizationConnectionId
         ? { connection_id: settings.normalizationConnectionId }
         : {}),
       reasoning: { source: 'off' },
+      signal: controller.signal,
       parameters: {
         temperature: 0,
         ...(settings.normalizationModelOverride
@@ -1851,7 +1864,11 @@ async function interpretEditInstruction(
           }),
         },
       ],
-    })
+    }), cancelled, new Promise<null>((resolve) => { timeout = setTimeout(() => { onTimeout(); resolve(null); controller.abort() }, clampNormalizationModelTimeoutSeconds(settings.normalizationModelTimeoutSeconds) * 1000) })])
+    if (!response) {
+      finishProvider(signal.aborted ? 'cancelled' : 'timed-out')
+      return null
+    }
     const content = extractGenerationContent(response)
     if (!content) {
       finishProvider('no-content')
@@ -1868,6 +1885,9 @@ async function interpretEditInstruction(
     finishProvider('failed')
     logSafeFailure('warn', 'EDIT_INTERPRETATION', error)
     return null
+  } finally {
+    if (timeout) clearTimeout(timeout)
+    if (finishCancellation) signal.removeEventListener('abort', finishCancellation)
   }
 }
 
@@ -2131,8 +2151,6 @@ interface GrammarRepairEdit {
   reason: string
 }
 
-const GRAMMAR_REPAIR_TIMEOUT_MS = 6_000
-const CANDIDATE_GRAMMAR_TIMEOUT_MS = 2_500
 const JEV_GRAMMAR_TIMEOUT_MS = 2_500
 const JEV_GRAMMAR_REPAIR_THRESHOLD = 0.7
 const MAX_GRAMMAR_SEGMENT_CHARACTERS = 3_000
@@ -2152,7 +2170,7 @@ async function maybeRepairEditGrammar(
   conversationReferences: readonly string[],
   userId: string,
   signal: AbortSignal,
-  timeoutMs = GRAMMAR_REPAIR_TIMEOUT_MS,
+  timeoutMs = clampNormalizationModelTimeoutSeconds(settings.normalizationModelTimeoutSeconds) * 1000,
 ): Promise<{ text: string; changes: string[] }> {
   const unchanged = { text: proposedText, changes: [] }
   if (proposedText === beforeText) return unchanged
@@ -2249,8 +2267,10 @@ async function maybeRepairEditGrammar(
 
   const startedAt = performance.now()
   const controller = new AbortController()
-  const abortFromRequest = () => controller.abort()
-  signal.addEventListener('abort', abortFromRequest, { once: true })
+  let finishCancellation: (() => void) | undefined
+  const cancelled = new Promise<null>((resolve) => { finishCancellation = () => { resolve(null); controller.abort() } })
+  if (signal.aborted) finishCancellation?.()
+  else signal.addEventListener('abort', finishCancellation!, { once: true })
   let timeout: ReturnType<typeof setTimeout> | undefined
 
   try {
@@ -2290,6 +2310,7 @@ async function maybeRepairEditGrammar(
           },
         ],
       }),
+      cancelled,
       // Abort the provider request, but also bound the await: a host that does
       // not tear down the request must not hold the draft lock indefinitely.
       new Promise<null>((resolve) => {
@@ -2384,7 +2405,7 @@ async function maybeRepairEditGrammar(
     return fallback
   } finally {
     clearTimeout(timeout)
-    signal.removeEventListener('abort', abortFromRequest)
+    if (finishCancellation) signal.removeEventListener('abort', finishCancellation)
   }
 }
 
@@ -3956,7 +3977,6 @@ function clampNormalizationModelTimeoutSeconds(value: unknown): number {
     ? Math.max(MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.min(MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.round(value)))
     : DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS
 }
-const FLOOR_PROBE_TIMEOUT_MS = 30_000
 
 /**
  * Debug-only: times a near-empty request through the same normalization connection and
@@ -3997,7 +4017,7 @@ async function measureProviderFloor(userId: string, settings: PhaseFourSettings)
         timeout = setTimeout(() => {
           controller.abort()
           resolve(null)
-        }, FLOOR_PROBE_TIMEOUT_MS)
+        }, clampNormalizationModelTimeoutSeconds(settings.normalizationModelTimeoutSeconds) * 1000)
       }),
     ])
     if (!response) outcome = 'timed-out'

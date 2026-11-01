@@ -1107,12 +1107,14 @@ function setup(ctx) {
   };
   const performRequest = async (request, isSend = false) => {
     const targetRegistry = isSend ? sendRegistry : registry;
-    const outcome = targetRegistry.wait(request.requestId);
+    const timeoutMs = request.type === "edit.candidate.select.request" ? (state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS) * 1e3 + 3e4 : void 0;
+    const outcome = targetRegistry.wait(request.requestId, timeoutMs);
     send(request);
     return outcome;
   };
   const performNormalizationRequest = async (request) => {
-    const timeoutMs = request.type === "transcript.normalize.request" ? (state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS) * 1e3 + 3e4 : NORMALIZATION_TIMEOUT_MS;
+    const providerTimeout = (state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS) * 1e3;
+    const timeoutMs = request.type === "transcript.normalize.request" ? providerTimeout + 3e4 : request.type === "edit.interpret.request" ? 2 * providerTimeout + 3e4 : NORMALIZATION_TIMEOUT_MS;
     const outcome = normalizationRegistry.wait(request.requestId, timeoutMs);
     send(request);
     return outcome;
@@ -3170,7 +3172,7 @@ function shellMarkup() {
           <label>Messages scanned for references (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label>Rolling name cache (0\u2013200, default 30)<input type="number" min="0" max="200" step="1" value="30" data-reference-cache-limit></label>
           <label>Capitalized occurrences before Jev (1\u20135, default 1)<input type="number" min="1" max="5" step="1" value="1" data-reference-admission-occurrences></label>
-          <label>Normalization model timeout in seconds (5\u2013180, default 40)<input type="number" min="5" max="180" step="1" value="40" data-normalization-timeout><small>Limits the LLM normalization call; other processing may take additional time.</small></label>
+          <label>LLM provider timeout in seconds (5\u2013180, default 40)<input type="number" min="5" max="180" step="1" value="40" data-normalization-timeout><small>Limits each LLM call for normalization, edit interpretation, and grammar repair. Additional calls and time waiting for the draft may extend the total. Speech-to-text and Jev use separate limits.</small></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. \u201CWhen needed\u201D needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose \u201CAlways\u201D to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>

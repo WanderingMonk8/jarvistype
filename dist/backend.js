@@ -4887,6 +4887,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
     const interpretStartedAt = performance.now();
     recordDebug(context.userId, "edit.interpret", "start");
     const glossaryHintResult = await resolveGlossaryHintReferences(request.instructionTranscript, glossary, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal);
+    let interpretationTimedOut = false;
     const interpretedPlan = await interpretEditInstruction(
       canonicalEditInstruction(glossaryHintResult.text),
       session,
@@ -4894,7 +4895,11 @@ async function handleEditInterpretation(request, context, activeRequest) {
       glossary,
       conversationReferences,
       authoritativeConversationReferences,
-      context.userId
+      context.userId,
+      activeRequest.abort.signal,
+      () => {
+        interpretationTimedOut = true;
+      }
     );
     recordDebug(
       context.userId,
@@ -4902,7 +4907,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
       `end plan=${Boolean(interpretedPlan)} duration=${debugDuration(interpretStartedAt)}`
     );
     if (activeRequest.cancelled) return { error: "cancelled", session };
-    if (!interpretedPlan) return { error: "interpretation", session };
+    if (!interpretedPlan) return { error: interpretationTimedOut ? "interpretation-timeout" : "interpretation", session };
     const plan = normalizeEditReferenceTargets(
       normalizeEditInputPayloads(
         stripQualifiedAsInEditPayloads(
@@ -5014,7 +5019,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
   }
   if ("error" in result) {
     const code = result.error === "permission" ? "PERMISSION_DENIED" : result.error === "empty" ? "DRAFT_EMPTY" : result.error === "target" ? "EDIT_TARGET_UNRESOLVED" : "EDIT_INTERPRETATION_FAILED";
-    const message = result.error === "target" ? `The edit target could not be resolved safely: ${result.detail}. Nothing changed.` : result.error === "interpretation" ? "The edit instruction did not produce a valid structured edit. Nothing changed." : "The edit could not be prepared because the chat, draft, or permissions changed.";
+    const message = result.error === "target" ? `The edit target could not be resolved safely: ${result.detail}. Nothing changed.` : result.error === "interpretation-timeout" ? "The edit interpretation timed out. Nothing changed; you can try again." : result.error === "interpretation" ? "The edit instruction did not produce a valid structured edit. Nothing changed." : "The edit could not be prepared because the chat, draft, or permissions changed.";
     sendDraftError(request, context, code, message, result.session);
     return;
   }
@@ -5282,8 +5287,7 @@ async function handleEditCandidateSelection(request, context, activeRequest) {
     glossary,
     [],
     context.userId,
-    activeRequest.abort.signal,
-    CANDIDATE_GRAMMAR_TIMEOUT_MS
+    activeRequest.abort.signal
   );
   if (activeRequest.cancelled) return;
   const proposal = {
@@ -5455,7 +5459,7 @@ function parseDeterministicCompoundEditPlan(clauses, session) {
     )
   });
 }
-async function interpretEditInstruction(instructionTranscript, session, settings, glossary, conversationReferences, authoritativeCasingReferences, userId) {
+async function interpretEditInstruction(instructionTranscript, session, settings, glossary, conversationReferences, authoritativeCasingReferences, userId, signal, onTimeout) {
   const clauses = splitEditClauses(instructionTranscript);
   const deterministicPlan = clauses.length > 1 ? parseDeterministicCompoundEditPlan(clauses, session) : parseDeterministicEditPlan(instructionTranscript, session);
   if (deterministicPlan) return deterministicPlan;
@@ -5467,12 +5471,24 @@ async function interpretEditInstruction(instructionTranscript, session, settings
     "provider.edit-interpretation",
     `end outcome=${outcome} duration=${debugDuration(providerStartedAt)}`
   );
+  const controller = new AbortController();
+  let timeout;
+  let finishCancellation;
+  const cancelled = new Promise((resolve) => {
+    finishCancellation = () => {
+      resolve(null);
+      controller.abort();
+    };
+  });
+  if (signal.aborted) finishCancellation?.();
+  else signal.addEventListener("abort", finishCancellation, { once: true });
   try {
-    const response = await spindle.generate.quiet({
+    const response = await Promise.race([spindle.generate.quiet({
       type: "quiet",
       userId,
       ...settings.normalizationConnectionId ? { connection_id: settings.normalizationConnectionId } : {},
       reasoning: { source: "off" },
+      signal: controller.signal,
       parameters: {
         temperature: 0,
         ...settings.normalizationModelOverride ? { model: settings.normalizationModelOverride } : {}
@@ -5500,7 +5516,17 @@ async function interpretEditInstruction(instructionTranscript, session, settings
           })
         }
       ]
-    });
+    }), cancelled, new Promise((resolve) => {
+      timeout = setTimeout(() => {
+        onTimeout();
+        resolve(null);
+        controller.abort();
+      }, clampNormalizationModelTimeoutSeconds(settings.normalizationModelTimeoutSeconds) * 1e3);
+    })]);
+    if (!response) {
+      finishProvider(signal.aborted ? "cancelled" : "timed-out");
+      return null;
+    }
     const content = extractGenerationContent(response);
     if (!content) {
       finishProvider("no-content");
@@ -5517,6 +5543,9 @@ async function interpretEditInstruction(instructionTranscript, session, settings
     finishProvider("failed");
     logSafeFailure("warn", "EDIT_INTERPRETATION", error);
     return null;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    if (finishCancellation) signal.removeEventListener("abort", finishCancellation);
   }
 }
 function parseDeterministicCompoundSentenceDeletion(instructionTranscript, draftVersion) {
@@ -5691,8 +5720,6 @@ function parseDeterministicSentenceTextDeletion(instructionTranscript, session) 
     ]
   });
 }
-var GRAMMAR_REPAIR_TIMEOUT_MS = 6e3;
-var CANDIDATE_GRAMMAR_TIMEOUT_MS = 2500;
 var JEV_GRAMMAR_TIMEOUT_MS = 2500;
 var JEV_GRAMMAR_REPAIR_THRESHOLD = 0.7;
 var MAX_GRAMMAR_SEGMENT_CHARACTERS = 3e3;
@@ -5701,7 +5728,7 @@ var MAX_GRAMMAR_FIND_CHARACTERS = 160;
 var MAX_GRAMMAR_REPLACE_CHARACTERS = 200;
 var MAX_GRAMMAR_PROTECTED_TERMS = 40;
 var MAX_GRAMMAR_PROTECTED_CHARACTERS = 800;
-async function maybeRepairEditGrammar(beforeText, proposedText, operations, affectedParagraphOrdinals, settings, glossary, conversationReferences, userId, signal, timeoutMs = GRAMMAR_REPAIR_TIMEOUT_MS) {
+async function maybeRepairEditGrammar(beforeText, proposedText, operations, affectedParagraphOrdinals, settings, glossary, conversationReferences, userId, signal, timeoutMs = clampNormalizationModelTimeoutSeconds(settings.normalizationModelTimeoutSeconds) * 1e3) {
   const unchanged = { text: proposedText, changes: [] };
   if (proposedText === beforeText) return unchanged;
   if (operations.every((operation) => operation.type === "case")) return unchanged;
@@ -5777,8 +5804,15 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
   );
   const startedAt2 = performance.now();
   const controller = new AbortController();
-  const abortFromRequest = () => controller.abort();
-  signal.addEventListener("abort", abortFromRequest, { once: true });
+  let finishCancellation;
+  const cancelled = new Promise((resolve) => {
+    finishCancellation = () => {
+      resolve(null);
+      controller.abort();
+    };
+  });
+  if (signal.aborted) finishCancellation?.();
+  else signal.addEventListener("abort", finishCancellation, { once: true });
   let timeout;
   try {
     const response = await Promise.race([
@@ -5812,6 +5846,7 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
           }
         ]
       }),
+      cancelled,
       // Abort the provider request, but also bound the await: a host that does
       // not tear down the request must not hold the draft lock indefinitely.
       new Promise((resolve) => {
@@ -5901,7 +5936,7 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
     return fallback;
   } finally {
     clearTimeout(timeout);
-    signal.removeEventListener("abort", abortFromRequest);
+    if (finishCancellation) signal.removeEventListener("abort", finishCancellation);
   }
 }
 async function evaluateEditGrammarWithJev(segments, deterministicTexts, operations, userId, signal, decisionConnectionId) {
@@ -7106,7 +7141,6 @@ function apostropheFlexiblePattern(value) {
 function clampNormalizationModelTimeoutSeconds(value) {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.min(MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.round(value))) : DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS;
 }
-var FLOOR_PROBE_TIMEOUT_MS = 3e4;
 async function measureProviderFloor(userId, settings) {
   const startedAt2 = performance.now();
   beginDebugCapture(userId);
@@ -7136,7 +7170,7 @@ async function measureProviderFloor(userId, settings) {
         timeout = setTimeout(() => {
           controller.abort();
           resolve(null);
-        }, FLOOR_PROBE_TIMEOUT_MS);
+        }, clampNormalizationModelTimeoutSeconds(settings.normalizationModelTimeoutSeconds) * 1e3);
       })
     ]);
     if (!response) outcome = "timed-out";

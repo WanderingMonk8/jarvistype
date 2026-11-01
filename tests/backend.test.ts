@@ -1880,6 +1880,41 @@ test('verifies a clearly separated span below the old score cutoff', async () =>
     assert.equal(ambiguous.proposal.candidateText, raw)
 })
 
+test('accepts a verified semantic hint while rejecting tied or unrelated spans', async () => {
+  const userId = 'calibrated-hint-user'
+  const chatId = 'calibrated-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'calibrated-hint-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.97
+  hintBoundaryDecision = () => 0.86
+  hintConfirmDecision = 0.78
+  hintSpanDecision = (id) => id === 'span_3_1' ? 0.83 : id === 'span_2_2' ? 0.21 : 0.02
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'calibrated-clear', 1, 'I called the surgeon. Hint: a medieval battlefield doctor.'), userId)
+  const clear = responses.at(-1)?.payload
+  assert.equal(clear?.type, 'transcript.normalization.response')
+  if (clear?.type === 'transcript.normalization.response') assert.equal(clear.proposal.candidateText, 'I called the chirurgeon.')
+
+  hintSpanDecision = (id) => id === 'span_1_1' || id === 'span_4_1' ? 0.79 : 0.02
+  const tiedText = 'One surgeon called another surgeon before sunrise. Hint: a medieval battlefield doctor.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'calibrated-tied', 1, tiedText), userId)
+  const tied = responses.at(-1)?.payload
+  assert.equal(tied?.type, 'transcript.normalization.response')
+  if (tied?.type === 'transcript.normalization.response') assert.equal(tied.proposal.candidateText, tiedText)
+
+  hintSpanDecision = (id) => id === 'span_3_1' ? 0.83 : 0.1
+  hintConfirmDecision = 0.1
+  const unrelatedText = 'I called the soldier. Hint: a medieval battlefield doctor.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'calibrated-unrelated', 1, unrelatedText), userId)
+  const unrelated = responses.at(-1)?.payload
+  assert.equal(unrelated?.type, 'transcript.normalization.response')
+  if (unrelated?.type === 'transcript.normalization.response') assert.equal(unrelated.proposal.candidateText, unrelatedText)
+})
+
 test('resolves delayed hints across commas without guessing between repeated matches', async () => {
   const userId = 'hint-across-commas-user'
   const chatId = 'hint-across-commas-chat'

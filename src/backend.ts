@@ -4580,7 +4580,7 @@ async function resolveGlossaryHintReferences(
           const confirmScore = confirmation?.type === 'noul' && Number.isFinite(confirmation.noul) ? confirmation.noul : 0
           const pluralScore = plural?.type === 'noul' && Number.isFinite(plural.noul) ? plural.noul : 0
           recordDebug(userId, 'glossary.hint.verify', `confirmation=${needsConfirmation ? confirmScore.toFixed(3) : 'not-needed'} plural=${pluralScore.toFixed(3)}`)
-          if (needsConfirmation && confirmScore < 0.95) { unresolved = true; continue }
+          if (needsConfirmation && confirmScore < 0.75) { unresolved = true; continue }
           if (plural?.type !== 'noul' || !Number.isFinite(plural.noul) || (pluralScore > 0.1 && pluralScore < 0.9)) { unresolved = true; continue }
           pluralTarget = pluralScore >= 0.9
           hit = { ...winner, word: winner.text }

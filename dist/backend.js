@@ -7678,7 +7678,7 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
           const confirmScore = confirmation?.type === "noul" && Number.isFinite(confirmation.noul) ? confirmation.noul : 0;
           const pluralScore = plural?.type === "noul" && Number.isFinite(plural.noul) ? plural.noul : 0;
           recordDebug(userId, "glossary.hint.verify", `confirmation=${needsConfirmation ? confirmScore.toFixed(3) : "not-needed"} plural=${pluralScore.toFixed(3)}`);
-          if (needsConfirmation && confirmScore < 0.95) {
+          if (needsConfirmation && confirmScore < 0.75) {
             unresolved = true;
             continue;
           }

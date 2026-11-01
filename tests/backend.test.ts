@@ -6887,6 +6887,30 @@ test('uses phonetic character references for recording normalization and edit ta
   assert.equal(generationRequests.length, 0)
 })
 
+test('corrects a repeated misheard name in a replacement payload', async () => {
+  decisionsEnabled = true
+  const userId = 'repeated-fuzzy-replacement-user'
+  const chatId = 'repeated-fuzzy-replacement-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'Erbold watches the road.' }]
+  generationNormalizedText = null
+  await seedDraft(userId, chatId, 'In Erbold, I suppose we have to leave.')
+  responses.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'edit.interpret.request',
+    requestId: 'repeated-fuzzy-replacement',
+    operationId: 'repeated-fuzzy-replacement-operation',
+    chatId,
+    expectedVersion: 1,
+    instructionTranscript: 'Replace in urboed with end urboed.',
+  }, userId)
+  const edit = responses.at(-1)?.payload
+  assert.equal(edit?.type, 'edit.proposal.response')
+  if (edit?.type === 'edit.proposal.response')
+    assert.equal(edit.proposal.afterText, 'End Erbold, I suppose we have to leave.')
+})
+
 test('keeps broad active-draft references available for recording fuzzy identification', async () => {
   decisionsEnabled = true
   const userId = 'draft-fuzzy-recording-user'

@@ -381,6 +381,35 @@ export function correctEditTargetFromConversationReferences(
   return correctReferenceTerms(text, references, protectedTerms, false)
 }
 
+/** Correct a repeated misheard name in a replacement when its target corroborates it. */
+export function correctRepeatedEditReference(
+  text: string,
+  target: string,
+  references: readonly string[],
+  protectedTerms: readonly string[] = [],
+): string {
+  const targetWords = new Set(
+    (target.match(/[\p{L}\p{M}]+/gu) ?? []).map((word) => word.toLocaleLowerCase()),
+  )
+  const protectedKeys = new Set(protectedTerms.map((term) => term.toLocaleLowerCase()))
+  const names = [...referenceMap(references).values()]
+  return text.replace(/[\p{L}][\p{L}\p{M}]*/gu, (word) => {
+    const key = word.toLocaleLowerCase()
+    if (
+      key.length < 6 ||
+      !targetWords.has(key) ||
+      protectedKeys.has(key) ||
+      names.some((name) => name.toLocaleLowerCase() === key)
+    ) return word
+    const candidates = names.filter((name) =>
+      name.length >= 6 &&
+      !protectedKeys.has(name.toLocaleLowerCase()) &&
+      areSpeechPhoneticNeighbors(key, name),
+    )
+    return candidates.length === 1 ? candidates[0]! : word
+  })
+}
+
 /**
  * Adopts canonical casing only when a payload token already matches a known
  * reference case-insensitively. This does not perform fuzzy substitution.

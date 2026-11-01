@@ -44,6 +44,7 @@ import {
   clampReferenceAdmissionOccurrences,
   correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
+  correctRepeatedEditReference,
   extractAuthoritativeCasingReferences,
   extractCapitalizedPhraseCandidates,
   extractCardCasingReferences,
@@ -3896,8 +3897,19 @@ function normalizeEditInputPayloads(
         exactReferences,
         exactProtectedReferences,
       ).text
+      const repeatedReferenceNormalized = operation.type === 'replace'
+        ? correctRepeatedEditReference(
+          exactNormalized,
+          [operation.target.exactText, operation.target.approximateText].filter(Boolean).join(' '),
+          mergeConversationReferences(
+            mergeConversationReferences(cardCharacterReferences, conversationReferences),
+            draftIdentificationReferences,
+          ),
+          protectedReferences,
+        )
+        : exactNormalized
       const cardNormalized = correctFromConversationReferences(
-        exactNormalized,
+        repeatedReferenceNormalized,
         cardCharacterReferences,
         protectedReferences,
       ).text

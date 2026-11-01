@@ -7,6 +7,7 @@ import {
   clampReferenceCacheLimit,
   correctEditTargetFromConversationReferences,
   correctFromConversationReferences,
+  correctRepeatedEditReference,
   extractAuthoritativeCasingReferences,
   extractCardCasingReferences,
   extractCardCharacterReferences,
@@ -14,6 +15,14 @@ import {
   selectRecentContext,
   selectRecentReferenceContext,
 } from '../src/domain/context'
+
+test('requires corroboration and an unambiguous phonetic name for replacement correction', () => {
+  assert.equal(correctRepeatedEditReference('end urboed', 'in urboed', ['Erbold']), 'end Erbold')
+  assert.equal(correctRepeatedEditReference('end urboed', 'in another place', ['Erbold']), 'end urboed')
+  assert.equal(correctRepeatedEditReference('end urboed', 'in urboed', ['Erbold', 'Herbold']), 'end urboed')
+  assert.equal(correctRepeatedEditReference('end urboed', 'in urboed', ['Erbold'], ['Erbold']), 'end urboed')
+  assert.equal(correctRepeatedEditReference('end urboed', 'in urboed', ['Urboed', 'Erbold']), 'end urboed')
+})
 
 test('defaults and bounds the user-configurable context count', () => {
   assert.equal(clampContextMessageCount(undefined), 5)

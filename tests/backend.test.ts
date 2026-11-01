@@ -1828,6 +1828,43 @@ test('verifies a moderate span match and preserves plural and quotation punctuat
     assert.match(unconfirmed.proposal.candidateText, /surgeons.*Hint:/u)
 })
 
+test('verifies a clearly separated span below the old score cutoff', async () => {
+  const userId = 'low-ranked-hint-span-user'
+  const chatId = 'low-ranked-hint-span-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'low-ranked-hint-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.97
+  hintBoundaryDecision = () => 0.86
+  hintSpanDecision = (id) => id === 'span_5_1' ? 0.49 : 0.04
+  hintPluralDecision = 0.99
+  const raw = 'Look, we need as many surgeons as we can find. Hint: a medieval field doctor.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'low-ranked-hint', 1, raw), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'Look, we need as many chirurgeons as we can find.')
+
+  hintConfirmDecision = 0.4
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'low-ranked-hint-unconfirmed', 1, raw), userId)
+  const unconfirmed = responses.at(-1)?.payload
+  assert.equal(unconfirmed?.type, 'transcript.normalization.response')
+  if (unconfirmed?.type === 'transcript.normalization.response')
+    assert.equal(unconfirmed.proposal.candidateText, raw)
+
+  hintConfirmDecision = 1
+  hintSpanDecision = (id) => id === 'span_5_1' ? 0.49 : id === 'span_4_1' ? 0.35 : 0.04
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'low-ranked-hint-ambiguous', 1, raw), userId)
+  const ambiguous = responses.at(-1)?.payload
+  assert.equal(ambiguous?.type, 'transcript.normalization.response')
+  if (ambiguous?.type === 'transcript.normalization.response')
+    assert.equal(ambiguous.proposal.candidateText, raw)
+})
+
 test('resolves delayed hints across commas without guessing between repeated matches', async () => {
   const userId = 'hint-across-commas-user'
   const chatId = 'hint-across-commas-chat'

@@ -4551,7 +4551,7 @@ async function resolveGlossaryHintReferences(
           const winner = ranked[0]
           const runnerUp = ranked[1]?.score ?? 0
           recordDebug(userId, 'glossary.hint.span', `candidates=${spans.length} best=${(winner?.score ?? 0).toFixed(3)} runnerUp=${runnerUp.toFixed(3)} threshold=0.950 margin=0.150`)
-          if (!winner || winner.score < 0.5 || runnerUp > winner.score - 0.15) { unresolved = true; continue }
+          if (!winner || runnerUp > winner.score - 0.15) { unresolved = true; continue }
           // A moderate span score is not sufficient by itself: independently verify the
           // selected span, and ask for grammatical number before applying the replacement.
           const needsConfirmation = winner.score < 0.95

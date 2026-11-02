@@ -454,13 +454,13 @@ test('undoes and redoes a draft mutation through the backend protocol', async ()
   }
 })
 
-test('saves normalization timeout settings and defaults legacy settings to forty seconds', async () => {
+test('saves normalization timeout settings and defaults legacy settings to 120 seconds', async () => {
   const userId = 'normalization-timeout-settings-user'
   const settings = { contextMessageCount: 5, contextualNormalizationEnabled: true, grammarRepairMode: 'off' as const, normalizationConnectionId: null, normalizationModelOverride: '' }
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'timeout-default', settings }, userId)
   let response = responses.at(-1)?.payload
   assert.equal(response?.type, 'phase4.state.response')
-  if (response?.type === 'phase4.state.response') assert.equal(response.settings.normalizationModelTimeoutSeconds, 40)
+  if (response?.type === 'phase4.state.response') assert.equal(response.settings.normalizationModelTimeoutSeconds, 120)
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'timeout-custom', settings: { ...settings, normalizationModelTimeoutSeconds: 75 } }, userId)
   response = responses.at(-1)?.payload
   assert.equal(response?.type, 'phase4.state.response')

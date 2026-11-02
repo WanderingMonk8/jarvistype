@@ -2949,6 +2949,60 @@ test('quotes through a unique spoken ellipsis without a provider call', async ()
   }
 })
 
+test('matches quotation range endpoints across omitted punctuation without a provider', async () => {
+  const userId = 'quotation-omitted-punctuation-user'
+  const chatId = 'quotation-omitted-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier. Well, I guess I am the genie, you rubbed the… I stop.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-omitted-punctuation', operationId: 'quotation-omitted-punctuation-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from well I guess to the ellipsis.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'Earlier. “Well, I guess I am the genie, you rubbed the…” I stop.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('does not guess when a punctuation-tolerant quotation start has multiple matches', async () => {
+  const userId = 'quotation-ambiguous-omitted-punctuation-user'
+  const chatId = 'quotation-ambiguous-omitted-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Well, I guess first. Well, I guess second…')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-ambiguous-omitted-punctuation', operationId: 'quotation-ambiguous-omitted-punctuation-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from well I guess to the ellipsis.' }, userId)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('matches a quotation end phrase when the transcript omits punctuation', async () => {
+  const userId = 'quotation-end-omitted-punctuation-user'
+  const chatId = 'quotation-end-omitted-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'We said hello and then good, bye. Next.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-end-omitted-punctuation', operationId: 'quotation-end-omitted-punctuation-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from hello to good bye.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'We said “hello and then good, bye.” Next.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('does not guess when a punctuation-tolerant quotation end is ambiguous', async () => {
+  const userId = 'quotation-ambiguous-end-punctuation-user'
+  const chatId = 'quotation-ambiguous-end-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'We said hello, then good, bye and good, bye again.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-ambiguous-end-punctuation', operationId: 'quotation-ambiguous-end-punctuation-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from hello to good bye.' }, userId)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('does not modify a draft when a spoken quotation endpoint is ambiguous', async () => {
   const userId = 'quotation-ambiguous-ellipsis-user'
   const chatId = 'quotation-ambiguous-ellipsis-chat'

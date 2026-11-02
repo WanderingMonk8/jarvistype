@@ -27,6 +27,7 @@ import {
 import {
   executeEditPlan,
   executeSequentialEditPlan,
+  findPunctuationInsensitiveMatch,
   findTextTargetMatches,
   parseEditPlan,
   type EditPlan,
@@ -3198,8 +3199,17 @@ function parseDeterministicQuotationRange(
   const punctuationTarget = SPOKEN_PUNCTUATION_TARGETS.find(([pattern]) =>
     new RegExp(`^(?:${pattern.source})$`, pattern.flags).test(punctuationName),
   )?.[1]
-  const startText = adoptUnambiguousDraftCasing(session, spokenStart, undefined)
-  const startIndex = session.cleanText.indexOf(startText)
+  let startText = adoptUnambiguousDraftCasing(session, spokenStart, undefined)
+  let startIndex = session.cleanText.indexOf(startText)
+  if (startIndex < 0) {
+    const match = findPunctuationInsensitiveMatch(session.cleanText, spokenStart, 0, session.cleanText.length)
+    if (typeof match === 'string') {
+      if (!match.includes('ambiguous')) return null
+      return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: 'The quotation start is ambiguous.', operations: [{ id: 'ambiguous-quotation-start', type: 'insert_before', target: { exactText: spokenStart }, text: style === 'single' ? '‘' : '“' }] })
+    }
+    startIndex = match.start
+    startText = session.cleanText.slice(match.start, match.end)
+  }
   if (startIndex < 0) return null
   const startOccurrence =
     countExactOccurrences(session.cleanText.slice(0, startIndex), startText) + 1
@@ -3221,8 +3231,17 @@ function parseDeterministicQuotationRange(
       text: closing,
     }
   } else {
-    const endText = adoptUnambiguousDraftCasing(session, spokenEnd, undefined)
-    const endIndex = session.cleanText.lastIndexOf(endText)
+    let endText = adoptUnambiguousDraftCasing(session, spokenEnd, undefined)
+    let endIndex = session.cleanText.lastIndexOf(endText)
+    if (endIndex < 0) {
+      const match = findPunctuationInsensitiveMatch(session.cleanText, spokenEnd, startIndex + startText.length, session.cleanText.length)
+      if (typeof match !== 'string') {
+        endIndex = match.start
+        endText = session.cleanText.slice(match.start, match.end)
+      } else if (match.includes('ambiguous')) {
+        return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: 'The quotation end is ambiguous.', operations: [{ id: 'ambiguous-quotation-end', type: 'insert_after', target: { exactText: spokenEnd }, text: closing }] })
+      }
+    }
     if (endIndex < startIndex) return null
     const endTerminal = session.cleanText
       .slice(endIndex + endText.length)

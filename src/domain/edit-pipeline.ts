@@ -1837,7 +1837,7 @@ function expandTokens(tokens: readonly FuzzyToken[]): ExpandedToken[] {
   return expanded
 }
 
-function findPunctuationInsensitiveMatch(
+export function findPunctuationInsensitiveMatch(
   text: string,
   search: string,
   start: number,

@@ -1024,6 +1024,8 @@ function cleanupPunctuationSpacing(value: string): string {
     .replace(/(?<=\p{L})[ \t]*’[ \t]*(?=\p{L})/gu, '’')
     .replace(/[ \t]*-[ \t]*/g, '-')
     .replace(/[,;:]\s*([.!?])/g, '$1')
+    // Protect the standard three-period ellipsis from duplicate-mark cleanup.
+    .replace(/(?<!\.)\.{3}(?!\.)/gu, '…')
     .replace(/([,.;:!?])(?:\s*\1)+/g, '$1')
     .replace(/…(?:\s*\.){1,3}/g, '…')
     .replace(/[ \t]*\n[ \t]*/g, '\n')

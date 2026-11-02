@@ -6028,6 +6028,27 @@ test('cleans local grammar after an edit even when provider repair is off', asyn
   assert.equal(generationRequests.length, 0)
 })
 
+test('preserves a provider-returned three-period ellipsis in an edit', async () => {
+  const userId = 'insert-ellipsis-user'
+  const chatId = 'insert-ellipsis-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'You rubbed the I stop before I say it.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Insert an ellipsis after the phrase.',
+    operations: [{ id: 'insert-ellipsis', type: 'insert_after', target: { exactText: 'rubbed the' }, text: '...' }],
+  }
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'insert-ellipsis-request', operationId: 'insert-ellipsis-operation', chatId, expectedVersion: 1, instructionTranscript: 'Insert ellipsis at the end of the phrase rubbed the.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'You rubbed the… I stop before I say it.')
+  assert.ok(generationRequests.length > 0)
+})
+
 test('fixes errant punctuation and sentence casing left by an edit', async () => {
   const userId = 'universal-cleanup-punctuation-user'
   const chatId = 'universal-cleanup-punctuation-chat'

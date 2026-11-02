@@ -8,6 +8,13 @@ import {
   recoverHighConfidenceContextualCommands,
 } from '../src/domain/normalization'
 
+test('preserves an ellipsis through punctuation cleanup', () => {
+  for (const input of ['...', '…', 'ellipsis'])
+    assert.equal(normalizeDeterministically(input, [], { capitalizeOpening: false }).text, '…')
+  assert.equal(normalizeDeterministically('Wait... I stopped.', []).text, 'Wait… I stopped.')
+  assert.equal(normalizeDeterministically('Wait.. What??', []).text, 'Wait. What?')
+})
+
 test('uses qualified as-in spelling references in recording text', () => {
   assert.equal(
     normalizeQualifiedAsInReferences(

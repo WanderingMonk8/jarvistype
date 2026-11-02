@@ -3916,7 +3916,7 @@ function applySpellingCasing(value, casing) {
   ).join("").replace(/(['\u2019])S$/u, "$1s");
 }
 function cleanupPunctuationSpacing(value) {
-  return value.replace(/[ \t]+([,.;:!?)\]>])/g, "$1").replace(/([(<[])\s+/g, "$1").replace(/([“‘])[ \t]+/g, "$1").replace(/[ \t]+([”’])/g, "$1").replace(/[ \t]+…/g, "\u2026").replace(/(?<=\p{L})[ \t]*’[ \t]*(?=\p{L})/gu, "\u2019").replace(/[ \t]*-[ \t]*/g, "-").replace(/[,;:]\s*([.!?])/g, "$1").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").replace(/^[ \t]+/, "").replace(/\s+$/, "");
+  return value.replace(/[ \t]+([,.;:!?)\]>])/g, "$1").replace(/([(<[])\s+/g, "$1").replace(/([“‘])[ \t]+/g, "$1").replace(/[ \t]+([”’])/g, "$1").replace(/[ \t]+…/g, "\u2026").replace(/(?<=\p{L})[ \t]*’[ \t]*(?=\p{L})/gu, "\u2019").replace(/[ \t]*-[ \t]*/g, "-").replace(/[,;:]\s*([.!?])/g, "$1").replace(/(?<!\.)\.{3}(?!\.)/gu, "\u2026").replace(/([,.;:!?])(?:\s*\1)+/g, "$1").replace(/…(?:\s*\.){1,3}/g, "\u2026").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/([,.;:!?])(?=[A-Za-z])/g, "$1 ").replace(/^[ \t]+/, "").replace(/\s+$/, "");
 }
 function escapeRegExp2(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

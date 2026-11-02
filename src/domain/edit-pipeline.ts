@@ -907,7 +907,10 @@ function executeInlineMove(
   const sourceEnd = operation.includeTrailingPunctuation
     ? extendThroughTerminalPunctuation(cleanText, source.end, source.scopeEnd)
     : source.end
-  if (source.start < destination.end && destination.start < sourceEnd)
+  const sourceInsideDestinationSentence =
+    (operation.destination.sentenceOrdinal !== undefined || operation.destination.sentenceFromEnd !== undefined) &&
+    operation.target.punctuation !== undefined && source.start >= destination.start && sourceEnd <= destination.end
+  if (source.start < destination.end && destination.start < sourceEnd && !sourceInsideDestinationSentence)
     return { ok: false, reason: 'move source and destination overlap' }
 
   const movedText = cleanText.slice(source.start, sourceEnd)
@@ -929,8 +932,17 @@ function executeInlineMove(
   let withoutSource = `${cleanText.slice(0, removalStart)}${cleanText.slice(removalEnd)}`
   if (formatText && isSentenceOpeningAt(cleanText, source.start))
     withoutSource = capitalizeExistingSentenceOpening(withoutSource, removalStart)
-  const originalInsertionPoint =
+  let originalInsertionPoint =
     operation.type === 'move_before' ? destination.start : destination.end
+  // A closing quote moved before a sentence belongs against the preceding
+  // sentence's punctuation, not on the far side of its separating space.
+  if (formatText && operation.type === 'move_before' &&
+      (operation.destination.sentenceOrdinal !== undefined || operation.destination.sentenceFromEnd !== undefined) &&
+      operation.target.punctuation === 'quote' && /^[”"]$/u.test(movedText) &&
+      source.start > destination.start) {
+    while (originalInsertionPoint > destination.scopeStart && /[ \t]/u.test(cleanText[originalInsertionPoint - 1] ?? ''))
+      originalInsertionPoint -= 1
+  }
   const insertionPoint =
     originalInsertionPoint > removalStart
       ? originalInsertionPoint - (removalEnd - removalStart)

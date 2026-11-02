@@ -2920,6 +2920,20 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('moves the last quotation mark before the last sentence without a provider call', async () => {
+  const userId = 'move-quote-sentence-user'
+  const chatId = 'move-quote-sentence-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She said, “First sentence. Second sentence. I leave.”')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'move-quote-sentence', operationId: 'move-quote-sentence-op', chatId, expectedVersion: 1, instructionTranscript: 'Move the last quotation mark to before the last sentence.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'She said, “First sentence. Second sentence.” I leave.')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('quotes a spoken range including its attached punctuation run', async () => {
   const userId = 'quotation-punctuation-run-user'
   const chatId = 'quotation-punctuation-run-chat'

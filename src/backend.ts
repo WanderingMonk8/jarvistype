@@ -1684,6 +1684,8 @@ function parseDeterministicEditPlan(
   instructionTranscript: string,
   session: PersistedDraftSession,
 ): EditPlan | null {
+  const punctuationMove = parseDeterministicPunctuationSentenceMove(instructionTranscript, session.draftVersion)
+  if (punctuationMove) return punctuationMove
   const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session.draftVersion)
   if (rangeDeletion) return rangeDeletion
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
@@ -1739,6 +1741,25 @@ function parseDeterministicEditPlan(
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session)
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement)
   return null
+}
+
+function parseDeterministicPunctuationSentenceMove(instruction: string, draftVersion: number): EditPlan | null {
+  const match = instruction.trim().match(
+    /^move\s+the\s+(last|final|first)\s+(quotation\s+mark|quote\s+mark|quote)\s+(?:to\s+)?(before|after)\s+the\s+(first|last|final|second[- ]to[- ]last|penultimate)\s+sentence[.!?]*$/iu,
+  )
+  if (!match) return null
+  const position = parseSentencePosition(`${match[4]} sentence`)
+  if (!position) return null
+  return parseEditPlan({
+    schemaVersion: 2, draftVersion,
+    explanation: `Move the ${match[1]} quotation mark ${match[3]} the ${match[4]} sentence.`,
+    operations: [{
+      id: 'deterministic-move-quotation',
+      type: match[3]!.toLowerCase() === 'before' ? 'move_before' : 'move_after',
+      target: { punctuation: 'quote', ...(match[1]!.toLowerCase() === 'first' ? { occurrence: 1 } : { occurrenceFromEnd: 1 }) },
+      destination: position,
+    }],
+  })
 }
 
 function parseDeterministicRangeDeletion(instruction: string, draftVersion: number): EditPlan | null {

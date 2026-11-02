@@ -732,6 +732,16 @@ function executeSequentialEditPlan(cleanText, paragraphs, currentVersion, plan, 
     return id;
   };
   for (const [index, operation] of plan.operations.entries()) {
+    const quotePart = operation.id.match(/^(.*)deterministic-(open|close)-quotation-range$/u);
+    const nextOperation = plan.operations[index + 1];
+    const nextQuotePart = nextOperation?.id.match(/^(.*)deterministic-(open|close)-quotation-range$/u);
+    if (quotePart && nextQuotePart && quotePart[1] === nextQuotePart[1] && quotePart[2] !== nextQuotePart[2]) {
+      const checked = executeEditPlan(text, currentParagraphs, currentVersion, { ...plan, operations: [operation, nextOperation] }, protectedCasingTerms);
+      if (!checked.ok) {
+        failedCommand = { index: index + 1, operationId: operation.id, reason: checked.reason };
+        break;
+      }
+    }
     let currentOperation = operation;
     const exact = operation.target.exactText;
     if (index > 0 && operation.type === "insert_after" && exact && /[.!?…]$/u.test(exact)) {
@@ -958,10 +968,15 @@ function parseTarget(value) {
     "sentenceOrdinal",
     "sentenceFromEnd",
     "relativePosition",
-    "relativeToText"
+    "relativeToText",
+    "ignorePunctuationForMatch"
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return null;
   const target = {};
+  if (value.ignorePunctuationForMatch !== void 0) {
+    if (typeof value.ignorePunctuationForMatch !== "boolean") return null;
+    target.ignorePunctuationForMatch = value.ignorePunctuationForMatch;
+  }
   if (value.paragraphId !== void 0) {
     if (!isIdentifier(value.paragraphId)) return null;
     target.paragraphId = value.paragraphId;
@@ -1031,7 +1046,7 @@ function parseTarget(value) {
     return null;
   if ((target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0) && (target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.scope !== void 0 || target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
     return null;
-  return Object.keys(target).length ? target : null;
+  return Object.keys(target).some((key) => key !== "ignorePunctuationForMatch") ? target : null;
 }
 function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms, formatText, quotationWrap) {
   const paragraphMatches = paragraphs.filter(
@@ -1079,7 +1094,8 @@ function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms
       operation.target.exactText,
       range.start,
       range.end,
-      operation.target.occurrence
+      operation.target.occurrence,
+      operation.target.ignorePunctuationForMatch
     );
     if (typeof match === "string") return match;
     start = match.start;
@@ -1390,6 +1406,14 @@ function findTextTargetMatches(cleanText, paragraphs, search, scope = {}) {
   );
   if (!scoped.length) return [];
   const matches = [];
+  if ((scope.ignorePunctuationForMatch || !hasTargetPunctuation(search)) && /[\p{L}\p{N}]/u.test(search)) {
+    for (const paragraph of scoped) {
+      const range = paragraphRange(cleanText, paragraph);
+      for (const match of findPunctuationInsensitiveCandidates(cleanText, search, range.start, range.end))
+        matches.push({ start: match.start, end: match.end, paragraphOrdinal: paragraph.ordinal });
+    }
+    if (matches.length) return matches;
+  }
   for (const paragraph of scoped) {
     const range = paragraphRange(cleanText, paragraph);
     for (const start of findAll(cleanText, search, range.start, range.end))
@@ -1439,7 +1463,8 @@ function resolveTextTarget(cleanText, paragraphs, target, label) {
       target.exactText,
       range.start,
       range.end,
-      target.occurrence
+      target.occurrence,
+      target.ignorePunctuationForMatch
     );
     if (match === "text target is ambiguous") return `${label} is ambiguous`;
     if (match === "text target was not found") return `${label} was not found`;
@@ -1468,11 +1493,11 @@ function isPunctuationTarget(value) {
 function resolvePunctuationTarget(cleanText, rangeStart, rangeEnd, target) {
   let matches = findPunctuationMatches(cleanText, target.punctuation, rangeStart, rangeEnd);
   if (target.relativeToText !== void 0) {
-    const anchors = findAll(cleanText, target.relativeToText, rangeStart, rangeEnd);
-    if (anchors.length !== 1)
-      return anchors.length ? "punctuation anchor is ambiguous" : "punctuation anchor was not found";
-    const anchorStart = anchors[0];
-    const anchorEnd = anchorStart + target.relativeToText.length;
+    const anchor = findExactOrFuzzyMatch(cleanText, target.relativeToText, rangeStart, rangeEnd, void 0, target.ignorePunctuationForMatch);
+    if (typeof anchor === "string")
+      return anchor.includes("ambiguous") ? "punctuation anchor is ambiguous" : "punctuation anchor was not found";
+    const anchorStart = anchor.start;
+    const anchorEnd = anchor.end;
     matches = target.relativePosition === "after" ? matches.filter((match) => match.start >= anchorEnd) : matches.filter((match) => match.end <= anchorStart).reverse();
   }
   if (target.occurrence !== void 0) {
@@ -1816,7 +1841,25 @@ function findLexicallyBoundedExactMatches(text, search, start, end) {
     return (!searchStartsLexically || preceding === void 0 || !/[\p{L}\p{M}\p{N}]/u.test(preceding)) && (!searchEndsLexically || following === void 0 || !/[\p{L}\p{M}\p{N}]/u.test(following));
   });
 }
-function findExactOrFuzzyMatch(text, search, start, end, occurrence) {
+function findExactOrFuzzyMatch(text, search, start, end, occurrence, ignorePunctuationForMatch) {
+  const namedPunctuation = normalizeNamedTargetPunctuation(search);
+  if (namedPunctuation !== search) search = namedPunctuation;
+  if ((ignorePunctuationForMatch === true || ignorePunctuationForMatch !== false && !hasTargetPunctuation(search)) && /[\p{L}\p{N}]/u.test(search)) {
+    const lexicalMatches = findPunctuationInsensitiveCandidates(text, search, start, end);
+    if (occurrence !== void 0 && lexicalMatches.length) {
+      const match = lexicalMatches[occurrence - 1];
+      if (!match) return "text target occurrence was not found";
+      const exact = findLexicallyBoundedExactMatches(text, search, start, end).find((index) => index === match.start);
+      return exact === void 0 ? match : { start: exact, end: exact + search.length };
+    }
+    if (lexicalMatches.length > 1)
+      return findLexicallyBoundedExactMatches(text, search, start, end).length > 1 ? "text target is ambiguous" : "punctuation-insensitive text target is ambiguous";
+    if (lexicalMatches.length === 1) {
+      const match = lexicalMatches[0];
+      const exact = findLexicallyBoundedExactMatches(text, search, start, end).find((index) => index === match.start);
+      return exact === void 0 ? match : { start: exact, end: exact + search.length };
+    }
+  }
   const exactMatches = findLexicallyBoundedExactMatches(text, search, start, end);
   if (occurrence !== void 0) {
     const match = exactMatches[occurrence - 1];
@@ -1834,6 +1877,14 @@ function findExactOrFuzzyMatch(text, search, start, end, occurrence) {
   const approximate = findApproximateMatch(text, search, start, end);
   if (typeof approximate !== "string") return approximate;
   return approximate.includes("ambiguous") ? "fuzzy text target is ambiguous" : "text target was not found";
+}
+function normalizeNamedTargetPunctuation(value) {
+  const marks = { comma: ",", colon: ":", semicolon: ";", period: ".", "full stop": ".", "question mark": "?", "exclamation mark": "!", "exclamation point": "!", ellipsis: "\u2026", "three dots": "\u2026", "dot dot dot": "\u2026", "em dash": "\u2014", "en dash": "\u2013", dash: "\u2014", hyphen: "-", apostrophe: "\u2019", "open parenthesis": "(", "close parenthesis": ")", "open bracket": "[", "close bracket": "]", "open quote": "\u201C", "close quote": "\u201D" };
+  if (/^(?:the|a|an)\s+(?:comma|colon|semicolon|period|full\s+stop|question\s+mark|exclamation\s+(?:mark|point)|ellipsis|three\s+dots|dot\s+dot\s+dot|em\s+dash|en\s+dash|dash|hyphen|apostrophe|open\s+parenthesis|close\s+parenthesis|open\s+bracket|close\s+bracket|open\s+quote|close\s+quote)$/iu.test(value.trim())) return value;
+  return value.replace(
+    /(?<=[\p{L}\p{N}])\s+(comma|colon|semicolon|period|full\s+stop|question\s+mark|exclamation\s+(?:mark|point)|ellipsis|three\s+dots|dot\s+dot\s+dot|em\s+dash|en\s+dash|dash|hyphen|apostrophe|open\s+parenthesis|close\s+parenthesis|open\s+bracket|close\s+bracket|open\s+quote|close\s+quote)(?:\s+(?=[\p{L}\p{N}])|(?=\s*$))/giu,
+    (match, name) => `${marks[name.toLocaleLowerCase().replace(/\s+/gu, " ")]}${/\s$/u.test(match) ? " " : ""}`
+  );
 }
 function findSpokenPossessiveMatch(text, search, start, end) {
   const wanted = tokenizeWithOffsets(search, 0, search.length);
@@ -1922,13 +1973,26 @@ function expandTokens(tokens) {
   return expanded;
 }
 function findPunctuationInsensitiveMatch(text, search, start, end) {
+  const candidates = findPunctuationInsensitiveCandidates(text, search, start, end);
+  if (candidates.length === 1) return candidates[0];
+  if (!candidates.length) return "punctuation-insensitive text target was not found";
   const wanted = tokenizeWithOffsets(search, 0, search.length);
-  if (!wanted.length) return "punctuation-insensitive text target was not found";
+  if (!hasTargetPunctuation(search)) return "punctuation-insensitive text target is ambiguous";
+  const wantedPunctuation = internalPunctuationSignature(search, wanted[0].start, wanted.at(-1).end);
+  const punctuationMatches = candidates.filter((candidate) => candidate.punctuation === wantedPunctuation);
+  return punctuationMatches.length === 1 ? punctuationMatches[0] : "punctuation-insensitive text target is ambiguous";
+}
+function hasTargetPunctuation(value) {
+  return /\p{P}/u.test(value.replace(/(?<=[\p{L}\p{N}])['’](?=[\p{L}\p{N}])/gu, ""));
+}
+function findPunctuationInsensitiveCandidates(text, search, start, end) {
+  const wanted = tokenizeWithOffsets(search, 0, search.length);
+  if (!wanted.length) return [];
   const available = tokenizeCachedDraftRange(text, start, end);
   const wantedExpanded = expandTokens(wanted);
   const availableExpanded = expandTokens(available);
   if (availableExpanded.length < wantedExpanded.length)
-    return "punctuation-insensitive text target was not found";
+    return [];
   const candidates = [];
   for (let index = 0; index <= availableExpanded.length - wantedExpanded.length; index += 1) {
     const window = availableExpanded.slice(index, index + wantedExpanded.length);
@@ -1940,17 +2004,7 @@ function findPunctuationInsensitiveMatch(text, search, start, end) {
       punctuation: internalPunctuationSignature(text, window[0].start, window.at(-1).end)
     });
   }
-  if (candidates.length === 1) return candidates[0];
-  if (!candidates.length) return "punctuation-insensitive text target was not found";
-  const wantedPunctuation = internalPunctuationSignature(
-    search,
-    wanted[0].start,
-    wanted.at(-1).end
-  );
-  const punctuationMatches = candidates.filter(
-    (candidate) => candidate.punctuation === wantedPunctuation
-  );
-  return punctuationMatches.length === 1 ? punctuationMatches[0] : "punctuation-insensitive text target is ambiguous";
+  return candidates;
 }
 function stripTokenPunctuation(value) {
   return value.replace(/[^\p{L}\p{N}]/gu, "");
@@ -4929,7 +4983,7 @@ async function handleEditInterpretation(request, context, activeRequest) {
     );
     if (activeRequest.cancelled) return { error: "cancelled", session };
     if (!interpretedPlan) return { error: interpretationTimedOut ? "interpretation-timeout" : "interpretation", session };
-    const plan = normalizeEditReferenceTargets(
+    const plan = applyTargetPunctuationIntent(normalizeEditReferenceTargets(
       normalizeEditInputPayloads(
         stripQualifiedAsInEditPayloads(
           enforceAuthoritativeEditSpellings(
@@ -4950,7 +5004,13 @@ async function handleEditInterpretation(request, context, activeRequest) {
       cardCharacterReferences,
       conversationReferences,
       draftIdentificationReferences
-    );
+    ), request.instructionTranscript, session);
+    if (plan.operations.length === 2 && plan.operations.every(
+      (operation) => /^deterministic-(?:open|close)-quotation-range$/u.test(operation.id)
+    )) {
+      const checked = executeEditPlan(session.cleanText, session.paragraphs, session.draftVersion, plan);
+      if (!checked.ok) return { error: "target", detail: checked.reason, session };
+    }
     const executeStartedAt = performance.now();
     const executed = executeSequentialEditPlan(
       session.cleanText,
@@ -5062,6 +5122,7 @@ function createEditCandidateContext(request, session, plan) {
   const searchText = operation.target.exactText ?? operation.target.approximateText;
   if (!searchText) return null;
   const matches = findTextTargetMatches(session.cleanText, session.paragraphs, searchText, {
+    ...operation.target.ignorePunctuationForMatch ? { ignorePunctuationForMatch: true } : {},
     ...operation.target.paragraphId === void 0 ? {} : { paragraphId: operation.target.paragraphId },
     ...operation.target.paragraphOrdinal === void 0 ? {} : { paragraphOrdinal: operation.target.paragraphOrdinal }
   });
@@ -5090,7 +5151,8 @@ function createEditCandidateContext(request, session, plan) {
       paragraphId: paragraph.id,
       paragraphOrdinal: paragraph.ordinal,
       exactText: matchedText,
-      occurrence
+      occurrence,
+      ignorePunctuationForMatch: false
     };
     plans.set(id, {
       ...plan,
@@ -6533,16 +6595,16 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   const match = rangeMatch ?? beforeAfterMatch ?? afterBeforeMatch;
   if (!match) return null;
   const style = (match[1] ?? "").toLocaleLowerCase();
-  const firstTarget = cleanQuotationRangeTarget(
+  const firstTarget = normalizeNamedTargetPunctuation(cleanQuotationRangeTarget(
     unwrapEditArgument(
       stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[2] ?? "").trim()))
     )
-  );
-  const secondTarget = cleanQuotationRangeTarget(
+  ));
+  const secondTarget = normalizeNamedTargetPunctuation(cleanQuotationRangeTarget(
     unwrapEditArgument(
       stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[3] ?? "").trim().replace(/([”’"'])[.!?]+$/u, "$1")))
     )
-  );
+  ));
   if (!firstTarget || !secondTarget) return null;
   const reverse = Boolean(afterBeforeMatch);
   const spokenStart = reverse ? secondTarget : firstTarget;
@@ -6554,11 +6616,14 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   )?.[1];
   let startText = adoptUnambiguousDraftCasing(session, spokenStart, void 0);
   let startIndex = session.cleanText.indexOf(startText);
-  if (startIndex < 0) {
+  if (startIndex < 0 || !hasTargetPunctuation(spokenStart)) {
     const match2 = findPunctuationInsensitiveMatch(session.cleanText, spokenStart, 0, session.cleanText.length);
     if (typeof match2 === "string") {
       if (!match2.includes("ambiguous")) return null;
-      return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: "The quotation start is ambiguous.", operations: [{ id: "ambiguous-quotation-start", type: "insert_before", target: { exactText: spokenStart }, text: style === "single" ? "\u2018" : "\u201C" }] });
+      return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: "The quotation start is ambiguous.", operations: [
+        { id: "ambiguous-quotation-start", type: "insert_before", target: { exactText: spokenStart }, text: style === "single" ? "\u2018" : "\u201C" },
+        { id: "unresolved-quotation-end", type: "insert_after", target: punctuationTarget ? { punctuation: punctuationTarget } : { exactText: spokenEnd }, text: style === "single" ? "\u2019" : "\u201D" }
+      ] });
     }
     startIndex = match2.start;
     startText = session.cleanText.slice(match2.start, match2.end);
@@ -6584,13 +6649,20 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   } else {
     let endText = adoptUnambiguousDraftCasing(session, spokenEnd, void 0);
     let endIndex = session.cleanText.lastIndexOf(endText);
-    if (endIndex < 0) {
+    const lexicalEnds = !hasTargetPunctuation(spokenEnd) ? findTextTargetMatches(session.cleanText, session.paragraphs, spokenEnd).filter((candidate) => candidate.start >= startIndex + startText.length) : [];
+    const identicalRepeatedEnds = endIndex >= 0 && lexicalEnds.length > 1 && lexicalEnds.every(
+      (candidate) => session.cleanText.slice(candidate.start, candidate.end).toLocaleLowerCase() === endText.toLocaleLowerCase()
+    );
+    if (endIndex < 0 || !hasTargetPunctuation(spokenEnd) && !identicalRepeatedEnds) {
       const match2 = findPunctuationInsensitiveMatch(session.cleanText, spokenEnd, startIndex + startText.length, session.cleanText.length);
       if (typeof match2 !== "string") {
         endIndex = match2.start;
         endText = session.cleanText.slice(match2.start, match2.end);
       } else if (match2.includes("ambiguous")) {
-        return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: "The quotation end is ambiguous.", operations: [{ id: "ambiguous-quotation-end", type: "insert_after", target: { exactText: spokenEnd }, text: closing }] });
+        return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: "The quotation end is ambiguous.", operations: [
+          { id: "ambiguous-quotation-end", type: "insert_after", target: { exactText: spokenEnd }, text: closing },
+          { id: "unresolved-quotation-start", type: "insert_before", target: { exactText: startText, occurrence: startOccurrence }, text: opening }
+        ] });
       }
     }
     if (endIndex < startIndex) return null;
@@ -7167,6 +7239,46 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
       return normalized === operation.text ? operation : { ...operation, text: normalized };
     })
   };
+}
+function applyTargetPunctuationIntent(plan, instruction, session) {
+  const punctuationWords = "(?:comma|colon|semicolon|period|full\\s+stop|question\\s+mark|exclamation\\s+(?:mark|point)|ellipsis|three\\s+dots|dot\\s+dot\\s+dot|em\\s+dash|en\\s+dash|dash|hyphen|apostrophe|open\\s+parenthesis|close\\s+parenthesis|open\\s+bracket|close\\s+bracket|open\\s+quote|close\\s+quote)";
+  const namedMark = new RegExp(`\\b${punctuationWords}\\b`, "iu");
+  const separator = `(?:[\\s\\p{P}]+|\\s+${punctuationWords}\\s+)+`;
+  const clauses = splitEditClauses(instruction);
+  const normalizeValue = (value, sourceInstruction) => {
+    if (!value || !/[\p{L}\p{N}]/u.test(value)) return { text: value, explicit: false };
+    const materialized = normalizeNamedTargetPunctuation(value);
+    const words = materialized.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu) ?? [];
+    if (!words.length) return { text: value, explicit: false };
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${words.map((word) => escapeRegularExpression(word).replace(/['’]/gu, "['\u2019]")).join(separator)}(?:\\s+${punctuationWords})?(?![\\p{L}\\p{N}])`, "giu");
+    const sources = [...sourceInstruction.matchAll(pattern)].map((match) => match[0]);
+    const explicitlyNamed = materialized !== value || sources.length > 0 && sources.every((source) => namedMark.test(source));
+    if (explicitlyNamed) {
+      const source = sources.find((candidate) => namedMark.test(candidate));
+      const spoken = source ? normalizeNamedTargetPunctuation(source) : materialized;
+      return { text: spoken.toLocaleLowerCase() === materialized.toLocaleLowerCase() ? materialized : spoken, explicit: true };
+    }
+    return { text: value, explicit: false };
+  };
+  const normalizeTarget = (target, operationId) => {
+    const clauseNumber = operationId.match(/^clause-(\d+)-/u)?.[1];
+    const sourceInstruction = clauseNumber ? clauses[Number(clauseNumber) - 1] ?? instruction : instruction;
+    const exact = normalizeValue(target.exactText, sourceInstruction);
+    const approximate = normalizeValue(target.approximateText, sourceInstruction);
+    const relative = normalizeValue(target.relativeToText, sourceInstruction);
+    const hasText = target.exactText !== void 0 || target.approximateText !== void 0 || target.relativeToText !== void 0;
+    const explicit = target.exactText !== void 0 ? exact.explicit : target.approximateText !== void 0 ? approximate.explicit : relative.explicit;
+    const targetText = target.exactText ?? target.approximateText ?? target.relativeToText ?? "";
+    const result = { ...target, ...target.exactText === void 0 ? {} : { exactText: exact.text }, ...target.approximateText === void 0 ? {} : { approximateText: approximate.text }, ...target.relativeToText === void 0 ? {} : { relativeToText: relative.text } };
+    delete result.ignorePunctuationForMatch;
+    if (hasText && !explicit && hasTargetPunctuation(targetText)) result.ignorePunctuationForMatch = true;
+    if (/^(?:clause-\d+-)?deterministic-(?:open|close)-quotation-range$/u.test(operationId) && !explicit && exact.text) {
+      const matches = findTextTargetMatches(session.cleanText, session.paragraphs, exact.text, { ignorePunctuationForMatch: true });
+      if (matches.length > 1) delete result.occurrence;
+    }
+    return result;
+  };
+  return { ...plan, operations: plan.operations.map((operation) => ({ ...operation, target: normalizeTarget(operation.target, operation.id), ...operation.destination ? { destination: normalizeTarget(operation.destination, operation.id) } : {} })) };
 }
 function normalizeEditReferenceTargets(plan, draftText, cardCharacterReferences, conversationReferences, draftReferences) {
   const references = mergeConversationReferences(

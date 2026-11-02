@@ -2964,6 +2964,62 @@ test('matches quotation range endpoints across omitted punctuation without a pro
   assert.equal(generationRequests.length, 0)
 })
 
+test('uses a spoken comma to distinguish quotation starts with identical words', async () => {
+  const userId = 'quotation-explicit-comma-user'
+  const chatId = 'quotation-explicit-comma-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, "Well I can't really do that obviously. Well, I can't really do that, obviously…")
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-explicit-comma', operationId: 'quotation-explicit-comma-op', chatId, expectedVersion: 1, instructionTranscript: "put quotations from well comma I can't really do that comma obviously to the ellipsis." }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify(proposal))
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, "Well I can't really do that obviously. “Well, I can't really do that, obviously…”")
+  assert.equal(generationRequests.length, 0)
+})
+
+test('ignores transcribed punctuation in edit targets unless punctuation was named', async () => {
+  const userId = 'spoken-target-punctuation-intent-user'
+  const chatId = 'spoken-target-punctuation-intent-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, "Well I can't really do that obviously. Well, I can't really do that, obviously.")
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'implicit-target-comma', operationId: 'implicit-target-comma-op', chatId, expectedVersion: 1, instructionTranscript: "Replace Well, I can't really do that, obviously with I decline." }, userId)
+  const implicit = responses.at(-1)?.payload
+  assert.notEqual(implicit?.type, 'edit.proposal.response')
+
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'implicit-quotation-comma', operationId: 'implicit-quotation-comma-op', chatId, expectedVersion: 1, instructionTranscript: "Put quotations from Well, I can't really do that, obviously to the last sentence." }, userId)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
+
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'explicit-target-comma', operationId: 'explicit-target-comma-op', chatId, expectedVersion: 1, instructionTranscript: "Replace Well comma I can't really do that comma obviously with I decline." }, userId)
+  const explicit = responses.at(-1)?.payload
+  assert.equal(explicit?.type, 'edit.proposal.response')
+  if (explicit?.type === 'edit.proposal.response')
+    assert.equal(explicit.proposal.afterText, "Well I can't really do that obviously. I decline.")
+})
+
+test('keeps explicit and implicit punctuation intent separate in a compound instruction', async () => {
+  const userId = 'compound-target-punctuation-intent-user'
+  const chatId = 'compound-target-punctuation-intent-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Alpha beta. Alpha, beta. Gamma delta. Gamma, delta.')
+  responses.length = 0
+  editPlanResponse = { schemaVersion: 2, draftVersion: 1, explanation: 'Two replacements.', operations: [
+    { id: 'first', type: 'replace', target: { exactText: 'Alpha, beta' }, text: 'One' },
+    { id: 'second', type: 'replace', target: { exactText: 'Gamma, delta' }, text: 'Two' },
+  ] }
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'compound-punctuation-intent', operationId: 'compound-punctuation-intent-op', chatId, expectedVersion: 1, instructionTranscript: 'Replace Alpha comma beta with One, then replace Gamma delta with Two.' }, userId)
+  const result = responses.at(-1)?.payload
+  assert.equal(result?.type, 'edit.proposal.response')
+  if (result?.type === 'edit.proposal.response') {
+    assert.equal(result.proposal.afterText, 'Alpha beta. One. Gamma delta. Gamma, delta.')
+    assert.equal(result.proposal.failedCommand?.index, 2)
+  }
+})
+
 test('does not guess when a punctuation-tolerant quotation start has multiple matches', async () => {
   const userId = 'quotation-ambiguous-omitted-punctuation-user'
   const chatId = 'quotation-ambiguous-omitted-punctuation-chat'
@@ -3065,7 +3121,7 @@ test('puts quotation marks around a spoken text range without a provider call', 
   assert.equal(generationRequests.length, 0)
 })
 
-test('quotes a range ending at a repeated phrase inside the paragraph', async () => {
+test('does not guess a quotation endpoint when the phrase repeats', async () => {
   const userId = 'quotation-range-repeated-end-user'
   const chatId = 'quotation-range-repeated-end-chat'
   activeChatId = chatId
@@ -3089,14 +3145,7 @@ test('quotes a range ending at a repeated phrase inside the paragraph', async ()
   )
 
   const proposal = responses.at(-1)?.payload
-  assert.equal(proposal?.type, 'edit.proposal.response')
-  if (proposal?.type !== 'edit.proposal.response') return
-  const expected = draft.replace(
-    'Yes, the syrup, I got the good kind.',
-    '“Yes, the syrup, I got the good kind.',
-  )
-  assert.equal(proposal.proposal.afterText, `${expected}”`)
-  assert.equal(proposal.proposal.afterText.endsWith('\n”'), false)
+  assert.equal(proposal?.type, 'app.error')
   assert.equal(generationRequests.length, 0)
 })
 
@@ -3132,7 +3181,7 @@ test('quotes a range ending at a positional last sentence inside the paragraph',
   )
   assert.deepEqual(
     proposal.proposal.plan.operations.map((operation) => operation.target),
-    [{ exactText: 'Yes, the syrup', occurrence: 1 }, { sentenceFromEnd: 1 }],
+    [{ exactText: 'Yes, the syrup', occurrence: 1, ignorePunctuationForMatch: true }, { sentenceFromEnd: 1 }],
   )
   assert.equal(generationRequests.length, 0)
 })
@@ -4561,6 +4610,23 @@ test('offers explicit choices for paragraph-resolvable ambiguity without mutatin
     assert.equal(proposal.proposal.afterText, 'Same phrase.\n\nChanged.')
     assert.equal(proposal.snapshot, undefined)
   }
+})
+
+test('applies the exact selected candidate when punctuation variants are ambiguous', async () => {
+  const userId = 'punctuation-candidate-user'
+  const chatId = 'punctuation-candidate-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Wait, here. Wait here.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'punctuation-candidate', operationId: 'punctuation-candidate-op', chatId, expectedVersion: 1, instructionTranscript: 'Replace wait here with stay.' }, userId)
+  const choices = responses.at(-1)?.payload
+  assert.equal(choices?.type, 'edit.candidates.response')
+  if (choices?.type !== 'edit.candidates.response') return
+  assert.equal(choices.candidateSet.candidates.length, 2)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.candidate.select.request', requestId: 'punctuation-candidate-select', operationId: 'punctuation-candidate-op', chatId, expectedVersion: 1, candidateId: choices.candidateSet.candidates[1]!.id }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'Wait, here. Stay.')
 })
 
 test('offers choices for multiple fuzzy sentence targets in one paragraph', async () => {

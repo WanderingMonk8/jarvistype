@@ -154,6 +154,10 @@ export const COMMAND_GROUPS = [
         'If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as “mouthlet” for “Mao let.”',
       ],
       [
+        'Punctuation in text targets',
+        'Punctuation is ignored when identifying a phrase unless you name it: say “well comma I guess” to favor “Well, I guess” over “Well I guess.” Ambiguous targets are not guessed.',
+      ],
+      [
         'Punctuation targets',
         'Say “the second quote in paragraph 1”, “the last period in paragraph 1”, or “the quote after the phrase ‘this is very good’” with move, replace, insert, or delete. To wrap a range ending at a unique punctuation mark, say “put quotations from ‘well, I guess’ to the ellipsis.”',
       ],

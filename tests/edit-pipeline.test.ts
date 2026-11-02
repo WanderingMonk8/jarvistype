@@ -2250,6 +2250,56 @@ test('ignores punctuation for unique text targets and uses it only to resolve le
   })
 })
 
+test('unpunctuated text targets do not silently choose an exact spelling over a punctuated match', () => {
+  for (const operation of [
+    { id: 'replace', type: 'replace' as const, target: { exactText: 'wait here' }, text: 'stay' },
+    { id: 'delete', type: 'delete' as const, target: { exactText: 'wait here' } },
+    { id: 'before', type: 'insert_before' as const, target: { exactText: 'wait here' }, text: 'please' },
+    { id: 'after', type: 'insert_after' as const, target: { exactText: 'wait here' }, text: 'please' },
+  ]) {
+    const result = executeEditPlan('wait here. wait, here.', [], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'ambiguous despite punctuation', operations: [operation],
+    })
+    assert.deepEqual(result, { ok: false, reason: 'punctuation-insensitive text target is ambiguous' }, operation.type)
+  }
+  const explicit = executeEditPlan('wait here. wait, here.', [], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'explicit comma',
+    operations: [{ id: 'explicit', type: 'replace', target: { exactText: 'wait, here' }, text: 'stay' }],
+  })
+  assert.equal(explicit.ok && explicit.afterText, 'wait here. Stay.')
+  const occurrence = executeEditPlan('wait here. wait, here.', [], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'second lexical occurrence',
+    operations: [{ id: 'second', type: 'replace', target: { exactText: 'wait here', occurrence: 2 }, text: 'stay' }],
+  })
+  assert.equal(occurrence.ok && occurrence.afterText, 'wait here. Stay.')
+})
+
+test('matches punctuation-relative text anchors across omitted punctuation', () => {
+  const result = executeEditPlan('She said “well, I guess”.', [], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'delete the quote after the phrase',
+    operations: [{ id: 'relative', type: 'delete', target: { punctuation: 'quote', relativePosition: 'after', relativeToText: 'well I guess' } }],
+  })
+  assert.equal(result.ok && result.afterText, 'She said “well, I guess.')
+})
+
+test('does not guess a move source or destination based on omitted punctuation', () => {
+  const text = 'wait here. wait, here. move this.'
+  const plan = (source: string, destination: string) => ({ schemaVersion: 2 as const, draftVersion: 1, explanation: 'move text', operations: [{ id: 'move', type: 'move_after' as const, target: { exactText: source }, destination: { exactText: destination } }] })
+  const ambiguousSource = executeEditPlan(text, [], 1, plan('wait here', 'move this'))
+  const ambiguousDestination = executeEditPlan(text, [], 1, plan('move this', 'wait here'))
+  assert.equal(ambiguousSource.ok, false)
+  assert.equal(ambiguousDestination.ok, false)
+})
+
+test('uses explicitly named punctuation to choose between otherwise matching phrases', () => {
+  const draft = "Well I can't really do that obviously. Well, I can't really do that, obviously."
+  const plan = (target: string) => ({ schemaVersion: 2 as const, draftVersion: 1, explanation: 'target the phrase', operations: [{ id: 'replace', type: 'replace' as const, target: { exactText: target }, text: 'I decline' }] })
+  const unspecified = executeEditPlan(draft, [], 1, plan("Well I can't really do that obviously"))
+  assert.equal(unspecified.ok, false)
+  const explicit = executeEditPlan(draft, [], 1, plan("Well comma I can't really do that comma obviously"))
+  assert.equal(explicit.ok && explicit.afterText, "Well I can't really do that obviously. I decline.")
+})
+
 test('matches spoken possessives as whole tokens and rejects repeated or unrelated candidates', () => {
   for (const [text, target, expected] of [
     ["Max's book is here.", 'Maxis', 'Meg’s book is here.'],

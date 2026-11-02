@@ -51,6 +51,8 @@ export interface EditTarget {
   sentenceFromEnd?: number
   relativePosition?: 'before' | 'after'
   relativeToText?: string
+  /** Internal intent: punctuation is ignored for identifying this text target. */
+  ignorePunctuationForMatch?: boolean
 }
 
 export interface EditOperation {
@@ -121,6 +123,16 @@ export function executeSequentialEditPlan(
     return id
   }
   for (const [index, operation] of plan.operations.entries()) {
+    const quotePart = operation.id.match(/^(.*)deterministic-(open|close)-quotation-range$/u)
+    const nextOperation = plan.operations[index + 1]
+    const nextQuotePart = nextOperation?.id.match(/^(.*)deterministic-(open|close)-quotation-range$/u)
+    if (quotePart && nextQuotePart && quotePart[1] === nextQuotePart[1] && quotePart[2] !== nextQuotePart[2]) {
+      const checked = executeEditPlan(text, currentParagraphs, currentVersion, { ...plan, operations: [operation, nextOperation!] }, protectedCasingTerms)
+      if (!checked.ok) {
+        failedCommand = { index: index + 1, operationId: operation.id, reason: checked.reason }
+        break
+      }
+    }
     let currentOperation = operation
     const exact = operation.target.exactText
     if (index > 0 && operation.type === 'insert_after' && exact && /[.!?…]$/u.test(exact)) {
@@ -427,9 +439,14 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     'sentenceFromEnd',
     'relativePosition',
     'relativeToText',
+    'ignorePunctuationForMatch',
   ])
   if (Object.keys(value).some((key) => !allowed.has(key))) return null
   const target: EditTarget = {}
+  if (value.ignorePunctuationForMatch !== undefined) {
+    if (typeof value.ignorePunctuationForMatch !== 'boolean') return null
+    target.ignorePunctuationForMatch = value.ignorePunctuationForMatch
+  }
   if (value.paragraphId !== undefined) {
     if (!isIdentifier(value.paragraphId)) return null
     target.paragraphId = value.paragraphId
@@ -539,7 +556,7 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
       hasRelativeText)
   )
     return null
-  return Object.keys(target).length ? target : null
+  return Object.keys(target).some((key) => key !== 'ignorePunctuationForMatch') ? target : null
 }
 
 function resolveOperation(
@@ -617,6 +634,7 @@ function resolveOperation(
       range.start,
       range.end,
       operation.target.occurrence,
+      operation.target.ignorePunctuationForMatch,
     )
     if (typeof match === 'string') return match
     start = match.start
@@ -1100,7 +1118,7 @@ export function findTextTargetMatches(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
   search: string,
-  scope: { paragraphId?: string; paragraphOrdinal?: number } = {},
+  scope: { paragraphId?: string; paragraphOrdinal?: number; ignorePunctuationForMatch?: boolean } = {},
 ): TextTargetMatch[] {
   const scoped = paragraphs.filter(
     (paragraph) =>
@@ -1109,6 +1127,14 @@ export function findTextTargetMatches(
   )
   if (!scoped.length) return []
   const matches: TextTargetMatch[] = []
+  if ((scope.ignorePunctuationForMatch || !hasTargetPunctuation(search)) && /[\p{L}\p{N}]/u.test(search)) {
+    for (const paragraph of scoped) {
+      const range = paragraphRange(cleanText, paragraph)
+      for (const match of findPunctuationInsensitiveCandidates(cleanText, search, range.start, range.end))
+        matches.push({ start: match.start, end: match.end, paragraphOrdinal: paragraph.ordinal })
+    }
+    if (matches.length) return matches
+  }
   for (const paragraph of scoped) {
     const range = paragraphRange(cleanText, paragraph)
     for (const start of findAll(cleanText, search, range.start, range.end))
@@ -1172,6 +1198,7 @@ function resolveTextTarget(
       range.start,
       range.end,
       target.occurrence,
+      target.ignorePunctuationForMatch,
     )
     if (match === 'text target is ambiguous') return `${label} is ambiguous`
     if (match === 'text target was not found') return `${label} was not found`
@@ -1226,11 +1253,11 @@ function resolvePunctuationTarget(
 ): { start: number; end: number } | string {
   let matches = findPunctuationMatches(cleanText, target.punctuation!, rangeStart, rangeEnd)
   if (target.relativeToText !== undefined) {
-    const anchors = findAll(cleanText, target.relativeToText, rangeStart, rangeEnd)
-    if (anchors.length !== 1)
-      return anchors.length ? 'punctuation anchor is ambiguous' : 'punctuation anchor was not found'
-    const anchorStart = anchors[0]!
-    const anchorEnd = anchorStart + target.relativeToText.length
+    const anchor = findExactOrFuzzyMatch(cleanText, target.relativeToText, rangeStart, rangeEnd, undefined, target.ignorePunctuationForMatch)
+    if (typeof anchor === 'string')
+      return anchor.includes('ambiguous') ? 'punctuation anchor is ambiguous' : 'punctuation anchor was not found'
+    const anchorStart = anchor.start
+    const anchorEnd = anchor.end
     matches =
       target.relativePosition === 'after'
         ? matches.filter((match) => match.start >= anchorEnd)
@@ -1704,7 +1731,31 @@ function findExactOrFuzzyMatch(
   start: number,
   end: number,
   occurrence?: number,
+  ignorePunctuationForMatch?: boolean,
 ): { start: number; end: number } | string {
+  // Named punctuation between target words is an explicit disambiguator.
+  const namedPunctuation = normalizeNamedTargetPunctuation(search)
+  if (namedPunctuation !== search) search = namedPunctuation
+  // When a text target does not specify punctuation, compare all lexical
+  // occurrences before choosing one; punctuation must not break a tie.
+  if ((ignorePunctuationForMatch === true || (ignorePunctuationForMatch !== false && !hasTargetPunctuation(search))) && /[\p{L}\p{N}]/u.test(search)) {
+    const lexicalMatches = findPunctuationInsensitiveCandidates(text, search, start, end)
+    if (occurrence !== undefined && lexicalMatches.length) {
+      const match = lexicalMatches[occurrence - 1]
+      if (!match) return 'text target occurrence was not found'
+      const exact = findLexicallyBoundedExactMatches(text, search, start, end).find((index) => index === match.start)
+      return exact === undefined ? match : { start: exact, end: exact + search.length }
+    }
+    if (lexicalMatches.length > 1)
+      return findLexicallyBoundedExactMatches(text, search, start, end).length > 1
+        ? 'text target is ambiguous'
+        : 'punctuation-insensitive text target is ambiguous'
+    if (lexicalMatches.length === 1) {
+      const match = lexicalMatches[0]!
+      const exact = findLexicallyBoundedExactMatches(text, search, start, end).find((index) => index === match.start)
+      return exact === undefined ? match : { start: exact, end: exact + search.length }
+    }
+  }
   const exactMatches = findLexicallyBoundedExactMatches(text, search, start, end)
   if (occurrence !== undefined) {
     const match = exactMatches[occurrence - 1]
@@ -1729,6 +1780,13 @@ function findExactOrFuzzyMatch(
   return approximate.includes('ambiguous')
     ? 'fuzzy text target is ambiguous'
     : 'text target was not found'
+}
+
+export function normalizeNamedTargetPunctuation(value: string): string {
+  const marks: Record<string, string> = { comma: ',', colon: ':', semicolon: ';', period: '.', 'full stop': '.', 'question mark': '?', 'exclamation mark': '!', 'exclamation point': '!', ellipsis: '…', 'three dots': '…', 'dot dot dot': '…', 'em dash': '—', 'en dash': '–', dash: '—', hyphen: '-', apostrophe: '’', 'open parenthesis': '(', 'close parenthesis': ')', 'open bracket': '[', 'close bracket': ']', 'open quote': '“', 'close quote': '”' }
+  if (/^(?:the|a|an)\s+(?:comma|colon|semicolon|period|full\s+stop|question\s+mark|exclamation\s+(?:mark|point)|ellipsis|three\s+dots|dot\s+dot\s+dot|em\s+dash|en\s+dash|dash|hyphen|apostrophe|open\s+parenthesis|close\s+parenthesis|open\s+bracket|close\s+bracket|open\s+quote|close\s+quote)$/iu.test(value.trim())) return value
+  return value.replace(/(?<=[\p{L}\p{N}])\s+(comma|colon|semicolon|period|full\s+stop|question\s+mark|exclamation\s+(?:mark|point)|ellipsis|three\s+dots|dot\s+dot\s+dot|em\s+dash|en\s+dash|dash|hyphen|apostrophe|open\s+parenthesis|close\s+parenthesis|open\s+bracket|close\s+bracket|open\s+quote|close\s+quote)(?:\s+(?=[\p{L}\p{N}])|(?=\s*$))/giu,
+    (match, name: string) => `${marks[name.toLocaleLowerCase().replace(/\s+/gu, ' ')]}${/\s$/u.test(match) ? ' ' : ''}`)
 }
 
 /** Match a fully spelled possessive as one complete token, never a word prefix. */
@@ -1843,13 +1901,33 @@ export function findPunctuationInsensitiveMatch(
   start: number,
   end: number,
 ): { start: number; end: number } | string {
+  const candidates = findPunctuationInsensitiveCandidates(text, search, start, end)
+  if (candidates.length === 1) return candidates[0]!
+  if (!candidates.length) return 'punctuation-insensitive text target was not found'
   const wanted = tokenizeWithOffsets(search, 0, search.length)
-  if (!wanted.length) return 'punctuation-insensitive text target was not found'
+  if (!hasTargetPunctuation(search)) return 'punctuation-insensitive text target is ambiguous'
+  const wantedPunctuation = internalPunctuationSignature(search, wanted[0]!.start, wanted.at(-1)!.end)
+  const punctuationMatches = candidates.filter((candidate) => candidate.punctuation === wantedPunctuation)
+  return punctuationMatches.length === 1 ? punctuationMatches[0]! : 'punctuation-insensitive text target is ambiguous'
+}
+
+export function hasTargetPunctuation(value: string): boolean {
+  return /\p{P}/u.test(value.replace(/(?<=[\p{L}\p{N}])['’](?=[\p{L}\p{N}])/gu, ''))
+}
+
+function findPunctuationInsensitiveCandidates(
+  text: string,
+  search: string,
+  start: number,
+  end: number,
+): Array<{ start: number; end: number; punctuation: string }> {
+  const wanted = tokenizeWithOffsets(search, 0, search.length)
+  if (!wanted.length) return []
   const available = tokenizeCachedDraftRange(text, start, end)
   const wantedExpanded = expandTokens(wanted)
   const availableExpanded = expandTokens(available)
   if (availableExpanded.length < wantedExpanded.length)
-    return 'punctuation-insensitive text target was not found'
+    return []
 
   const candidates: Array<{ start: number; end: number; punctuation: string }> = []
   for (let index = 0; index <= availableExpanded.length - wantedExpanded.length; index += 1) {
@@ -1866,20 +1944,7 @@ export function findPunctuationInsensitiveMatch(
       punctuation: internalPunctuationSignature(text, window[0]!.start, window.at(-1)!.end),
     })
   }
-  if (candidates.length === 1) return candidates[0]!
-  if (!candidates.length) return 'punctuation-insensitive text target was not found'
-
-  const wantedPunctuation = internalPunctuationSignature(
-    search,
-    wanted[0]!.start,
-    wanted.at(-1)!.end,
-  )
-  const punctuationMatches = candidates.filter(
-    (candidate) => candidate.punctuation === wantedPunctuation,
-  )
-  return punctuationMatches.length === 1
-    ? punctuationMatches[0]!
-    : 'punctuation-insensitive text target is ambiguous'
+  return candidates
 }
 
 function stripTokenPunctuation(value: string): string {

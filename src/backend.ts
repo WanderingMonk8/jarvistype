@@ -29,6 +29,8 @@ import {
   executeSequentialEditPlan,
   findPunctuationInsensitiveMatch,
   findTextTargetMatches,
+  hasTargetPunctuation,
+  normalizeNamedTargetPunctuation,
   parseEditPlan,
   type EditPlan,
   type ResolvedEditOperation,
@@ -1176,7 +1178,7 @@ async function handleEditInterpretation(
     )
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
     if (!interpretedPlan) return { error: interpretationTimedOut ? 'interpretation-timeout' as const : 'interpretation' as const, session }
-    const plan = normalizeEditReferenceTargets(
+    const plan = applyTargetPunctuationIntent(normalizeEditReferenceTargets(
       normalizeEditInputPayloads(
         stripQualifiedAsInEditPayloads(
           enforceAuthoritativeEditSpellings(
@@ -1197,7 +1199,16 @@ async function handleEditInterpretation(
       cardCharacterReferences,
       conversationReferences,
       draftIdentificationReferences,
-    )
+    ), request.instructionTranscript, session)
+    // A quotation range is one command represented by two insertions. Do not
+    // apply just one quotation mark if punctuation-insensitive matching makes
+    // either endpoint ambiguous after interpretation.
+    if (plan.operations.length === 2 && plan.operations.every((operation) =>
+      /^deterministic-(?:open|close)-quotation-range$/u.test(operation.id),
+    )) {
+      const checked = executeEditPlan(session.cleanText, session.paragraphs, session.draftVersion, plan)
+      if (!checked.ok) return { error: 'target' as const, detail: checked.reason, session }
+    }
     const executeStartedAt = performance.now()
     const executed = executeSequentialEditPlan(
       session.cleanText,
@@ -1330,6 +1341,7 @@ function createEditCandidateContext(
   const searchText = operation.target.exactText ?? operation.target.approximateText
   if (!searchText) return null
   const matches = findTextTargetMatches(session.cleanText, session.paragraphs, searchText, {
+    ...(operation.target.ignorePunctuationForMatch ? { ignorePunctuationForMatch: true } : {}),
     ...(operation.target.paragraphId === undefined
       ? {}
       : { paragraphId: operation.target.paragraphId }),
@@ -1364,6 +1376,7 @@ function createEditCandidateContext(
       paragraphOrdinal: paragraph.ordinal,
       exactText: matchedText,
       occurrence,
+      ignorePunctuationForMatch: false,
     }
     plans.set(id, {
       ...plan,
@@ -3178,16 +3191,16 @@ function parseDeterministicQuotationRange(
   const match = rangeMatch ?? beforeAfterMatch ?? afterBeforeMatch
   if (!match) return null
   const style = (match[1] ?? '').toLocaleLowerCase()
-  const firstTarget = cleanQuotationRangeTarget(
+  const firstTarget = normalizeNamedTargetPunctuation(cleanQuotationRangeTarget(
     unwrapEditArgument(
       stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[2] ?? '').trim())),
     ),
-  )
-  const secondTarget = cleanQuotationRangeTarget(
+  ))
+  const secondTarget = normalizeNamedTargetPunctuation(cleanQuotationRangeTarget(
     unwrapEditArgument(
       stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[3] ?? '').trim().replace(/([”’"'])[.!?]+$/u, '$1'))),
     ),
-  )
+  ))
   if (!firstTarget || !secondTarget) return null
   const reverse = Boolean(afterBeforeMatch)
   const spokenStart = reverse ? secondTarget : firstTarget
@@ -3201,11 +3214,14 @@ function parseDeterministicQuotationRange(
   )?.[1]
   let startText = adoptUnambiguousDraftCasing(session, spokenStart, undefined)
   let startIndex = session.cleanText.indexOf(startText)
-  if (startIndex < 0) {
+  if (startIndex < 0 || !hasTargetPunctuation(spokenStart)) {
     const match = findPunctuationInsensitiveMatch(session.cleanText, spokenStart, 0, session.cleanText.length)
     if (typeof match === 'string') {
       if (!match.includes('ambiguous')) return null
-      return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: 'The quotation start is ambiguous.', operations: [{ id: 'ambiguous-quotation-start', type: 'insert_before', target: { exactText: spokenStart }, text: style === 'single' ? '‘' : '“' }] })
+      return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: 'The quotation start is ambiguous.', operations: [
+        { id: 'ambiguous-quotation-start', type: 'insert_before', target: { exactText: spokenStart }, text: style === 'single' ? '‘' : '“' },
+        { id: 'unresolved-quotation-end', type: 'insert_after', target: punctuationTarget ? { punctuation: punctuationTarget } : { exactText: spokenEnd }, text: style === 'single' ? '’' : '”' },
+      ] })
     }
     startIndex = match.start
     startText = session.cleanText.slice(match.start, match.end)
@@ -3233,13 +3249,22 @@ function parseDeterministicQuotationRange(
   } else {
     let endText = adoptUnambiguousDraftCasing(session, spokenEnd, undefined)
     let endIndex = session.cleanText.lastIndexOf(endText)
-    if (endIndex < 0) {
+    const lexicalEnds = !hasTargetPunctuation(spokenEnd)
+      ? findTextTargetMatches(session.cleanText, session.paragraphs, spokenEnd).filter((candidate) => candidate.start >= startIndex + startText.length)
+      : []
+    const identicalRepeatedEnds = endIndex >= 0 && lexicalEnds.length > 1 && lexicalEnds.every((candidate) =>
+      session.cleanText.slice(candidate.start, candidate.end).toLocaleLowerCase() === endText.toLocaleLowerCase(),
+    )
+    if (endIndex < 0 || (!hasTargetPunctuation(spokenEnd) && !identicalRepeatedEnds)) {
       const match = findPunctuationInsensitiveMatch(session.cleanText, spokenEnd, startIndex + startText.length, session.cleanText.length)
       if (typeof match !== 'string') {
         endIndex = match.start
         endText = session.cleanText.slice(match.start, match.end)
       } else if (match.includes('ambiguous')) {
-        return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: 'The quotation end is ambiguous.', operations: [{ id: 'ambiguous-quotation-end', type: 'insert_after', target: { exactText: spokenEnd }, text: closing }] })
+        return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: 'The quotation end is ambiguous.', operations: [
+          { id: 'ambiguous-quotation-end', type: 'insert_after', target: { exactText: spokenEnd }, text: closing },
+          { id: 'unresolved-quotation-start', type: 'insert_before', target: { exactText: startText, occurrence: startOccurrence }, text: opening },
+        ] })
       }
     }
     if (endIndex < startIndex) return null
@@ -3975,6 +4000,50 @@ function normalizeEditInputPayloads(
       return normalized === operation.text ? operation : { ...operation, text: normalized }
     }),
   }
+}
+
+/** Distinguish spoken punctuation names from punctuation supplied by transcription. */
+function applyTargetPunctuationIntent(plan: EditPlan, instruction: string, session: PersistedDraftSession): EditPlan {
+  const punctuationWords = '(?:comma|colon|semicolon|period|full\\s+stop|question\\s+mark|exclamation\\s+(?:mark|point)|ellipsis|three\\s+dots|dot\\s+dot\\s+dot|em\\s+dash|en\\s+dash|dash|hyphen|apostrophe|open\\s+parenthesis|close\\s+parenthesis|open\\s+bracket|close\\s+bracket|open\\s+quote|close\\s+quote)'
+  const namedMark = new RegExp(`\\b${punctuationWords}\\b`, 'iu')
+  const separator = `(?:[\\s\\p{P}]+|\\s+${punctuationWords}\\s+)+`
+  const clauses = splitEditClauses(instruction)
+  const normalizeValue = (value: string | undefined, sourceInstruction: string): { text: string | undefined; explicit: boolean } => {
+    if (!value || !/[\p{L}\p{N}]/u.test(value)) return { text: value, explicit: false }
+    const materialized = normalizeNamedTargetPunctuation(value)
+    const words = materialized.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu) ?? []
+    if (!words.length) return { text: value, explicit: false }
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${words.map((word) => escapeRegularExpression(word).replace(/['’]/gu, "['’]")).join(separator)}(?:\\s+${punctuationWords})?(?![\\p{L}\\p{N}])`, 'giu')
+    const sources = [...sourceInstruction.matchAll(pattern)].map((match) => match[0])
+    const explicitlyNamed = materialized !== value || (sources.length > 0 && sources.every((source) => namedMark.test(source)))
+    if (explicitlyNamed) {
+      const source = sources.find((candidate) => namedMark.test(candidate))
+      const spoken = source ? normalizeNamedTargetPunctuation(source) : materialized
+      return { text: spoken.toLocaleLowerCase() === materialized.toLocaleLowerCase() ? materialized : spoken, explicit: true }
+    }
+    return { text: value, explicit: false }
+  }
+  const normalizeTarget = (target: EditTarget, operationId: string): EditTarget => {
+    const clauseNumber = operationId.match(/^clause-(\d+)-/u)?.[1]
+    const sourceInstruction = clauseNumber ? clauses[Number(clauseNumber) - 1] ?? instruction : instruction
+    const exact = normalizeValue(target.exactText, sourceInstruction)
+    const approximate = normalizeValue(target.approximateText, sourceInstruction)
+    const relative = normalizeValue(target.relativeToText, sourceInstruction)
+    const hasText = target.exactText !== undefined || target.approximateText !== undefined || target.relativeToText !== undefined
+    const explicit = target.exactText !== undefined ? exact.explicit : target.approximateText !== undefined ? approximate.explicit : relative.explicit
+    const targetText = target.exactText ?? target.approximateText ?? target.relativeToText ?? ''
+    const result = { ...target, ...(target.exactText === undefined ? {} : { exactText: exact.text }), ...(target.approximateText === undefined ? {} : { approximateText: approximate.text }), ...(target.relativeToText === undefined ? {} : { relativeToText: relative.text }) }
+    delete result.ignorePunctuationForMatch
+    if (hasText && !explicit && hasTargetPunctuation(targetText)) result.ignorePunctuationForMatch = true
+    // A quotation parser's synthetic occurrence must not turn automatically
+    // inserted punctuation into an implicit tie-breaker.
+    if (/^(?:clause-\d+-)?deterministic-(?:open|close)-quotation-range$/u.test(operationId) && !explicit && exact.text) {
+      const matches = findTextTargetMatches(session.cleanText, session.paragraphs, exact.text, { ignorePunctuationForMatch: true })
+      if (matches.length > 1) delete result.occurrence
+    }
+    return result
+  }
+  return { ...plan, operations: plan.operations.map((operation) => ({ ...operation, target: normalizeTarget(operation.target, operation.id), ...(operation.destination ? { destination: normalizeTarget(operation.destination, operation.id) } : {}) })) }
 }
 
 function normalizeEditReferenceTargets(

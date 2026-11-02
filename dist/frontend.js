@@ -161,10 +161,15 @@ function parseTarget(value) {
     "sentenceOrdinal",
     "sentenceFromEnd",
     "relativePosition",
-    "relativeToText"
+    "relativeToText",
+    "ignorePunctuationForMatch"
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return null;
   const target = {};
+  if (value.ignorePunctuationForMatch !== void 0) {
+    if (typeof value.ignorePunctuationForMatch !== "boolean") return null;
+    target.ignorePunctuationForMatch = value.ignorePunctuationForMatch;
+  }
   if (value.paragraphId !== void 0) {
     if (!isIdentifier(value.paragraphId)) return null;
     target.paragraphId = value.paragraphId;
@@ -234,7 +239,7 @@ function parseTarget(value) {
     return null;
   if ((target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0) && (target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.scope !== void 0 || target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
     return null;
-  return Object.keys(target).length ? target : null;
+  return Object.keys(target).some((key) => key !== "ignorePunctuationForMatch") ? target : null;
 }
 function hasInlineSelector(target) {
   return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0;
@@ -500,6 +505,10 @@ var COMMAND_GROUPS = [
       [
         "Fuzzy target fallback",
         "If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as \u201Cmouthlet\u201D for \u201CMao let.\u201D"
+      ],
+      [
+        "Punctuation in text targets",
+        "Punctuation is ignored when identifying a phrase unless you name it: say \u201Cwell comma I guess\u201D to favor \u201CWell, I guess\u201D over \u201CWell I guess.\u201D Ambiguous targets are not guessed."
       ],
       [
         "Punctuation targets",

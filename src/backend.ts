@@ -3194,6 +3194,10 @@ function parseDeterministicQuotationRange(
   const sentencePosition = isSentencePositionTarget(spokenEnd)
     ? parseSentencePosition(spokenEnd)
     : null
+  const punctuationName = spokenEnd.replace(/^(?:the|a|an)\s+/iu, '').trim()
+  const punctuationTarget = SPOKEN_PUNCTUATION_TARGETS.find(([pattern]) =>
+    new RegExp(`^(?:${pattern.source})$`, pattern.flags).test(punctuationName),
+  )?.[1]
   const startText = adoptUnambiguousDraftCasing(session, spokenStart, undefined)
   const startIndex = session.cleanText.indexOf(startText)
   if (startIndex < 0) return null
@@ -3202,7 +3206,14 @@ function parseDeterministicQuotationRange(
   const [opening, closing] = style === 'single' ? ['\u2018', '\u2019'] : ['\u201c', '\u201d']
 
   let closeOperation: EditPlan['operations'][number]
-  if (sentencePosition) {
+  if (punctuationTarget) {
+    closeOperation = {
+      id: 'deterministic-close-quotation-range',
+      type: 'insert_after',
+      target: { punctuation: punctuationTarget },
+      text: closing,
+    }
+  } else if (sentencePosition) {
     closeOperation = {
       id: 'deterministic-close-quotation-range',
       type: 'insert_after',
@@ -3230,17 +3241,18 @@ function parseDeterministicQuotationRange(
   const plan = parseEditPlan({
     schemaVersion: 2,
     draftVersion: session.draftVersion,
-    explanation: sentencePosition
+    explanation: sentencePosition || punctuationTarget
       ? `Put quotation marks from “${startText}” through the ${spokenEnd}.`
       : `Put quotation marks from “${startText}” through “${spokenEnd}”.`,
     operations: [
+      ...(punctuationTarget ? [closeOperation] : []),
       {
         id: 'deterministic-open-quotation-range',
         type: 'insert_before',
         target: { exactText: startText, occurrence: startOccurrence },
         text: opening,
       },
-      closeOperation,
+      ...(!punctuationTarget ? [closeOperation] : []),
     ],
   })
   if (!plan) return null
@@ -3250,6 +3262,18 @@ function parseDeterministicQuotationRange(
     session.draftVersion,
     plan,
   )
+  if (punctuationTarget && !resolved.ok) return plan
+  if (punctuationTarget && resolved.ok) {
+    const close = resolved.operations.find((operation) => operation.id === 'deterministic-close-quotation-range')
+    if (!close || close.startOffset < startIndex + startText.length) {
+      return {
+        ...plan,
+        operations: plan.operations.map((operation) => operation.id === 'deterministic-close-quotation-range'
+          ? { ...operation, target: { punctuation: punctuationTarget, relativeToText: startText, relativePosition: 'after' } }
+          : operation),
+      }
+    }
+  }
   return resolved.ok && resolved.afterText !== session.cleanText ? plan : null
 }
 

@@ -503,7 +503,7 @@ var COMMAND_GROUPS = [
       ],
       [
         "Punctuation targets",
-        "Say \u201Cthe second quote in paragraph 1\u201D, \u201Cthe last period in paragraph 1\u201D, or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
+        "Say \u201Cthe second quote in paragraph 1\u201D, \u201Cthe last period in paragraph 1\u201D, or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete. To wrap a range ending at a unique punctuation mark, say \u201Cput quotations from \u2018well, I guess\u2019 to the ellipsis.\u201D"
       ],
       [
         "Multiple changes",

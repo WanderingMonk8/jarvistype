@@ -2932,6 +2932,48 @@ test('quotes a spoken range including its attached punctuation run', async () =>
   if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'She says “hello, then goodbye?!” Next.')
 })
 
+test('quotes through a unique spoken ellipsis without a provider call', async () => {
+  for (const [index, mark] of ['…', '...'].entries()) {
+    const userId = `quotation-ellipsis-user-${index}`
+    const chatId = `quotation-ellipsis-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, `Earlier. Well, I guess I am the genie, you rubbed the${mark} I stop.`)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `quotation-ellipsis-${index}`, operationId: `quotation-ellipsis-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: 'put quotations from well, I guess, to the ellipsis.' }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response')
+    if (proposal?.type === 'edit.proposal.response')
+      assert.equal(proposal.proposal.afterText, `Earlier. “Well, I guess I am the genie, you rubbed the${mark}” I stop.`)
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('does not modify a draft when a spoken quotation endpoint is ambiguous', async () => {
+  const userId = 'quotation-ambiguous-ellipsis-user'
+  const chatId = 'quotation-ambiguous-ellipsis-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Well, I guess this… continues… and ends.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-ambiguous-ellipsis', operationId: 'quotation-ambiguous-ellipsis-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from well, I guess, to the ellipsis.' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.notEqual(response?.type, 'edit.proposal.response')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('does not quote backwards when the punctuation endpoint precedes the range', async () => {
+  const userId = 'quotation-earlier-ellipsis-user'
+  const chatId = 'quotation-earlier-ellipsis-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'An earlier thought… Well, I guess that is all.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-earlier-ellipsis', operationId: 'quotation-earlier-ellipsis-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from well, I guess, to the ellipsis.' }, userId)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('puts quotation marks around a spoken text range without a provider call', async () => {
   const userId = 'quotation-range-user'
   const chatId = 'quotation-range-chat'

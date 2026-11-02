@@ -6548,13 +6548,24 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   const spokenStart = reverse ? secondTarget : firstTarget;
   const spokenEnd = reverse ? firstTarget : secondTarget;
   const sentencePosition = isSentencePositionTarget(spokenEnd) ? parseSentencePosition(spokenEnd) : null;
+  const punctuationName = spokenEnd.replace(/^(?:the|a|an)\s+/iu, "").trim();
+  const punctuationTarget = SPOKEN_PUNCTUATION_TARGETS.find(
+    ([pattern]) => new RegExp(`^(?:${pattern.source})$`, pattern.flags).test(punctuationName)
+  )?.[1];
   const startText = adoptUnambiguousDraftCasing(session, spokenStart, void 0);
   const startIndex = session.cleanText.indexOf(startText);
   if (startIndex < 0) return null;
   const startOccurrence = countExactOccurrences(session.cleanText.slice(0, startIndex), startText) + 1;
   const [opening, closing] = style === "single" ? ["\u2018", "\u2019"] : ["\u201C", "\u201D"];
   let closeOperation;
-  if (sentencePosition) {
+  if (punctuationTarget) {
+    closeOperation = {
+      id: "deterministic-close-quotation-range",
+      type: "insert_after",
+      target: { punctuation: punctuationTarget },
+      text: closing
+    };
+  } else if (sentencePosition) {
     closeOperation = {
       id: "deterministic-close-quotation-range",
       type: "insert_after",
@@ -6578,15 +6589,16 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   const plan = parseEditPlan({
     schemaVersion: 2,
     draftVersion: session.draftVersion,
-    explanation: sentencePosition ? `Put quotation marks from \u201C${startText}\u201D through the ${spokenEnd}.` : `Put quotation marks from \u201C${startText}\u201D through \u201C${spokenEnd}\u201D.`,
+    explanation: sentencePosition || punctuationTarget ? `Put quotation marks from \u201C${startText}\u201D through the ${spokenEnd}.` : `Put quotation marks from \u201C${startText}\u201D through \u201C${spokenEnd}\u201D.`,
     operations: [
+      ...punctuationTarget ? [closeOperation] : [],
       {
         id: "deterministic-open-quotation-range",
         type: "insert_before",
         target: { exactText: startText, occurrence: startOccurrence },
         text: opening
       },
-      closeOperation
+      ...!punctuationTarget ? [closeOperation] : []
     ]
   });
   if (!plan) return null;
@@ -6596,6 +6608,16 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
     session.draftVersion,
     plan
   );
+  if (punctuationTarget && !resolved.ok) return plan;
+  if (punctuationTarget && resolved.ok) {
+    const close = resolved.operations.find((operation) => operation.id === "deterministic-close-quotation-range");
+    if (!close || close.startOffset < startIndex + startText.length) {
+      return {
+        ...plan,
+        operations: plan.operations.map((operation) => operation.id === "deterministic-close-quotation-range" ? { ...operation, target: { punctuation: punctuationTarget, relativeToText: startText, relativePosition: "after" } } : operation)
+      };
+    }
+  }
   return resolved.ok && resolved.afterText !== session.cleanText ? plan : null;
 }
 function parseDeterministicSentenceQuotationInsertion(instructionTranscript, draftVersion) {

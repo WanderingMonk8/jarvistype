@@ -155,7 +155,7 @@ export const COMMAND_GROUPS = [
       ],
       [
         'Punctuation targets',
-        'Say “the second quote in paragraph 1”, “the last period in paragraph 1”, or “the quote after the phrase ‘this is very good’” with move, replace, insert, or delete.',
+        'Say “the second quote in paragraph 1”, “the last period in paragraph 1”, or “the quote after the phrase ‘this is very good’” with move, replace, insert, or delete. To wrap a range ending at a unique punctuation mark, say “put quotations from ‘well, I guess’ to the ellipsis.”',
       ],
       [
         'Multiple changes',

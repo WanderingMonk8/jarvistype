@@ -4081,7 +4081,7 @@ function applyTargetPunctuationIntent(plan: EditPlan, instruction: string, sessi
   const normalizeValue = (value: string | undefined, sourceInstruction: string): { text: string | undefined; explicit: boolean } => {
     if (!value || !/[\p{L}\p{N}]/u.test(value)) return { text: value, explicit: false }
     const materialized = normalizeNamedTargetPunctuation(value)
-    const words = materialized.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu) ?? []
+    const words = materialized.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? []
     if (!words.length) return { text: value, explicit: false }
     const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${words.map((word) => escapeRegularExpression(word).replace(/['’]/gu, "['’]")).join(separator)}(?:\\s+${punctuationWords})?(?![\\p{L}\\p{N}])`, 'giu')
     const sources = [...sourceInstruction.matchAll(pattern)].map((match) => match[0])

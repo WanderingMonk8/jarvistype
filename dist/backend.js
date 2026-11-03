@@ -1265,7 +1265,8 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
   );
   if (typeof destination === "string") return { ok: false, reason: destination };
   const sourceEnd = operation.includeTrailingPunctuation ? extendThroughTerminalPunctuation(cleanText, source.end, source.scopeEnd) : source.end;
-  if (source.start < destination.end && destination.start < sourceEnd)
+  const sourceInsideDestinationSentence = (operation.destination.sentenceOrdinal !== void 0 || operation.destination.sentenceFromEnd !== void 0) && operation.target.punctuation !== void 0 && source.start >= destination.start && sourceEnd <= destination.end;
+  if (source.start < destination.end && destination.start < sourceEnd && !sourceInsideDestinationSentence)
     return { ok: false, reason: "move source and destination overlap" };
   const movedText = cleanText.slice(source.start, sourceEnd);
   let removalStart = source.start;
@@ -1279,7 +1280,11 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
   let withoutSource = `${cleanText.slice(0, removalStart)}${cleanText.slice(removalEnd)}`;
   if (formatText && isSentenceOpeningAt(cleanText, source.start))
     withoutSource = capitalizeExistingSentenceOpening(withoutSource, removalStart);
-  const originalInsertionPoint = operation.type === "move_before" ? destination.start : destination.end;
+  let originalInsertionPoint = operation.type === "move_before" ? destination.start : destination.end;
+  if (formatText && operation.type === "move_before" && (operation.destination.sentenceOrdinal !== void 0 || operation.destination.sentenceFromEnd !== void 0) && operation.target.punctuation === "quote" && /^[”"]$/u.test(movedText) && source.start > destination.start) {
+    while (originalInsertionPoint > destination.scopeStart && /[ \t]/u.test(cleanText[originalInsertionPoint - 1] ?? ""))
+      originalInsertionPoint -= 1;
+  }
   const insertionPoint = originalInsertionPoint > removalStart ? originalInsertionPoint - (removalEnd - removalStart) : originalInsertionPoint;
   const formattedMovedText = formatText ? formatInsertionCasing(withoutSource, insertionPoint, movedText, protectedCasingTerms) : movedText;
   const displacedOpening = formatText && operation.type === "move_before" && isSentenceOpeningAt(withoutSource, insertionPoint) && /\p{L}/u.test(formattedMovedText) ? lowercaseOrdinarySentenceOpening(
@@ -3378,6 +3383,22 @@ function titleCaseWords(value) {
     return `${word.slice(0, index)}${word[index].toLocaleUpperCase()}${word.slice(index + 1)}`;
   });
 }
+function findArticleCasingCandidates(text) {
+  const candidates = [];
+  const pattern = /\b(?:a|an)\s+(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+([\p{L}\p{M}][\p{L}\p{M}\d'’-]*)(?=[.!?,;:]|\s|$)/giu;
+  for (const match of text.matchAll(pattern)) {
+    const target = match[2];
+    if (CASING_TARGET_STOPWORDS.has(target.toLocaleLowerCase())) continue;
+    candidates.push({ start: match.index + match[0].indexOf(match[1]), end: match.index + match[0].length, cue: match[1], target });
+  }
+  return candidates;
+}
+function renderArticleCasingCandidate(cue, target) {
+  const command = cue.toLocaleLowerCase();
+  if (command === "lowercase") return target.toLocaleLowerCase();
+  if (command === "uppercase" || command === "all caps") return target.toLocaleUpperCase();
+  return titleCaseWords(target);
+}
 var CASING_PROSE_PRECEDERS = /* @__PURE__ */ new Set([
   "a",
   "an",
@@ -3979,7 +4000,7 @@ function escapeRegExp2(value) {
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
 var APP_VERSION = "1.6.15";
-var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 40;
+var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
 var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
 var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;
 var PHASE_FOUR_PERMISSIONS = [
@@ -4525,6 +4546,10 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       `end used=${contextualModelUsed} duration=${debugDuration(contextualStartedAt)}`
     );
   }
+  const casingDecision = await resolveArticleCasingCommands(candidateText, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal);
+  candidateText = casingDecision.text;
+  if (casingDecision.changed) reasons.push("spoken casing");
+  if (casingDecision.uncertain) ambiguities.push("A possible spoken casing command could not be resolved confidently; the wording was retained.");
   const glossaryHintResult = await resolveGlossaryHintReferences(candidateText, glossary, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal);
   candidateText = glossaryHintResult.text;
   if (glossaryHintResult.changed) reasons.push("glossary hint disambiguation");
@@ -5418,6 +5443,8 @@ function canonicalEditInstruction(instructionTranscript) {
   return instructionTranscript.replace(/^\s*please\s+/iu, "").replace(/^\s*(?:remove|take\s+(?:off|out)|erase|cut)\b/iu, "delete").replace(/[\s,]*\bplease\s*([.!?]*)\s*$/iu, "$1");
 }
 function parseDeterministicEditPlan(instructionTranscript, session) {
+  const punctuationMove = parseDeterministicPunctuationSentenceMove(instructionTranscript, session.draftVersion);
+  if (punctuationMove) return punctuationMove;
   const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session.draftVersion);
   if (rangeDeletion) return rangeDeletion;
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
@@ -5473,6 +5500,25 @@ function parseDeterministicEditPlan(instructionTranscript, session) {
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session);
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement);
   return null;
+}
+function parseDeterministicPunctuationSentenceMove(instruction, draftVersion) {
+  const match = instruction.trim().match(
+    /^move\s+the\s+(last|final|first)\s+(quotation\s+mark|quote\s+mark|quote)\s+(?:to\s+)?(before|after)\s+the\s+(first|last|final|second[- ]to[- ]last|penultimate)\s+sentence[.!?]*$/iu
+  );
+  if (!match) return null;
+  const position = parseSentencePosition(`${match[4]} sentence`);
+  if (!position) return null;
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation: `Move the ${match[1]} quotation mark ${match[3]} the ${match[4]} sentence.`,
+    operations: [{
+      id: "deterministic-move-quotation",
+      type: match[3].toLowerCase() === "before" ? "move_before" : "move_after",
+      target: { punctuation: "quote", ...match[1].toLowerCase() === "first" ? { occurrence: 1 } : { occurrenceFromEnd: 1 } },
+      destination: position
+    }]
+  });
 }
 function parseDeterministicRangeDeletion(instruction, draftVersion) {
   const match = instruction.trim().match(
@@ -6020,6 +6066,54 @@ async function maybeRepairEditGrammar(beforeText, proposedText, operations, affe
   } finally {
     clearTimeout(timeout);
     if (finishCancellation) signal.removeEventListener("abort", finishCancellation);
+  }
+}
+async function resolveArticleCasingCommands(text, userId, decisionConnectionId, signal) {
+  const candidates = findArticleCasingCandidates(text).slice(0, 20);
+  if (!candidates.length) return { text, changed: false, uncertain: false };
+  if (!spindle.permissions.has("decisions") || signal.aborted) return { text, changed: false, uncertain: true };
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal.addEventListener("abort", abort, { once: true });
+  let timeout;
+  try {
+    const questions = Object.fromEntries(candidates.map((candidate, index) => [`casing_${index}`, {
+      type: "noul",
+      instructions: `Is \u201C${candidate.cue}\u201D a spoken instruction to change the capitalization of the following word \u201C${candidate.target}\u201D, rather than ordinary dictated prose? Consider the surrounding text.`,
+      criteria: { true: "It is a spoken casing instruction; remove the cue and apply the requested casing.", false: "It is a natural descriptive or grammatical use. Give an intermediate score when uncertain." }
+    }]));
+    const result = await Promise.race([
+      spindle.decisions.evaluate({ userId, ...decisionConnectionId ? { connection_id: decisionConnectionId } : {}, state: { task: "Distinguish spoken casing instructions from literal prose.", candidates: candidates.map((candidate, index) => ({ id: `casing_${index}`, context: text.slice(Math.max(0, candidate.start - 250), Math.min(text.length, candidate.end + 250)) })) }, questions }, { signal: controller.signal }),
+      new Promise((resolve) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          resolve(null);
+        }, 2500);
+      })
+    ]);
+    if (!result || signal.aborted) return { text, changed: false, uncertain: true };
+    let updated = text;
+    let changed = false;
+    let uncertain = false;
+    for (let index = candidates.length - 1; index >= 0; index--) {
+      const candidate = candidates[index];
+      const answer = result.answers[`casing_${index}`];
+      const score = answer?.type === "noul" ? answer.noul : void 0;
+      if (typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1 || score > 0.1 && score < 0.9) {
+        uncertain = true;
+        continue;
+      }
+      if (score >= 0.9) {
+        updated = updated.slice(0, candidate.start) + renderArticleCasingCandidate(candidate.cue, candidate.target) + updated.slice(candidate.end);
+        changed = true;
+      }
+    }
+    return { text: updated, changed, uncertain };
+  } catch {
+    return { text, changed: false, uncertain: true };
+  } finally {
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", abort);
   }
 }
 async function evaluateEditGrammarWithJev(segments, deterministicTexts, operations, userId, signal, decisionConnectionId) {
@@ -7248,7 +7342,7 @@ function applyTargetPunctuationIntent(plan, instruction, session) {
   const normalizeValue = (value, sourceInstruction) => {
     if (!value || !/[\p{L}\p{N}]/u.test(value)) return { text: value, explicit: false };
     const materialized = normalizeNamedTargetPunctuation(value);
-    const words = materialized.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu) ?? [];
+    const words = materialized.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? [];
     if (!words.length) return { text: value, explicit: false };
     const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${words.map((word) => escapeRegularExpression(word).replace(/['’]/gu, "['\u2019]")).join(separator)}(?:\\s+${punctuationWords})?(?![\\p{L}\\p{N}])`, "giu");
     const sources = [...sourceInstruction.matchAll(pattern)].map((match) => match[0]);

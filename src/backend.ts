@@ -72,6 +72,8 @@ import { areSpeechPhoneticNeighbors } from './domain/phonetics'
 import type { DeterministicGrammarOptions } from './domain/grammar'
 import {
   applySpellingCasing,
+  findArticleCasingCandidates,
+  renderArticleCasingCandidate,
   normalizeDeterministically,
   normalizeQualifiedAsInReferences,
   recoverHighConfidenceContextualCommands,
@@ -630,6 +632,10 @@ async function handleTranscriptNormalization(
       `end used=${contextualModelUsed} duration=${debugDuration(contextualStartedAt)}`,
     )
   }
+  const casingDecision = await resolveArticleCasingCommands(candidateText, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal)
+  candidateText = casingDecision.text
+  if (casingDecision.changed) reasons.push('spoken casing')
+  if (casingDecision.uncertain) ambiguities.push('A possible spoken casing command could not be resolved confidently; the wording was retained.')
   const glossaryHintResult = await resolveGlossaryHintReferences(candidateText, glossary, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal)
   candidateText = glossaryHintResult.text
   if (glossaryHintResult.changed) reasons.push('glossary hint disambiguation')
@@ -2448,6 +2454,49 @@ async function maybeRepairEditGrammar(
   } finally {
     clearTimeout(timeout)
     if (finishCancellation) signal.removeEventListener('abort', finishCancellation)
+  }
+}
+
+async function resolveArticleCasingCommands(
+  text: string, userId: string, decisionConnectionId: string | null, signal: AbortSignal,
+): Promise<{ text: string; changed: boolean; uncertain: boolean }> {
+  const candidates = findArticleCasingCandidates(text).slice(0, 20)
+  if (!candidates.length) return { text, changed: false, uncertain: false }
+  if (!spindle.permissions.has('decisions') || signal.aborted) return { text, changed: false, uncertain: true }
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  signal.addEventListener('abort', abort, { once: true })
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    const questions = Object.fromEntries(candidates.map((candidate, index) => [`casing_${index}`, {
+      type: 'noul' as const,
+      instructions: `Is “${candidate.cue}” a spoken instruction to change the capitalization of the following word “${candidate.target}”, rather than ordinary dictated prose? Consider the surrounding text.`,
+      criteria: { true: 'It is a spoken casing instruction; remove the cue and apply the requested casing.', false: 'It is a natural descriptive or grammatical use. Give an intermediate score when uncertain.' },
+    }]))
+    const result = await Promise.race([
+      spindle.decisions.evaluate({ userId, ...(decisionConnectionId ? { connection_id: decisionConnectionId } : {}), state: { task: 'Distinguish spoken casing instructions from literal prose.', candidates: candidates.map((candidate, index) => ({ id: `casing_${index}`, context: text.slice(Math.max(0, candidate.start - 250), Math.min(text.length, candidate.end + 250)) })) }, questions }, { signal: controller.signal }),
+      new Promise<null>((resolve) => { timeout = setTimeout(() => { controller.abort(); resolve(null) }, 2500) }),
+    ])
+    if (!result || signal.aborted) return { text, changed: false, uncertain: true }
+    let updated = text
+    let changed = false
+    let uncertain = false
+    for (let index = candidates.length - 1; index >= 0; index--) {
+      const candidate = candidates[index]!
+      const answer = result.answers[`casing_${index}`]
+      const score = answer?.type === 'noul' ? answer.noul : undefined
+      if (typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 1 || (score > 0.1 && score < 0.9)) { uncertain = true; continue }
+      if (score >= 0.9) {
+        updated = updated.slice(0, candidate.start) + renderArticleCasingCandidate(candidate.cue, candidate.target) + updated.slice(candidate.end)
+        changed = true
+      }
+    }
+    return { text: updated, changed, uncertain }
+  } catch {
+    return { text, changed: false, uncertain: true }
+  } finally {
+    clearTimeout(timeout)
+    signal.removeEventListener('abort', abort)
   }
 }
 

@@ -206,6 +206,25 @@ function titleCaseWords(value: string): string {
   })
 }
 
+/** Finds article-prefixed casing cues left untouched by the local prose safeguard. */
+export function findArticleCasingCandidates(text: string): Array<{ start: number; end: number; cue: string; target: string }> {
+  const candidates: Array<{ start: number; end: number; cue: string; target: string }> = []
+  const pattern = /\b(?:a|an)\s+(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+([\p{L}\p{M}][\p{L}\p{M}\d'’-]*)(?=[.!?,;:]|\s|$)/giu
+  for (const match of text.matchAll(pattern)) {
+    const target = match[2]!
+    if (CASING_TARGET_STOPWORDS.has(target.toLocaleLowerCase())) continue
+    candidates.push({ start: match.index! + match[0].indexOf(match[1]!), end: match.index! + match[0].length, cue: match[1]!, target })
+  }
+  return candidates
+}
+
+export function renderArticleCasingCandidate(cue: string, target: string): string {
+  const command = cue.toLocaleLowerCase()
+  if (command === 'lowercase') return target.toLocaleLowerCase()
+  if (command === 'uppercase' || command === 'all caps') return target.toLocaleUpperCase()
+  return titleCaseWords(target)
+}
+
 // Words that make a casing word prose rather than a command: "a lowercase letter", "in all caps",
 // "the word uppercase", "they capitalized the company".
 const CASING_PROSE_PRECEDERS = new Set([

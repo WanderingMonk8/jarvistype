@@ -7441,6 +7441,27 @@ test('logs semantic hint span fallback metadata without recording its text', asy
   assert.doesNotMatch(log, /chirurgeon|battlefield|surgeon|medieval/iu)
 })
 
+test('uses Jev to decide ambiguous article-prefixed casing commands', async () => {
+  const userId = 'article-casing-user'
+  const chatId = 'article-casing-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'article-casing-settings', settings: { contextMessageCount: 0, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '' } }, userId)
+  await seedDraft(userId, chatId, '')
+  for (const [index, raw, score, expected] of [
+    [0, 'I had a capitalized wife.', 0.99, 'I had a Wife.'],
+    [1, 'This is a capitalized company.', 0.01, 'This is a capitalized company.'],
+    [2, 'I had a capitalized wife.', 0.5, 'I had a capitalized wife.'],
+  ] as const) {
+    referenceDecisionProbability = score
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `article-casing-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+})
+
 test('collects a copiable backend timing log when debug logging is enabled', async () => {
   const userId = 'debug-log-user'
   const chatId = 'debug-log-chat'

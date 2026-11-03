@@ -206,6 +206,25 @@ function titleCaseWords(value: string): string {
   })
 }
 
+/** Finds article-prefixed casing cues left untouched by the local prose safeguard. */
+export function findArticleCasingCandidates(text: string): Array<{ start: number; end: number; cue: string; target: string }> {
+  const candidates: Array<{ start: number; end: number; cue: string; target: string }> = []
+  const pattern = /\b(?:a|an)\s+(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+([\p{L}\p{M}][\p{L}\p{M}\d'’-]*)(?=[.!?,;:]|\s|$)/giu
+  for (const match of text.matchAll(pattern)) {
+    const target = match[2]!
+    if (CASING_TARGET_STOPWORDS.has(target.toLocaleLowerCase())) continue
+    candidates.push({ start: match.index! + match[0].indexOf(match[1]!), end: match.index! + match[0].length, cue: match[1]!, target })
+  }
+  return candidates
+}
+
+export function renderArticleCasingCandidate(cue: string, target: string): string {
+  const command = cue.toLocaleLowerCase()
+  if (command === 'lowercase') return target.toLocaleLowerCase()
+  if (command === 'uppercase' || command === 'all caps') return target.toLocaleUpperCase()
+  return titleCaseWords(target)
+}
+
 // Words that make a casing word prose rather than a command: "a lowercase letter", "in all caps",
 // "the word uppercase", "they capitalized the company".
 const CASING_PROSE_PRECEDERS = new Set([
@@ -484,6 +503,25 @@ export function normalizeQualifiedAsInReferences(input: string): QualifiedAsInNo
     searchFrom = match.index + replacement.length
   }
 
+  // Delayed references repeat the intended term later, after intervening prose:
+  // “Jenga is my favorite, as in Jenga the game.” Resolve only a unique,
+  // substantial exact repetition within the same sentence or clause.
+  const delayed = /,\s*as\s+in\s+([\p{L}\p{M}][\p{L}\p{M}'’-]{3,})\b([^.!?\n]*)/giu
+  let delayedMatch: RegExpExecArray | null
+  while ((delayedMatch = delayed.exec(text))) {
+    const reference = delayedMatch[1]!
+    const prefix = text.slice(0, delayedMatch.index)
+    const boundary = Math.max(prefix.lastIndexOf('.'), prefix.lastIndexOf('!'), prefix.lastIndexOf('?'), prefix.lastIndexOf(';'), prefix.lastIndexOf('\n'), prefix.lastIndexOf(',')) + 1
+    const words = [...prefix.slice(boundary).matchAll(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu)]
+    const targets = words.filter((word) => word[0].toLocaleLowerCase() === reference.toLocaleLowerCase())
+    if (targets.length !== 1 || targets[0]!.index! + targets[0]![0].length === prefix.length) continue
+    const suffix = delayedMatch[2]!
+    const continuation = suffix.search(/,\s+|\s+(?:and|but|so|then)\s+(?=(?:the|a|an|my|your|his|her|our|their|I|we|you|he|she|it|they)\b)/iu)
+    const end = continuation < 0 ? delayedMatch.index + delayedMatch[0].length : delayedMatch.index + delayedMatch[0].length - suffix.length + continuation
+    text = `${text.slice(0, delayedMatch.index)}${text.slice(end)}`
+    changed = true
+    delayed.lastIndex = delayedMatch.index
+  }
   return { text, changed }
 }
 
@@ -1005,6 +1043,8 @@ function cleanupPunctuationSpacing(value: string): string {
     .replace(/(?<=\p{L})[ \t]*’[ \t]*(?=\p{L})/gu, '’')
     .replace(/[ \t]*-[ \t]*/g, '-')
     .replace(/[,;:]\s*([.!?])/g, '$1')
+    // Protect the standard three-period ellipsis from duplicate-mark cleanup.
+    .replace(/(?<!\.)\.{3}(?!\.)/gu, '…')
     .replace(/([,.;:!?])(?:\s*\1)+/g, '$1')
     .replace(/…(?:\s*\.){1,3}/g, '…')
     .replace(/[ \t]*\n[ \t]*/g, '\n')

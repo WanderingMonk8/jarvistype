@@ -374,6 +374,8 @@ function isPhaseFourSettings(value: unknown): boolean {
     (value.normalizationConnectionId === null || isIdentifier(value.normalizationConnectionId)) &&
     typeof value.normalizationModelOverride === 'string' &&
     value.normalizationModelOverride.length <= 200 &&
+    (value.normalizationModelTimeoutSeconds === undefined ||
+      (isNonNegativeInteger(value.normalizationModelTimeoutSeconds) && value.normalizationModelTimeoutSeconds >= 5 && value.normalizationModelTimeoutSeconds <= 180)) &&
     (value.debugLoggingEnabled === undefined || typeof value.debugLoggingEnabled === 'boolean')
   )
 }

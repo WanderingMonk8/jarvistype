@@ -10,14 +10,14 @@ var RequestRegistry = class {
     this.onTimeout = onTimeout;
   }
   pending = /* @__PURE__ */ new Map();
-  wait(requestId) {
+  wait(requestId, timeoutMs = this.timeoutMs) {
     this.cancel(requestId);
     return new Promise((settle) => {
       const timer = setTimeout(() => {
         if (!this.pending.delete(requestId)) return;
         this.onTimeout?.(requestId);
         settle({ status: "timed-out" });
-      }, this.timeoutMs);
+      }, timeoutMs);
       this.pending.set(requestId, { timer, settle });
     });
   }
@@ -50,6 +50,9 @@ var PROTOCOL_VERSION = 7;
 var APP_VERSION = "1.6.15";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
+var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 40;
+var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
+var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;
 var SEND_TIMEOUT_MS = 12e4;
 var PHASE_FOUR_PERMISSIONS = [
   "media",
@@ -158,10 +161,15 @@ function parseTarget(value) {
     "sentenceOrdinal",
     "sentenceFromEnd",
     "relativePosition",
-    "relativeToText"
+    "relativeToText",
+    "ignorePunctuationForMatch"
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return null;
   const target = {};
+  if (value.ignorePunctuationForMatch !== void 0) {
+    if (typeof value.ignorePunctuationForMatch !== "boolean") return null;
+    target.ignorePunctuationForMatch = value.ignorePunctuationForMatch;
+  }
   if (value.paragraphId !== void 0) {
     if (!isIdentifier(value.paragraphId)) return null;
     target.paragraphId = value.paragraphId;
@@ -231,7 +239,7 @@ function parseTarget(value) {
     return null;
   if ((target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0) && (target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.scope !== void 0 || target.occurrence !== void 0 || target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
     return null;
-  return Object.keys(target).length ? target : null;
+  return Object.keys(target).some((key) => key !== "ignorePunctuationForMatch") ? target : null;
 }
 function hasInlineSelector(target) {
   return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0;
@@ -338,7 +346,7 @@ function isPermissionSnapshot(value) {
   return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function isPhaseFourSettings(value) {
-  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger2(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger2(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.glossaryDefaultScope === void 0 || value.glossaryDefaultScope === "local" || value.glossaryDefaultScope === "global") && (value.decisionConnectionId === void 0 || value.decisionConnectionId === null || isIdentifier2(value.decisionConnectionId)) && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
+  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger2(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger2(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.glossaryDefaultScope === void 0 || value.glossaryDefaultScope === "local" || value.glossaryDefaultScope === "global") && (value.decisionConnectionId === void 0 || value.decisionConnectionId === null || isIdentifier2(value.decisionConnectionId)) && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.normalizationModelTimeoutSeconds === void 0 || isNonNegativeInteger2(value.normalizationModelTimeoutSeconds) && value.normalizationModelTimeoutSeconds >= 5 && value.normalizationModelTimeoutSeconds <= 180) && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function isNormalizationConnectionOption(value) {
   return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
@@ -484,9 +492,10 @@ var COMMAND_GROUPS = [
       ["Lowercase", "Lowercase paragraph 2, or make paragraph 2 lowercase."],
       ["Capitalize", "Capitalize \u201Cthe hawk\u201D to make every word title-cased: \u201CThe Hawk.\u201D"],
       ["Spelled form", "Replace Kalora with capitalized C-A-E-L-O-R-A."],
+      ["Glossary hint", "Say \u201Chint\u201D or \u201Cclue\u201D and a description after the term, immediately or later in the same sentence: \u201Ctwo-door army clue Midland\u2019s enemy.\u201D Commas are optional; synonyms, plurals, and inflected forms can match the hint. The earlier term must be uniquely identifiable, including by spelling, sound, or a confident semantic match. Ambiguous terms or explanation endpoints are left for review."],
       [
         "As in reference",
-        "Use a qualified \u201Cas in\u201D reference anywhere you dictate new edit text: replace, insert before or after, prepend, or append. For example, \u201CPrepend \u2018I nod,\u2019 as in nodding one\u2019s head, to the first sentence.\u201D The intended word must occur immediately before \u201Cas in\u201D and repeat afterward exactly or as a clear inflection; otherwise the wording remains literal."
+        "Clarify a dictated term by repeating it or a clear inflection after \u201Cas in,\u201D for example \u201CJenga is my favorite, as in Jenga the game.\u201D The repeated term can appear earlier in the same clause. A unique target and clear boundary are required; otherwise the wording remains for review. Use \u201Chint\u201D or \u201Cclue\u201D for glossary descriptions."
       ]
     ]
   },
@@ -498,8 +507,12 @@ var COMMAND_GROUPS = [
         "If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as \u201Cmouthlet\u201D for \u201CMao let.\u201D"
       ],
       [
+        "Punctuation in text targets",
+        "Punctuation is ignored when identifying a phrase unless you name it: say \u201Cwell comma I guess\u201D to favor \u201CWell, I guess\u201D over \u201CWell I guess.\u201D Ambiguous targets are not guessed."
+      ],
+      [
         "Punctuation targets",
-        "Say \u201Cthe second quote in paragraph 1\u201D, \u201Cthe last period in paragraph 1\u201D, or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete."
+        "Say \u201Cthe second quote in paragraph 1\u201D, \u201Cthe last period in paragraph 1\u201D, or \u201Cthe quote after the phrase \u2018this is very good\u2019\u201D with move, replace, insert, or delete. To wrap a range ending at a unique punctuation mark, say \u201Cput quotations from \u2018well, I guess\u2019 to the ellipsis.\u201D"
       ],
       [
         "Multiple changes",
@@ -731,6 +744,7 @@ function setup(ctx) {
     "[data-reference-admission-occurrences]"
   );
   const contextualToggle = requireElement(tab.root, "[data-context-enabled]");
+  const normalizationTimeoutInput = requireElement(tab.root, "[data-normalization-timeout]");
   const grammarRepairWarning = requireElement(
     tab.root,
     "[data-grammar-repair-warning]"
@@ -858,6 +872,7 @@ function setup(ctx) {
       decisionConnectionId: null,
       normalizationConnectionId: null,
       normalizationModelOverride: "",
+      normalizationModelTimeoutSeconds: DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
       debugLoggingEnabled: false
     },
     normalizationConnections: [],
@@ -1042,6 +1057,7 @@ function setup(ctx) {
       state.settings.referenceAdmissionOccurrences ?? 1
     );
     contextualToggle.checked = state.settings.contextualNormalizationEnabled;
+    normalizationTimeoutInput.value = String(state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS);
     grammarRepairSelect.value = state.settings.grammarRepairMode;
     const hasActiveChat = Boolean(state.activeChatId);
     const displayedGlossaryScope = hasActiveChat ? state.settings.glossaryDefaultScope ?? "local" : "global";
@@ -1100,12 +1116,15 @@ function setup(ctx) {
   };
   const performRequest = async (request, isSend = false) => {
     const targetRegistry = isSend ? sendRegistry : registry;
-    const outcome = targetRegistry.wait(request.requestId);
+    const timeoutMs = request.type === "edit.candidate.select.request" ? (state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS) * 1e3 + 3e4 : void 0;
+    const outcome = targetRegistry.wait(request.requestId, timeoutMs);
     send(request);
     return outcome;
   };
   const performNormalizationRequest = async (request) => {
-    const outcome = normalizationRegistry.wait(request.requestId);
+    const providerTimeout = (state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS) * 1e3;
+    const timeoutMs = request.type === "transcript.normalize.request" ? providerTimeout + 3e4 : request.type === "edit.interpret.request" ? 2 * providerTimeout + 3e4 : NORMALIZATION_TIMEOUT_MS;
+    const outcome = normalizationRegistry.wait(request.requestId, timeoutMs);
     send(request);
     return outcome;
   };
@@ -1722,6 +1741,7 @@ function setup(ctx) {
     state.settings.grammarRepairMode = grammarRepairMode;
     state.settings.debugLoggingEnabled = debugEnabledToggle.checked;
     state.settings.normalizationModelOverride = normalizationModelPicker.getValue().trim();
+    state.settings.normalizationModelTimeoutSeconds = Math.max(MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.min(MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Number.parseInt(normalizationTimeoutInput.value, 10) || DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS));
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: "phase4.settings.update.request",
@@ -1736,6 +1756,7 @@ function setup(ctx) {
         decisionConnectionId: state.settings.decisionConnectionId ?? null,
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: state.settings.normalizationModelOverride,
+        normalizationModelTimeoutSeconds: state.settings.normalizationModelTimeoutSeconds,
         debugLoggingEnabled: debugEnabledToggle.checked
       },
       chatId: state.activeChatId ?? void 0
@@ -1757,6 +1778,7 @@ function setup(ctx) {
   const handleContextCountInput = () => scheduleSettingsSave(600);
   const handleReferenceCacheLimitInput = () => scheduleSettingsSave(600);
   const handleReferenceAdmissionOccurrencesInput = () => scheduleSettingsSave(600);
+  const handleNormalizationTimeoutInput = () => scheduleSettingsSave(600);
   const handleSettingToggleChange = () => scheduleSettingsSave(0);
   const refreshDebugLog = async (clear = false) => {
     if (state.settings.debugLoggingEnabled !== true) {
@@ -2468,6 +2490,7 @@ function setup(ctx) {
     handleReferenceAdmissionOccurrencesInput
   );
   contextualToggle.addEventListener("change", handleSettingToggleChange);
+  normalizationTimeoutInput.addEventListener("input", handleNormalizationTimeoutInput);
   debugRefreshButton.addEventListener("click", handleDebugRefreshClick);
   debugCopyButton.addEventListener("click", handleDebugCopyClick);
   debugClearButton.addEventListener("click", handleDebugClearClick);
@@ -2540,6 +2563,7 @@ function setup(ctx) {
       handleReferenceAdmissionOccurrencesInput
     );
     contextualToggle.removeEventListener("change", handleSettingToggleChange);
+    normalizationTimeoutInput.removeEventListener("input", handleNormalizationTimeoutInput);
     grammarRepairSelect.removeEventListener("change", handleGrammarRepairModeChange);
     debugEnabledToggle.removeEventListener("change", handleDebugEnabledChange);
     debugRefreshButton.removeEventListener("click", handleDebugRefreshClick);
@@ -3157,6 +3181,7 @@ function shellMarkup() {
           <label>Messages scanned for references (0\u201320, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label>Rolling name cache (0\u2013200, default 30)<input type="number" min="0" max="200" step="1" value="30" data-reference-cache-limit></label>
           <label>Capitalized occurrences before Jev (1\u20135, default 1)<input type="number" min="1" max="5" step="1" value="1" data-reference-admission-occurrences></label>
+          <label>LLM provider timeout in seconds (5\u2013180, default 40)<input type="number" min="5" max="180" step="1" value="40" data-normalization-timeout><small>Limits each LLM call for normalization, edit interpretation, and grammar repair. Additional calls and time waiting for the draft may extend the total. Speech-to-text and Jev use separate limits.</small></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. \u201CWhen needed\u201D needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose \u201CAlways\u201D to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>

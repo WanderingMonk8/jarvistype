@@ -400,6 +400,64 @@ test('prepend and insert-before adjust displaced ordinary sentence openings only
   }
 })
 
+test('preserves quoted speech openings after a dialogue tag', () => {
+  for (const [open, close] of [['“', '”'], ['‘', '’'], ['"', '"'], ["'", "'"]] as const) {
+    const original = `She said, ${open}Hello there.${close}`
+    const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: original }]
+    for (const [operation, expected] of [
+      [{ id: 'replace', type: 'replace' as const, target: { exactText: 'Hello' }, text: 'come' }, `She said, ${open}Come there.${close}`],
+      [{ id: 'insert', type: 'insert_before' as const, target: { exactText: 'Hello' }, text: 'please' }, `She said, ${open}Please hello there.${close}`],
+    ] as const) {
+      const result = executeEditPlan(original, paragraphs, 1, { schemaVersion: 2, draftVersion: 1, explanation: 'Edit.', operations: [operation] })
+      assert.equal(result.ok && result.afterText, expected, `${open} ${operation.type}`)
+    }
+    const incomplete = `She said, ${open}`
+    const result = executeEditPlan(incomplete, [{ id: 'p', ordinal: 1, lineIndex: 0, text: incomplete }], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Append.', operations: [{ id: 'append', type: 'append', target: { paragraphOrdinal: 1 }, text: 'hello' }],
+    })
+    assert.equal(result.ok && result.afterText, `${incomplete}hello`, `${open} append without existing capitalized text`)
+    const fragment = `She mentioned ${open}hello there${close} in passing.`
+    const fragmentResult = executeEditPlan(fragment, [{ id: 'p', ordinal: 1, lineIndex: 0, text: fragment }], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Replace.', operations: [{ id: 'replace', type: 'replace', target: { exactText: 'hello' }, text: 'goodbye' }],
+    })
+    assert.equal(fragmentResult.ok && fragmentResult.afterText, `She mentioned ${open}goodbye there${close} in passing.`, `${open} lowercase fragment`)
+    for (const [word, expectedWord, protectedTerms] of [['Hello', 'hello', []], ['Erbold', 'Erbold', ['Erbold']], ['I', 'I', []]] as const) {
+      const quoted = `${open}${word} waits.${close}`
+      const prepended = executeEditPlan(quoted, [{ id: 'p', ordinal: 1, lineIndex: 0, text: quoted }], 1, {
+        schemaVersion: 2, draftVersion: 1, explanation: 'Prepend.', operations: [{ id: 'prepend', type: 'prepend', target: { paragraphOrdinal: 1 }, text: 'please' }],
+      }, protectedTerms)
+      assert.equal(prepended.ok && prepended.afterText, `${open}Please ${expectedWord} waits.${close}`, `${open} prepend ${word}`)
+    }
+  }
+})
+
+test('splices punctuation-ending replacements with the following sentence', () => {
+  for (const [original, target, replacement, expected, protectedTerms] of [
+    ['We walked, then rested.', 'walked,', 'stopped.', 'We stopped. Then rested.', []],
+    ['We stopped. Then rested.', 'stopped.', 'walked,', 'We walked, then rested.', []],
+    ['We stopped. Erbold rested.', 'stopped.', 'walked,', 'We walked, Erbold rested.', ['Erbold']],
+    ['We stopped. I rested.', 'stopped.', 'walked,', 'We walked, I rested.', []],
+  ] as const) {
+    const result = executeEditPlan(original, [{ id: 'p', ordinal: 1, lineIndex: 0, text: original }], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Replace.', operations: [{ id: 'replace', type: 'replace', target: { exactText: target }, text: replacement }],
+    }, protectedTerms)
+    assert.equal(result.ok && result.afterText, expected)
+  }
+})
+
+test('wrapping text includes all immediately attached punctuation', () => {
+  for (const punctuation of [',', ':', ';', '?!', '...', '—', '!?;']) {
+    const original = `She said hello${punctuation} then left.`
+    const plan = { schemaVersion: 2 as const, draftVersion: 1, explanation: 'Quote.', operations: [
+      { id: 'open', type: 'insert_before' as const, target: { exactText: 'hello' }, text: '“' },
+      { id: 'close', type: 'insert_after' as const, target: { exactText: 'hello' }, text: '”' },
+    ] }
+    const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: original }]
+    for (const result of [executeEditPlan(original, paragraphs, 1, plan), executeSequentialEditPlan(original, paragraphs, 1, plan)])
+      assert.equal(result.ok && result.afterText, `She said “hello${punctuation}” then left.`, punctuation)
+  }
+})
+
 test('supports insert, append, prepend, delete, and casing through the same pipeline', () => {
   const session = fixture()
   const result = executeEditPlan(session.cleanText, session.paragraphs, 1, {
@@ -2190,6 +2248,56 @@ test('ignores punctuation for unique text targets and uses it only to resolve le
     ok: false,
     reason: 'punctuation-insensitive text target is ambiguous',
   })
+})
+
+test('unpunctuated text targets do not silently choose an exact spelling over a punctuated match', () => {
+  for (const operation of [
+    { id: 'replace', type: 'replace' as const, target: { exactText: 'wait here' }, text: 'stay' },
+    { id: 'delete', type: 'delete' as const, target: { exactText: 'wait here' } },
+    { id: 'before', type: 'insert_before' as const, target: { exactText: 'wait here' }, text: 'please' },
+    { id: 'after', type: 'insert_after' as const, target: { exactText: 'wait here' }, text: 'please' },
+  ]) {
+    const result = executeEditPlan('wait here. wait, here.', [], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'ambiguous despite punctuation', operations: [operation],
+    })
+    assert.deepEqual(result, { ok: false, reason: 'punctuation-insensitive text target is ambiguous' }, operation.type)
+  }
+  const explicit = executeEditPlan('wait here. wait, here.', [], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'explicit comma',
+    operations: [{ id: 'explicit', type: 'replace', target: { exactText: 'wait, here' }, text: 'stay' }],
+  })
+  assert.equal(explicit.ok && explicit.afterText, 'wait here. Stay.')
+  const occurrence = executeEditPlan('wait here. wait, here.', [], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'second lexical occurrence',
+    operations: [{ id: 'second', type: 'replace', target: { exactText: 'wait here', occurrence: 2 }, text: 'stay' }],
+  })
+  assert.equal(occurrence.ok && occurrence.afterText, 'wait here. Stay.')
+})
+
+test('matches punctuation-relative text anchors across omitted punctuation', () => {
+  const result = executeEditPlan('She said “well, I guess”.', [], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'delete the quote after the phrase',
+    operations: [{ id: 'relative', type: 'delete', target: { punctuation: 'quote', relativePosition: 'after', relativeToText: 'well I guess' } }],
+  })
+  assert.equal(result.ok && result.afterText, 'She said “well, I guess.')
+})
+
+test('does not guess a move source or destination based on omitted punctuation', () => {
+  const text = 'wait here. wait, here. move this.'
+  const plan = (source: string, destination: string) => ({ schemaVersion: 2 as const, draftVersion: 1, explanation: 'move text', operations: [{ id: 'move', type: 'move_after' as const, target: { exactText: source }, destination: { exactText: destination } }] })
+  const ambiguousSource = executeEditPlan(text, [], 1, plan('wait here', 'move this'))
+  const ambiguousDestination = executeEditPlan(text, [], 1, plan('move this', 'wait here'))
+  assert.equal(ambiguousSource.ok, false)
+  assert.equal(ambiguousDestination.ok, false)
+})
+
+test('uses explicitly named punctuation to choose between otherwise matching phrases', () => {
+  const draft = "Well I can't really do that obviously. Well, I can't really do that, obviously."
+  const plan = (target: string) => ({ schemaVersion: 2 as const, draftVersion: 1, explanation: 'target the phrase', operations: [{ id: 'replace', type: 'replace' as const, target: { exactText: target }, text: 'I decline' }] })
+  const unspecified = executeEditPlan(draft, [], 1, plan("Well I can't really do that obviously"))
+  assert.equal(unspecified.ok, false)
+  const explicit = executeEditPlan(draft, [], 1, plan("Well comma I can't really do that comma obviously"))
+  assert.equal(explicit.ok && explicit.afterText, "Well I can't really do that obviously. I decline.")
 })
 
 test('matches spoken possessives as whole tokens and rejects repeated or unrelated candidates', () => {

@@ -10,6 +10,9 @@ import type { GlossaryEntry } from './domain/glossary'
 import { RequestRegistry, type RequestOutcome } from './domain/request-registry'
 import {
   APP_VERSION,
+  DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
+  MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
+  MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
   NORMALIZATION_TIMEOUT_MS,
   PROTOCOL_VERSION,
   REQUEST_TIMEOUT_MS,
@@ -136,9 +139,10 @@ export const COMMAND_GROUPS = [
       ['Lowercase', 'Lowercase paragraph 2, or make paragraph 2 lowercase.'],
       ['Capitalize', 'Capitalize “the hawk” to make every word title-cased: “The Hawk.”'],
       ['Spelled form', 'Replace Kalora with capitalized C-A-E-L-O-R-A.'],
+      ['Glossary hint', 'Say “hint” or “clue” and a description after the term, immediately or later in the same sentence: “two-door army clue Midland’s enemy.” Commas are optional; synonyms, plurals, and inflected forms can match the hint. The earlier term must be uniquely identifiable, including by spelling, sound, or a confident semantic match. Ambiguous terms or explanation endpoints are left for review.'],
       [
         'As in reference',
-        'Use a qualified “as in” reference anywhere you dictate new edit text: replace, insert before or after, prepend, or append. For example, “Prepend ‘I nod,’ as in nodding one’s head, to the first sentence.” The intended word must occur immediately before “as in” and repeat afterward exactly or as a clear inflection; otherwise the wording remains literal.',
+        'Clarify a dictated term by repeating it or a clear inflection after “as in,” for example “Jenga is my favorite, as in Jenga the game.” The repeated term can appear earlier in the same clause. A unique target and clear boundary are required; otherwise the wording remains for review. Use “hint” or “clue” for glossary descriptions.',
       ],
     ],
   },
@@ -150,8 +154,12 @@ export const COMMAND_GROUPS = [
         'If a spoken target has no exact match, JarvisType can use one uniquely similar written or sound-alike phrase, including a compounded transcript such as “mouthlet” for “Mao let.”',
       ],
       [
+        'Punctuation in text targets',
+        'Punctuation is ignored when identifying a phrase unless you name it: say “well comma I guess” to favor “Well, I guess” over “Well I guess.” Ambiguous targets are not guessed.',
+      ],
+      [
         'Punctuation targets',
-        'Say “the second quote in paragraph 1”, “the last period in paragraph 1”, or “the quote after the phrase ‘this is very good’” with move, replace, insert, or delete.',
+        'Say “the second quote in paragraph 1”, “the last period in paragraph 1”, or “the quote after the phrase ‘this is very good’” with move, replace, insert, or delete. To wrap a range ending at a unique punctuation mark, say “put quotations from ‘well, I guess’ to the ellipsis.”',
       ],
       [
         'Multiple changes',
@@ -451,6 +459,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     '[data-reference-admission-occurrences]',
   )
   const contextualToggle = requireElement<HTMLInputElement>(tab.root, '[data-context-enabled]')
+  const normalizationTimeoutInput = requireElement<HTMLInputElement>(tab.root, '[data-normalization-timeout]')
   const grammarRepairWarning = requireElement<HTMLElement>(
     tab.root,
     '[data-grammar-repair-warning]',
@@ -582,6 +591,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       decisionConnectionId: null,
       normalizationConnectionId: null,
       normalizationModelOverride: '',
+      normalizationModelTimeoutSeconds: DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
       debugLoggingEnabled: false,
     },
     normalizationConnections: [],
@@ -891,6 +901,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       state.settings.referenceAdmissionOccurrences ?? 1,
     )
     contextualToggle.checked = state.settings.contextualNormalizationEnabled
+    normalizationTimeoutInput.value = String(state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS)
     grammarRepairSelect.value = state.settings.grammarRepairMode
     const hasActiveChat = Boolean(state.activeChatId)
     const displayedGlossaryScope = hasActiveChat
@@ -967,7 +978,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     isSend = false,
   ): Promise<RequestOutcome<BackendResponse>> => {
     const targetRegistry = isSend ? sendRegistry : registry
-    const outcome = targetRegistry.wait(request.requestId)
+    const timeoutMs = request.type === 'edit.candidate.select.request'
+      ? (state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS) * 1000 + 30_000
+      : undefined
+    const outcome = targetRegistry.wait(request.requestId, timeoutMs)
     send(request)
     return outcome
   }
@@ -975,7 +989,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const performNormalizationRequest = async (
     request: FrontendRequest,
   ): Promise<RequestOutcome<BackendResponse>> => {
-    const outcome = normalizationRegistry.wait(request.requestId)
+    const providerTimeout = (state.settings.normalizationModelTimeoutSeconds ?? DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS) * 1000
+    const timeoutMs = request.type === 'transcript.normalize.request'
+      ? providerTimeout + 30_000
+      : request.type === 'edit.interpret.request' ? 2 * providerTimeout + 30_000 : NORMALIZATION_TIMEOUT_MS
+    const outcome = normalizationRegistry.wait(request.requestId, timeoutMs)
     send(request)
     return outcome
   }
@@ -1728,6 +1746,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.settings.grammarRepairMode = grammarRepairMode
     state.settings.debugLoggingEnabled = debugEnabledToggle.checked
     state.settings.normalizationModelOverride = normalizationModelPicker.getValue().trim()
+    state.settings.normalizationModelTimeoutSeconds = Math.max(MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Math.min(MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS, Number.parseInt(normalizationTimeoutInput.value, 10) || DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS))
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: 'phase4.settings.update.request',
@@ -1742,6 +1761,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         decisionConnectionId: state.settings.decisionConnectionId ?? null,
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: state.settings.normalizationModelOverride,
+        normalizationModelTimeoutSeconds: state.settings.normalizationModelTimeoutSeconds,
         debugLoggingEnabled: debugEnabledToggle.checked,
       },
       chatId: state.activeChatId ?? undefined,
@@ -1763,6 +1783,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const handleContextCountInput = () => scheduleSettingsSave(600)
   const handleReferenceCacheLimitInput = () => scheduleSettingsSave(600)
   const handleReferenceAdmissionOccurrencesInput = () => scheduleSettingsSave(600)
+  const handleNormalizationTimeoutInput = () => scheduleSettingsSave(600)
   const handleSettingToggleChange = () => scheduleSettingsSave(0)
 
   const refreshDebugLog = async (clear = false): Promise<void> => {
@@ -2589,6 +2610,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     handleReferenceAdmissionOccurrencesInput,
   )
   contextualToggle.addEventListener('change', handleSettingToggleChange)
+  normalizationTimeoutInput.addEventListener('input', handleNormalizationTimeoutInput)
   debugRefreshButton.addEventListener('click', handleDebugRefreshClick)
   debugCopyButton.addEventListener('click', handleDebugCopyClick)
   debugClearButton.addEventListener('click', handleDebugClearClick)
@@ -2663,6 +2685,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       handleReferenceAdmissionOccurrencesInput,
     )
     contextualToggle.removeEventListener('change', handleSettingToggleChange)
+    normalizationTimeoutInput.removeEventListener('input', handleNormalizationTimeoutInput)
     grammarRepairSelect.removeEventListener('change', handleGrammarRepairModeChange)
     debugEnabledToggle.removeEventListener('change', handleDebugEnabledChange)
     debugRefreshButton.removeEventListener('click', handleDebugRefreshClick)
@@ -3358,6 +3381,7 @@ function shellMarkup(): string {
           <label>Messages scanned for references (0–20, default 5)<input type="number" min="0" max="20" step="1" value="5" data-context-count></label>
           <label>Rolling name cache (0–200, default 30)<input type="number" min="0" max="200" step="1" value="30" data-reference-cache-limit></label>
           <label>Capitalized occurrences before Jev (1–5, default 1)<input type="number" min="1" max="5" step="1" value="1" data-reference-admission-occurrences></label>
+          <label>LLM provider timeout in seconds (5–180, default 120)<input type="number" min="5" max="180" step="1" value="120" data-normalization-timeout><small>Limits each LLM call for normalization, edit interpretation, and grammar repair. Additional calls and time waiting for the draft may extend the total. Speech-to-text and Jev use separate limits.</small></label>
           <label><span><input type="checkbox" checked data-context-enabled> Use bounded context normalization</span></label>
           <label>Post-edit grammar repair<select data-grammar-repair-mode><option value="off">Off</option><option value="when_needed">When needed</option><option value="always">Always</option></select><small>Always applies local spacing, casing, and punctuation cleanup to the edited sentence. This setting adds an optional provider grammar check through the selected normalization connection; Off keeps all cleanup local, and every correction remains part of the proposal.</small><small class="jt-setting-warning" data-grammar-repair-warning hidden>No decision model connection is available. “When needed” needs one to decide whether an edit broke grammar, so until one is set up only the local cleanup runs. Set up a decision model in Lumiverse, or choose “Always” to use the normalization connection instead.</small></label>
           <label>Normalization connection<select data-normalization-connection><option value="">Main connection</option></select></label>

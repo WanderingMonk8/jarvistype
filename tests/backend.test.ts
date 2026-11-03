@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { applyManualEdit, restoreDraftSession } from '../src/domain/draft-session'
+import { applyManualEdit, clearDraftAfterSend, restoreDraftSession } from '../src/domain/draft-session'
 import { PROTOCOL_VERSION, type BackendResponse } from '../src/protocol/messages'
 
 type FrontendHandler = (payload: unknown, userId: string, frontendSessionId?: string) => void
@@ -20,6 +20,12 @@ const decisionRequests: unknown[] = []
 let decisionsEnabled = false
 let decisionProbability = 0
 let referenceDecisionProbability = 1
+let hintBoundaryDecision: ((id: string) => number) | null = null
+let hintSemanticDecision: ((id: string) => number) | null = null
+let hintCommandDecision: ((id: string) => number) | null = null
+let hintSpanDecision: ((id: string) => number) | null = null
+let hintPluralDecision = 0
+let hintConfirmDecision = 1
 let frontendHandler: FrontendHandler | null = null
 let activeChatId: string | null = 'chat-default'
 let appendShouldFail = false
@@ -29,8 +35,12 @@ let generationNormalizedText: string | null = null
 let generationEditsOverride: unknown[] | null = null
 let generationCommandDecisions: unknown[] = []
 let editPlanResponse: unknown = null
+let editInterpretationHangs = false
+let editInterpretationSignal: AbortSignal | undefined
 let grammarRepairResponse: unknown = null
 let grammarRepairHangs = false
+let normalizationHangs = false
+let normalizationSignal: AbortSignal | undefined
 let grammarRepairIgnoresAbort = false
 let grammarRepairSignal: AbortSignal | undefined
 let chatMessages: Array<{
@@ -96,7 +106,7 @@ const spindleMock = {
           {
             type: 'noul',
             noul:
-              key === 'introducedGrammarError' ? decisionProbability : referenceDecisionProbability,
+              key === 'introducedGrammarError' ? decisionProbability : key === 'plural_span' ? hintPluralDecision : key === 'confirm_span' ? hintConfirmDecision : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : key.startsWith('semantic_') && hintSemanticDecision ? hintSemanticDecision(key) : key.startsWith('command_') && hintCommandDecision ? hintCommandDecision(key) : key.startsWith('span_') && hintSpanDecision ? hintSpanDecision(key) : referenceDecisionProbability,
           },
         ]),
       )
@@ -175,6 +185,10 @@ const spindleMock = {
         rawTranscript?: string
         task?: string
       }
+      if (input.task === 'Interpret this edit instruction against the numbered draft.' && editInterpretationHangs) {
+        editInterpretationSignal = request.signal
+        return new Promise(() => undefined)
+      }
       if (input.task === 'Interpret this edit instruction against the numbered draft.')
         return Promise.resolve({ content: JSON.stringify(editPlanResponse) })
       if (input.task === 'Conservatively repair edit-caused grammar in editable paragraphs.') {
@@ -193,6 +207,10 @@ const spindleMock = {
             { once: true },
           )
         })
+      }
+      if (normalizationHangs && input.rawTranscript !== undefined) {
+        normalizationSignal = request.signal
+        return new Promise(() => undefined)
       }
       if (generationEditsOverride)
         return Promise.resolve({
@@ -254,7 +272,13 @@ test.beforeEach(() => {
   decisionRequests.length = 0
   decisionsEnabled = false
   decisionProbability = 0
+  hintSpanDecision = null
+  hintPluralDecision = 0
+  hintConfirmDecision = 1
   referenceDecisionProbability = 1
+  hintBoundaryDecision = null
+  hintSemanticDecision = null
+  hintCommandDecision = null
   activeChatId = 'chat-default'
   appendShouldFail = false
   appendAcknowledgementGate = null
@@ -263,8 +287,12 @@ test.beforeEach(() => {
   generationEditsOverride = null
   generationCommandDecisions = []
   editPlanResponse = null
+  editInterpretationHangs = false
+  editInterpretationSignal = undefined
   grammarRepairResponse = null
   grammarRepairHangs = false
+  normalizationHangs = false
+  normalizationSignal = undefined
   grammarRepairIgnoresAbort = false
   grammarRepairSignal = undefined
   chatMessages = []
@@ -359,6 +387,30 @@ test('an explicit load refreshes a draft changed through shared storage on anoth
   }
 })
 
+test('refreshes a cached draft cleared by sending in another instance', async () => {
+  const userId = 'cross-device-sent-user'
+  const chatId = 'cross-device-sent-chat'
+  await seedDraft(userId, chatId, 'Already submitted')
+  const storageKey = `${userId}:draft-${encodeURIComponent(chatId)}.json`
+  const original = restoreDraftSession(stored.get(storageKey), chatId)
+  assert.ok(original)
+  stored.set(storageKey, structuredClone(clearDraftAfterSend(original)))
+  activeChatId = chatId
+  responses.length = 0
+  await dispatch(sendRequest(chatId, 'stale-device-send'), userId)
+  assert.equal(appended.length, 0)
+  assert.equal(responses.at(-1)?.payload.type, 'app.error')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'draft.load.request', requestId: 'cross-device-sent-refresh', chatId }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'draft.snapshot.response')
+  if (response?.type === 'draft.snapshot.response') {
+    assert.equal(response.snapshot.cleanText, '')
+    assert.equal(response.snapshot.draftVersion, original.draftVersion + 1)
+    assert.equal(response.snapshot.dirty, false)
+  }
+})
+
 test('undoes and redoes a draft mutation through the backend protocol', async () => {
   const userId = 'redo-user'
   const chatId = 'redo-chat'
@@ -400,6 +452,75 @@ test('undoes and redoes a draft mutation through the backend protocol', async ()
     assert.equal(redone.snapshot.canRedo, false)
     assert.equal(redone.snapshot.canUndo, true)
   }
+})
+
+test('saves normalization timeout settings and defaults legacy settings to 120 seconds', async () => {
+  const userId = 'normalization-timeout-settings-user'
+  const settings = { contextMessageCount: 5, contextualNormalizationEnabled: true, grammarRepairMode: 'off' as const, normalizationConnectionId: null, normalizationModelOverride: '' }
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'timeout-default', settings }, userId)
+  let response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'phase4.state.response')
+  if (response?.type === 'phase4.state.response') assert.equal(response.settings.normalizationModelTimeoutSeconds, 120)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'timeout-custom', settings: { ...settings, normalizationModelTimeoutSeconds: 75 } }, userId)
+  response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'phase4.state.response')
+  if (response?.type === 'phase4.state.response') assert.equal(response.settings.normalizationModelTimeoutSeconds, 75)
+  assert.equal((stored.get(`${userId}:phase4-settings.json`) as { normalizationModelTimeoutSeconds?: number }).normalizationModelTimeoutSeconds, 75)
+})
+
+test('aborts a stalled normalization provider at the configured timeout and returns a proposal', async () => {
+  const userId = 'normalization-timeout-runtime-user'
+  const chatId = 'normalization-timeout-runtime-chat'
+  activeChatId = chatId
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'timeout-runtime-settings', settings: { contextMessageCount: 0, contextualNormalizationEnabled: true, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', normalizationModelTimeoutSeconds: 5 } }, userId)
+  await seedDraft(userId, chatId, '')
+  normalizationHangs = true
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'timeout-runtime-segment', 1, 'Hello there.'), userId)
+  for (let attempt = 0; attempt < 60 && !responses.length; attempt++)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'Hello there.')
+  assert.equal(normalizationSignal?.aborted, true)
+})
+
+test('times out an unresponsive edit provider and releases the draft lock', async () => {
+  const userId = 'edit-provider-timeout-user'
+  const chatId = 'edit-provider-timeout-chat'
+  activeChatId = chatId
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'edit-timeout-settings', settings: { contextMessageCount: 0, contextualNormalizationEnabled: true, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', normalizationModelTimeoutSeconds: 5 } }, userId)
+  await seedDraft(userId, chatId, 'Keep this draft.')
+  editInterpretationHangs = true
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'edit-timeout-interpret', operationId: 'edit-timeout-op', chatId, expectedVersion: 1, instructionTranscript: 'Please reshape this prose somehow.' }, userId)
+  for (let attempt = 0; attempt < 80 && !responses.length; attempt++) await new Promise((resolve) => setTimeout(resolve, 100))
+  const error = responses.at(-1)?.payload
+  assert.equal(error?.type, 'app.error')
+  if (error?.type === 'app.error') assert.match(error.message, /timed out/u)
+  assert.equal(editInterpretationSignal?.aborted, true)
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'draft.load.request', requestId: 'edit-timeout-load', chatId }, userId)
+  const loaded = responses.at(-1)?.payload
+  assert.equal(loaded?.type, 'draft.snapshot.response')
+  if (loaded?.type === 'draft.snapshot.response') assert.equal(loaded.snapshot.cleanText, 'Keep this draft.')
+})
+
+test('cancelling an unresponsive edit provider releases the draft lock', async () => {
+  const userId = 'cancel-edit-provider-user'
+  const chatId = 'cancel-edit-provider-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Keep this draft.')
+  editInterpretationHangs = true
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'cancel-edit-provider-request', operationId: 'cancel-edit-provider-op', chatId, expectedVersion: 1, instructionTranscript: 'Please reshape this prose somehow.' }, userId)
+  assert.ok(editInterpretationSignal)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'app.operation.cancel', requestId: 'cancel-edit-provider-cancel', targetRequestId: 'cancel-edit-provider-request' }, userId)
+  assert.equal(editInterpretationSignal.aborted, true)
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'draft.load.request', requestId: 'cancel-edit-provider-load', chatId }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'draft.snapshot.response')
 })
 
 test('lists safe normalization connections and dispatches with selected connection and model', async () => {
@@ -852,6 +973,10 @@ test('sends exactly clean text once, triggers generation, and clears only after 
   await dispatch({ ...request, requestId: 'send-duplicate-request' }, userId)
 
   assert.equal(appended.length, 1)
+  const cleared = restoreDraftSession(stored.get(`${userId}:draft-${encodeURIComponent(chatId)}.json`), chatId)
+  assert.ok(cleared)
+  assert.equal(cleared.cleanText, '')
+  assert.equal(cleared.draftVersion, 2)
   assert.deepEqual(appended[0], {
     chatId,
     content: 'First\n\nSecond',
@@ -1561,6 +1686,472 @@ test('does not let contextual normalization replace an authoritative literal pun
     assert.equal(response.proposal.candidateText, 'The period of time is challenging for many.')
     assert.equal(response.proposal.contextualModelUsed, false)
   }
+})
+
+test('does not use glossary hints to interpret as-in wording', async () => {
+  const userId = 'hint-no-comma-user'
+  const chatId = 'hint-no-comma-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-no-comma-entry', canonical: 'Tudor', variants: [], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  const raw = "I intend to face the Tudor as in Midland's enemy."
+  hintBoundaryDecision = () => 0.1
+  hintCommandDecision = () => 0.1
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-no-comma-uncertain', 1, raw), userId)
+  const uncertain = responses.at(-1)?.payload
+  assert.equal(uncertain?.type, 'transcript.normalization.response')
+  if (uncertain?.type === 'transcript.normalization.response') assert.equal(uncertain.proposal.candidateText, raw)
+  assert.equal(decisionRequests.some((request) => JSON.stringify(request).includes("Midland's enemy")), false)
+})
+
+test('resolves the explicit hint cue with or without a comma and preserves ordinary hint prose', async () => {
+  const userId = 'explicit-hint-user'
+  const chatId = 'explicit-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'explicit-hint-entry', canonical: 'Tudor', variants: [], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintBoundaryDecision = () => 0.1
+  hintCommandDecision = () => 0.1
+  hintSemanticDecision = () => 0.1
+  for (const [index, raw, expected] of [
+    [0, "We face Tudor hint Midland's enemies.", 'We face Tudor.'],
+    [1, "We face Tudor, hint Midland's enemy.", 'We face Tudor.'],
+    [2, "Give me a hint about Midland's enemy.", "Give me a hint about Midland's enemy."],
+  ] as const) {
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `explicit-hint-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+})
+
+test('resolves the hint cue in replacement instructions', async () => {
+  const userId = 'explicit-hint-edit-user'
+  const chatId = 'explicit-hint-edit-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'explicit-hint-edit-entry', canonical: 'Tudor', variants: [], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, 'We face enemies.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'explicit-hint-edit', operationId: 'explicit-hint-edit-op', chatId, expectedVersion: 1, instructionTranscript: "Replace enemies with Tudor hint Midland's enemy." }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, 'We face Tudor.')
+})
+
+test('finds a unique delayed hinted term in the current clause', async () => {
+  const userId = 'delayed-hint-user'
+  const chatId = 'delayed-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'delayed-hint-entry', canonical: 'Tudor', variants: [], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.99
+  for (const [index, raw, expected] of [
+    [0, "I face the two-door army hint Midland's enemy.", 'I face the Tudor army.'],
+    [1, "I face the Tudor army, hint Midland's enemy.", 'I face the Tudor army.'],
+    [2, "I face the Tudor and the two-door army hint Midland's enemy.", "I face the Tudor and the two-door army hint Midland's enemy."],
+    [3, "Tudor left. I face the army hint Midland's enemy.", "Tudor left. I face the army hint Midland's enemy."],
+    [4, "You may know that I intend to face the Tudor army (hint: Midland's enemy).", 'You may know that I intend to face the Tudor army.'],
+    [5, "I face the two-door army hint: Midland's enemy.", 'I face the Tudor army.'],
+    [6, "The Tudor is an enemy that we have faced for such a long time. Hint: Midland's enemy.", 'The Tudor is an enemy that we have faced for such a long time.'],
+    [7, "We face the two-door army! Hint: Midland's enemy. We must prepare.", 'We face the Tudor army! We must prepare.'],
+    [8, "I face the two-door army clue Midland's enemy.", 'I face the Tudor army.'],
+    [9, "I face the two-door army (clue: Midland's enemy).", 'I face the Tudor army.'],
+    [10, "I face the two-door army, as in Midland's enemy.", "I face the two-door army, as in Midland's enemy."],
+    [11, "I face the Tudor and two-door army, as in Midland's enemy.", "I face the Tudor and two-door army, as in Midland's enemy."],
+    [12, "Give me a clue about Midland's enemy.", "Give me a clue about Midland's enemy."],
+  ] as const) {
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `delayed-hint-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+})
+
+test('uses Jev to locate a semantically identified hint term when phonetic matching fails', async () => {
+  const userId = 'semantic-hint-span-user'
+  const chatId = 'semantic-hint-span-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'semantic-hint-span-entry', canonical: 'chirurgeon', variants: ['Chi-rur-gion'], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.98
+  hintSpanDecision = (id) => id === 'span_4_1' ? 0.99 : 0.1
+  const raw = 'I look at the surgeon. Hint: A medieval field doctor.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'semantic-hint-span', 1, raw), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'I look at the chirurgeon.')
+
+  hintSpanDecision = (id) => id === 'span_4_1' || id === 'span_3_2' ? 0.99 : 0.1
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'semantic-hint-span-ambiguous', 1, raw), userId)
+  const ambiguous = responses.at(-1)?.payload
+  assert.equal(ambiguous?.type, 'transcript.normalization.response')
+  if (ambiguous?.type === 'transcript.normalization.response') {
+    assert.equal(ambiguous.proposal.candidateText, raw)
+    assert.ok(ambiguous.proposal.ambiguities.some((message) => message.includes('Jev’s highest-scoring hint span:') && message.includes('surgeon') && message.includes('unaccepted candidates')))
+  }
+})
+
+test('verifies a moderate span match and preserves plural and quotation punctuation', async () => {
+  const userId = 'plural-hint-span-user'
+  const chatId = 'plural-hint-span-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'plural-hint-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.97
+  hintBoundaryDecision = () => 0.82
+  hintSpanDecision = (id) => id === 'span_5_1' ? 0.51 : 0.04
+  hintPluralDecision = 0.99
+  const raw = 'Begin speech: Look, we need all the surgeons we can get. Hint: a medieval field doctor. End speech.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'plural-hint-span', 1, raw), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, '“Look, we need all the chirurgeons we can get.”')
+
+  hintConfirmDecision = 0.4
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'plural-hint-unconfirmed', 1, raw), userId)
+  const unconfirmed = responses.at(-1)?.payload
+  assert.equal(unconfirmed?.type, 'transcript.normalization.response')
+  if (unconfirmed?.type === 'transcript.normalization.response')
+    assert.match(unconfirmed.proposal.candidateText, /surgeons.*Hint:/u)
+})
+
+test('verifies a clearly separated span below the old score cutoff', async () => {
+  const userId = 'low-ranked-hint-span-user'
+  const chatId = 'low-ranked-hint-span-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'low-ranked-hint-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.97
+  hintBoundaryDecision = () => 0.86
+  hintSpanDecision = (id) => id === 'span_5_1' ? 0.49 : 0.04
+  hintPluralDecision = 0.99
+  const raw = 'Look, we need as many surgeons as we can find. Hint: a medieval field doctor.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'low-ranked-hint', 1, raw), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'Look, we need as many chirurgeons as we can find.')
+  const spanRequest = decisionRequests.find((request) =>
+    Boolean((request as { questions?: Record<string, unknown> }).questions?.span_5_1),
+  ) as { questions: Record<string, { instructions: string }>; state: { sentence: string; hint: string } } | undefined
+  assert.ok(spanRequest)
+  assert.match(spanRequest.questions.span_5_1!.instructions, /same kind of person, place, thing, or concept/u)
+  assert.match(spanRequest.questions.span_5_1!.instructions, /singular or plural/u)
+  assert.equal(spanRequest.state.sentence, 'Look, we need as many surgeons as we can find')
+  const verificationRequest = decisionRequests.find((request) =>
+    Boolean((request as { questions?: Record<string, unknown> }).questions?.confirm_span),
+  ) as { questions: Record<string, { instructions: string }>; state: { selected: string } } | undefined
+  assert.ok(verificationRequest)
+  assert.equal(verificationRequest.state.selected, 'surgeons')
+  assert.match(verificationRequest.questions.confirm_span!.instructions, /semantic relationship/u)
+
+  hintConfirmDecision = 0.4
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'low-ranked-hint-unconfirmed', 1, raw), userId)
+  const unconfirmed = responses.at(-1)?.payload
+  assert.equal(unconfirmed?.type, 'transcript.normalization.response')
+  if (unconfirmed?.type === 'transcript.normalization.response')
+    assert.equal(unconfirmed.proposal.candidateText, raw)
+
+  hintConfirmDecision = 1
+  hintSpanDecision = (id) => id === 'span_5_1' ? 0.49 : id === 'span_4_1' ? 0.35 : 0.04
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'low-ranked-hint-ambiguous', 1, raw), userId)
+  const ambiguous = responses.at(-1)?.payload
+  assert.equal(ambiguous?.type, 'transcript.normalization.response')
+  if (ambiguous?.type === 'transcript.normalization.response')
+    assert.equal(ambiguous.proposal.candidateText, raw)
+})
+
+test('accepts a verified semantic hint while rejecting tied or unrelated spans', async () => {
+  const userId = 'calibrated-hint-user'
+  const chatId = 'calibrated-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'calibrated-hint-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.97
+  hintBoundaryDecision = () => 0.86
+  hintConfirmDecision = 0.78
+  hintSpanDecision = (id) => id === 'span_3_1' ? 0.83 : id === 'span_2_2' ? 0.21 : 0.02
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'calibrated-clear', 1, 'I called the surgeon. Hint: a medieval battlefield doctor.'), userId)
+  const clear = responses.at(-1)?.payload
+  assert.equal(clear?.type, 'transcript.normalization.response')
+  if (clear?.type === 'transcript.normalization.response') assert.equal(clear.proposal.candidateText, 'I called the chirurgeon.')
+
+  hintSpanDecision = (id) => id === 'span_1_1' || id === 'span_4_1' ? 0.79 : 0.02
+  const tiedText = 'One surgeon called another surgeon before sunrise. Hint: a medieval battlefield doctor.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'calibrated-tied', 1, tiedText), userId)
+  const tied = responses.at(-1)?.payload
+  assert.equal(tied?.type, 'transcript.normalization.response')
+  if (tied?.type === 'transcript.normalization.response') assert.equal(tied.proposal.candidateText, tiedText)
+
+  hintSpanDecision = (id) => id === 'span_3_1' ? 0.83 : 0.1
+  hintConfirmDecision = 0.1
+  const unrelatedText = 'I called the soldier. Hint: a medieval battlefield doctor.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'calibrated-unrelated', 1, unrelatedText), userId)
+  const unrelated = responses.at(-1)?.payload
+  assert.equal(unrelated?.type, 'transcript.normalization.response')
+  if (unrelated?.type === 'transcript.normalization.response') assert.equal(unrelated.proposal.candidateText, unrelatedText)
+})
+
+test('resolves delayed hints across commas without guessing between repeated matches', async () => {
+  const userId = 'hint-across-commas-user'
+  const chatId = 'hint-across-commas-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-across-commas-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  const raw = 'Look, we need the chirurgeon, as many as we can. Hint: a medieval field doctor.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-across-commas', 1, raw), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'Look, we need the chirurgeon, as many as we can.')
+
+  hintSpanDecision = (id) => id === 'span_4_1' ? 0.99 : 0.1
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-across-commas-fuzzy', 1, 'Look, we need the surgeon, as many as we can. Hint: a medieval field doctor.'), userId)
+  const fuzzy = responses.at(-1)?.payload
+  assert.equal(fuzzy?.type, 'transcript.normalization.response')
+  if (fuzzy?.type === 'transcript.normalization.response')
+    assert.equal(fuzzy.proposal.candidateText, 'Look, we need the chirurgeon, as many as we can.')
+
+  const ambiguous = 'The chirurgeon saw a chirurgeon, then left. Hint: a medieval field doctor.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-across-commas-ambiguous', 1, ambiguous), userId)
+  const second = responses.at(-1)?.payload
+  assert.equal(second?.type, 'transcript.normalization.response')
+  if (second?.type === 'transcript.normalization.response')
+    assert.equal(second.proposal.candidateText, ambiguous)
+})
+
+test('supports synonymous hint descriptions when the semantic decision is confident', async () => {
+  const userId = 'synonym-hint-user'
+  const chatId = 'synonym-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'synonym-hint-entry', canonical: 'chirurgeon', variants: ['surgeon'], hint: 'a battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.99
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'synonym-hint-segment', 1, 'Find the surgeon hint a war zone physician.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'Find the chirurgeon.')
+})
+
+test('passes extra hint modifiers to semantic evaluation without treating natural hence as a command', async () => {
+  const userId = 'modified-hint-user'
+  const chatId = 'modified-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'modified-hint-entry', canonical: 'Tudor', variants: [], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.99
+  for (const [index, raw, expected] of [
+    [0, "They faced the Tudor army hint Midland's long-term enemy.", 'They faced the Tudor army.'],
+    [1, "They faced the Tudor army, hence Midland's long-term enemy.", "They faced the Tudor army, hence Midland's long-term enemy."],
+  ] as const) {
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `modified-hint-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+  assert.ok(decisionRequests.some((request) => {
+    const questions = (request as { questions?: Record<string, { instructions?: string }> }).questions ?? {}
+    return questions.semantic_0_0_0?.instructions?.includes('candidate reference_0_0_0') &&
+      questions.semantic_0_0_0.instructions.includes('extra descriptive modifiers')
+  }))
+})
+
+test('does not use semantic glossary hints for as-in dictation', async () => {
+  const userId = 'hint-as-in-user'
+  const chatId = 'hint-as-in-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-entry', canonical: 'chirurgeon', variants: ['chi-rur-gion'], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-segment', 1, 'I need a surgeon, as in a medieval battlefield doctor.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need a surgeon, as in a medieval battlefield doctor.')
+  assert.equal(decisionRequests.some((request) => JSON.stringify(request).includes('medieval battlefield doctor')), false)
+})
+
+test('leaves non-repeating as-in wording literal regardless of glossary scores', async () => {
+  const userId = 'hint-single-boundary-user'
+  const chatId = 'hint-single-boundary-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-single-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  const raw = 'I need to see the surgeon, as in a medieval battlefield doctor.'
+  for (const [index, semantic, boundary, expected] of [[0, 0.99, 0.75, raw], [1, 0.94, 0.75, raw], [2, 0.99, 0.69, raw]] as const) {
+    hintSemanticDecision = () => semantic
+    hintBoundaryDecision = () => boundary
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `hint-single-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+})
+
+test('keeps as-in wording literal after an already canonical glossary term', async () => {
+  const userId = 'hint-canonical-command-user'
+  const chatId = 'hint-canonical-command-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-canonical-command-entry', canonical: 'Tudor', variants: [], hint: 'Midland’s enemy', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  const raw = 'We need to face the Tudor, as in Midland’s enemy.'
+  for (const [index, semantic, command, expected] of [[0, 0.84, 0.99, raw], [1, 0.84, 0.2, raw], [2, 0.93, 0.57, raw], [3, 0.93, 0.54, raw], [4, 0.89, 0.57, raw]] as const) {
+    hintSemanticDecision = () => semantic
+    hintBoundaryDecision = () => 0.31
+    hintCommandDecision = () => command
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `hint-canonical-command-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+})
+
+test('uses a semantic glossary hint in an edit instruction', async () => {
+  const userId = 'hint-as-in-edit-user'
+  const chatId = 'hint-as-in-edit-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-edit-entry', canonical: 'chirurgeon', variants: ['surgeon'], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, 'I need a doctor.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'hint-edit-request', operationId: 'hint-edit-operation', chatId, expectedVersion: 1, instructionTranscript: 'Replace doctor with surgeon hint a medieval battlefield doctor.' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, 'I need a chirurgeon.')
+})
+
+test('does not apply glossary matching to as-in references', async () => {
+  const userId = 'hint-either-route-user'
+  const chatId = 'hint-either-route-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-either-entry', canonical: 'chirurgeon', variants: ['children'], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  for (const [index, spoken, semantic] of [[0, 'stranger', 1], [1, 'children', 0.1]] as const) {
+    hintSemanticDecision = () => semantic
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `hint-either-${index}`, 1, `I need the ${spoken}, as in the battlefield doctor.`), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.match(response.proposal.candidateText, /as in the battlefield doctor\./u)
+  }
+})
+
+test('preserves unqualified as-in wording with hesitation fillers', async () => {
+  const userId = 'hint-as-in-filler-user'
+  const chatId = 'hint-as-in-filler-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-filler-entry', canonical: 'chirurgeon', variants: [], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-filler-segment', 1, 'The children, as in, um, a battlefield doctor.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'The children, as in, um, a battlefield doctor.')
+  assert.equal(decisionRequests.some((request) => JSON.stringify(request).includes('a battlefield doctor')), false)
+})
+
+test('preserves non-repeating as-in explanations and subsequent prose', async () => {
+  const userId = 'hint-boundary-user'
+  const chatId = 'hint-boundary-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-boundary-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  for (const [index, raw, expected, boundary] of [
+    [0, 'I found the surgeon, as in a battlefield doctor, near the gate.', 'I found the surgeon, as in a battlefield doctor, near the gate.', 0],
+    [1, 'I found the surgeon, as in a doctor, one who treats soldiers, near the gate.', 'I found the surgeon, as in a doctor, one who treats soldiers, near the gate.', 1],
+  ] as const) {
+    hintBoundaryDecision = (id) => id.endsWith(`_${boundary}`) ? 0.99 : 0.1
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `hint-boundary-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+  hintBoundaryDecision = () => 0.99
+  responses.length = 0
+  const ambiguous = 'I found the surgeon, as in a battlefield doctor, near the gate.'
+  await dispatch(recordingAppendRequest(chatId, 'hint-boundary-ambiguous', 1, ambiguous), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, ambiguous)
+})
+
+test('leaves ambiguous glossary hint references unchanged', async () => {
+  const userId = 'hint-as-in-ambiguous-user'
+  const chatId = 'hint-as-in-ambiguous-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  for (const canonical of ['chirurgeon', 'physician'])
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: `hint-${canonical}`, canonical, variants: [], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'ambiguous-hint-segment', 1, 'I need a surgeon, as in a medieval battlefield doctor.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need a surgeon, as in a medieval battlefield doctor.')
+})
+
+test('leaves glossary hint wording intact when the decision model is unavailable', async () => {
+  const userId = 'hint-as-in-offline-user'
+  const chatId = 'hint-as-in-offline-chat'
+  activeChatId = chatId
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-offline-entry', canonical: 'chirurgeon', variants: [], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'offline-hint-segment', 1, 'I need a surgeon, as in a medieval battlefield doctor.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'I need a surgeon, as in a medieval battlefield doctor.')
+})
+
+test('resolves delayed repeated as-in references without glossary hints', async () => {
+  const userId = 'delayed-repeated-reference-user'
+  const chatId = 'delayed-repeated-reference-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, '')
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'delayed-repeated-reference-segment', 1, 'Oh, Jenga is my favorite, as in Jenga the game.'), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, 'Oh, Jenga is my favorite.')
 })
 
 test('does not let contextual normalization discard literal as in wording', async () => {
@@ -2329,6 +2920,184 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('moves the last quotation mark before the last sentence without a provider call', async () => {
+  const userId = 'move-quote-sentence-user'
+  const chatId = 'move-quote-sentence-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She said, “First sentence. Second sentence. I leave.”')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'move-quote-sentence', operationId: 'move-quote-sentence-op', chatId, expectedVersion: 1, instructionTranscript: 'Move the last quotation mark to before the last sentence.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'She said, “First sentence. Second sentence.” I leave.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('quotes a spoken range including its attached punctuation run', async () => {
+  const userId = 'quotation-punctuation-run-user'
+  const chatId = 'quotation-punctuation-run-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She says hello, then goodbye?! Next.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-punctuation-run', operationId: 'quotation-punctuation-run-op', chatId, expectedVersion: 1, instructionTranscript: 'Put quotations from hello to goodbye.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'She says “hello, then goodbye?!” Next.')
+})
+
+test('quotes through a unique spoken ellipsis without a provider call', async () => {
+  for (const [index, mark] of ['…', '...'].entries()) {
+    const userId = `quotation-ellipsis-user-${index}`
+    const chatId = `quotation-ellipsis-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, `Earlier. Well, I guess I am the genie, you rubbed the${mark} I stop.`)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `quotation-ellipsis-${index}`, operationId: `quotation-ellipsis-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: 'put quotations from well, I guess, to the ellipsis.' }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response')
+    if (proposal?.type === 'edit.proposal.response')
+      assert.equal(proposal.proposal.afterText, `Earlier. “Well, I guess I am the genie, you rubbed the${mark}” I stop.`)
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('matches quotation range endpoints across omitted punctuation without a provider', async () => {
+  const userId = 'quotation-omitted-punctuation-user'
+  const chatId = 'quotation-omitted-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Earlier. Well, I guess I am the genie, you rubbed the… I stop.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-omitted-punctuation', operationId: 'quotation-omitted-punctuation-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from well I guess to the ellipsis.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'Earlier. “Well, I guess I am the genie, you rubbed the…” I stop.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('uses a spoken comma to distinguish quotation starts with identical words', async () => {
+  const userId = 'quotation-explicit-comma-user'
+  const chatId = 'quotation-explicit-comma-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, "Well I can't really do that obviously. Well, I can't really do that, obviously…")
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-explicit-comma', operationId: 'quotation-explicit-comma-op', chatId, expectedVersion: 1, instructionTranscript: "put quotations from well comma I can't really do that comma obviously to the ellipsis." }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify(proposal))
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, "Well I can't really do that obviously. “Well, I can't really do that, obviously…”")
+  assert.equal(generationRequests.length, 0)
+})
+
+test('ignores transcribed punctuation in edit targets unless punctuation was named', async () => {
+  const userId = 'spoken-target-punctuation-intent-user'
+  const chatId = 'spoken-target-punctuation-intent-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, "Well I can't really do that obviously. Well, I can't really do that, obviously.")
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'implicit-target-comma', operationId: 'implicit-target-comma-op', chatId, expectedVersion: 1, instructionTranscript: "Replace Well, I can't really do that, obviously with I decline." }, userId)
+  const implicit = responses.at(-1)?.payload
+  assert.notEqual(implicit?.type, 'edit.proposal.response')
+
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'implicit-quotation-comma', operationId: 'implicit-quotation-comma-op', chatId, expectedVersion: 1, instructionTranscript: "Put quotations from Well, I can't really do that, obviously to the last sentence." }, userId)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
+
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'explicit-target-comma', operationId: 'explicit-target-comma-op', chatId, expectedVersion: 1, instructionTranscript: "Replace Well comma I can't really do that comma obviously with I decline." }, userId)
+  const explicit = responses.at(-1)?.payload
+  assert.equal(explicit?.type, 'edit.proposal.response')
+  if (explicit?.type === 'edit.proposal.response')
+    assert.equal(explicit.proposal.afterText, "Well I can't really do that obviously. I decline.")
+})
+
+test('keeps explicit and implicit punctuation intent separate in a compound instruction', async () => {
+  const userId = 'compound-target-punctuation-intent-user'
+  const chatId = 'compound-target-punctuation-intent-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Alpha beta. Alpha, beta. Gamma delta. Gamma, delta.')
+  responses.length = 0
+  editPlanResponse = { schemaVersion: 2, draftVersion: 1, explanation: 'Two replacements.', operations: [
+    { id: 'first', type: 'replace', target: { exactText: 'Alpha, beta' }, text: 'One' },
+    { id: 'second', type: 'replace', target: { exactText: 'Gamma, delta' }, text: 'Two' },
+  ] }
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'compound-punctuation-intent', operationId: 'compound-punctuation-intent-op', chatId, expectedVersion: 1, instructionTranscript: 'Replace Alpha comma beta with One, then replace Gamma delta with Two.' }, userId)
+  const result = responses.at(-1)?.payload
+  assert.equal(result?.type, 'edit.proposal.response')
+  if (result?.type === 'edit.proposal.response') {
+    assert.equal(result.proposal.afterText, 'Alpha beta. One. Gamma delta. Gamma, delta.')
+    assert.equal(result.proposal.failedCommand?.index, 2)
+  }
+})
+
+test('does not guess when a punctuation-tolerant quotation start has multiple matches', async () => {
+  const userId = 'quotation-ambiguous-omitted-punctuation-user'
+  const chatId = 'quotation-ambiguous-omitted-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Well, I guess first. Well, I guess second…')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-ambiguous-omitted-punctuation', operationId: 'quotation-ambiguous-omitted-punctuation-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from well I guess to the ellipsis.' }, userId)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('matches a quotation end phrase when the transcript omits punctuation', async () => {
+  const userId = 'quotation-end-omitted-punctuation-user'
+  const chatId = 'quotation-end-omitted-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'We said hello and then good, bye. Next.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-end-omitted-punctuation', operationId: 'quotation-end-omitted-punctuation-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from hello to good bye.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'We said “hello and then good, bye.” Next.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('does not guess when a punctuation-tolerant quotation end is ambiguous', async () => {
+  const userId = 'quotation-ambiguous-end-punctuation-user'
+  const chatId = 'quotation-ambiguous-end-punctuation-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'We said hello, then good, bye and good, bye again.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-ambiguous-end-punctuation', operationId: 'quotation-ambiguous-end-punctuation-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from hello to good bye.' }, userId)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('does not modify a draft when a spoken quotation endpoint is ambiguous', async () => {
+  const userId = 'quotation-ambiguous-ellipsis-user'
+  const chatId = 'quotation-ambiguous-ellipsis-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Well, I guess this… continues… and ends.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-ambiguous-ellipsis', operationId: 'quotation-ambiguous-ellipsis-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from well, I guess, to the ellipsis.' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.notEqual(response?.type, 'edit.proposal.response')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('does not quote backwards when the punctuation endpoint precedes the range', async () => {
+  const userId = 'quotation-earlier-ellipsis-user'
+  const chatId = 'quotation-earlier-ellipsis-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'An earlier thought… Well, I guess that is all.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-earlier-ellipsis', operationId: 'quotation-earlier-ellipsis-op', chatId, expectedVersion: 1, instructionTranscript: 'put quotations from well, I guess, to the ellipsis.' }, userId)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('puts quotation marks around a spoken text range without a provider call', async () => {
   const userId = 'quotation-range-user'
   const chatId = 'quotation-range-chat'
@@ -2366,7 +3135,7 @@ test('puts quotation marks around a spoken text range without a provider call', 
   assert.equal(generationRequests.length, 0)
 })
 
-test('quotes a range ending at a repeated phrase inside the paragraph', async () => {
+test('does not guess a quotation endpoint when the phrase repeats', async () => {
   const userId = 'quotation-range-repeated-end-user'
   const chatId = 'quotation-range-repeated-end-chat'
   activeChatId = chatId
@@ -2390,14 +3159,7 @@ test('quotes a range ending at a repeated phrase inside the paragraph', async ()
   )
 
   const proposal = responses.at(-1)?.payload
-  assert.equal(proposal?.type, 'edit.proposal.response')
-  if (proposal?.type !== 'edit.proposal.response') return
-  const expected = draft.replace(
-    'Yes, the syrup, I got the good kind.',
-    '“Yes, the syrup, I got the good kind.',
-  )
-  assert.equal(proposal.proposal.afterText, `${expected}”`)
-  assert.equal(proposal.proposal.afterText.endsWith('\n”'), false)
+  assert.equal(proposal?.type, 'app.error')
   assert.equal(generationRequests.length, 0)
 })
 
@@ -2433,7 +3195,7 @@ test('quotes a range ending at a positional last sentence inside the paragraph',
   )
   assert.deepEqual(
     proposal.proposal.plan.operations.map((operation) => operation.target),
-    [{ exactText: 'Yes, the syrup', occurrence: 1 }, { sentenceFromEnd: 1 }],
+    [{ exactText: 'Yes, the syrup', occurrence: 1, ignorePunctuationForMatch: true }, { sentenceFromEnd: 1 }],
   )
   assert.equal(generationRequests.length, 0)
 })
@@ -3864,6 +4626,23 @@ test('offers explicit choices for paragraph-resolvable ambiguity without mutatin
   }
 })
 
+test('applies the exact selected candidate when punctuation variants are ambiguous', async () => {
+  const userId = 'punctuation-candidate-user'
+  const chatId = 'punctuation-candidate-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Wait, here. Wait here.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'punctuation-candidate', operationId: 'punctuation-candidate-op', chatId, expectedVersion: 1, instructionTranscript: 'Replace wait here with stay.' }, userId)
+  const choices = responses.at(-1)?.payload
+  assert.equal(choices?.type, 'edit.candidates.response')
+  if (choices?.type !== 'edit.candidates.response') return
+  assert.equal(choices.candidateSet.candidates.length, 2)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.candidate.select.request', requestId: 'punctuation-candidate-select', operationId: 'punctuation-candidate-op', chatId, expectedVersion: 1, candidateId: choices.candidateSet.candidates[1]!.id }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'Wait, here. Stay.')
+})
+
 test('offers choices for multiple fuzzy sentence targets in one paragraph', async () => {
   const userId = 'fuzzy-candidate-user'
   const chatId = 'fuzzy-candidate-chat'
@@ -5266,6 +6045,7 @@ test('bounds candidate selection when the grammar provider ignores abort', async
         grammarRepairMode: 'always',
         normalizationConnectionId: null,
         normalizationModelOverride: '',
+        normalizationModelTimeoutSeconds: 5,
       },
     },
     userId,
@@ -5294,6 +6074,7 @@ test('bounds candidate selection when the grammar provider ignores abort', async
   assert.equal(candidates?.type, 'edit.candidates.response')
   if (candidates?.type !== 'edit.candidates.response') return
 
+  grammarRepairHangs = true
   grammarRepairIgnoresAbort = true
   const startedAt = Date.now()
   await dispatch(
@@ -5421,6 +6202,27 @@ test('cleans local grammar after an edit even when provider repair is off', asyn
   assert.equal(proposal.proposal.afterText, 'Earlier. This is an accessible entrance.')
   assert.equal(proposal.proposal.grammarRepairChanges, undefined)
   assert.equal(generationRequests.length, 0)
+})
+
+test('preserves a provider-returned three-period ellipsis in an edit', async () => {
+  const userId = 'insert-ellipsis-user'
+  const chatId = 'insert-ellipsis-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'You rubbed the I stop before I say it.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Insert an ellipsis after the phrase.',
+    operations: [{ id: 'insert-ellipsis', type: 'insert_after', target: { exactText: 'rubbed the' }, text: '...' }],
+  }
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'insert-ellipsis-request', operationId: 'insert-ellipsis-operation', chatId, expectedVersion: 1, instructionTranscript: 'Insert ellipsis at the end of the phrase rubbed the.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'You rubbed the… I stop before I say it.')
+  assert.ok(generationRequests.length > 0)
 })
 
 test('fixes errant punctuation and sentence casing left by an edit', async () => {
@@ -6461,6 +7263,30 @@ test('uses phonetic character references for recording normalization and edit ta
   assert.equal(generationRequests.length, 0)
 })
 
+test('corrects a repeated misheard name in a replacement payload', async () => {
+  decisionsEnabled = true
+  const userId = 'repeated-fuzzy-replacement-user'
+  const chatId = 'repeated-fuzzy-replacement-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'Erbold watches the road.' }]
+  generationNormalizedText = null
+  await seedDraft(userId, chatId, 'In Erbold, I suppose we have to leave.')
+  responses.length = 0
+  await dispatch({
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'edit.interpret.request',
+    requestId: 'repeated-fuzzy-replacement',
+    operationId: 'repeated-fuzzy-replacement-operation',
+    chatId,
+    expectedVersion: 1,
+    instructionTranscript: 'Replace in urboed with end urboed.',
+  }, userId)
+  const edit = responses.at(-1)?.payload
+  assert.equal(edit?.type, 'edit.proposal.response')
+  if (edit?.type === 'edit.proposal.response')
+    assert.equal(edit.proposal.afterText, 'End Erbold, I suppose we have to leave.')
+})
+
 test('keeps broad active-draft references available for recording fuzzy identification', async () => {
   decisionsEnabled = true
   const userId = 'draft-fuzzy-recording-user'
@@ -6572,6 +7398,69 @@ function sendRequest(chatId: string, operationId: string) {
     expectedVersion: 1,
   }
 }
+
+test('logs glossary hint decisions without recording transcript or hint text', async () => {
+  const userId = 'debug-hint-user'
+  const chatId = 'debug-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'debug-hint-settings', settings: { contextMessageCount: 5, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', debugLoggingEnabled: true } }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'debug-hint-entry', canonical: 'chirurgeon', variants: [], hint: 'a battlefield surgeon', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  await dispatch(recordingAppendRequest(chatId, 'debug-hint-segment', 1, 'I need a chirurgeon hint a medieval battlefield doctor.'), userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'debug.log.request', requestId: 'debug-hint-read' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'debug.log.response')
+  if (response?.type !== 'debug.log.response') return
+  const log = response.entries.join('\n')
+  assert.match(log, /\[glossary\.hint\] start matches=1 hints=1 candidates=1/u)
+  assert.match(log, /\[glossary\.hint\.candidate\] id=reference_0_0_0 semantic=1\.000 boundary=1\.000 command=1\.000 phonetic=yes/u)
+  assert.match(log, /\[glossary\.hint\] decision=1 semantic=1\.000 boundary=1\.000 command=1\.000 phonetic=yes singleBoundary=yes best=1\.000/u)
+  assert.match(log, /\[glossary\.hint\] outcome=resolved/u)
+  assert.doesNotMatch(log, /chirurgeon|battlefield|surgeon/iu)
+})
+
+test('logs semantic hint span fallback metadata without recording its text', async () => {
+  const userId = 'debug-hint-span-user'
+  const chatId = 'debug-hint-span-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'debug-hint-span-settings', settings: { contextMessageCount: 5, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', debugLoggingEnabled: true } }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'debug-hint-span-entry', canonical: 'chirurgeon', variants: [], hint: 'a medieval battlefield doctor', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSpanDecision = (id) => id === 'span_4_1' ? 0.99 : 0.1
+  await dispatch(recordingAppendRequest(chatId, 'debug-hint-span-segment', 1, 'I look at the surgeon. Hint: A medieval field doctor.'), userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'debug.log.request', requestId: 'debug-hint-span-read' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'debug.log.response')
+  if (response?.type !== 'debug.log.response') return
+  const log = response.entries.join('\n')
+  assert.match(log, /\[glossary\.hint\.resolve\] explicit=yes localHits=0/u)
+  assert.match(log, /\[glossary\.hint\.span\] start words=5 candidates=12/u)
+  assert.match(log, /\[glossary\.hint\.span\] candidates=12 best=0\.990 runnerUp=0\.100/u)
+  assert.doesNotMatch(log, /chirurgeon|battlefield|surgeon|medieval/iu)
+})
+
+test('uses Jev to decide ambiguous article-prefixed casing commands', async () => {
+  const userId = 'article-casing-user'
+  const chatId = 'article-casing-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'article-casing-settings', settings: { contextMessageCount: 0, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '' } }, userId)
+  await seedDraft(userId, chatId, '')
+  for (const [index, raw, score, expected] of [
+    [0, 'I had a capitalized wife.', 0.99, 'I had a Wife.'],
+    [1, 'This is a capitalized company.', 0.01, 'This is a capitalized company.'],
+    [2, 'I had a capitalized wife.', 0.5, 'I had a capitalized wife.'],
+  ] as const) {
+    referenceDecisionProbability = score
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `article-casing-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+})
 
 test('collects a copiable backend timing log when debug logging is enabled', async () => {
   const userId = 'debug-log-user'

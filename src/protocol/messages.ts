@@ -7,6 +7,9 @@ export const PROTOCOL_VERSION = 7 as const
 export const APP_VERSION = '1.6.15'
 export const REQUEST_TIMEOUT_MS = 15_000
 export const NORMALIZATION_TIMEOUT_MS = 120_000
+export const DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120
+export const MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5
+export const MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180
 export const SEND_TIMEOUT_MS = 120_000
 
 export const PHASE_FOUR_PERMISSIONS = [
@@ -29,6 +32,7 @@ export interface PhaseFourSettings {
   decisionConnectionId?: string | null
   normalizationConnectionId: string | null
   normalizationModelOverride: string
+  normalizationModelTimeoutSeconds?: number
   debugLoggingEnabled?: boolean
 }
 

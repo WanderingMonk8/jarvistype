@@ -8,6 +8,13 @@ import {
   recoverHighConfidenceContextualCommands,
 } from '../src/domain/normalization'
 
+test('preserves an ellipsis through punctuation cleanup', () => {
+  for (const input of ['...', '…', 'ellipsis'])
+    assert.equal(normalizeDeterministically(input, [], { capitalizeOpening: false }).text, '…')
+  assert.equal(normalizeDeterministically('Wait... I stopped.', []).text, 'Wait… I stopped.')
+  assert.equal(normalizeDeterministically('Wait.. What??', []).text, 'Wait. What?')
+})
+
 test('uses qualified as-in spelling references in recording text', () => {
   assert.equal(
     normalizeQualifiedAsInReferences(
@@ -29,6 +36,12 @@ test('keeps ordinary as-in prose literal', () => {
   ]) {
     assert.equal(normalizeQualifiedAsInReferences(text).text, text)
   }
+})
+
+test('resolves a unique delayed repeated-word reference without a glossary', () => {
+  assert.equal(normalizeQualifiedAsInReferences('Oh, Jenga is my favorite, as in Jenga the game.').text, 'Oh, Jenga is my favorite.')
+  assert.equal(normalizeQualifiedAsInReferences('Jenga and Jenga are favorites, as in Jenga the game.').text, 'Jenga and Jenga are favorites, as in Jenga the game.')
+  assert.equal(normalizeQualifiedAsInReferences('Jenga is fun. Other games matter, as in Jenga the game.').text, 'Jenga is fun. Other games matter, as in Jenga the game.')
 })
 
 test('recognized command handlers consume their own cues and preserve literal vocabulary', () => {

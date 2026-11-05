@@ -1003,8 +1003,14 @@ function setup(ctx) {
     recordEditButton.disabled = editCancellable ? false : recordingInProgress ? activeRecording?.mode !== "edit" : !hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
     cancelRecordingButton.style.visibility = messageIsLive || normalizationCancellable ? "visible" : "hidden";
     cancelRecordingButton.disabled = !messageIsLive && !normalizationCancellable;
+    cancelRecordingButton.textContent = normalizationCancellable ? "\u2715  Normalizing\u2026" : "\u2715";
+    cancelRecordingButton.setAttribute("aria-label", normalizationCancellable ? "Cancel normalization" : "Cancel recording");
+    cancelRecordingButton.title = normalizationCancellable ? "Cancel normalization" : "Cancel recording";
     cancelEditRecordingButton.style.visibility = editIsLive || editCancellable ? "visible" : "hidden";
     cancelEditRecordingButton.disabled = !editIsLive && !editCancellable;
+    cancelEditRecordingButton.textContent = editCancellable ? "\u2715  Normalizing\u2026" : "\u2715";
+    cancelEditRecordingButton.setAttribute("aria-label", editCancellable ? "Cancel edit interpretation" : "Cancel edit recording");
+    cancelEditRecordingButton.title = editCancellable ? "Cancel edit interpretation" : "Cancel edit recording";
     voiceStatus.textContent = state.voiceMessage;
     voiceStatus.dataset.phase = state.voicePhase;
     voiceElapsed.textContent = `Elapsed: ${formatDuration(state.voiceElapsedMs)}`;
@@ -3021,6 +3027,7 @@ function shellMarkup() {
       .jt-record-slot[data-live="true"] > [data-record-message], .jt-record-slot[data-live="true"] > [data-record-edit] { grid-column: 1; }
       .jt-record-slot > [data-cancel-recording], .jt-record-slot > [data-cancel-edit-recording] { grid-column: 2; }
       .jt-record-slot[data-normalizing="true"] > [data-cancel-recording], .jt-record-slot[data-normalizing="true"] > [data-cancel-edit-recording] { grid-column: 1 / -1; }
+      .jt-record-slot[data-normalizing="true"] > [data-record-message], .jt-record-slot[data-normalizing="true"] > [data-record-edit] { visibility: hidden; }
       .jt-actions > [data-send] { flex: 1 1 100%; }
       .jt-shell [data-recording-state="starting"] { border-color: #ecc94b; background: #ecc94b; color: #1a1a1a; font-weight: 700; }
       .jt-shell [data-recording-state="recording"] { border-color: #e53e3e; background: #e53e3e; color: #ffffff; font-weight: 700; }

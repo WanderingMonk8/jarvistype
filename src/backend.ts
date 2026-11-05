@@ -543,6 +543,7 @@ async function handleTranscriptNormalization(
           glossary,
           settings,
           context.userId,
+          activeRequest.abort.signal,
         )
     if (explicitQuotationAliasHandled) reasons.push('deterministic quotation fast path')
     if (contextual) {
@@ -4246,6 +4247,7 @@ async function normalizeWithContext(
   glossary: GlossaryState,
   settings: PhaseFourSettings,
   userId: string,
+  signal: AbortSignal,
   timeoutMs = clampNormalizationModelTimeoutSeconds(settings.normalizationModelTimeoutSeconds) * 1000,
 ): Promise<{
   text: string
@@ -4265,6 +4267,10 @@ async function normalizeWithContext(
       `end outcome=${outcome} duration=${debugDuration(startedAt)}`,
     )
   const controller = new AbortController()
+  let finishCancellation: (() => void) | undefined
+  const cancelled = new Promise<null>((resolve) => { finishCancellation = () => { resolve(null); controller.abort() } })
+  if (signal.aborted) finishCancellation?.()
+  else signal.addEventListener('abort', finishCancellation!, { once: true })
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {
     const response = await Promise.race([
@@ -4303,6 +4309,7 @@ async function normalizeWithContext(
           },
         ],
       }),
+      cancelled,
       new Promise<null>((resolve) => {
         timeout = setTimeout(() => {
           controller.abort()
@@ -4312,7 +4319,7 @@ async function normalizeWithContext(
     ])
     clearTimeout(timeout)
     if (!response) {
-      finish('timed-out')
+      finish(signal.aborted ? 'cancelled' : 'timed-out')
       return null
     }
     const content = extractGenerationContent(response)
@@ -4365,9 +4372,12 @@ async function normalizeWithContext(
     }
   } catch (error) {
     clearTimeout(timeout)
-    finish('failed')
-    logSafeFailure('warn', 'CONTEXT_NORMALIZATION', error)
+    finish(signal.aborted ? 'cancelled' : 'failed')
+    if (!signal.aborted) logSafeFailure('warn', 'CONTEXT_NORMALIZATION', error)
     return null
+  } finally {
+    clearTimeout(timeout)
+    if (finishCancellation) signal.removeEventListener('abort', finishCancellation)
   }
 }
 

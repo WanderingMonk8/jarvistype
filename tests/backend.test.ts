@@ -485,6 +485,26 @@ test('aborts a stalled normalization provider at the configured timeout and retu
   assert.equal(normalizationSignal?.aborted, true)
 })
 
+test('cancelling normalization aborts an unresponsive provider without proposing or changing the draft', async () => {
+  const userId = 'cancel-normalization-user'
+  const chatId = 'cancel-normalization-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Keep this draft.')
+  normalizationHangs = true
+  responses.length = 0
+  const request = recordingAppendRequest(chatId, 'cancel-normalization-segment', 1, 'Hello there.')
+  await dispatch(request, userId)
+  assert.ok(normalizationSignal)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'app.operation.cancel', requestId: 'cancel-normalization', targetRequestId: request.requestId }, userId)
+  assert.equal(normalizationSignal.aborted, true)
+  assert.equal(responses.some(({ payload }) => payload.type === 'transcript.normalization.response'), false)
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'draft.load.request', requestId: 'cancel-normalization-load', chatId }, userId)
+  const loaded = responses.at(-1)?.payload
+  assert.equal(loaded?.type, 'draft.snapshot.response')
+  if (loaded?.type === 'draft.snapshot.response') assert.equal(loaded.snapshot.cleanText, 'Keep this draft.')
+})
+
 test('times out an unresponsive edit provider and releases the draft lock', async () => {
   const userId = 'edit-provider-timeout-user'
   const chatId = 'edit-provider-timeout-chat'
@@ -517,10 +537,12 @@ test('cancelling an unresponsive edit provider releases the draft lock', async (
   assert.ok(editInterpretationSignal)
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'app.operation.cancel', requestId: 'cancel-edit-provider-cancel', targetRequestId: 'cancel-edit-provider-request' }, userId)
   assert.equal(editInterpretationSignal.aborted, true)
+  assert.equal(responses.some(({ payload }) => payload.type === 'edit.proposal.response'), false)
   responses.length = 0
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'draft.load.request', requestId: 'cancel-edit-provider-load', chatId }, userId)
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'draft.snapshot.response')
+  if (response?.type === 'draft.snapshot.response') assert.equal(response.snapshot.cleanText, 'Keep this draft.')
 })
 
 test('lists safe normalization connections and dispatches with selected connection and model', async () => {

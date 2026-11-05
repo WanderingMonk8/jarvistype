@@ -4465,7 +4465,8 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       authoritativeConversationReferences,
       glossary,
       settings,
-      context.userId
+      context.userId,
+      activeRequest.abort.signal
     );
     if (explicitQuotationAliasHandled) reasons.push("deterministic quotation fast path");
     if (contextual) {
@@ -7465,7 +7466,7 @@ async function measureProviderFloor(userId, settings) {
   );
   endDebugCapture(userId);
 }
-async function normalizeWithContext(rawTranscript, deterministicCandidate, conversationReferences, authoritativeCasingReferences, glossary, settings, userId, timeoutMs = clampNormalizationModelTimeoutSeconds(settings.normalizationModelTimeoutSeconds) * 1e3) {
+async function normalizeWithContext(rawTranscript, deterministicCandidate, conversationReferences, authoritativeCasingReferences, glossary, settings, userId, signal, timeoutMs = clampNormalizationModelTimeoutSeconds(settings.normalizationModelTimeoutSeconds) * 1e3) {
   const startedAt2 = performance.now();
   recordDebug(
     userId,
@@ -7478,6 +7479,15 @@ async function normalizeWithContext(rawTranscript, deterministicCandidate, conve
     `end outcome=${outcome} duration=${debugDuration(startedAt2)}`
   );
   const controller = new AbortController();
+  let finishCancellation;
+  const cancelled = new Promise((resolve) => {
+    finishCancellation = () => {
+      resolve(null);
+      controller.abort();
+    };
+  });
+  if (signal.aborted) finishCancellation?.();
+  else signal.addEventListener("abort", finishCancellation, { once: true });
   let timeout;
   try {
     const response = await Promise.race([
@@ -7511,6 +7521,7 @@ async function normalizeWithContext(rawTranscript, deterministicCandidate, conve
           }
         ]
       }),
+      cancelled,
       new Promise((resolve) => {
         timeout = setTimeout(() => {
           controller.abort();
@@ -7520,7 +7531,7 @@ async function normalizeWithContext(rawTranscript, deterministicCandidate, conve
     ]);
     clearTimeout(timeout);
     if (!response) {
-      finish("timed-out");
+      finish(signal.aborted ? "cancelled" : "timed-out");
       return null;
     }
     const content = extractGenerationContent(response);
@@ -7566,9 +7577,12 @@ async function normalizeWithContext(rawTranscript, deterministicCandidate, conve
     };
   } catch (error) {
     clearTimeout(timeout);
-    finish("failed");
-    logSafeFailure("warn", "CONTEXT_NORMALIZATION", error);
+    finish(signal.aborted ? "cancelled" : "failed");
+    if (!signal.aborted) logSafeFailure("warn", "CONTEXT_NORMALIZATION", error);
     return null;
+  } finally {
+    clearTimeout(timeout);
+    if (finishCancellation) signal.removeEventListener("abort", finishCancellation);
   }
 }
 var MAX_CONTEXTUAL_EDITS = 12;

@@ -994,9 +994,11 @@ function setup(ctx) {
     recordButton.setAttribute("aria-label", normalizationCancellable ? "Cancel normalization" : messageIsLive ? "Stop recording" : "Record");
     recordButton.title = normalizationCancellable ? "Cancel normalization" : messageIsLive ? "Stop recording" : "";
     recordButton.parentElement?.setAttribute("data-live", String(messageIsLive));
+    recordButton.parentElement?.setAttribute("data-normalizing", String(normalizationCancellable));
     recordEditButton.setAttribute("aria-label", editCancellable ? "Cancel edit interpretation" : editIsLive ? "Stop edit recording" : "Edit");
     recordEditButton.title = editCancellable ? "Cancel edit interpretation" : editIsLive ? "Stop edit recording" : "";
     recordEditButton.parentElement?.setAttribute("data-live", String(editIsLive));
+    recordEditButton.parentElement?.setAttribute("data-normalizing", String(editCancellable));
     recordEditButton.textContent = state.voicePhase === "starting" && activeRecording?.mode === "edit" ? "Preparing" : editIsLive ? "\u25A0" : editCancellable ? "Normalizing\u2026" : state.voicePhase === "review" && state.pendingEditProposal ? "Review required" : "Edit";
     recordEditButton.disabled = editCancellable ? false : recordingInProgress ? activeRecording?.mode !== "edit" : !hasNativeStt() || !recordingOwnerReady || !desiredText.trim() || voiceBusy() || state.voicePhase === "processing" || state.voicePhase === "committing" || state.voicePhase === "review";
     cancelRecordingButton.style.visibility = messageIsLive || normalizationCancellable ? "visible" : "hidden";
@@ -3018,6 +3020,7 @@ function shellMarkup() {
       .jt-record-slot > [data-record-message], .jt-record-slot > [data-record-edit] { grid-column: 1 / -1; }
       .jt-record-slot[data-live="true"] > [data-record-message], .jt-record-slot[data-live="true"] > [data-record-edit] { grid-column: 1; }
       .jt-record-slot > [data-cancel-recording], .jt-record-slot > [data-cancel-edit-recording] { grid-column: 2; }
+      .jt-record-slot[data-normalizing="true"] > [data-cancel-recording], .jt-record-slot[data-normalizing="true"] > [data-cancel-edit-recording] { grid-column: 1 / -1; }
       .jt-actions > [data-send] { flex: 1 1 100%; }
       .jt-shell [data-recording-state="starting"] { border-color: #ecc94b; background: #ecc94b; color: #1a1a1a; font-weight: 700; }
       .jt-shell [data-recording-state="recording"] { border-color: #e53e3e; background: #e53e3e; color: #ffffff; font-weight: 700; }

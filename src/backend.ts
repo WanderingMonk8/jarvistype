@@ -1201,6 +1201,7 @@ async function handleEditInterpretation(
         session.cleanText,
         draftIdentificationReferences,
         request.instructionTranscript,
+        session.paragraphs,
       ),
       session.cleanText,
       cardCharacterReferences,
@@ -3992,6 +3993,7 @@ function normalizeEditInputPayloads(
   draftText: string,
   draftIdentificationReferences: string[],
   instructionTranscript: string,
+  paragraphs: PersistedDraftSession['paragraphs'],
 ): EditPlan {
   const explicitLowercaseKeys = new Set(
     [...instructionTranscript.matchAll(/\b(?:with|to|into|for)\s+lowercase\s+([\p{L}\p{M}\d]+(?:['’][\p{L}\p{M}\d]+)*)/giu)]
@@ -4068,6 +4070,20 @@ function normalizeEditInputPayloads(
         draftIdentificationReferences,
         protectedReferences,
       ).text
+      if (operation.type === 'replace' && operation.target.exactText &&
+          normalized.toLocaleLowerCase() !== exactNormalized.toLocaleLowerCase()) {
+        const matches = findTextTargetMatches(draftText, paragraphs, operation.target.exactText, {
+          paragraphId: operation.target.paragraphId,
+          paragraphOrdinal: operation.target.paragraphOrdinal,
+          ignorePunctuationForMatch: operation.target.ignorePunctuationForMatch,
+        })
+        if (matches.length === 1) {
+          const matched = draftText.slice(matches[0]!.start, matches[0]!.end)
+          if (normalized.toLocaleLowerCase() === matched.toLocaleLowerCase() &&
+              exactNormalized.toLocaleLowerCase() !== matched.toLocaleLowerCase())
+            return { ...operation, text: exactNormalized }
+        }
+      }
       return normalized === operation.text ? operation : { ...operation, text: normalized }
     }),
   }

@@ -7285,6 +7285,20 @@ test('uses phonetic character references for recording normalization and edit ta
   assert.equal(generationRequests.length, 0)
 })
 
+test('preserves a distinct replacement when fuzzy reference correction would make it a no-op', async () => {
+  decisionsEnabled = true
+  const userId = 'replacement-noop-reference-user'
+  const chatId = 'replacement-noop-reference-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'Brad watches. Brad waits.' }]
+  await seedDraft(userId, chatId, 'I would rather trade Dickinson for Brad.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'replacement-noop-reference', operationId: 'replacement-noop-reference-op', chatId, expectedVersion: 1, instructionTranscript: 'Replace Brett with Freud.' }, userId)
+  const edit = responses.at(-1)?.payload
+  assert.equal(edit?.type, 'edit.proposal.response')
+  if (edit?.type === 'edit.proposal.response') assert.equal(edit.proposal.afterText, 'I would rather trade Dickinson for Freud.')
+})
+
 test('corrects a repeated misheard name in a replacement payload', async () => {
   decisionsEnabled = true
   const userId = 'repeated-fuzzy-replacement-user'

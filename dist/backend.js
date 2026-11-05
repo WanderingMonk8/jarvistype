@@ -5024,7 +5024,8 @@ async function handleEditInterpretation(request, context, activeRequest) {
         spelling.learningCandidates.map((candidate) => candidate.canonical),
         session.cleanText,
         draftIdentificationReferences,
-        request.instructionTranscript
+        request.instructionTranscript,
+        session.paragraphs
       ),
       session.cleanText,
       cardCharacterReferences,
@@ -7260,7 +7261,7 @@ function stripQualifiedAsInEditPayloads(plan) {
     })
   };
 }
-function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, conversationReferences, authoritativeConversationReferences, protectedTerms, draftText, draftIdentificationReferences, instructionTranscript) {
+function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, conversationReferences, authoritativeConversationReferences, protectedTerms, draftText, draftIdentificationReferences, instructionTranscript, paragraphs) {
   const explicitLowercaseKeys = new Set(
     [...instructionTranscript.matchAll(/\b(?:with|to|into|for)\s+lowercase\s+([\p{L}\p{M}\d]+(?:['’][\p{L}\p{M}\d]+)*)/giu)].map((match) => match[1].toLocaleLowerCase())
   );
@@ -7331,6 +7332,18 @@ function normalizeEditInputPayloads(plan, glossary, cardCharacterReferences, con
         draftIdentificationReferences,
         protectedReferences
       ).text;
+      if (operation.type === "replace" && operation.target.exactText && normalized.toLocaleLowerCase() !== exactNormalized.toLocaleLowerCase()) {
+        const matches = findTextTargetMatches(draftText, paragraphs, operation.target.exactText, {
+          paragraphId: operation.target.paragraphId,
+          paragraphOrdinal: operation.target.paragraphOrdinal,
+          ignorePunctuationForMatch: operation.target.ignorePunctuationForMatch
+        });
+        if (matches.length === 1) {
+          const matched = draftText.slice(matches[0].start, matches[0].end);
+          if (normalized.toLocaleLowerCase() === matched.toLocaleLowerCase() && exactNormalized.toLocaleLowerCase() !== matched.toLocaleLowerCase())
+            return { ...operation, text: exactNormalized };
+        }
+      }
       return normalized === operation.text ? operation : { ...operation, text: normalized };
     })
   };

@@ -4229,6 +4229,26 @@ test('inserts deterministically after a sentence label with punctuation-insensit
   assert.equal(proposal.proposal.plan.operations[0]?.text, 'Are you clocking out soon?')
 })
 
+test('replacement with delimiter does not split a draft target at an earlier to or for', async () => {
+  const cases = [
+    ["I’m off to the launder.", "Replace the phrase I'm off to the launder with I'm off now.", "I'm off now."],
+    ['We wait for the train.', 'Replace the phrase wait for the train with depart now.', 'We depart now.'],
+  ] as const
+  for (const [index, [draft, instructionTranscript, expected]] of cases.entries()) {
+    const userId = `replace-delimiter-user-${index}`
+    const chatId = `replace-delimiter-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `replace-delimiter-${index}`, operationId: `replace-delimiter-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify(proposal))
+    if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, expected)
+    assert.equal(generationRequests.filter((request) => request.messages?.some((message: { content?: string }) => message.content?.includes('Convert the spoken editing instruction'))).length, 0)
+  }
+})
+
 test('removes an unquoted phrase label from deterministic replacement text', async () => {
   const userId = 'deterministic-phrase-label-user'
   const chatId = 'deterministic-phrase-label-chat'

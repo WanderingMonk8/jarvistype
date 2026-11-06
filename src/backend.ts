@@ -3727,7 +3727,22 @@ function parseDeterministicSimpleReplacement(
     .trim()
     .replace(/[.!?]+$/u, '')
     .trim()
-  const match = command.match(
+  // Prefer a draft-backed target ending at "with" over an earlier "to" or
+  // "for" within that target.
+  const withMatch = command.match(
+    /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:replace|change|swap|substitute)\s+(.+?)\s+with\s+(.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu,
+  )
+  const withTarget = withMatch ? unwrapEditArgument(stripUnquotedEditArgumentLabel(withMatch[2] ?? '')) : ''
+  const withParagraph = withMatch?.[1] ?? withMatch?.[4]
+  const withParagraphOrdinal = withParagraph === undefined ? undefined : Number(withParagraph)
+  const scopedWithParagraphs = withParagraphOrdinal === undefined ? session.paragraphs : session.paragraphs.filter((paragraph) => paragraph.ordinal === withParagraphOrdinal)
+  const normalizeApostrophe = (value: string) => value.replace(/[’‘]/gu, "'")
+  const withTargetExists = withTarget && findTextTargetMatches(
+    normalizeApostrophe(session.cleanText),
+    scopedWithParagraphs.map((paragraph) => ({ ...paragraph, text: normalizeApostrophe(paragraph.text) })),
+    normalizeApostrophe(withTarget),
+  ).length > 0
+  const match = (withTargetExists ? withMatch : null) ?? command.match(
     /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:replace|change|swap|substitute)\s+(?:the\s+)?(?:word|words|phrase|text)\s+((?:“[^”]*”|‘[^’]*’|"[^"]*"|'[^']*'))\s+(?:with|to|into|for)\s+(.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu,
   ) ?? command.match(
     /^(?:in\s+paragraph\s+(\d+)\s*,?\s*)?(?:replace|change|swap|substitute)\s+(.+?)\s+(?:with|to|into|for)\s+(.+?)(?:\s+(?:in|from|of)\s+paragraph\s+(\d+))?$/iu,

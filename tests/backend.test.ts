@@ -3169,6 +3169,39 @@ test('quotes a spoken range including its attached punctuation run', async () =>
   if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'She says “hello, then goodbye?!” Next.')
 })
 
+test('wraps a multi-sentence quotation range once and includes attached punctuation', async () => {
+  const instructions = ['Put quotations from alpha to omega.', 'Put quotations around alpha to omega.', 'Put quotations around alpha and omega.', 'Put quotations around everything from alpha through omega.', 'Put quotations around everything between alpha and omega.']
+  for (const [index, instructionTranscript] of instructions.entries()) {
+    const userId = `quotation-continuous-user-${index}`
+    const chatId = `quotation-continuous-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, 'Before. Alpha begins. Another sentence. Omega?! After.')
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `quotation-continuous-${index}`, operationId: `quotation-continuous-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response')
+    if (proposal?.type === 'edit.proposal.response')
+      assert.equal(proposal.proposal.afterText, 'Before. “Alpha begins. Another sentence. Omega?!” After.')
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('quotation around an exact phrase containing and keeps it as one target', async () => {
+  const userId = 'quotation-around-literal-and-user'
+  const chatId = 'quotation-around-literal-and-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Before. Bread and butter, please. After.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-around-literal-and', operationId: 'quotation-around-literal-and-op', chatId, expectedVersion: 1, instructionTranscript: 'Put quotations around the phrase bread and butter.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'Before. “Bread and butter,” please. After.')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('quotes through a unique spoken ellipsis without a provider call', async () => {
   for (const [index, mark] of ['…', '...'].entries()) {
     const userId = `quotation-ellipsis-user-${index}`

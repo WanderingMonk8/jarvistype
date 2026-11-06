@@ -66,6 +66,7 @@ export const SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   'single quote',
   'single quotation',
   'begin speech',
+  'again speech',
   'end speech',
   'beginning speech',
   'ending speech',
@@ -111,7 +112,7 @@ const TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
 )
 
 const SPOKEN_PUNCTUATION_TERM_SOURCE =
-  'open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?(?!\\s+(?:mark|point)\\b)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk'
+  'open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|again speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?(?!\\s+(?:mark|point)\\b)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk'
 
 const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
@@ -371,7 +372,7 @@ export function normalizeDeterministically(
   const quotation = replaceSpokenQuotationCommands(
     text,
     protectedLiterals.some((literal) =>
-      /\b(?:(?:single\s+)?(?:quote|quotation)|begin(?:ning|s)?\s+speech|end(?:ing|s)?\s+speech|begin\s+single|end\s+single)\b/iu.test(
+      /\b(?:(?:single\s+)?(?:quote|quotation)|(?:begin(?:ning|s)?|again)\s+speech|end(?:ing|s)?\s+speech|begin\s+single|end\s+single)\b/iu.test(
         literal,
       ),
     ),
@@ -747,7 +748,7 @@ function replaceSpokenQuotationCommands(
   }
 
   replaceGuardedAliasPair(
-    'begin(?:ning|s)?(?:\\s+the)?\\s+speech',
+    '(?:begin(?:ning|s)?(?:\\s+the)?|again)\\s+speech',
     'end(?:ing|s)? speech',
     '“',
     '”',
@@ -799,7 +800,7 @@ function replaceSpokenQuotationCommands(
 }
 
 function hasNaturalAliasUsage(text: string): boolean {
-  return /\b(?:begin(?:ning|s)?|end(?:ing|s)?)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
+  return /\b(?:begin(?:ning|s)?|again|end(?:ing|s)?)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
     text,
   )
 }

@@ -993,6 +993,19 @@ test('attaches inserted quotation marks directly to an exact sentence target', (
   }
 })
 
+test('quotation wraps close after punctuation attached to a phrase target', () => {
+  for (const punctuation of [',', '?!', '...', '—']) {
+    const text = `She said hello${punctuation} then left.`
+    const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Quote the phrase.', operations: [
+        { id: 'open', type: 'insert_before', target: { exactText: 'hello' }, text: '“' },
+        { id: 'close', type: 'insert_after', target: { exactText: 'hello' }, text: '”' },
+      ],
+    })
+    assert.equal(result.ok && result.afterText, `She said “hello${punctuation}” then left.`)
+  }
+})
+
 test('deletes an inclusive range across paragraphs and joins the remaining text safely', () => {
   const text = 'Before. I remember the time we met.\n\nMore words nearly in an instant she returned.'
   const plan = {

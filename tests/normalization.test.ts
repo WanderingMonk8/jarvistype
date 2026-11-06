@@ -417,6 +417,13 @@ test('supports guarded speech quotation aliases without consuming natural usage'
   )
 })
 
+test('accepts again speech as an opening alias while preserving literal uses', () => {
+  assert.equal(normalizeDeterministically('I chuckled softly. Again speech. No, not a thing out of her, but plenty of warnings and speech.', []).text, 'I chuckled softly. “No, not a thing out of her, but plenty of warnings”.')
+  assert.equal(normalizeDeterministically('Again speech hello there end speech.', []).text, '“Hello there”.')
+  assert.equal(normalizeDeterministically('I said again speech remains literal.', []).text, 'I said again speech remains literal.')
+  assert.equal(normalizeDeterministically('We said the phrase again speech and the phrase end speech.', []).text, 'We said again speech and end speech.')
+})
+
 test('recovers a closing end speech alias mistranscribed as and speech', () => {
   const repaired = normalizeDeterministically(
     'Begin speech. Hello there. Name your price and speech.',

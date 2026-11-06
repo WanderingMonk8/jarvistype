@@ -3346,6 +3346,7 @@ var SPOKEN_PUNCTUATION_COMMAND_PHRASES = [
   "single quote",
   "single quotation",
   "begin speech",
+  "again speech",
   "end speech",
   "beginning speech",
   "ending speech",
@@ -3382,7 +3383,7 @@ var TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
   "\\.+(?=\\s*\\b(?:question mark|exclamation(?: (?:mark|point))?|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|semi[ -]?colon|colon|comma)\\b)",
   "giu"
 );
-var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?(?!\\s+(?:mark|point)\\b)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk";
+var SPOKEN_PUNCTUATION_TERM_SOURCE = "open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|again speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?(?!\\s+(?:mark|point)\\b)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk";
 var LITERAL_PUNCTUATION_CONTEXTS = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
   /\btime\s+period\b/gi,
@@ -3578,7 +3579,7 @@ function normalizeDeterministically(raw, glossary, options = {}) {
   const quotation = replaceSpokenQuotationCommands(
     text,
     protectedLiterals.some(
-      (literal) => /\b(?:(?:single\s+)?(?:quote|quotation)|begin(?:ning|s)?\s+speech|end(?:ing|s)?\s+speech|begin\s+single|end\s+single)\b/iu.test(
+      (literal) => /\b(?:(?:single\s+)?(?:quote|quotation)|(?:begin(?:ning|s)?|again)\s+speech|end(?:ing|s)?\s+speech|begin\s+single|end\s+single)\b/iu.test(
         literal
       )
     )
@@ -3859,7 +3860,7 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
     );
   };
   replaceGuardedAliasPair(
-    "begin(?:ning|s)?(?:\\s+the)?\\s+speech",
+    "(?:begin(?:ning|s)?(?:\\s+the)?|again)\\s+speech",
     "end(?:ing|s)? speech",
     "\u201C",
     "\u201D",
@@ -3899,7 +3900,7 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
   return { text, marks, reasons };
 }
 function hasNaturalAliasUsage(text) {
-  return /\b(?:begin(?:ning|s)?|end(?:ing|s)?)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
+  return /\b(?:begin(?:ning|s)?|again|end(?:ing|s)?)\s+(?:speech|single)\s+(?:therapy|recognition|synthesis|training|class|course|pathology|development|delay|disorder|exercise|practice|section|segment|act)\b/iu.test(
     text
   );
 }
@@ -4773,7 +4774,7 @@ function preservesAuthoritativePunctuationMarks(deterministicCandidate, contextu
 }
 function didHandleExplicitQuotationAlias(rawTranscript, candidateText) {
   return [
-    [/\bbegin(?:ning|s)?(?:\s+the)?\s+speech\b/iu, /\bend(?:ing|s)?\s+speech\b/iu],
+    [/\b(?:begin(?:ning|s)?(?:\s+the)?|again)\s+speech\b/iu, /\bend(?:ing|s)?\s+speech\b/iu],
     [/\bbegin\s+single\b/iu, /\bend\s+single\b/iu]
   ].some(
     ([begin, end]) => begin.test(rawTranscript) && end.test(rawTranscript) && !begin.test(candidateText) && !end.test(candidateText)
@@ -5854,6 +5855,10 @@ async function interpretEditInstruction(instructionTranscript, session, settings
         },
         {
           role: "system",
+          content: "When asked to put quotation marks from one target to another, wrap the entire continuous range with exactly one opening and one closing quotation mark, even if it contains multiple sentences. Do not quote each sentence separately. The closing quotation belongs after punctuation attached to the end target."
+        },
+        {
+          role: "system",
           content: "Recognize flexible edit vocabulary only when the instruction supplies the arguments required for that operation. Delete aliases: delete, remove, take off, take out, erase, cut. Replace aliases: replace X with Y; change X to or into Y; swap X with or for Y; substitute X with or for Y. Insert aliases: insert, add, place, or put X before or after Y. Append aliases: append, add to the end, place at the end, put at the end, or tack onto the end. Prepend aliases: prepend, add to the beginning or start, place at the beginning or start, or put at the beginning or start. Move aliases: move, relocate, or shift X before or after Y. Split aliases: split, break, or divide a paragraph after the identified target. Join aliases: join, merge, or combine a paragraph with the following paragraph. Casing aliases: uppercase or make all caps; lowercase or make lowercase; capitalize or title case every word in the target phrase. Isolated verbs without the required target, payload, or destination are not valid edit operations."
         },
         {
@@ -6905,9 +6910,17 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   if (/[\r\n;]/u.test(instructionTranscript)) return null;
   const trimmed = instructionTranscript.trim();
   const quotationToken = "(?:(single|double)\\s+)?(?:quotation\\s+marks?|quote\\s+marks?|quotations?|quotes?)";
-  const rangeMatch = trimmed.match(
+  const betweenMatch = trimmed.match(
+    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:around\\s+)?(?:everything\\s+)?between\\s+(.+?)\\s+and\\s+(.+?)$`, "iu")
+  );
+  const aroundAndMatch = betweenMatch ? null : trimmed.match(
+    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+around\\s+(.+?)\\s+and\\s+(.+?)$`, "iu")
+  );
+  const wholeAroundTarget = aroundAndMatch ? unwrapEditArgument(stripUnquotedEditArgumentLabel(`${aroundAndMatch[2]} and ${aroundAndMatch[3]}`.replace(/[.!?]+$/u, "").trim())) : "";
+  const useAroundAnd = aroundAndMatch && !findTextTargetMatches(session.cleanText, session.paragraphs, wholeAroundTarget).length;
+  const rangeMatch = betweenMatch ?? (useAroundAnd ? aroundAndMatch : null) ?? trimmed.match(
     new RegExp(
-      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:from|starting\\s+(?:at|from))\\s+(.+?)\\s+(?:to|through|until|ending\\s+(?:at|with))\\s+(.+?)$`,
+      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:(?:around|over)\\s+(?:everything\\s+)?(?:from\\s+)?|from\\s+|starting\\s+(?:at|from)\\s+)(.+?)\\s+(?:to|through|until|ending\\s+(?:at|with))\\s+(.+?)$`,
       "iu"
     )
   );

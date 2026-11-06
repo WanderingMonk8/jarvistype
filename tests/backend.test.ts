@@ -20,6 +20,7 @@ const generationRequests: Array<{
 const decisionRequests: unknown[] = []
 let decisionsEnabled = false
 let decisionProbability = 0
+let aboutDecision: ((id: string) => number) | null = null
 let referenceDecisionProbability = 1
 let hintBoundaryDecision: ((id: string) => number) | null = null
 let hintSemanticDecision: ((id: string) => number) | null = null
@@ -107,7 +108,7 @@ const spindleMock = {
           {
             type: 'noul',
             noul:
-              key === 'introducedGrammarError' ? decisionProbability : key === 'plural_span' ? hintPluralDecision : key === 'confirm_span' ? hintConfirmDecision : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : key.startsWith('semantic_') && hintSemanticDecision ? hintSemanticDecision(key) : key.startsWith('command_') && hintCommandDecision ? hintCommandDecision(key) : key.startsWith('span_') && hintSpanDecision ? hintSpanDecision(key) : referenceDecisionProbability,
+              key === 'introducedGrammarError' ? decisionProbability : key.startsWith('about_') && aboutDecision ? aboutDecision(key) : key === 'plural_span' ? hintPluralDecision : key === 'confirm_span' ? hintConfirmDecision : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : key.startsWith('semantic_') && hintSemanticDecision ? hintSemanticDecision(key) : key.startsWith('command_') && hintCommandDecision ? hintCommandDecision(key) : key.startsWith('span_') && hintSpanDecision ? hintSpanDecision(key) : referenceDecisionProbability,
           },
         ]),
       )
@@ -272,6 +273,7 @@ test.beforeEach(() => {
   generationRequests.length = 0
   decisionRequests.length = 0
   decisionsEnabled = false
+  aboutDecision = null
   decisionProbability = 0
   hintSpanDecision = null
   hintPluralDecision = 0
@@ -2941,6 +2943,57 @@ test('deletes one positional sentence without a provider interpretation', async 
     }).length,
     0,
   )
+})
+
+test('resolves about sentence and phrase edits and move destinations with guarded decisions', async () => {
+  const examples = [
+    ['Erin unwinds herself, then smiles. She leaves.', 'Delete the sentence about Erin relaxing.', 0, 'She leaves.'],
+    ['Erin unwinds herself with a groan, finds her camisole, and puts it on anyway — the tear gaping at the shoulder, and she makes no comment. She takes her mug.', 'Delete the sentence about Erin unwinding herself.', 0, 'She takes her mug.'],
+    ['Erin unwinds herself, then smiles. She leaves.', 'Delete the phrase about Erin relaxing.', 0, 'Then smiles. She leaves.'],
+    ['Erin unwinds herself, then smiles. She leaves.', 'Replace the phrase about Erin relaxing with Maeve waits.', 0, 'Maeve waits then smiles. She leaves.'],
+    ['We must carry on. They fought a long war.', 'Move the phrase “We must carry on” to the end of the sentence about a long conflict.', 1, 'They fought a long war. We must carry on.'],
+    ['Erin unwinds herself. Maeve waits.', 'Move the sentence about Erin relaxing after Maeve waits.', 0, 'Maeve waits. Erin unwinds herself.'],
+  ] as const
+  for (const [index, [draft, instruction, selected, expected]] of examples.entries()) {
+    const userId = `about-edit-user-${index}`
+    const chatId = `about-edit-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = true
+    aboutDecision = (id) => id === `about_${selected}` ? 0.99 : 0.01
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-edit-${index}`, operationId: `about-edit-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+  }
+})
+
+test('about selection refuses tied candidates and preserves literal quoted about targets', async () => {
+  const userId = 'about-safe-user'
+  const chatId = 'about-safe-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  aboutDecision = () => 0.99
+  await seedDraft(userId, chatId, 'Erin rests. Maeve rests.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-tie', operationId: 'about-tie-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the sentence about resting.' }, userId)
+  assert.equal(responses.at(-1)?.payload.type, 'app.error')
+  decisionsEnabled = false
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-unavailable', operationId: 'about-unavailable-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the sentence about resting.' }, userId)
+  assert.equal(responses.at(-1)?.payload.type, 'app.error')
+  decisionsEnabled = true
+  const literalUser = 'about-literal-user'
+  const literalChat = 'about-literal-chat'
+  activeChatId = literalChat
+  await seedDraft(literalUser, literalChat, 'We spoke about the war yesterday.')
+  responses.length = 0
+  decisionRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-literal', operationId: 'about-literal-op', chatId: literalChat, expectedVersion: 1, instructionTranscript: 'Delete the phrase “about the war”.' }, literalUser)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  assert.equal(decisionRequests.some((request) => Object.keys((request as { questions?: Record<string, unknown> }).questions ?? {}).some((key) => key.startsWith('about_'))), false)
 })
 
 test('supports relative replacement and casing with multiword anchors', async () => {

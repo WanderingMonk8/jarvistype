@@ -28,6 +28,7 @@ import {
   executeEditPlan,
   executeSequentialEditPlan,
   findPunctuationInsensitiveMatch,
+  findAboutTargetCandidates,
   findTextTargetMatches,
   hasTargetPunctuation,
   normalizeNamedTargetPunctuation,
@@ -1167,7 +1168,9 @@ async function handleEditInterpretation(
     recordDebug(context.userId, 'edit.interpret', 'start')
     const glossaryHintResult = await resolveGlossaryHintReferences(request.instructionTranscript, glossary, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal)
     let interpretationTimedOut = false
-    const interpretedPlan = await interpretEditInstruction(
+    const aboutResult = await interpretAboutEdit(request.instructionTranscript, session, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal)
+    if (aboutResult.handled && !aboutResult.plan) return { error: 'target' as const, detail: 'The about target could not be resolved confidently.', session }
+    const interpretedPlan = aboutResult.handled ? aboutResult.plan : await interpretEditInstruction(
       canonicalEditInstruction(glossaryHintResult.text),
       session,
       settings,
@@ -1881,6 +1884,86 @@ function parseDeterministicCompoundEditPlan(
       })),
     ),
   })
+}
+
+async function interpretAboutEdit(
+  instruction: string, session: PersistedDraftSession, userId: string,
+  connectionId: string | null, signal: AbortSignal,
+): Promise<{ handled: boolean; plan: EditPlan | null }> {
+  const command = instruction.trim().replace(/[.!?]+$/u, '').trim()
+  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+to\s+the\s+(?:end\s+of\s+the\s+)?(sentence|phrase)\s+about\s+(.+)$/iu)
+  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentence|phrase)\s+about\s+(.+)$/iu)
+  if (!destinationMove && !source) return { handled: false, plan: null }
+  let description = (destinationMove ? destinationMove[3]! : source![3]!).trim()
+  let replacement = ''
+  let moveDestination = ''
+  let moveDirection: 'move_before' | 'move_after' = 'move_after'
+  const verb = source?.[1]?.toLocaleLowerCase() ?? 'move'
+  if (verb === 'replace' || verb === 'change') {
+    const parts = description.match(/^(.+?)\s+(?:with|to|into)\s+(.+)$/iu)
+    if (!parts) return { handled: true, plan: null }
+    description = parts[1]!.trim()
+    replacement = unwrapEditArgument(parts[2]!.trim())
+  }
+  if (source && ['move', 'relocate', 'shift'].includes(verb)) {
+    const parts = description.match(/^(.+?)\s+(before|after)\s+(.+)$/iu)
+    if (!parts) return { handled: true, plan: null }
+    description = parts[1]!.trim()
+    moveDirection = parts[2]!.toLocaleLowerCase() === 'before' ? 'move_before' : 'move_after'
+    moveDestination = unwrapEditArgument(parts[3]!.trim().replace(/^(?:the\s+)?(?:word|phrase|sentence)\s+/iu, ''))
+    if (!moveDestination) return { handled: true, plan: null }
+  }
+  // Quoted descriptions and existing literal targets stay on the ordinary exact path.
+  if (/^[“"‘']/u.test(description) || editTargetTextExists(session.cleanText, `about ${description}`))
+    return { handled: false, plan: null }
+  if (!description || !spindle.permissions.has('decisions') || signal.aborted)
+    return { handled: true, plan: null }
+  const kind = (destinationMove ? destinationMove[2]! : source![2]!).toLocaleLowerCase() as 'sentence' | 'phrase'
+  const candidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind)
+  if (!candidates.length || candidates.length > 100) return { handled: true, plan: null }
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  signal.addEventListener('abort', abort, { once: true })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const questions = Object.fromEntries(candidates.map((candidate, index) => [`about_${index}`, {
+      type: 'noul' as const,
+      instructions: 'Does this candidate specifically express the described subject? Judge meaning, not word overlap; do not prefer broad or merely related text.',
+      criteria: { true: 'The candidate directly expresses the description.', false: 'It is unrelated, only broadly related, or does not identify the requested content.' },
+    }]))
+    const result = await Promise.race([
+      spindle.decisions.evaluate({ userId, ...(connectionId ? { connection_id: connectionId } : {}), state: { task: 'Identify the sentence or phrase described by the user.', description, candidates: candidates.map((candidate, index) => ({ id: `about_${index}`, text: candidate.text })) }, questions }, { signal: controller.signal }),
+      new Promise<null>((resolve) => { timer = setTimeout(() => { controller.abort(); resolve(null) }, 2500) }),
+    ])
+    if (!result || signal.aborted) return { handled: true, plan: null }
+    if (candidates.some((_candidate, index) => {
+      const answer = result.answers[`about_${index}`]
+      return answer?.type !== 'noul' || !Number.isFinite(answer.noul) || answer.noul < 0 || answer.noul > 1
+    })) return { handled: true, plan: null }
+    const ranked = candidates.map((candidate, index) => {
+      const answer = result.answers[`about_${index}`]
+      return { candidate, score: answer?.type === 'noul' && Number.isFinite(answer.noul) && answer.noul >= 0 && answer.noul <= 1 ? answer.noul : 0 }
+    }).sort((a, b) => b.score - a.score)
+    if (ranked[0]!.score < 0.9 || (ranked[1] && ranked[0]!.score - ranked[1].score < 0.15)) return { handled: true, plan: null }
+    const selected = ranked[0]!.candidate
+    const selectedTarget = { paragraphId: selected.paragraphId, exactText: selected.text, ignorePunctuationForMatch: false }
+    if (moveDestination && kind === 'sentence' && moveDirection === 'move_after') {
+      const anchors = findAboutTargetCandidates(session.cleanText, session.paragraphs, 'sentence').filter((candidate) => candidate.text.replace(/[.!?…]+[”’"']*$/u, '').trim().toLocaleLowerCase() === moveDestination.toLocaleLowerCase())
+      if (anchors.length === 1) moveDestination = anchors[0]!.text
+    }
+    const operation = destinationMove
+      ? { id: 'about-move', type: 'move_after', target: { exactText: unwrapEditArgument(destinationMove[1]!) }, destination: selectedTarget, includeTrailingPunctuation: true }
+      : moveDestination ? { id: 'about-move', type: moveDirection, target: selectedTarget, destination: { exactText: moveDestination }, includeTrailingPunctuation: kind === 'sentence' ? true : undefined }
+      : verb === 'replace' || verb === 'change'
+        ? { id: 'about-replace', type: 'replace', target: selectedTarget, text: replacement }
+        : { id: 'about-delete', type: 'delete', target: selectedTarget }
+    return { handled: true, plan: parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: `Edit the ${kind} matching the description.`, operations: [operation] }) }
+  } catch {
+    return { handled: true, plan: null }
+  } finally {
+    clearTimeout(timer)
+    signal.removeEventListener('abort', abort)
+  }
 }
 
 async function interpretEditInstruction(

@@ -233,7 +233,7 @@ function parseTarget(value) {
   if (hasRelativePosition !== hasRelativeText) return null;
   if (target.punctuation !== void 0 && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
     return null;
-  if (target.punctuation === void 0 && (target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
+  if (target.punctuation === void 0 && (target.occurrenceFromEnd !== void 0 || (hasRelativePosition || hasRelativeText) && target.exactText === void 0))
     return null;
   if (target.punctuation === void 0 && target.occurrence !== void 0 && target.exactText === void 0)
     return null;

@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { applyManualEdit, clearDraftAfterSend, restoreDraftSession } from '../src/domain/draft-session'
 import { PROTOCOL_VERSION, type BackendResponse } from '../src/protocol/messages'
+import { isBackendResponse } from '../src/protocol/validation'
 
 type FrontendHandler = (payload: unknown, userId: string, frontendSessionId?: string) => void
 
@@ -2958,6 +2959,7 @@ test('supports relative replacement and casing with multiword anchors', async ()
     await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `relative-edit-${index}`, operationId: `relative-edit-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
     const proposal = responses.at(-1)?.payload
     assert.equal(proposal?.type, 'edit.proposal.response', instruction)
+    assert.equal(isBackendResponse(proposal), true, `frontend validation: ${instruction}`)
     if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, expected, instruction)
     assert.equal(generationRequests.length, 0)
   }
@@ -2981,6 +2983,7 @@ test('supports relative word, phrase, and sentence deletion with multiword ancho
     await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `relative-multiword-${index}`, operationId: `relative-multiword-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
     const proposal = responses.at(-1)?.payload
     assert.equal(proposal?.type, 'edit.proposal.response', instruction)
+    assert.equal(isBackendResponse(proposal), true, `frontend validation: ${instruction}`)
     if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, expected, instruction)
     assert.equal(generationRequests.length, 0)
   }

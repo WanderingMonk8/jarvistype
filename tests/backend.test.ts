@@ -2972,6 +2972,32 @@ test('resolves about sentence and phrase edits and move destinations with guarde
   }
 })
 
+test('offers candidate-specific phonetic evidence for a misheard about description', async () => {
+  const userId = 'about-phonetic-user'
+  const chatId = 'about-phonetic-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  aboutDecision = (id) => id === 'about_1' ? 0.99 : 0.01
+  await seedDraft(userId, chatId, 'The kitchen tap shuts off. The kettle’s going now, that low building rattle. Maeve hasn’t turned around.')
+  responses.length = 0
+  decisionRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-phonetic', operationId: 'about-phonetic-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the phrase about the cattles going.' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  const request = decisionRequests.find((item) => (item as { state?: { task?: string } }).state?.task === 'Identify the sentence or phrase described by the user.') as { state: { description: string; candidates: Array<{ id: string; phoneticEvidence: Array<{ heard: string; candidateWord: string }> }> } }
+  assert.equal(request.state.description, 'the cattles going')
+  assert.deepEqual(request.state.candidates.find((item) => item.id === 'about_1')?.phoneticEvidence, [{ heard: 'cattles', candidateWord: 'kettle’s' }])
+  assert.deepEqual(request.state.candidates.find((item) => item.id === 'about_0')?.phoneticEvidence, [])
+  const ambiguousUser = 'about-phonetic-ambiguous-user'
+  const ambiguousChat = 'about-phonetic-ambiguous-chat'
+  activeChatId = ambiguousChat
+  await seedDraft(ambiguousUser, ambiguousChat, 'Kettles and Kattles are going.')
+  decisionRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-phonetic-ambiguous', operationId: 'about-phonetic-ambiguous-op', chatId: ambiguousChat, expectedVersion: 1, instructionTranscript: 'Delete the sentence about the cattles going.' }, ambiguousUser)
+  const ambiguousRequest = decisionRequests.find((item) => (item as { state?: { task?: string } }).state?.task === 'Identify the sentence or phrase described by the user.') as { state: { candidates: Array<{ phoneticEvidence: Array<{ heard: string }> }> } }
+  assert.equal(ambiguousRequest.state.candidates[0]?.phoneticEvidence.some((item) => item.heard === 'cattles'), false)
+})
+
 test('about decision diagnostics record scores without dictated content', async () => {
   const userId = 'about-debug-user'
   const chatId = 'about-debug-chat'

@@ -1886,6 +1886,23 @@ function parseDeterministicCompoundEditPlan(
   })
 }
 
+function aboutPhoneticEvidence(description: string, candidate: string): Array<{ heard: string; candidateWord: string }> {
+  const normalize = (word: string) => word.toLocaleLowerCase().replace(/[’']/gu, '')
+  const heardWords = [...description.matchAll(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu)].map((match) => match[0])
+  const candidateWords = [...candidate.matchAll(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu)].map((match) => match[0])
+  const evidence: Array<{ heard: string; candidateWord: string }> = []
+  for (const heard of heardWords) {
+    const key = normalize(heard)
+    if (key.length < 4 || candidateWords.some((word) => normalize(word) === key)) continue
+    const possible = [...new Map(candidateWords.filter((word) => {
+      const candidateKey = normalize(word)
+      return candidateKey.length >= 4 && candidateKey !== key && areSpeechPhoneticNeighbors(key, candidateKey)
+    }).map((word) => [normalize(word), word])).values()]
+    if (possible.length === 1) evidence.push({ heard, candidateWord: possible[0]! })
+  }
+  return evidence
+}
+
 async function interpretAboutEdit(
   instruction: string, session: PersistedDraftSession, userId: string,
   connectionId: string | null, signal: AbortSignal,
@@ -1932,11 +1949,11 @@ async function interpretAboutEdit(
   try {
     const questions = Object.fromEntries(candidates.map((candidate, index) => [`about_${index}`, {
       type: 'noul' as const,
-      instructions: `Does candidate about_${index} specifically express the described subject? Judge that candidate only, by meaning rather than word overlap; do not prefer broad or merely related text.`,
+      instructions: `Does candidate about_${index} specifically express the described subject? The description may contain speech transcription errors. Consider this candidate's phoneticEvidence as possible sound-alike interpretations, not established corrections; judge the complete meaning and reject unrelated or ambiguous interpretations.`,
       criteria: { true: 'The candidate directly expresses the description.', false: 'It is unrelated, only broadly related, or does not identify the requested content.' },
     }]))
     const result = await Promise.race([
-      spindle.decisions.evaluate({ userId, ...(connectionId ? { connection_id: connectionId } : {}), state: { task: 'Identify the sentence or phrase described by the user.', description, candidates: candidates.map((candidate, index) => ({ id: `about_${index}`, text: candidate.text })) }, questions }, { signal: controller.signal }),
+      spindle.decisions.evaluate({ userId, ...(connectionId ? { connection_id: connectionId } : {}), state: { task: 'Identify the sentence or phrase described by the user.', description, candidates: candidates.map((candidate, index) => ({ id: `about_${index}`, text: candidate.text, phoneticEvidence: aboutPhoneticEvidence(description, candidate.text) })) }, questions }, { signal: controller.signal }),
       new Promise<null>((resolve) => { timer = setTimeout(() => { controller.abort(); resolve(null) }, 2500) }),
     ])
     if (!result || signal.aborted) { logOutcome(signal.aborted ? 'cancelled' : 'timeout'); return { handled: true, plan: null } }

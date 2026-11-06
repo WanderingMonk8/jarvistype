@@ -535,7 +535,7 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     return null
   if (
     target.punctuation === undefined &&
-    (target.occurrenceFromEnd !== undefined || hasRelativePosition || hasRelativeText)
+    (target.occurrenceFromEnd !== undefined || ((hasRelativePosition || hasRelativeText) && target.exactText === undefined))
   )
     return null
   if (
@@ -628,7 +628,7 @@ function resolveOperation(
     start = match.start
     end = match.end
   } else if (operation.target.exactText !== undefined) {
-    const match = findExactOrFuzzyMatch(
+    const match = operation.target.relativeToText !== undefined ? resolveRelativeWordTarget(cleanText, range.start, range.end, operation.target) : findExactOrFuzzyMatch(
       cleanText,
       operation.target.exactText,
       range.start,
@@ -683,6 +683,9 @@ function resolveOperation(
     } else if (isSentenceOpeningAt(cleanText, start)) {
       const orphanedPunctuation = attachedSentencePartPunctuation(cleanText, end, range.end)
       if (orphanedPunctuation) end += orphanedPunctuation.length
+    } else if (operation.target.relativeToText !== undefined && /,[ \t]*$/u.test(cleanText.slice(range.start, start)) && /^[.!?…](?=\s|$)/u.test(cleanText.slice(end, range.end))) {
+      const separator = cleanText.slice(range.start, start).match(/,[ \t]*$/u)![0]
+      start -= separator.length
     } else if (
       /[.,;:!?…—–-][ \t]*$/u.test(cleanText.slice(range.start, start)) &&
       attachedSentencePartPunctuation(cleanText, end, range.end)
@@ -1204,7 +1207,7 @@ function resolveTextTarget(
     start = match.start
     end = match.end
   } else if (target.exactText !== undefined) {
-    const match = findExactOrFuzzyMatch(
+    const match = target.relativeToText !== undefined ? resolveRelativeWordTarget(cleanText, range.start, range.end, target) : findExactOrFuzzyMatch(
       cleanText,
       target.exactText,
       range.start,
@@ -1233,6 +1236,23 @@ function resolveTextTarget(
     scopeStart: range.start,
     scopeEnd: range.end,
   }
+}
+
+function resolveRelativeWordTarget(text: string, start: number, end: number, target: EditTarget): { start: number; end: number } | string {
+  const anchor = findExactOrFuzzyMatch(text, target.relativeToText!, start, end, undefined, true)
+  if (typeof anchor === 'string') return anchor.includes('ambiguous') ? 'text anchor is ambiguous' : 'text anchor was not found'
+  const word = target.exactText!
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const separator = '[\\s\\p{P}]*'
+  if (target.relativePosition === 'after') {
+    const match = text.slice(anchor.end, end).match(new RegExp(`^${separator}(${escaped})(?![\\p{L}\\p{N}])`, 'iu'))
+    if (!match) return 'text target was not found after anchor'
+    return { start: anchor.end + match[0].length - match[1]!.length, end: anchor.end + match[0].length }
+  }
+  const match = text.slice(start, anchor.start).match(new RegExp(`(?<![\\p{L}\\p{N}])(${escaped})${separator}$`, 'iu'))
+  if (!match) return 'text target was not found before anchor'
+  const position = start + match.index!
+  return { start: position, end: position + match[1]!.length }
 }
 
 function isPunctuationTarget(value: unknown): value is PunctuationTarget {

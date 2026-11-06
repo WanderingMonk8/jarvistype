@@ -2942,6 +2942,25 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('deletes the word immediately after an anchor across punctuation and rejects ambiguous anchors', async () => {
+  const userId = 'relative-word-delete-user'
+  const chatId = 'relative-word-delete-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'We spoke with her. Finally, with. And I leave.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'relative-word-delete', operationId: 'relative-word-delete-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the word with after finally.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'We spoke with her. Finally. And I leave.')
+  const secondUser = 'relative-word-ambiguous-user'
+  const secondChat = 'relative-word-ambiguous-chat'
+  activeChatId = secondChat
+  await seedDraft(secondUser, secondChat, 'Finally, with. Finally, with.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'relative-word-ambiguous', operationId: 'relative-word-ambiguous-op', chatId: secondChat, expectedVersion: 1, instructionTranscript: 'Delete the word with after finally.' }, secondUser)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
+})
+
 test('moves the last quotation mark before the last sentence without a provider call', async () => {
   const userId = 'move-quote-sentence-user'
   const chatId = 'move-quote-sentence-chat'

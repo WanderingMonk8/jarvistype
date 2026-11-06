@@ -2047,6 +2047,15 @@ function parseDeterministicTextDeletion(
     return null
 
   const rawTarget = stripUnquotedEditArgumentLabel(match[2] ?? '')
+  const relative = rawTarget.match(/^([\p{L}\p{N}][\p{L}\p{N}'’-]*)\s+(before|after)\s+(?:the\s+)?(?:word\s+)?([\p{L}\p{N}][\p{L}\p{N}'’-]*)$/iu)
+  if (relative) return parseEditPlan({
+    schemaVersion: 2, draftVersion: session.draftVersion,
+    explanation: `Delete the word “${relative[1]}” ${relative[2]} “${relative[3]}”.`,
+    operations: [{ id: 'deterministic-delete-relative-word', type: 'delete', target: {
+      ...((leadingParagraph ?? trailingParagraph) === undefined ? {} : { paragraphOrdinal: leadingParagraph ?? trailingParagraph }),
+      exactText: relative[1]!, relativePosition: relative[2]!.toLocaleLowerCase(), relativeToText: relative[3]!,
+    } }],
+  })
   const spokenTarget = unwrapEditArgument(rawTarget)
   if (!spokenTarget || (isSemanticReplacementTarget(spokenTarget) && !/^["'“‘]/u.test(rawTarget))) return null
   const paragraphOrdinal = leadingParagraph ?? trailingParagraph

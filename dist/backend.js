@@ -1040,7 +1040,7 @@ function parseTarget(value) {
   if (hasRelativePosition !== hasRelativeText) return null;
   if (target.punctuation !== void 0 && (target.exactText !== void 0 || target.approximateText !== void 0 || target.scope !== void 0))
     return null;
-  if (target.punctuation === void 0 && (target.occurrenceFromEnd !== void 0 || hasRelativePosition || hasRelativeText))
+  if (target.punctuation === void 0 && (target.occurrenceFromEnd !== void 0 || (hasRelativePosition || hasRelativeText) && target.exactText === void 0))
     return null;
   if (target.punctuation === void 0 && target.occurrence !== void 0 && target.exactText === void 0)
     return null;
@@ -1089,7 +1089,7 @@ function resolveOperation(cleanText, paragraphs, operation, protectedCasingTerms
     start = match.start;
     end = match.end;
   } else if (operation.target.exactText !== void 0) {
-    const match = findExactOrFuzzyMatch(
+    const match = operation.target.relativeToText !== void 0 ? resolveRelativeWordTarget(cleanText, range.start, range.end, operation.target) : findExactOrFuzzyMatch(
       cleanText,
       operation.target.exactText,
       range.start,
@@ -1140,6 +1140,9 @@ ${formattedParagraph}`,
     } else if (isSentenceOpeningAt(cleanText, start)) {
       const orphanedPunctuation = attachedSentencePartPunctuation(cleanText, end, range.end);
       if (orphanedPunctuation) end += orphanedPunctuation.length;
+    } else if (operation.target.relativeToText !== void 0 && /,[ \t]*$/u.test(cleanText.slice(range.start, start)) && /^[.!?…](?=\s|$)/u.test(cleanText.slice(end, range.end))) {
+      const separator = cleanText.slice(range.start, start).match(/,[ \t]*$/u)[0];
+      start -= separator.length;
     } else if (/[.,;:!?…—–-][ \t]*$/u.test(cleanText.slice(range.start, start)) && attachedSentencePartPunctuation(cleanText, end, range.end)) {
       end += attachedSentencePartPunctuation(cleanText, end, range.end).length;
     }
@@ -1463,7 +1466,7 @@ function resolveTextTarget(cleanText, paragraphs, target, label) {
     start = match.start;
     end = match.end;
   } else if (target.exactText !== void 0) {
-    const match = findExactOrFuzzyMatch(
+    const match = target.relativeToText !== void 0 ? resolveRelativeWordTarget(cleanText, range.start, range.end, target) : findExactOrFuzzyMatch(
       cleanText,
       target.exactText,
       range.start,
@@ -1491,6 +1494,22 @@ function resolveTextTarget(cleanText, paragraphs, target, label) {
     scopeStart: range.start,
     scopeEnd: range.end
   };
+}
+function resolveRelativeWordTarget(text, start, end, target) {
+  const anchor = findExactOrFuzzyMatch(text, target.relativeToText, start, end, void 0, true);
+  if (typeof anchor === "string") return anchor.includes("ambiguous") ? "text anchor is ambiguous" : "text anchor was not found";
+  const word = target.exactText;
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const separator = "[\\s\\p{P}]*";
+  if (target.relativePosition === "after") {
+    const match2 = text.slice(anchor.end, end).match(new RegExp(`^${separator}(${escaped})(?![\\p{L}\\p{N}])`, "iu"));
+    if (!match2) return "text target was not found after anchor";
+    return { start: anchor.end + match2[0].length - match2[1].length, end: anchor.end + match2[0].length };
+  }
+  const match = text.slice(start, anchor.start).match(new RegExp(`(?<![\\p{L}\\p{N}])(${escaped})${separator}$`, "iu"));
+  if (!match) return "text target was not found before anchor";
+  const position = start + match.index;
+  return { start: position, end: position + match[1].length };
 }
 function isPunctuationTarget(value) {
   return value === "period" || value === "comma" || value === "colon" || value === "semicolon" || value === "question_mark" || value === "exclamation_mark" || value === "ellipsis" || value === "quote" || value === "single_quote" || value === "apostrophe" || value === "hyphen" || value === "en_dash" || value === "em_dash" || value === "open_parenthesis" || value === "close_parenthesis" || value === "open_bracket" || value === "close_bracket";
@@ -5749,6 +5768,18 @@ function parseDeterministicTextDeletion(instructionTranscript, session) {
   if (leadingParagraph !== void 0 && (!Number.isSafeInteger(leadingParagraph) || leadingParagraph < 1) || trailingParagraph !== void 0 && (!Number.isSafeInteger(trailingParagraph) || trailingParagraph < 1) || leadingParagraph !== void 0 && trailingParagraph !== void 0 && leadingParagraph !== trailingParagraph)
     return null;
   const rawTarget = stripUnquotedEditArgumentLabel(match[2] ?? "");
+  const relative = rawTarget.match(/^([\p{L}\p{N}][\p{L}\p{N}'’-]*)\s+(before|after)\s+(?:the\s+)?(?:word\s+)?([\p{L}\p{N}][\p{L}\p{N}'’-]*)$/iu);
+  if (relative) return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: `Delete the word \u201C${relative[1]}\u201D ${relative[2]} \u201C${relative[3]}\u201D.`,
+    operations: [{ id: "deterministic-delete-relative-word", type: "delete", target: {
+      ...(leadingParagraph ?? trailingParagraph) === void 0 ? {} : { paragraphOrdinal: leadingParagraph ?? trailingParagraph },
+      exactText: relative[1],
+      relativePosition: relative[2].toLocaleLowerCase(),
+      relativeToText: relative[3]
+    } }]
+  });
   const spokenTarget = unwrapEditArgument(rawTarget);
   if (!spokenTarget || isSemanticReplacementTarget(spokenTarget) && !/^["'“‘]/u.test(rawTarget)) return null;
   const paragraphOrdinal = leadingParagraph ?? trailingParagraph;

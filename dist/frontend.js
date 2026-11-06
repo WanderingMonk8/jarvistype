@@ -473,7 +473,7 @@ var COMMAND_GROUPS = [
         "Say \u201Cdelete,\u201D \u201Cremove,\u201D \u201Ctake off,\u201D \u201Ctake out,\u201D \u201Cerase,\u201D or \u201Ccut,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
       ],
       ["Delete a range", "Remove the passage from \u201CI remember the time\u201D to \u201Cnearly in an instant.\u201D Both endpoint phrases and the text between them are removed."],
-      ["About a sentence or phrase", "Delete, remove, or replace the sentence or phrase about a description; or move a phrase to the end of the sentence about a description. A unique high-confidence semantic match is required."],
+      ["About a sentence or phrase", "Say \u201Cdelete the sentence about Erin unwinding,\u201D \u201Creplace the phrase about Erin unwinding with she rests,\u201D or \u201Cmove the sentence about Erin unwinding after Maeve waits.\u201D You can also say \u201Cmove the phrase we must carry on to the end of the sentence about a long war.\u201D Jev requires a unique high-confidence match; otherwise the edit stops. Quote a literal target containing \u201Cabout\u201D to keep it exact."],
       ["Move", "Move, relocate, or shift \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
       ["Move before", "Move paragraph 3 before paragraph 1."],
       ["Move after", "Move paragraph 1 after paragraph 2."]

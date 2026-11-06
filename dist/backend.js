@@ -5674,6 +5674,23 @@ function parseDeterministicCompoundEditPlan(clauses, session) {
     )
   });
 }
+function normalizeAboutDescription(description, draft) {
+  const words = [...draft.matchAll(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu)].map((match) => match[0]);
+  const key = (word) => word.toLocaleLowerCase().replace(/[’']/gu, "");
+  const base = (word) => word.replace(/['’]s$/iu, "");
+  return description.replace(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu, (heard) => {
+    const heardKey = key(heard);
+    if (heardKey.length < 4 || words.some((word) => key(word) === heardKey)) return heard;
+    const matches = [...new Map(words.filter((word) => {
+      const left = key(heard);
+      const right = key(word);
+      const leftBase = key(base(heard));
+      const rightBase = key(base(word));
+      return right.length >= 4 && (areSpeechPhoneticNeighbors(left, right) || leftBase.length >= 4 && rightBase.length >= 4 && areSpeechPhoneticNeighbors(leftBase, rightBase));
+    }).map((word) => [key(word), word])).values()];
+    return matches.length === 1 ? matches[0] : heard;
+  });
+}
 function aboutPhoneticEvidence(description, candidate) {
   const normalize = (word) => word.toLocaleLowerCase().replace(/[’']/gu, "");
   const heardWords = [...description.matchAll(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu)].map((match) => match[0]);
@@ -5722,6 +5739,7 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
   }
   const kind = (destinationMove ? destinationMove[2] : source[2]).toLocaleLowerCase();
   const candidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind);
+  const phoneticDescription = normalizeAboutDescription(description, session.cleanText);
   const startedAt2 = performance.now();
   const logOutcome = (outcome, details = "") => recordDebug(userId, "edit.about", `outcome=${outcome} kind=${kind} candidates=${candidates.length}${details ? ` ${details}` : ""} duration=${debugDuration(startedAt2)}`);
   if (!candidates.length || candidates.length > 100) {
@@ -5735,11 +5753,11 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
   try {
     const questions = Object.fromEntries(candidates.map((candidate, index) => [`about_${index}`, {
       type: "noul",
-      instructions: `Does candidate about_${index} specifically express the described subject? The description may contain speech transcription errors. Consider this candidate's phoneticEvidence as possible sound-alike interpretations, not established corrections; judge the complete meaning and reject unrelated or ambiguous interpretations.`,
+      instructions: `Does candidate about_${index} specifically express the described subject? The original description may contain speech transcription errors. phoneticDescription is a possible draft-based sound-alike interpretation, not a confirmed correction. Consider both descriptions and this candidate's phoneticEvidence; judge the complete meaning and reject unrelated or ambiguous interpretations.`,
       criteria: { true: "The candidate directly expresses the description.", false: "It is unrelated, only broadly related, or does not identify the requested content." }
     }]));
     const result = await Promise.race([
-      spindle.decisions.evaluate({ userId, ...connectionId ? { connection_id: connectionId } : {}, state: { task: "Identify the sentence or phrase described by the user.", description, candidates: candidates.map((candidate, index) => ({ id: `about_${index}`, text: candidate.text, phoneticEvidence: aboutPhoneticEvidence(description, candidate.text) })) }, questions }, { signal: controller.signal }),
+      spindle.decisions.evaluate({ userId, ...connectionId ? { connection_id: connectionId } : {}, state: { task: "Identify the sentence or phrase described by the user.", description, phoneticDescription, candidates: candidates.map((candidate, index) => ({ id: `about_${index}`, text: candidate.text, phoneticEvidence: aboutPhoneticEvidence(description, candidate.text) })) }, questions }, { signal: controller.signal }),
       new Promise((resolve) => {
         timer = setTimeout(() => {
           controller.abort();

@@ -2984,17 +2984,25 @@ test('offers candidate-specific phonetic evidence for a misheard about descripti
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-phonetic', operationId: 'about-phonetic-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the phrase about the cattles going.' }, userId)
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'edit.proposal.response')
-  const request = decisionRequests.find((item) => (item as { state?: { task?: string } }).state?.task === 'Identify the sentence or phrase described by the user.') as { state: { description: string; candidates: Array<{ id: string; phoneticEvidence: Array<{ heard: string; candidateWord: string }> }> } }
+  const request = decisionRequests.find((item) => (item as { state?: { task?: string } }).state?.task === 'Identify the sentence or phrase described by the user.') as { state: { description: string; phoneticDescription: string; candidates: Array<{ id: string; phoneticEvidence: Array<{ heard: string; candidateWord: string }> }> } }
   assert.equal(request.state.description, 'the cattles going')
+  assert.equal(request.state.phoneticDescription, 'the kettle’s going')
   assert.deepEqual(request.state.candidates.find((item) => item.id === 'about_1')?.phoneticEvidence, [{ heard: 'cattles', candidateWord: 'kettle’s' }])
   assert.deepEqual(request.state.candidates.find((item) => item.id === 'about_0')?.phoneticEvidence, [])
+  for (const [index, spoken] of ['cattle', 'cattle’s'].entries()) {
+    decisionRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-phonetic-form-${index}`, operationId: `about-phonetic-form-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: `Delete the phrase about the ${spoken} going.` }, userId)
+    const form = decisionRequests.find((item) => (item as { state?: { task?: string } }).state?.task === 'Identify the sentence or phrase described by the user.') as { state: { phoneticDescription: string } }
+    assert.equal(form.state.phoneticDescription, 'the kettle’s going')
+  }
   const ambiguousUser = 'about-phonetic-ambiguous-user'
   const ambiguousChat = 'about-phonetic-ambiguous-chat'
   activeChatId = ambiguousChat
   await seedDraft(ambiguousUser, ambiguousChat, 'Kettles and Kattles are going.')
   decisionRequests.length = 0
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-phonetic-ambiguous', operationId: 'about-phonetic-ambiguous-op', chatId: ambiguousChat, expectedVersion: 1, instructionTranscript: 'Delete the sentence about the cattles going.' }, ambiguousUser)
-  const ambiguousRequest = decisionRequests.find((item) => (item as { state?: { task?: string } }).state?.task === 'Identify the sentence or phrase described by the user.') as { state: { candidates: Array<{ phoneticEvidence: Array<{ heard: string }> }> } }
+  const ambiguousRequest = decisionRequests.find((item) => (item as { state?: { task?: string } }).state?.task === 'Identify the sentence or phrase described by the user.') as { state: { phoneticDescription: string; candidates: Array<{ phoneticEvidence: Array<{ heard: string }> }> } }
+  assert.equal(ambiguousRequest.state.phoneticDescription, 'the cattles going')
   assert.equal(ambiguousRequest.state.candidates[0]?.phoneticEvidence.some((item) => item.heard === 'cattles'), false)
 })
 

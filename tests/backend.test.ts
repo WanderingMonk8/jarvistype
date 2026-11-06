@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { applyManualEdit, clearDraftAfterSend, restoreDraftSession } from '../src/domain/draft-session'
 import { PROTOCOL_VERSION, type BackendResponse } from '../src/protocol/messages'
+import { isBackendResponse } from '../src/protocol/validation'
 
 type FrontendHandler = (payload: unknown, userId: string, frontendSessionId?: string) => void
 
@@ -19,6 +20,7 @@ const generationRequests: Array<{
 const decisionRequests: unknown[] = []
 let decisionsEnabled = false
 let decisionProbability = 0
+let aboutDecision: ((id: string) => number) | null = null
 let referenceDecisionProbability = 1
 let hintBoundaryDecision: ((id: string) => number) | null = null
 let hintSemanticDecision: ((id: string) => number) | null = null
@@ -106,7 +108,7 @@ const spindleMock = {
           {
             type: 'noul',
             noul:
-              key === 'introducedGrammarError' ? decisionProbability : key === 'plural_span' ? hintPluralDecision : key === 'confirm_span' ? hintConfirmDecision : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : key.startsWith('semantic_') && hintSemanticDecision ? hintSemanticDecision(key) : key.startsWith('command_') && hintCommandDecision ? hintCommandDecision(key) : key.startsWith('span_') && hintSpanDecision ? hintSpanDecision(key) : referenceDecisionProbability,
+              key === 'introducedGrammarError' ? decisionProbability : key.startsWith('about_') && aboutDecision ? aboutDecision(key) : key === 'plural_span' ? hintPluralDecision : key === 'confirm_span' ? hintConfirmDecision : key.startsWith('reference_') && hintBoundaryDecision ? hintBoundaryDecision(key) : key.startsWith('semantic_') && hintSemanticDecision ? hintSemanticDecision(key) : key.startsWith('command_') && hintCommandDecision ? hintCommandDecision(key) : key.startsWith('span_') && hintSpanDecision ? hintSpanDecision(key) : referenceDecisionProbability,
           },
         ]),
       )
@@ -271,6 +273,7 @@ test.beforeEach(() => {
   generationRequests.length = 0
   decisionRequests.length = 0
   decisionsEnabled = false
+  aboutDecision = null
   decisionProbability = 0
   hintSpanDecision = null
   hintPluralDecision = 0
@@ -485,6 +488,26 @@ test('aborts a stalled normalization provider at the configured timeout and retu
   assert.equal(normalizationSignal?.aborted, true)
 })
 
+test('cancelling normalization aborts an unresponsive provider without proposing or changing the draft', async () => {
+  const userId = 'cancel-normalization-user'
+  const chatId = 'cancel-normalization-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Keep this draft.')
+  normalizationHangs = true
+  responses.length = 0
+  const request = recordingAppendRequest(chatId, 'cancel-normalization-segment', 1, 'Hello there.')
+  await dispatch(request, userId)
+  assert.ok(normalizationSignal)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'app.operation.cancel', requestId: 'cancel-normalization', targetRequestId: request.requestId }, userId)
+  assert.equal(normalizationSignal.aborted, true)
+  assert.equal(responses.some(({ payload }) => payload.type === 'transcript.normalization.response'), false)
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'draft.load.request', requestId: 'cancel-normalization-load', chatId }, userId)
+  const loaded = responses.at(-1)?.payload
+  assert.equal(loaded?.type, 'draft.snapshot.response')
+  if (loaded?.type === 'draft.snapshot.response') assert.equal(loaded.snapshot.cleanText, 'Keep this draft.')
+})
+
 test('times out an unresponsive edit provider and releases the draft lock', async () => {
   const userId = 'edit-provider-timeout-user'
   const chatId = 'edit-provider-timeout-chat'
@@ -517,10 +540,12 @@ test('cancelling an unresponsive edit provider releases the draft lock', async (
   assert.ok(editInterpretationSignal)
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'app.operation.cancel', requestId: 'cancel-edit-provider-cancel', targetRequestId: 'cancel-edit-provider-request' }, userId)
   assert.equal(editInterpretationSignal.aborted, true)
+  assert.equal(responses.some(({ payload }) => payload.type === 'edit.proposal.response'), false)
   responses.length = 0
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'draft.load.request', requestId: 'cancel-edit-provider-load', chatId }, userId)
   const response = responses.at(-1)?.payload
   assert.equal(response?.type, 'draft.snapshot.response')
+  if (response?.type === 'draft.snapshot.response') assert.equal(response.snapshot.cleanText, 'Keep this draft.')
 })
 
 test('lists safe normalization connections and dispatches with selected connection and model', async () => {
@@ -2920,6 +2945,204 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('resolves about sentence and phrase edits and move destinations with guarded decisions', async () => {
+  const examples = [
+    ["The kitchen tap shuts off. The kettle’s going now, that low building rattle. Maeve hasn’t turned around.", 'Delete the sentence about the kitchen tap shutting off.', 0, "The kettle’s going now, that low building rattle. Maeve hasn’t turned around."],
+    ['Erin unwinds herself, then smiles. She leaves.', 'Delete the sentence about Erin relaxing.', 0, 'She leaves.'],
+    ['Erin unwinds herself with a groan, finds her camisole, and puts it on anyway — the tear gaping at the shoulder, and she makes no comment. She takes her mug.', 'Delete the sentence about Erin unwinding herself.', 0, 'She takes her mug.'],
+    ['Erin unwinds herself, then smiles. She leaves.', 'Delete the phrase about Erin relaxing.', 0, 'Then smiles. She leaves.'],
+    ['Erin unwinds herself, then smiles. She leaves.', 'Replace the phrase about Erin relaxing with Maeve waits.', 0, 'Maeve waits then smiles. She leaves.'],
+    ['We must carry on. They fought a long war.', 'Move the phrase “We must carry on” to the end of the sentence about a long conflict.', 1, 'They fought a long war. We must carry on.'],
+    ['Erin unwinds herself. Maeve waits.', 'Move the sentence about Erin relaxing after Maeve waits.', 0, 'Maeve waits. Erin unwinds herself.'],
+  ] as const
+  for (const [index, [draft, instruction, selected, expected]] of examples.entries()) {
+    const userId = `about-edit-user-${index}`
+    const chatId = `about-edit-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = true
+    aboutDecision = (id) => id === `about_${selected}` ? 0.99 : 0.01
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-edit-${index}`, operationId: `about-edit-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+    const questionSets = decisionRequests.map((request) => (request as { questions?: Record<string, { instructions?: string }> }).questions ?? {})
+    assert.ok(questionSets.some((questions) => questions[`about_${selected}`]?.instructions?.includes(`about_${selected}`)))
+  }
+})
+
+test('offers candidate-specific phonetic evidence for a misheard about description', async () => {
+  const userId = 'about-phonetic-user'
+  const chatId = 'about-phonetic-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  aboutDecision = (id) => id === 'about_1' ? 0.99 : 0.01
+  await seedDraft(userId, chatId, 'The kitchen tap shuts off. The kettle’s going now, that low building rattle. Maeve hasn’t turned around.')
+  responses.length = 0
+  decisionRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-phonetic', operationId: 'about-phonetic-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the phrase about the cattles going.' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  const request = decisionRequests.find((item) => (item as { state?: { task?: string } }).state?.task === 'Identify the sentence or phrase described by the user.') as { state: { description: string; phoneticDescription: string; candidates: Array<{ id: string; phoneticEvidence: Array<{ heard: string; candidateWord: string }> }> } }
+  assert.equal(request.state.description, 'the cattles going')
+  assert.equal(request.state.phoneticDescription, 'the kettle’s going')
+  assert.deepEqual(request.state.candidates.find((item) => item.id === 'about_1')?.phoneticEvidence, [{ heard: 'cattles', candidateWord: 'kettle’s' }])
+  assert.deepEqual(request.state.candidates.find((item) => item.id === 'about_0')?.phoneticEvidence, [])
+  for (const [index, spoken] of ['cattle', 'cattle’s'].entries()) {
+    decisionRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-phonetic-form-${index}`, operationId: `about-phonetic-form-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: `Delete the phrase about the ${spoken} going.` }, userId)
+    const form = decisionRequests.find((item) => (item as { state?: { task?: string } }).state?.task === 'Identify the sentence or phrase described by the user.') as { state: { phoneticDescription: string } }
+    assert.equal(form.state.phoneticDescription, 'the kettle’s going')
+  }
+  const ambiguousUser = 'about-phonetic-ambiguous-user'
+  const ambiguousChat = 'about-phonetic-ambiguous-chat'
+  activeChatId = ambiguousChat
+  await seedDraft(ambiguousUser, ambiguousChat, 'Kettles and Kattles are going.')
+  decisionRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-phonetic-ambiguous', operationId: 'about-phonetic-ambiguous-op', chatId: ambiguousChat, expectedVersion: 1, instructionTranscript: 'Delete the sentence about the cattles going.' }, ambiguousUser)
+  const ambiguousRequest = decisionRequests.find((item) => (item as { state?: { task?: string } }).state?.task === 'Identify the sentence or phrase described by the user.') as { state: { phoneticDescription: string; candidates: Array<{ phoneticEvidence: Array<{ heard: string }> }> } }
+  assert.equal(ambiguousRequest.state.phoneticDescription, 'the cattles going')
+  assert.equal(ambiguousRequest.state.candidates[0]?.phoneticEvidence.some((item) => item.heard === 'cattles'), false)
+})
+
+test('corroborates near-threshold about matches only with unique draft phonetics and a clear margin', async () => {
+  const examples = [
+    ['The tap stops. The kettle’s going now, rattling.', 'cattle’s going', [0.03, 0.87, 0.02], true],
+    ['The tap stops. The kettle’s going now, rattling.', 'cattle’s going', [0.03, 0.84, 0.02], true],
+    ['The tap stops. The kettle’s going now, rattling.', 'cattle’s going', [0.76, 0.87, 0.02], false],
+    ['The tap stops. The kettle’s going now, rattling.', 'kettle’s going', [0.03, 0.87, 0.02], true],
+    ['The tap stops. The kettle’s going now, rattling.', 'kettle’s going', [0.03, 0.79, 0.02], false],
+    ['The tap stops. The kettle’s going now, rattling.', 'kettle’s going', [0.60, 0.84, 0.02], false],
+    ['The kettle’s boiling. The kettle’s going now.', 'cattle’s going', [0.03, 0.87], true],
+  ] as const
+  for (const [index, [draft, description, scores, expected]] of examples.entries()) {
+    const userId = `about-corroboration-user-${index}`
+    const chatId = `about-corroboration-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = true
+    aboutDecision = (id) => scores[Number(id.slice('about_'.length))] ?? 0.01
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-corroboration-${index}`, operationId: `about-corroboration-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: `Delete the phrase about ${description}.` }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type === 'edit.proposal.response', expected, description)
+    if (expected && response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, index === 6 ? 'The kettle’s boiling.' : 'The tap stops. Rattling.')
+    if (expected && (scores[1]! < 0.85 || description === 'kettle’s going' || index === 6) && response?.type === 'edit.proposal.response') assert.match(response.proposal.explanation, /Uncertain “about” match; verify the selected phrase/u)
+  }
+})
+
+test('about decision diagnostics record scores without dictated content', async () => {
+  const userId = 'about-debug-user'
+  const chatId = 'about-debug-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  aboutDecision = (id) => id === 'about_0' ? 0.79 : 0.1
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'about-debug-settings', settings: { contextMessageCount: 0, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', debugLoggingEnabled: true } }, userId)
+  await seedDraft(userId, chatId, 'The kitchen tap shuts off. The kettle rattles.')
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-debug-edit', operationId: 'about-debug-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the sentence about the tap stopping.' }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'debug.log.request', requestId: 'about-debug-read' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'debug.log.response')
+  if (response?.type === 'debug.log.response') {
+    const log = response.entries.join('\n')
+    assert.match(log, /\[edit\.about\] outcome=below-threshold kind=sentence candidates=2 best=0\.790 runnerUp=0\.100/u)
+    assert.doesNotMatch(log, /kitchen|kettle|tap stopping/iu)
+  }
+})
+
+test('about selection refuses tied candidates and preserves literal quoted about targets', async () => {
+  const userId = 'about-safe-user'
+  const chatId = 'about-safe-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  aboutDecision = () => 0.99
+  await seedDraft(userId, chatId, 'Erin rests. Maeve rests.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-tie', operationId: 'about-tie-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the sentence about resting.' }, userId)
+  assert.equal(responses.at(-1)?.payload.type, 'app.error')
+  decisionsEnabled = false
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-unavailable', operationId: 'about-unavailable-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the sentence about resting.' }, userId)
+  assert.equal(responses.at(-1)?.payload.type, 'app.error')
+  decisionsEnabled = true
+  const literalUser = 'about-literal-user'
+  const literalChat = 'about-literal-chat'
+  activeChatId = literalChat
+  await seedDraft(literalUser, literalChat, 'We spoke about the war yesterday.')
+  responses.length = 0
+  decisionRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-literal', operationId: 'about-literal-op', chatId: literalChat, expectedVersion: 1, instructionTranscript: 'Delete the phrase “about the war”.' }, literalUser)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  assert.equal(decisionRequests.some((request) => Object.keys((request as { questions?: Record<string, unknown> }).questions ?? {}).some((key) => key.startsWith('about_'))), false)
+})
+
+test('supports relative replacement and casing with multiword anchors', async () => {
+  const examples = [
+    ['Most of the time, with', 'Replace the word with after most of the time with without.', 'Most of the time, without'],
+    ['We wait. The road, is clear.', 'Uppercase the phrase the road is clear after we wait.', 'We wait. THE ROAD, IS CLEAR.'],
+    ['We wait. The road, is clear.', 'Put quotations around the phrase the road is clear after we wait.', 'We wait. “The road, is clear.”'],
+  ] as const
+  for (const [index, [draft, instruction, expected]] of examples.entries()) {
+    const userId = `relative-edit-user-${index}`
+    const chatId = `relative-edit-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `relative-edit-${index}`, operationId: `relative-edit-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instruction)
+    assert.equal(isBackendResponse(proposal), true, `frontend validation: ${instruction}`)
+    if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, expected, instruction)
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('supports relative word, phrase, and sentence deletion with multiword anchors', async () => {
+  const examples = [
+    ['Most of the time, with', 'Delete the word with after most of the time.', 'Most of the time,'],
+    ['With, most of the time', 'Delete the word with before most of the time.', 'Most of the time'],
+    ['We wait. The road, is clear. Next.', 'Delete the phrase the road is clear after we wait.', 'We wait. Next.'],
+    ['We wait. The road is clear. Next.', 'Delete the sentence the road is clear after we wait.', 'We wait. Next.'],
+    ['We wait. The road is clear. Next.', 'Delete the sentence the road after we wait.', 'We wait. Next.'],
+  ] as const
+  for (const [index, [draft, instruction, expected]] of examples.entries()) {
+    const userId = `relative-multiword-user-${index}`
+    const chatId = `relative-multiword-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `relative-multiword-${index}`, operationId: `relative-multiword-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instruction)
+    assert.equal(isBackendResponse(proposal), true, `frontend validation: ${instruction}`)
+    if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, expected, instruction)
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('deletes the word immediately after an anchor across punctuation and rejects ambiguous anchors', async () => {
+  const userId = 'relative-word-delete-user'
+  const chatId = 'relative-word-delete-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'We spoke with her. Finally, with. And I leave.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'relative-word-delete', operationId: 'relative-word-delete-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the word with after finally.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'We spoke with her. Finally. And I leave.')
+  const secondUser = 'relative-word-ambiguous-user'
+  const secondChat = 'relative-word-ambiguous-chat'
+  activeChatId = secondChat
+  await seedDraft(secondUser, secondChat, 'Finally, with. Finally, with.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'relative-word-ambiguous', operationId: 'relative-word-ambiguous-op', chatId: secondChat, expectedVersion: 1, instructionTranscript: 'Delete the word with after finally.' }, secondUser)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
+})
+
 test('moves the last quotation mark before the last sentence without a provider call', async () => {
   const userId = 'move-quote-sentence-user'
   const chatId = 'move-quote-sentence-chat'
@@ -2944,6 +3167,39 @@ test('quotes a spoken range including its attached punctuation run', async () =>
   const proposal = responses.at(-1)?.payload
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'She says “hello, then goodbye?!” Next.')
+})
+
+test('wraps a multi-sentence quotation range once and includes attached punctuation', async () => {
+  const instructions = ['Put quotations from alpha to omega.', 'Put quotations around alpha to omega.', 'Put quotations around alpha and omega.', 'Put quotations around everything from alpha through omega.', 'Put quotations around everything between alpha and omega.']
+  for (const [index, instructionTranscript] of instructions.entries()) {
+    const userId = `quotation-continuous-user-${index}`
+    const chatId = `quotation-continuous-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, 'Before. Alpha begins. Another sentence. Omega?! After.')
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `quotation-continuous-${index}`, operationId: `quotation-continuous-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response')
+    if (proposal?.type === 'edit.proposal.response')
+      assert.equal(proposal.proposal.afterText, 'Before. “Alpha begins. Another sentence. Omega?!” After.')
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('quotation around an exact phrase containing and keeps it as one target', async () => {
+  const userId = 'quotation-around-literal-and-user'
+  const chatId = 'quotation-around-literal-and-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Before. Bread and butter, please. After.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-around-literal-and', operationId: 'quotation-around-literal-and-op', chatId, expectedVersion: 1, instructionTranscript: 'Put quotations around the phrase bread and butter.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'Before. “Bread and butter,” please. After.')
+  assert.equal(generationRequests.length, 0)
 })
 
 test('quotes through a unique spoken ellipsis without a provider call', async () => {
@@ -3971,6 +4227,26 @@ test('inserts deterministically after a sentence label with punctuation-insensit
   assert.equal(proposal.proposal.afterText, 'She answered, “So, yeah.” Are you clocking out soon?')
   assert.deepEqual(proposal.proposal.plan.operations[0]?.target, { exactText: 'so yeah' })
   assert.equal(proposal.proposal.plan.operations[0]?.text, 'Are you clocking out soon?')
+})
+
+test('replacement with delimiter does not split a draft target at an earlier to or for', async () => {
+  const cases = [
+    ["I’m off to the launder.", "Replace the phrase I'm off to the launder with I'm off now.", "I'm off now."],
+    ['We wait for the train.', 'Replace the phrase wait for the train with depart now.', 'We depart now.'],
+  ] as const
+  for (const [index, [draft, instructionTranscript, expected]] of cases.entries()) {
+    const userId = `replace-delimiter-user-${index}`
+    const chatId = `replace-delimiter-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `replace-delimiter-${index}`, operationId: `replace-delimiter-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify(proposal))
+    if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, expected)
+    assert.equal(generationRequests.filter((request) => request.messages?.some((message: { content?: string }) => message.content?.includes('Convert the spoken editing instruction'))).length, 0)
+  }
 })
 
 test('removes an unquoted phrase label from deterministic replacement text', async () => {
@@ -7261,6 +7537,20 @@ test('uses phonetic character references for recording normalization and edit ta
   if (edit?.type === 'edit.proposal.response')
     assert.equal(edit.proposal.afterText, 'The captain checks the road.')
   assert.equal(generationRequests.length, 0)
+})
+
+test('preserves a distinct replacement when fuzzy reference correction would make it a no-op', async () => {
+  decisionsEnabled = true
+  const userId = 'replacement-noop-reference-user'
+  const chatId = 'replacement-noop-reference-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'Brad watches. Brad waits.' }]
+  await seedDraft(userId, chatId, 'I would rather trade Dickinson for Brad.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'replacement-noop-reference', operationId: 'replacement-noop-reference-op', chatId, expectedVersion: 1, instructionTranscript: 'Replace Brett with Freud.' }, userId)
+  const edit = responses.at(-1)?.payload
+  assert.equal(edit?.type, 'edit.proposal.response')
+  if (edit?.type === 'edit.proposal.response') assert.equal(edit.proposal.afterText, 'I would rather trade Dickinson for Freud.')
 })
 
 test('corrects a repeated misheard name in a replacement payload', async () => {

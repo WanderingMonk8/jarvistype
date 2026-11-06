@@ -81,7 +81,7 @@ export const COMMAND_GROUPS = [
       ],
       [
         'Quotations',
-        'Say “quote” or “quotation” at both ends of a quotation; use “begin speech” and “end speech,” “beginning speech” and “ending speech,” or “begins speech” and “ends speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”',
+        'Say “quote” or “quotation” at both ends of a quotation; use “begin speech” (or “again speech”) and “end speech,” “beginning speech” and “ending speech,” or “begins speech” and “ends speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”',
       ],
       ['Explicit punctuation', 'Say “insert period,” “punctuation colon,” or “command new line.”'],
       [
@@ -120,6 +120,7 @@ export const COMMAND_GROUPS = [
         'Say “delete,” “remove,” “take off,” “take out,” “erase,” or “cut,” followed by the target—for example, “Take off the second sentence in paragraph 1.”',
       ],
       ['Delete a range', 'Remove the passage from “I remember the time” to “nearly in an instant.” Both endpoint phrases and the text between them are removed.'],
+      ['About a sentence or phrase', 'Say “delete the sentence about Erin unwinding,” “replace the phrase about Erin unwinding with she rests,” or “move the sentence about Erin unwinding after Maeve waits.” You can also say “move the phrase we must carry on to the end of the sentence about a long war.” A clear near-threshold match is flagged for review; low-confidence or ambiguous matches stop. Quote a literal target containing “about” to keep it exact.'],
       ['Move', 'Move, relocate, or shift “approved” before “pending” in paragraph 1.'],
       ['Move before', 'Move paragraph 3 before paragraph 1.'],
       ['Move after', 'Move paragraph 1 after paragraph 2.'],
@@ -656,6 +657,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     NORMALIZATION_TIMEOUT_MS,
     sendCancellation,
   )
+  let activeNormalizationRequestId: string | null = null
+  let activeNormalizationMode: 'message' | 'edit' | null = null
   const sendRegistry = new RequestRegistry<BackendResponse>(SEND_TIMEOUT_MS, sendCancellation)
 
   const hasChatMismatch = () =>
@@ -773,7 +776,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           ? '■'
           : state.voicePhase === 'processing'
             ? 'Transcribing…'
-            : state.voicePhase === 'committing'
+            : state.voicePhase === 'committing' && activeNormalizationMode !== 'edit'
               ? 'Normalizing…'
               : state.voicePhase === 'review'
                 ? 'Review required'
@@ -781,7 +784,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const recordingInProgress =
       activeRecording !== null &&
       (state.voicePhase === 'starting' || state.voicePhase === 'recording')
-    recordButton.disabled = recordingInProgress
+    const normalizationCancellable = state.voicePhase === 'committing' && activeNormalizationRequestId !== null && activeNormalizationMode === 'message'
+    const editCancellable = state.voicePhase === 'committing' && activeNormalizationRequestId !== null && activeNormalizationMode === 'edit'
+    recordButton.disabled = normalizationCancellable ? false : recordingInProgress
       ? activeRecording?.mode !== 'message'
       : !hasNativeStt() ||
         !recordingOwnerReady ||
@@ -796,21 +801,23 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         : editLive && state.voicePhase === 'recording'
           ? 'recording'
           : ''
-    recordButton.setAttribute('aria-label', messageIsLive ? 'Stop recording' : 'Record')
-    recordButton.title = messageIsLive ? 'Stop recording' : ''
+    recordButton.setAttribute('aria-label', normalizationCancellable ? 'Cancel normalization' : messageIsLive ? 'Stop recording' : 'Record')
+    recordButton.title = normalizationCancellable ? 'Cancel normalization' : messageIsLive ? 'Stop recording' : ''
     recordButton.parentElement?.setAttribute('data-live', String(messageIsLive))
-    recordEditButton.setAttribute('aria-label', editIsLive ? 'Stop edit recording' : 'Edit')
-    recordEditButton.title = editIsLive ? 'Stop edit recording' : ''
+    recordButton.parentElement?.setAttribute('data-normalizing', String(normalizationCancellable))
+    recordEditButton.setAttribute('aria-label', editCancellable ? 'Cancel edit interpretation' : editIsLive ? 'Stop edit recording' : 'Edit')
+    recordEditButton.title = editCancellable ? 'Cancel edit interpretation' : editIsLive ? 'Stop edit recording' : ''
     recordEditButton.parentElement?.setAttribute('data-live', String(editIsLive))
+    recordEditButton.parentElement?.setAttribute('data-normalizing', String(editCancellable))
     recordEditButton.textContent =
       state.voicePhase === 'starting' && activeRecording?.mode === 'edit'
         ? 'Preparing'
         : editIsLive
           ? '■'
-          : state.voicePhase === 'review' && state.pendingEditProposal
+          : editCancellable ? 'Normalizing…' : state.voicePhase === 'review' && state.pendingEditProposal
             ? 'Review required'
             : 'Edit'
-    recordEditButton.disabled = recordingInProgress
+    recordEditButton.disabled = editCancellable ? false : recordingInProgress
       ? activeRecording?.mode !== 'edit'
       : !hasNativeStt() ||
         !recordingOwnerReady ||
@@ -819,10 +826,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         state.voicePhase === 'processing' ||
         state.voicePhase === 'committing' ||
         state.voicePhase === 'review'
-    cancelRecordingButton.style.visibility = messageIsLive ? 'visible' : 'hidden'
-    cancelRecordingButton.disabled = !messageIsLive
-    cancelEditRecordingButton.style.visibility = editIsLive ? 'visible' : 'hidden'
-    cancelEditRecordingButton.disabled = !activeRecording || activeRecording.mode !== 'edit'
+    cancelRecordingButton.style.visibility = messageIsLive || normalizationCancellable ? 'visible' : 'hidden'
+    cancelRecordingButton.disabled = !messageIsLive && !normalizationCancellable
+    cancelRecordingButton.textContent = normalizationCancellable ? 'Normalizing…' : '✕'
+    cancelRecordingButton.setAttribute('aria-label', normalizationCancellable ? 'Cancel normalization' : 'Cancel recording')
+    cancelRecordingButton.title = normalizationCancellable ? 'Cancel normalization' : 'Cancel recording'
+    cancelEditRecordingButton.style.visibility = editIsLive || editCancellable ? 'visible' : 'hidden'
+    cancelEditRecordingButton.disabled = !editIsLive && !editCancellable
+    cancelEditRecordingButton.textContent = editCancellable ? 'Normalizing…' : '✕'
+    cancelEditRecordingButton.setAttribute('aria-label', editCancellable ? 'Cancel edit interpretation' : 'Cancel edit recording')
+    cancelEditRecordingButton.title = editCancellable ? 'Cancel edit interpretation' : 'Cancel edit recording'
     voiceStatus.textContent = state.voiceMessage
     voiceStatus.dataset.phase = state.voicePhase
     voiceElapsed.textContent = `Elapsed: ${formatDuration(state.voiceElapsedMs)}`
@@ -1437,17 +1450,24 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       return
     }
 
-    const outcome = await performNormalizationRequest({
+    const requestId = createRequestId('transcript-normalize')
+    activeNormalizationRequestId = requestId
+    activeNormalizationMode = 'message'
+    const pending = performNormalizationRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: 'transcript.normalize.request',
-      requestId: createRequestId('transcript-normalize'),
+      requestId,
       operationId,
       chatId: snapshot.chatId,
       expectedVersion: snapshot.draftVersion,
       rawTranscript,
       ...(quotationBoundaryHint ? { quotationBoundaryHint } : {}),
     })
+    render()
+    const outcome = await pending
+    if (activeNormalizationRequestId === requestId) { activeNormalizationRequestId = null; activeNormalizationMode = null }
     if (!alive) return
+    if (outcome.status === 'cancelled') return
     if (
       requestTransitionId !== chatTransitionId ||
       state.activeChatId !== snapshot.chatId ||
@@ -1505,16 +1525,23 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       render()
       return
     }
-    const outcome = await performNormalizationRequest({
+    const requestId = createRequestId('edit-interpret')
+    activeNormalizationRequestId = requestId
+    activeNormalizationMode = 'edit'
+    const pending = performNormalizationRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: 'edit.interpret.request',
-      requestId: createRequestId('edit-interpret'),
+      requestId,
       operationId,
       chatId: snapshot.chatId,
       expectedVersion: snapshot.draftVersion,
       instructionTranscript,
     })
+    render()
+    const outcome = await pending
+    if (activeNormalizationRequestId === requestId) { activeNormalizationRequestId = null; activeNormalizationMode = null }
     if (!alive) return
+    if (outcome.status === 'cancelled') return
     if (
       requestTransitionId !== chatTransitionId ||
       state.activeChatId !== snapshot.chatId ||
@@ -2358,12 +2385,34 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const handleUndoClick = () =>
     void (state.snapshot?.canUndoRecording ? handleUndoRecording() : handleUndo())
   const handleRedoClick = () => void handleRedo()
-  const handleRecordClick = () => void handleRecording('message')
-  const handleRecordEditClick = () => void handleRecording('edit')
-  const handleCancelRecordingClick = () =>
-    cancelActiveRecording('Recording cancelled. No transcript was appended.')
-  const handleCancelEditRecordingClick = () =>
-    cancelActiveRecording('Edit recording cancelled. The draft was not changed.')
+  const cancelNormalization = () => {
+    const requestId = activeNormalizationRequestId
+    if (!requestId) return
+    const mode = activeNormalizationMode
+    activeNormalizationRequestId = null
+    activeNormalizationMode = null
+    if (normalizationRegistry.cancel(requestId)) sendCancellation(requestId)
+    state.voicePhase = 'idle'
+    state.voiceProvisionalText = ''
+    state.voiceMessage = mode === 'edit' ? 'Edit interpretation cancelled. The draft was not changed.' : 'Normalization cancelled. No transcript was appended.'
+    render()
+  }
+  const handleRecordClick = () => {
+    if (activeNormalizationMode === 'message') cancelNormalization()
+    else void handleRecording('message')
+  }
+  const handleRecordEditClick = () => {
+    if (activeNormalizationMode === 'edit') cancelNormalization()
+    else void handleRecording('edit')
+  }
+  const handleCancelRecordingClick = () => {
+    if (activeNormalizationMode === 'message') cancelNormalization()
+    else cancelActiveRecording('Recording cancelled. No transcript was appended.')
+  }
+  const handleCancelEditRecordingClick = () => {
+    if (activeNormalizationMode === 'edit') cancelNormalization()
+    else cancelActiveRecording('Edit recording cancelled. The draft was not changed.')
+  }
   const handleSendClick = () => void handleSend()
   const handleAcceptProposalClick = () => void acceptNormalizationProposal()
   const handleRejectProposalClick = () => rejectNormalizationProposal()
@@ -3001,7 +3050,7 @@ function detectQuotationBoundaryHint(input: string): 'double' | 'single' | null 
   const trimmed = input.trim()
   if (/^begin\s+single\b[\s\S]*\bend\s+single[.,;:!?]*$/iu.test(trimmed)) return 'single'
   if (
-    /^begin(?:ning|s)?(?:\s+the)?\s+speech\b[\s\S]*\bend(?:ing|s)?\s+speech[.,;:!?]*$/iu.test(trimmed)
+    /^(?:begin(?:ning|s)?(?:\s+the)?|again)\s+speech\b[\s\S]*\bend(?:ing|s)?\s+speech[.,;:!?]*$/iu.test(trimmed)
   )
     return 'double'
   const doubleOpening = /^(?:open\s+)?(?:quote|quotation)(?:\s+marks?)?\b/iu
@@ -3170,6 +3219,11 @@ function shellMarkup(): string {
       .jt-record-slot > [data-record-message], .jt-record-slot > [data-record-edit] { grid-column: 1 / -1; }
       .jt-record-slot[data-live="true"] > [data-record-message], .jt-record-slot[data-live="true"] > [data-record-edit] { grid-column: 1; }
       .jt-record-slot > [data-cancel-recording], .jt-record-slot > [data-cancel-edit-recording] { grid-column: 2; }
+      .jt-record-slot[data-normalizing="true"] > [data-cancel-recording], .jt-record-slot[data-normalizing="true"] > [data-cancel-edit-recording] { grid-column: 1 / -1; }
+      .jt-record-slot[data-normalizing="true"] > [data-cancel-recording], .jt-record-slot[data-normalizing="true"] > [data-cancel-edit-recording] { display: grid; grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr); align-items: center; }
+      .jt-record-slot[data-normalizing="true"] > [data-cancel-recording]::before, .jt-record-slot[data-normalizing="true"] > [data-cancel-edit-recording]::before { content: '✕'; text-align: center; }
+      .jt-record-slot[data-normalizing="true"] > [data-cancel-recording]::after, .jt-record-slot[data-normalizing="true"] > [data-cancel-edit-recording]::after { content: ''; }
+      .jt-record-slot[data-normalizing="true"] > [data-record-message], .jt-record-slot[data-normalizing="true"] > [data-record-edit] { visibility: hidden; }
       .jt-actions > [data-send] { flex: 1 1 100%; }
       .jt-shell [data-recording-state="starting"] { border-color: #ecc94b; background: #ecc94b; color: #1a1a1a; font-weight: 700; }
       .jt-shell [data-recording-state="recording"] { border-color: #e53e3e; background: #e53e3e; color: #ffffff; font-weight: 700; }

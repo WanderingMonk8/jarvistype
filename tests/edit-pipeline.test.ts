@@ -6,7 +6,14 @@ import {
   createDraftSession,
   applyManualEdit,
 } from '../src/domain/draft-session'
-import { executeEditPlan, executeSequentialEditPlan, parseEditPlan, type EditPlan } from '../src/domain/edit-pipeline'
+import { executeEditPlan, executeSequentialEditPlan, findAboutTargetCandidates, parseEditPlan, type EditPlan } from '../src/domain/edit-pipeline'
+
+test('enumerates semantic sentence and punctuation-bounded phrase candidates', () => {
+  const text = 'Erin unwinds herself, then stands?! She leaves.'
+  const session = applyManualEdit(createDraftSession('about-candidates'), text, { expectedVersion: 0, editGroupId: 'seed' }).session
+  assert.deepEqual(findAboutTargetCandidates(text, session.paragraphs, 'sentence').map((candidate) => candidate.text), ['Erin unwinds herself, then stands?!', 'She leaves.'])
+  assert.deepEqual(findAboutTargetCandidates(text, session.paragraphs, 'phrase').map((candidate) => candidate.text), ['Erin unwinds herself,', 'then stands?!', 'She leaves.'])
+})
 
 function fixture() {
   const empty = createDraftSession('chat', '2026-01-01T00:00:00.000Z')
@@ -986,6 +993,19 @@ test('attaches inserted quotation marks directly to an exact sentence target', (
   }
 })
 
+test('quotation wraps close after punctuation attached to a phrase target', () => {
+  for (const punctuation of [',', '?!', '...', '—']) {
+    const text = `She said hello${punctuation} then left.`
+    const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Quote the phrase.', operations: [
+        { id: 'open', type: 'insert_before', target: { exactText: 'hello' }, text: '“' },
+        { id: 'close', type: 'insert_after', target: { exactText: 'hello' }, text: '”' },
+      ],
+    })
+    assert.equal(result.ok && result.afterText, `She said “hello${punctuation}” then left.`)
+  }
+})
+
 test('deletes an inclusive range across paragraphs and joins the remaining text safely', () => {
   const text = 'Before. I remember the time we met.\n\nMore words nearly in an instant she returned.'
   const plan = {
@@ -1420,6 +1440,17 @@ test('splits and joins paragraphs with controlled whitespace', () => {
     operations: [{ id: 'join-one', type: 'join_next', target: { paragraphOrdinal: 1 } }],
   })
   assert.equal(join.ok && join.afterText, 'First sentence. Second sentence. Closing paragraph.')
+})
+
+test('split anchors ignore unspecified punctuation and reject ambiguous or explicit mismatches', () => {
+  const text = 'Well, I agree. Next sentence.'
+  const seeded = applyManualEdit(createDraftSession('split-lexical-chat'), text, { expectedVersion: 0, editGroupId: 'seed' }).session
+  const run = (target: { exactText: string; ignorePunctuationForMatch?: boolean }) => executeEditPlan(seeded.cleanText, seeded.paragraphs, 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'split', operations: [{ id: 'split', type: 'split', target: { paragraphOrdinal: 1, ...target }, includeTrailingPunctuation: true }],
+  })
+  const split = run({ exactText: 'Well I agree' })
+  assert.equal(split.ok && split.afterText, 'Well, I agree.\n\nNext sentence.')
+  assert.equal(run({ exactText: 'Well; I agree', ignorePunctuationForMatch: false }).ok, false)
 })
 
 test('splits a sentence target after its terminal punctuation rather than an internal comma', () => {

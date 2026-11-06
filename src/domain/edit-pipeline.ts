@@ -535,7 +535,7 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     return null
   if (
     target.punctuation === undefined &&
-    (target.occurrenceFromEnd !== undefined || hasRelativePosition || hasRelativeText)
+    (target.occurrenceFromEnd !== undefined || ((hasRelativePosition || hasRelativeText) && target.exactText === undefined))
   )
     return null
   if (
@@ -628,7 +628,7 @@ function resolveOperation(
     start = match.start
     end = match.end
   } else if (operation.target.exactText !== undefined) {
-    const match = findExactOrFuzzyMatch(
+    const match = operation.target.relativeToText !== undefined ? resolveRelativeWordTarget(cleanText, range.start, range.end, operation.target) : findExactOrFuzzyMatch(
       cleanText,
       operation.target.exactText,
       range.start,
@@ -675,6 +675,12 @@ function resolveOperation(
     }
   }
   if (operation.type === 'delete') {
+    if (operation.id.endsWith('deterministic-delete-relative-text') && operation.includeTrailingPunctuation) {
+      const sentence = findSentenceRanges(cleanText, range.start, range.end).find((candidate) => candidate.start <= start && candidate.end >= end)
+      if (!sentence) return 'target sentence was not found'
+      start = sentence.start
+      end = sentence.end
+    }
     const wrapped = expandThroughPairedPunctuation(cleanText, start, end, range.start, range.end)
     start = wrapped.start
     end = wrapped.end
@@ -683,6 +689,9 @@ function resolveOperation(
     } else if (isSentenceOpeningAt(cleanText, start)) {
       const orphanedPunctuation = attachedSentencePartPunctuation(cleanText, end, range.end)
       if (orphanedPunctuation) end += orphanedPunctuation.length
+    } else if (operation.target.relativeToText !== undefined && /,[ \t]*$/u.test(cleanText.slice(range.start, start)) && /^[.!?…](?=\s|$)/u.test(cleanText.slice(end, range.end))) {
+      const separator = cleanText.slice(range.start, start).match(/,[ \t]*$/u)![0]
+      start -= separator.length
     } else if (
       /[.,;:!?…—–-][ \t]*$/u.test(cleanText.slice(range.start, start)) &&
       attachedSentencePartPunctuation(cleanText, end, range.end)
@@ -1101,6 +1110,41 @@ function findSentenceRanges(
   return ranges
 }
 
+/** Enumerate bounded semantic-selection candidates without interpreting their meaning. */
+export function findAboutTargetCandidates(
+  text: string,
+  paragraphs: readonly DraftParagraph[],
+  kind: 'sentence' | 'phrase',
+): Array<{ paragraphId: string; paragraphOrdinal: number; start: number; end: number; text: string }> {
+  const candidates: Array<{ paragraphId: string; paragraphOrdinal: number; start: number; end: number; text: string }> = []
+  for (const paragraph of paragraphs) {
+    const range = paragraphRange(text, paragraph)
+    for (const sentence of findSentenceRanges(text, range.start, range.end)) {
+      const ranges = kind === 'sentence' ? [sentence] : (() => {
+        const parts: Array<{ start: number; end: number }> = []
+        let cursor = sentence.start
+        const punctuation = /[,;:—–.!?…]+[”’"')\]]*/gu
+        punctuation.lastIndex = cursor
+        for (const match of text.matchAll(punctuation)) {
+          if (match.index >= sentence.end) break
+          const partEnd = Math.min(sentence.end, match.index + match[0].length)
+          if (partEnd > cursor) parts.push({ start: cursor, end: partEnd })
+          cursor = partEnd
+        }
+        if (cursor < sentence.end) parts.push({ start: cursor, end: sentence.end })
+        return parts
+      })()
+      for (const candidate of ranges) {
+        let start = candidate.start
+        while (start < candidate.end && /\s/u.test(text[start] ?? '')) start++
+        if (start >= candidate.end || !/[\p{L}\p{N}]/u.test(text.slice(start, candidate.end))) continue
+        candidates.push({ paragraphId: paragraph.id, paragraphOrdinal: paragraph.ordinal, start, end: candidate.end, text: text.slice(start, candidate.end) })
+      }
+    }
+  }
+  return candidates
+}
+
 function findSentenceTerminal(remainder: string, from: number): RegExpExecArray | null {
   const pattern = /(?:\.{3}|[.!?…])([”’"')\]]*)(?=\s|$)/gu
   pattern.lastIndex = from
@@ -1204,7 +1248,7 @@ function resolveTextTarget(
     start = match.start
     end = match.end
   } else if (target.exactText !== undefined) {
-    const match = findExactOrFuzzyMatch(
+    const match = target.relativeToText !== undefined ? resolveRelativeWordTarget(cleanText, range.start, range.end, target) : findExactOrFuzzyMatch(
       cleanText,
       target.exactText,
       range.start,
@@ -1233,6 +1277,17 @@ function resolveTextTarget(
     scopeStart: range.start,
     scopeEnd: range.end,
   }
+}
+
+function resolveRelativeWordTarget(text: string, start: number, end: number, target: EditTarget): { start: number; end: number } | string {
+  const anchor = findExactOrFuzzyMatch(text, target.relativeToText!, start, end, undefined, true)
+  if (typeof anchor === 'string') return anchor.includes('ambiguous') ? 'text anchor is ambiguous' : 'text anchor was not found'
+  const candidates = findPunctuationInsensitiveCandidates(text, target.exactText!, start, end)
+  const matches = candidates.filter((candidate) => target.relativePosition === 'after'
+    ? candidate.start >= anchor.end && /^[\s\p{P}]*$/u.test(text.slice(anchor.end, candidate.start))
+    : candidate.end <= anchor.start && /^[\s\p{P}]*$/u.test(text.slice(candidate.end, anchor.start)))
+  if (matches.length !== 1) return matches.length ? 'text target is ambiguous' : 'text target was not found relative to anchor'
+  return { start: matches[0]!.start, end: matches[0]!.end }
 }
 
 function isPunctuationTarget(value: unknown): value is PunctuationTarget {
@@ -1600,13 +1655,9 @@ function executeStructuralPlan(
       } else {
         const anchor = operation.target.exactText
         if (!anchor) return { ok: false, reason: 'split requires an exact or sentence anchor' }
-        const matches = findAll(sourceResult.text, anchor, 0, sourceResult.text.length)
-        if (matches.length !== 1)
-          return {
-            ok: false,
-            reason: matches.length ? 'split anchor is ambiguous' : 'split anchor was not found',
-          }
-        const anchorEnd = matches[0]! + anchor.length
+        const match = findExactOrFuzzyMatch(sourceResult.text, anchor, 0, sourceResult.text.length, operation.target.occurrence, operation.target.ignorePunctuationForMatch)
+        if (typeof match === 'string') return { ok: false, reason: match.includes('ambiguous') ? 'split anchor is ambiguous' : 'split anchor was not found' }
+        const anchorEnd = match.end
         splitAt = operation.includeTrailingPunctuation
           ? extendThroughSentenceEnd(sourceResult.text, anchorEnd)
           : anchorEnd
@@ -1778,6 +1829,9 @@ function findExactOrFuzzyMatch(
   if (exactMatches.length > 1) return 'text target is ambiguous'
   if (exactMatches.length === 1)
     return { start: exactMatches[0]!, end: exactMatches[0]! + search.length }
+
+  if (ignorePunctuationForMatch === false && hasTargetPunctuation(search))
+    return 'text target was not found'
 
   const lexicalMatch = findPunctuationInsensitiveMatch(text, search, start, end)
   if (typeof lexicalMatch !== 'string') return lexicalMatch

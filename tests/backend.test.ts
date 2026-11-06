@@ -2947,6 +2947,7 @@ test('deletes one positional sentence without a provider interpretation', async 
 
 test('resolves about sentence and phrase edits and move destinations with guarded decisions', async () => {
   const examples = [
+    ["The kitchen tap shuts off. The kettle’s going now, that low building rattle. Maeve hasn’t turned around.", 'Delete the sentence about the kitchen tap shutting off.', 0, "The kettle’s going now, that low building rattle. Maeve hasn’t turned around."],
     ['Erin unwinds herself, then smiles. She leaves.', 'Delete the sentence about Erin relaxing.', 0, 'She leaves.'],
     ['Erin unwinds herself with a groan, finds her camisole, and puts it on anyway — the tear gaping at the shoulder, and she makes no comment. She takes her mug.', 'Delete the sentence about Erin unwinding herself.', 0, 'She takes her mug.'],
     ['Erin unwinds herself, then smiles. She leaves.', 'Delete the phrase about Erin relaxing.', 0, 'Then smiles. She leaves.'],
@@ -2966,6 +2967,27 @@ test('resolves about sentence and phrase edits and move destinations with guarde
     const response = responses.at(-1)?.payload
     assert.equal(response?.type, 'edit.proposal.response', instruction)
     if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+    const questionSets = decisionRequests.map((request) => (request as { questions?: Record<string, { instructions?: string }> }).questions ?? {})
+    assert.ok(questionSets.some((questions) => questions[`about_${selected}`]?.instructions?.includes(`about_${selected}`)))
+  }
+})
+
+test('about decision diagnostics record scores without dictated content', async () => {
+  const userId = 'about-debug-user'
+  const chatId = 'about-debug-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  aboutDecision = (id) => id === 'about_0' ? 0.8 : 0.1
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'about-debug-settings', settings: { contextMessageCount: 0, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', debugLoggingEnabled: true } }, userId)
+  await seedDraft(userId, chatId, 'The kitchen tap shuts off. The kettle rattles.')
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-debug-edit', operationId: 'about-debug-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the sentence about the tap stopping.' }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'debug.log.request', requestId: 'about-debug-read' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'debug.log.response')
+  if (response?.type === 'debug.log.response') {
+    const log = response.entries.join('\n')
+    assert.match(log, /\[edit\.about\] outcome=below-threshold kind=sentence candidates=2 best=0\.800 runnerUp=0\.100/u)
+    assert.doesNotMatch(log, /kitchen|kettle|tap stopping/iu)
   }
 })
 

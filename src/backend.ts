@@ -1916,11 +1916,15 @@ async function interpretAboutEdit(
   // Quoted descriptions and existing literal targets stay on the ordinary exact path.
   if (/^[“"‘']/u.test(description) || editTargetTextExists(session.cleanText, `about ${description}`))
     return { handled: false, plan: null }
-  if (!description || !spindle.permissions.has('decisions') || signal.aborted)
+  if (!description || !spindle.permissions.has('decisions') || signal.aborted) {
+    recordDebug(userId, 'edit.about', `outcome=${signal.aborted ? 'cancelled' : !description ? 'empty-description' : 'permission-unavailable'}`)
     return { handled: true, plan: null }
+  }
   const kind = (destinationMove ? destinationMove[2]! : source![2]!).toLocaleLowerCase() as 'sentence' | 'phrase'
   const candidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind)
-  if (!candidates.length || candidates.length > 100) return { handled: true, plan: null }
+  const startedAt = performance.now()
+  const logOutcome = (outcome: string, details = '') => recordDebug(userId, 'edit.about', `outcome=${outcome} kind=${kind} candidates=${candidates.length}${details ? ` ${details}` : ''} duration=${debugDuration(startedAt)}`)
+  if (!candidates.length || candidates.length > 100) { logOutcome(!candidates.length ? 'no-candidates' : 'too-many-candidates'); return { handled: true, plan: null } }
   const controller = new AbortController()
   const abort = () => controller.abort()
   signal.addEventListener('abort', abort, { once: true })
@@ -1928,23 +1932,24 @@ async function interpretAboutEdit(
   try {
     const questions = Object.fromEntries(candidates.map((candidate, index) => [`about_${index}`, {
       type: 'noul' as const,
-      instructions: 'Does this candidate specifically express the described subject? Judge meaning, not word overlap; do not prefer broad or merely related text.',
+      instructions: `Does candidate about_${index} specifically express the described subject? Judge that candidate only, by meaning rather than word overlap; do not prefer broad or merely related text.`,
       criteria: { true: 'The candidate directly expresses the description.', false: 'It is unrelated, only broadly related, or does not identify the requested content.' },
     }]))
     const result = await Promise.race([
       spindle.decisions.evaluate({ userId, ...(connectionId ? { connection_id: connectionId } : {}), state: { task: 'Identify the sentence or phrase described by the user.', description, candidates: candidates.map((candidate, index) => ({ id: `about_${index}`, text: candidate.text })) }, questions }, { signal: controller.signal }),
       new Promise<null>((resolve) => { timer = setTimeout(() => { controller.abort(); resolve(null) }, 2500) }),
     ])
-    if (!result || signal.aborted) return { handled: true, plan: null }
+    if (!result || signal.aborted) { logOutcome(signal.aborted ? 'cancelled' : 'timeout'); return { handled: true, plan: null } }
     if (candidates.some((_candidate, index) => {
       const answer = result.answers[`about_${index}`]
       return answer?.type !== 'noul' || !Number.isFinite(answer.noul) || answer.noul < 0 || answer.noul > 1
-    })) return { handled: true, plan: null }
+    })) { logOutcome('invalid-answer'); return { handled: true, plan: null } }
     const ranked = candidates.map((candidate, index) => {
       const answer = result.answers[`about_${index}`]
       return { candidate, score: answer?.type === 'noul' && Number.isFinite(answer.noul) && answer.noul >= 0 && answer.noul <= 1 ? answer.noul : 0 }
     }).sort((a, b) => b.score - a.score)
-    if (ranked[0]!.score < 0.9 || (ranked[1] && ranked[0]!.score - ranked[1].score < 0.15)) return { handled: true, plan: null }
+    const scores = `best=${ranked[0]!.score.toFixed(3)} runnerUp=${(ranked[1]?.score ?? 0).toFixed(3)} threshold=0.900 margin=0.150`
+    if (ranked[0]!.score < 0.9 || (ranked[1] && ranked[0]!.score - ranked[1].score < 0.15)) { logOutcome(ranked[0]!.score < 0.9 ? 'below-threshold' : 'ambiguous', scores); return { handled: true, plan: null } }
     const selected = ranked[0]!.candidate
     const selectedTarget = { paragraphId: selected.paragraphId, exactText: selected.text, ignorePunctuationForMatch: false }
     if (moveDestination && kind === 'sentence' && moveDirection === 'move_after') {
@@ -1957,8 +1962,11 @@ async function interpretAboutEdit(
       : verb === 'replace' || verb === 'change'
         ? { id: 'about-replace', type: 'replace', target: selectedTarget, text: replacement }
         : { id: 'about-delete', type: 'delete', target: selectedTarget }
-    return { handled: true, plan: parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: `Edit the ${kind} matching the description.`, operations: [operation] }) }
+    const plan = parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: `Edit the ${kind} matching the description.`, operations: [operation] })
+    logOutcome(plan ? 'resolved' : 'invalid-plan', scores)
+    return { handled: true, plan }
   } catch {
+    logOutcome(signal.aborted ? 'cancelled' : 'decision-error')
     return { handled: true, plan: null }
   } finally {
     clearTimeout(timer)

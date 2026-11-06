@@ -5700,11 +5700,18 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
   }
   if (/^[“"‘']/u.test(description) || editTargetTextExists(session.cleanText, `about ${description}`))
     return { handled: false, plan: null };
-  if (!description || !spindle.permissions.has("decisions") || signal.aborted)
+  if (!description || !spindle.permissions.has("decisions") || signal.aborted) {
+    recordDebug(userId, "edit.about", `outcome=${signal.aborted ? "cancelled" : !description ? "empty-description" : "permission-unavailable"}`);
     return { handled: true, plan: null };
+  }
   const kind = (destinationMove ? destinationMove[2] : source[2]).toLocaleLowerCase();
   const candidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind);
-  if (!candidates.length || candidates.length > 100) return { handled: true, plan: null };
+  const startedAt2 = performance.now();
+  const logOutcome = (outcome, details = "") => recordDebug(userId, "edit.about", `outcome=${outcome} kind=${kind} candidates=${candidates.length}${details ? ` ${details}` : ""} duration=${debugDuration(startedAt2)}`);
+  if (!candidates.length || candidates.length > 100) {
+    logOutcome(!candidates.length ? "no-candidates" : "too-many-candidates");
+    return { handled: true, plan: null };
+  }
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal.addEventListener("abort", abort, { once: true });
@@ -5712,7 +5719,7 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
   try {
     const questions = Object.fromEntries(candidates.map((candidate, index) => [`about_${index}`, {
       type: "noul",
-      instructions: "Does this candidate specifically express the described subject? Judge meaning, not word overlap; do not prefer broad or merely related text.",
+      instructions: `Does candidate about_${index} specifically express the described subject? Judge that candidate only, by meaning rather than word overlap; do not prefer broad or merely related text.`,
       criteria: { true: "The candidate directly expresses the description.", false: "It is unrelated, only broadly related, or does not identify the requested content." }
     }]));
     const result = await Promise.race([
@@ -5724,16 +5731,26 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
         }, 2500);
       })
     ]);
-    if (!result || signal.aborted) return { handled: true, plan: null };
+    if (!result || signal.aborted) {
+      logOutcome(signal.aborted ? "cancelled" : "timeout");
+      return { handled: true, plan: null };
+    }
     if (candidates.some((_candidate, index) => {
       const answer = result.answers[`about_${index}`];
       return answer?.type !== "noul" || !Number.isFinite(answer.noul) || answer.noul < 0 || answer.noul > 1;
-    })) return { handled: true, plan: null };
+    })) {
+      logOutcome("invalid-answer");
+      return { handled: true, plan: null };
+    }
     const ranked = candidates.map((candidate, index) => {
       const answer = result.answers[`about_${index}`];
       return { candidate, score: answer?.type === "noul" && Number.isFinite(answer.noul) && answer.noul >= 0 && answer.noul <= 1 ? answer.noul : 0 };
     }).sort((a, b) => b.score - a.score);
-    if (ranked[0].score < 0.9 || ranked[1] && ranked[0].score - ranked[1].score < 0.15) return { handled: true, plan: null };
+    const scores = `best=${ranked[0].score.toFixed(3)} runnerUp=${(ranked[1]?.score ?? 0).toFixed(3)} threshold=0.900 margin=0.150`;
+    if (ranked[0].score < 0.9 || ranked[1] && ranked[0].score - ranked[1].score < 0.15) {
+      logOutcome(ranked[0].score < 0.9 ? "below-threshold" : "ambiguous", scores);
+      return { handled: true, plan: null };
+    }
     const selected = ranked[0].candidate;
     const selectedTarget = { paragraphId: selected.paragraphId, exactText: selected.text, ignorePunctuationForMatch: false };
     if (moveDestination && kind === "sentence" && moveDirection === "move_after") {
@@ -5741,8 +5758,11 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
       if (anchors.length === 1) moveDestination = anchors[0].text;
     }
     const operation = destinationMove ? { id: "about-move", type: "move_after", target: { exactText: unwrapEditArgument(destinationMove[1]) }, destination: selectedTarget, includeTrailingPunctuation: true } : moveDestination ? { id: "about-move", type: moveDirection, target: selectedTarget, destination: { exactText: moveDestination }, includeTrailingPunctuation: kind === "sentence" ? true : void 0 } : verb === "replace" || verb === "change" ? { id: "about-replace", type: "replace", target: selectedTarget, text: replacement } : { id: "about-delete", type: "delete", target: selectedTarget };
-    return { handled: true, plan: parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: `Edit the ${kind} matching the description.`, operations: [operation] }) };
+    const plan = parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: `Edit the ${kind} matching the description.`, operations: [operation] });
+    logOutcome(plan ? "resolved" : "invalid-plan", scores);
+    return { handled: true, plan };
   } catch {
+    logOutcome(signal.aborted ? "cancelled" : "decision-error");
     return { handled: true, plan: null };
   } finally {
     clearTimeout(timer);

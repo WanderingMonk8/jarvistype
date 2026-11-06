@@ -4130,7 +4130,8 @@ function applyTargetPunctuationIntent(plan: EditPlan, instruction: string, sessi
     const targetText = target.exactText ?? target.approximateText ?? target.relativeToText ?? ''
     const result = { ...target, ...(target.exactText === undefined ? {} : { exactText: exact.text }), ...(target.approximateText === undefined ? {} : { approximateText: approximate.text }), ...(target.relativeToText === undefined ? {} : { relativeToText: relative.text }) }
     delete result.ignorePunctuationForMatch
-    if (hasText && !explicit && hasTargetPunctuation(targetText)) result.ignorePunctuationForMatch = true
+    if (hasText && explicit) result.ignorePunctuationForMatch = false
+    else if (hasText && hasTargetPunctuation(targetText)) result.ignorePunctuationForMatch = true
     // A quotation parser's synthetic occurrence must not turn automatically
     // inserted punctuation into an implicit tie-breaker.
     if (/^(?:clause-\d+-)?deterministic-(?:open|close)-quotation-range$/u.test(operationId) && !explicit && exact.text) {

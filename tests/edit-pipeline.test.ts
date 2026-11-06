@@ -1422,6 +1422,17 @@ test('splits and joins paragraphs with controlled whitespace', () => {
   assert.equal(join.ok && join.afterText, 'First sentence. Second sentence. Closing paragraph.')
 })
 
+test('split anchors ignore unspecified punctuation and reject ambiguous or explicit mismatches', () => {
+  const text = 'Well, I agree. Next sentence.'
+  const seeded = applyManualEdit(createDraftSession('split-lexical-chat'), text, { expectedVersion: 0, editGroupId: 'seed' }).session
+  const run = (target: { exactText: string; ignorePunctuationForMatch?: boolean }) => executeEditPlan(seeded.cleanText, seeded.paragraphs, 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'split', operations: [{ id: 'split', type: 'split', target: { paragraphOrdinal: 1, ...target }, includeTrailingPunctuation: true }],
+  })
+  const split = run({ exactText: 'Well I agree' })
+  assert.equal(split.ok && split.afterText, 'Well, I agree.\n\nNext sentence.')
+  assert.equal(run({ exactText: 'Well; I agree', ignorePunctuationForMatch: false }).ok, false)
+})
+
 test('splits a sentence target after its terminal punctuation rather than an internal comma', () => {
   const text =
     'Opening sentence. The brief eruption of discussion seemed to die down once more, and the general passivity returned to campus. Friday arrived.'

@@ -1620,13 +1620,9 @@ function executeStructuralPlan(
       } else {
         const anchor = operation.target.exactText
         if (!anchor) return { ok: false, reason: 'split requires an exact or sentence anchor' }
-        const matches = findAll(sourceResult.text, anchor, 0, sourceResult.text.length)
-        if (matches.length !== 1)
-          return {
-            ok: false,
-            reason: matches.length ? 'split anchor is ambiguous' : 'split anchor was not found',
-          }
-        const anchorEnd = matches[0]! + anchor.length
+        const match = findExactOrFuzzyMatch(sourceResult.text, anchor, 0, sourceResult.text.length, operation.target.occurrence, operation.target.ignorePunctuationForMatch)
+        if (typeof match === 'string') return { ok: false, reason: match.includes('ambiguous') ? 'split anchor is ambiguous' : 'split anchor was not found' }
+        const anchorEnd = match.end
         splitAt = operation.includeTrailingPunctuation
           ? extendThroughSentenceEnd(sourceResult.text, anchorEnd)
           : anchorEnd
@@ -1798,6 +1794,9 @@ function findExactOrFuzzyMatch(
   if (exactMatches.length > 1) return 'text target is ambiguous'
   if (exactMatches.length === 1)
     return { start: exactMatches[0]!, end: exactMatches[0]! + search.length }
+
+  if (ignorePunctuationForMatch === false && hasTargetPunctuation(search))
+    return 'text target was not found'
 
   const lexicalMatch = findPunctuationInsensitiveMatch(text, search, start, end)
   if (typeof lexicalMatch !== 'string') return lexicalMatch

@@ -1132,6 +1132,12 @@ ${formattedParagraph}`,
     };
   }
   if (operation.type === "delete") {
+    if (operation.id.endsWith("deterministic-delete-relative-text") && operation.includeTrailingPunctuation) {
+      const sentence = findSentenceRanges(cleanText, range.start, range.end).find((candidate) => candidate.start <= start && candidate.end >= end);
+      if (!sentence) return "target sentence was not found";
+      start = sentence.start;
+      end = sentence.end;
+    }
     const wrapped = expandThroughPairedPunctuation(cleanText, start, end, range.start, range.end);
     start = wrapped.start;
     end = wrapped.end;
@@ -1498,18 +1504,10 @@ function resolveTextTarget(cleanText, paragraphs, target, label) {
 function resolveRelativeWordTarget(text, start, end, target) {
   const anchor = findExactOrFuzzyMatch(text, target.relativeToText, start, end, void 0, true);
   if (typeof anchor === "string") return anchor.includes("ambiguous") ? "text anchor is ambiguous" : "text anchor was not found";
-  const word = target.exactText;
-  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const separator = "[\\s\\p{P}]*";
-  if (target.relativePosition === "after") {
-    const match2 = text.slice(anchor.end, end).match(new RegExp(`^${separator}(${escaped})(?![\\p{L}\\p{N}])`, "iu"));
-    if (!match2) return "text target was not found after anchor";
-    return { start: anchor.end + match2[0].length - match2[1].length, end: anchor.end + match2[0].length };
-  }
-  const match = text.slice(start, anchor.start).match(new RegExp(`(?<![\\p{L}\\p{N}])(${escaped})${separator}$`, "iu"));
-  if (!match) return "text target was not found before anchor";
-  const position = start + match.index;
-  return { start: position, end: position + match[1].length };
+  const candidates = findPunctuationInsensitiveCandidates(text, target.exactText, start, end);
+  const matches = candidates.filter((candidate) => target.relativePosition === "after" ? candidate.start >= anchor.end && /^[\s\p{P}]*$/u.test(text.slice(anchor.end, candidate.start)) : candidate.end <= anchor.start && /^[\s\p{P}]*$/u.test(text.slice(candidate.end, anchor.start)));
+  if (matches.length !== 1) return matches.length ? "text target is ambiguous" : "text target was not found relative to anchor";
+  return { start: matches[0].start, end: matches[0].end };
 }
 function isPunctuationTarget(value) {
   return value === "period" || value === "comma" || value === "colon" || value === "semicolon" || value === "question_mark" || value === "exclamation_mark" || value === "ellipsis" || value === "quote" || value === "single_quote" || value === "apostrophe" || value === "hyphen" || value === "en_dash" || value === "em_dash" || value === "open_parenthesis" || value === "close_parenthesis" || value === "open_bracket" || value === "close_bracket";
@@ -5462,6 +5460,10 @@ function canonicalEditInstruction(instructionTranscript) {
   return instructionTranscript.replace(/^\s*please\s+/iu, "").replace(/^\s*(?:remove|take\s+(?:off|out)|erase|cut)\b/iu, "delete").replace(/[\s,]*\bplease\s*([.!?]*)\s*$/iu, "$1");
 }
 function parseDeterministicEditPlan(instructionTranscript, session) {
+  const relativeDeletion = parseDeterministicRelativeDeletion(instructionTranscript, session.draftVersion);
+  if (relativeDeletion) return relativeDeletion;
+  const relativeEdit = parseDeterministicRelativeEdit(instructionTranscript, session.draftVersion);
+  if (relativeEdit) return relativeEdit;
   const punctuationMove = parseDeterministicPunctuationSentenceMove(instructionTranscript, session.draftVersion);
   if (punctuationMove) return punctuationMove;
   const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session.draftVersion);
@@ -5519,6 +5521,40 @@ function parseDeterministicEditPlan(instructionTranscript, session) {
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session);
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement);
   return null;
+}
+function parseDeterministicRelativeDeletion(instruction, draftVersion) {
+  const match = instruction.trim().match(/^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(word|phrase|sentence)\s+(.+?)\s+(before|after)\s+(.+?)[.!?]*$/iu);
+  if (!match || /\b(?:before|after)\b/iu.test(match[4])) return null;
+  const target = unwrapEditArgument(match[2].trim());
+  const anchor = unwrapEditArgument(match[4].trim().replace(/^(?:the\s+)?(?:word|phrase|sentence)\s+/iu, ""));
+  if (!target || !anchor) return null;
+  return parseEditPlan({ schemaVersion: 2, draftVersion, explanation: `Delete the ${match[1]} \u201C${target}\u201D ${match[3]} \u201C${anchor}\u201D.`, operations: [{
+    id: "deterministic-delete-relative-text",
+    type: "delete",
+    target: { exactText: target, relativePosition: match[3].toLocaleLowerCase(), relativeToText: anchor },
+    ...match[1].toLocaleLowerCase() === "sentence" ? { includeTrailingPunctuation: true } : {}
+  }] });
+}
+function parseDeterministicRelativeEdit(instruction, draftVersion) {
+  const trimmed = instruction.trim().replace(/[.!?]+$/u, "").trim();
+  const replacement = trimmed.match(/^(?:replace|change)\s+(?:the\s+)?(word|phrase)\s+(.+?)\s+(before|after)\s+(.+?)\s+(?:with|to|into)\s+(.+)$/iu);
+  const casing = replacement ? null : trimmed.match(/^(capitalize|uppercase|lowercase)\s+(?:the\s+)?(word|phrase)\s+(.+?)\s+(before|after)\s+(.+)$/iu);
+  const quotation = replacement || casing ? null : trimmed.match(/^(?:put|add|place|insert)\s+(?:the\s+)?(?:quotation\s+marks?|quotes?|quotations?)\s+around\s+(?:the\s+)?(word|phrase)\s+(.+?)\s+(before|after)\s+(.+)$/iu);
+  if (!replacement && !casing && !quotation) return null;
+  const rawTarget = replacement ? replacement[2] : casing ? casing[3] : quotation[2];
+  const rawAnchor = replacement ? replacement[4] : casing ? casing[5] : quotation[4];
+  if (/\b(?:before|after)\b/iu.test(rawAnchor)) return null;
+  const targetText = unwrapEditArgument(rawTarget.trim());
+  const anchor = unwrapEditArgument(rawAnchor.trim().replace(/^(?:the\s+)?(?:word|phrase|sentence)\s+/iu, ""));
+  if (!targetText || !anchor) return null;
+  const direction = (replacement ? replacement[3] : casing ? casing[4] : quotation[3]).toLocaleLowerCase();
+  const target = { exactText: targetText, relativePosition: direction, relativeToText: anchor };
+  if (quotation) return parseEditPlan({ schemaVersion: 2, draftVersion, explanation: `Quote \u201C${targetText}\u201D ${direction} \u201C${anchor}\u201D.`, operations: [
+    { id: "deterministic-open-relative-quote", type: "insert_before", target, text: "\u201C" },
+    { id: "deterministic-close-relative-quote", type: "insert_after", target, text: "\u201D" }
+  ] });
+  const operation = replacement ? { id: "deterministic-replace-relative-text", type: "replace", target, text: unwrapEditArgument(replacement[5].trim()) } : { id: "deterministic-case-relative-text", type: "case", target, caseMode: casing[1].toLocaleLowerCase() };
+  return parseEditPlan({ schemaVersion: 2, draftVersion, explanation: `Edit \u201C${targetText}\u201D ${direction} \u201C${anchor}\u201D.`, operations: [operation] });
 }
 function parseDeterministicPunctuationSentenceMove(instruction, draftVersion) {
   const match = instruction.trim().match(

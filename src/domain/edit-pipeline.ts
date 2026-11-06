@@ -675,6 +675,12 @@ function resolveOperation(
     }
   }
   if (operation.type === 'delete') {
+    if (operation.id.endsWith('deterministic-delete-relative-text') && operation.includeTrailingPunctuation) {
+      const sentence = findSentenceRanges(cleanText, range.start, range.end).find((candidate) => candidate.start <= start && candidate.end >= end)
+      if (!sentence) return 'target sentence was not found'
+      start = sentence.start
+      end = sentence.end
+    }
     const wrapped = expandThroughPairedPunctuation(cleanText, start, end, range.start, range.end)
     start = wrapped.start
     end = wrapped.end
@@ -1241,18 +1247,12 @@ function resolveTextTarget(
 function resolveRelativeWordTarget(text: string, start: number, end: number, target: EditTarget): { start: number; end: number } | string {
   const anchor = findExactOrFuzzyMatch(text, target.relativeToText!, start, end, undefined, true)
   if (typeof anchor === 'string') return anchor.includes('ambiguous') ? 'text anchor is ambiguous' : 'text anchor was not found'
-  const word = target.exactText!
-  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const separator = '[\\s\\p{P}]*'
-  if (target.relativePosition === 'after') {
-    const match = text.slice(anchor.end, end).match(new RegExp(`^${separator}(${escaped})(?![\\p{L}\\p{N}])`, 'iu'))
-    if (!match) return 'text target was not found after anchor'
-    return { start: anchor.end + match[0].length - match[1]!.length, end: anchor.end + match[0].length }
-  }
-  const match = text.slice(start, anchor.start).match(new RegExp(`(?<![\\p{L}\\p{N}])(${escaped})${separator}$`, 'iu'))
-  if (!match) return 'text target was not found before anchor'
-  const position = start + match.index!
-  return { start: position, end: position + match[1]!.length }
+  const candidates = findPunctuationInsensitiveCandidates(text, target.exactText!, start, end)
+  const matches = candidates.filter((candidate) => target.relativePosition === 'after'
+    ? candidate.start >= anchor.end && /^[\s\p{P}]*$/u.test(text.slice(anchor.end, candidate.start))
+    : candidate.end <= anchor.start && /^[\s\p{P}]*$/u.test(text.slice(candidate.end, anchor.start)))
+  if (matches.length !== 1) return matches.length ? 'text target is ambiguous' : 'text target was not found relative to anchor'
+  return { start: matches[0]!.start, end: matches[0]!.end }
 }
 
 function isPunctuationTarget(value: unknown): value is PunctuationTarget {

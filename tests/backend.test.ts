@@ -2942,6 +2942,50 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('supports relative replacement and casing with multiword anchors', async () => {
+  const examples = [
+    ['Most of the time, with', 'Replace the word with after most of the time with without.', 'Most of the time, without'],
+    ['We wait. The road, is clear.', 'Uppercase the phrase the road is clear after we wait.', 'We wait. THE ROAD, IS CLEAR.'],
+    ['We wait. The road, is clear.', 'Put quotations around the phrase the road is clear after we wait.', 'We wait. “The road, is clear.”'],
+  ] as const
+  for (const [index, [draft, instruction, expected]] of examples.entries()) {
+    const userId = `relative-edit-user-${index}`
+    const chatId = `relative-edit-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `relative-edit-${index}`, operationId: `relative-edit-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instruction)
+    if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, expected, instruction)
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('supports relative word, phrase, and sentence deletion with multiword anchors', async () => {
+  const examples = [
+    ['Most of the time, with', 'Delete the word with after most of the time.', 'Most of the time,'],
+    ['With, most of the time', 'Delete the word with before most of the time.', 'Most of the time'],
+    ['We wait. The road, is clear. Next.', 'Delete the phrase the road is clear after we wait.', 'We wait. Next.'],
+    ['We wait. The road is clear. Next.', 'Delete the sentence the road is clear after we wait.', 'We wait. Next.'],
+    ['We wait. The road is clear. Next.', 'Delete the sentence the road after we wait.', 'We wait. Next.'],
+  ] as const
+  for (const [index, [draft, instruction, expected]] of examples.entries()) {
+    const userId = `relative-multiword-user-${index}`
+    const chatId = `relative-multiword-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `relative-multiword-${index}`, operationId: `relative-multiword-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', instruction)
+    if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, expected, instruction)
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
 test('deletes the word immediately after an anchor across punctuation and rejects ambiguous anchors', async () => {
   const userId = 'relative-word-delete-user'
   const chatId = 'relative-word-delete-chat'

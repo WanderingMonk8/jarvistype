@@ -1692,6 +1692,10 @@ function parseDeterministicEditPlan(
   instructionTranscript: string,
   session: PersistedDraftSession,
 ): EditPlan | null {
+  const relativeDeletion = parseDeterministicRelativeDeletion(instructionTranscript, session.draftVersion)
+  if (relativeDeletion) return relativeDeletion
+  const relativeEdit = parseDeterministicRelativeEdit(instructionTranscript, session.draftVersion)
+  if (relativeEdit) return relativeEdit
   const punctuationMove = parseDeterministicPunctuationSentenceMove(instructionTranscript, session.draftVersion)
   if (punctuationMove) return punctuationMove
   const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session.draftVersion)
@@ -1749,6 +1753,43 @@ function parseDeterministicEditPlan(
   const simpleReplacement = parseDeterministicSimpleReplacement(instructionTranscript, session)
   if (simpleReplacement) return finalizeInterpretedPlan(instructionTranscript, simpleReplacement)
   return null
+}
+
+function parseDeterministicRelativeDeletion(instruction: string, draftVersion: number): EditPlan | null {
+  const match = instruction.trim().match(/^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(word|phrase|sentence)\s+(.+?)\s+(before|after)\s+(.+?)[.!?]*$/iu)
+  if (!match || /\b(?:before|after)\b/iu.test(match[4]!)) return null
+  const target = unwrapEditArgument(match[2]!.trim())
+  const anchor = unwrapEditArgument(match[4]!.trim().replace(/^(?:the\s+)?(?:word|phrase|sentence)\s+/iu, ''))
+  if (!target || !anchor) return null
+  return parseEditPlan({ schemaVersion: 2, draftVersion, explanation: `Delete the ${match[1]} “${target}” ${match[3]} “${anchor}”.`, operations: [{
+    id: 'deterministic-delete-relative-text', type: 'delete',
+    target: { exactText: target, relativePosition: match[3]!.toLocaleLowerCase(), relativeToText: anchor },
+    ...(match[1]!.toLocaleLowerCase() === 'sentence' ? { includeTrailingPunctuation: true } : {}),
+  }] })
+}
+
+function parseDeterministicRelativeEdit(instruction: string, draftVersion: number): EditPlan | null {
+  const trimmed = instruction.trim().replace(/[.!?]+$/u, '').trim()
+  const replacement = trimmed.match(/^(?:replace|change)\s+(?:the\s+)?(word|phrase)\s+(.+?)\s+(before|after)\s+(.+?)\s+(?:with|to|into)\s+(.+)$/iu)
+  const casing = replacement ? null : trimmed.match(/^(capitalize|uppercase|lowercase)\s+(?:the\s+)?(word|phrase)\s+(.+?)\s+(before|after)\s+(.+)$/iu)
+  const quotation = replacement || casing ? null : trimmed.match(/^(?:put|add|place|insert)\s+(?:the\s+)?(?:quotation\s+marks?|quotes?|quotations?)\s+around\s+(?:the\s+)?(word|phrase)\s+(.+?)\s+(before|after)\s+(.+)$/iu)
+  if (!replacement && !casing && !quotation) return null
+  const rawTarget = replacement ? replacement[2]! : casing ? casing[3]! : quotation![2]!
+  const rawAnchor = replacement ? replacement[4]! : casing ? casing[5]! : quotation![4]!
+  if (/\b(?:before|after)\b/iu.test(rawAnchor)) return null
+  const targetText = unwrapEditArgument(rawTarget.trim())
+  const anchor = unwrapEditArgument(rawAnchor.trim().replace(/^(?:the\s+)?(?:word|phrase|sentence)\s+/iu, ''))
+  if (!targetText || !anchor) return null
+  const direction = (replacement ? replacement[3]! : casing ? casing[4]! : quotation![3]!).toLocaleLowerCase()
+  const target = { exactText: targetText, relativePosition: direction, relativeToText: anchor }
+  if (quotation) return parseEditPlan({ schemaVersion: 2, draftVersion, explanation: `Quote “${targetText}” ${direction} “${anchor}”.`, operations: [
+    { id: 'deterministic-open-relative-quote', type: 'insert_before', target, text: '“' },
+    { id: 'deterministic-close-relative-quote', type: 'insert_after', target, text: '”' },
+  ] })
+  const operation = replacement
+    ? { id: 'deterministic-replace-relative-text', type: 'replace', target, text: unwrapEditArgument(replacement[5]!.trim()) }
+    : { id: 'deterministic-case-relative-text', type: 'case', target, caseMode: casing![1]!.toLocaleLowerCase() }
+  return parseEditPlan({ schemaVersion: 2, draftVersion, explanation: `Edit “${targetText}” ${direction} “${anchor}”.`, operations: [operation] })
 }
 
 function parseDeterministicPunctuationSentenceMove(instruction: string, draftVersion: number): EditPlan | null {

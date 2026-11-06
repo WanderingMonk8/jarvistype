@@ -1992,8 +1992,10 @@ async function interpretAboutEdit(
     const corroborating = correctedWords.length ? candidates.filter((candidate) => correctedWords.every((word) => editTargetTextExists(candidate.text, word))) : []
     const phoneticCorroborated = corroborating.length === 1 && corroborating[0] === ranked[0]!.candidate
     const effectiveThreshold = phoneticCorroborated ? 0.85 : 0.9
-    const scores = `best=${ranked[0]!.score.toFixed(3)} runnerUp=${(ranked[1]?.score ?? 0).toFixed(3)} threshold=${effectiveThreshold.toFixed(3)} margin=0.150 phoneticCorroborated=${phoneticCorroborated ? 'yes' : 'no'}`
-    if (ranked[0]!.score < effectiveThreshold || (ranked[1] && ranked[0]!.score - ranked[1].score < 0.15)) { logOutcome(ranked[0]!.score < effectiveThreshold ? 'below-threshold' : 'ambiguous', scores); return { handled: true, plan: null } }
+    const lead = ranked[0]!.score - (ranked[1]?.score ?? 0)
+    const uncertainReview = ranked[0]!.score < effectiveThreshold && ranked[0]!.score >= 0.8 && lead >= 0.3
+    const scores = `best=${ranked[0]!.score.toFixed(3)} runnerUp=${(ranked[1]?.score ?? 0).toFixed(3)} threshold=${effectiveThreshold.toFixed(3)} margin=0.150 phoneticCorroborated=${phoneticCorroborated ? 'yes' : 'no'} uncertainReview=${uncertainReview ? 'yes' : 'no'}`
+    if (!uncertainReview && (ranked[0]!.score < effectiveThreshold || (ranked[1] && lead < 0.15))) { logOutcome(ranked[0]!.score < effectiveThreshold ? 'below-threshold' : 'ambiguous', scores); return { handled: true, plan: null } }
     const selected = ranked[0]!.candidate
     const selectedTarget = { paragraphId: selected.paragraphId, exactText: selected.text, ignorePunctuationForMatch: false }
     if (moveDestination && kind === 'sentence' && moveDirection === 'move_after') {
@@ -2006,8 +2008,10 @@ async function interpretAboutEdit(
       : verb === 'replace' || verb === 'change'
         ? { id: 'about-replace', type: 'replace', target: selectedTarget, text: replacement }
         : { id: 'about-delete', type: 'delete', target: selectedTarget }
-    const plan = parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: `Edit the ${kind} matching the description.`, operations: [operation] })
-    logOutcome(plan ? 'resolved' : 'invalid-plan', scores)
+    const preview = selected.text.length > 300 ? `${selected.text.slice(0, 300)}…` : selected.text
+    const explanation = uncertainReview ? `Uncertain “about” match; verify the selected ${kind}: “${preview}”.` : `Edit the ${kind} matching the description.`
+    const plan = parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation, operations: [operation] })
+    logOutcome(plan ? (uncertainReview ? 'review-uncertain' : 'resolved') : 'invalid-plan', scores)
     return { handled: true, plan }
   } catch {
     logOutcome(signal.aborted ? 'cancelled' : 'decision-error')

@@ -3009,10 +3009,12 @@ test('offers candidate-specific phonetic evidence for a misheard about descripti
 test('corroborates near-threshold about matches only with unique draft phonetics and a clear margin', async () => {
   const examples = [
     ['The tap stops. The kettle’s going now, rattling.', 'cattle’s going', [0.03, 0.87, 0.02], true],
-    ['The tap stops. The kettle’s going now, rattling.', 'cattle’s going', [0.03, 0.84, 0.02], false],
+    ['The tap stops. The kettle’s going now, rattling.', 'cattle’s going', [0.03, 0.84, 0.02], true],
     ['The tap stops. The kettle’s going now, rattling.', 'cattle’s going', [0.76, 0.87, 0.02], false],
-    ['The tap stops. The kettle’s going now, rattling.', 'kettle’s going', [0.03, 0.87, 0.02], false],
-    ['The kettle’s boiling. The kettle’s going now.', 'cattle’s going', [0.03, 0.87], false],
+    ['The tap stops. The kettle’s going now, rattling.', 'kettle’s going', [0.03, 0.87, 0.02], true],
+    ['The tap stops. The kettle’s going now, rattling.', 'kettle’s going', [0.03, 0.79, 0.02], false],
+    ['The tap stops. The kettle’s going now, rattling.', 'kettle’s going', [0.60, 0.84, 0.02], false],
+    ['The kettle’s boiling. The kettle’s going now.', 'cattle’s going', [0.03, 0.87], true],
   ] as const
   for (const [index, [draft, description, scores, expected]] of examples.entries()) {
     const userId = `about-corroboration-user-${index}`
@@ -3025,7 +3027,8 @@ test('corroborates near-threshold about matches only with unique draft phonetics
     await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-corroboration-${index}`, operationId: `about-corroboration-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: `Delete the phrase about ${description}.` }, userId)
     const response = responses.at(-1)?.payload
     assert.equal(response?.type === 'edit.proposal.response', expected, description)
-    if (expected && response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, 'The tap stops. Rattling.')
+    if (expected && response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, index === 6 ? 'The kettle’s boiling.' : 'The tap stops. Rattling.')
+    if (expected && (scores[1]! < 0.85 || description === 'kettle’s going' || index === 6) && response?.type === 'edit.proposal.response') assert.match(response.proposal.explanation, /Uncertain “about” match; verify the selected phrase/u)
   }
 })
 
@@ -3034,7 +3037,7 @@ test('about decision diagnostics record scores without dictated content', async 
   const chatId = 'about-debug-chat'
   activeChatId = chatId
   decisionsEnabled = true
-  aboutDecision = (id) => id === 'about_0' ? 0.8 : 0.1
+  aboutDecision = (id) => id === 'about_0' ? 0.79 : 0.1
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'about-debug-settings', settings: { contextMessageCount: 0, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', debugLoggingEnabled: true } }, userId)
   await seedDraft(userId, chatId, 'The kitchen tap shuts off. The kettle rattles.')
   await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-debug-edit', operationId: 'about-debug-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the sentence about the tap stopping.' }, userId)
@@ -3043,7 +3046,7 @@ test('about decision diagnostics record scores without dictated content', async 
   assert.equal(response?.type, 'debug.log.response')
   if (response?.type === 'debug.log.response') {
     const log = response.entries.join('\n')
-    assert.match(log, /\[edit\.about\] outcome=below-threshold kind=sentence candidates=2 best=0\.800 runnerUp=0\.100/u)
+    assert.match(log, /\[edit\.about\] outcome=below-threshold kind=sentence candidates=2 best=0\.790 runnerUp=0\.100/u)
     assert.doesNotMatch(log, /kitchen|kettle|tap stopping/iu)
   }
 })

@@ -1110,6 +1110,41 @@ function findSentenceRanges(
   return ranges
 }
 
+/** Enumerate bounded semantic-selection candidates without interpreting their meaning. */
+export function findAboutTargetCandidates(
+  text: string,
+  paragraphs: readonly DraftParagraph[],
+  kind: 'sentence' | 'phrase',
+): Array<{ paragraphId: string; paragraphOrdinal: number; start: number; end: number; text: string }> {
+  const candidates: Array<{ paragraphId: string; paragraphOrdinal: number; start: number; end: number; text: string }> = []
+  for (const paragraph of paragraphs) {
+    const range = paragraphRange(text, paragraph)
+    for (const sentence of findSentenceRanges(text, range.start, range.end)) {
+      const ranges = kind === 'sentence' ? [sentence] : (() => {
+        const parts: Array<{ start: number; end: number }> = []
+        let cursor = sentence.start
+        const punctuation = /[,;:—–.!?…]+[”’"')\]]*/gu
+        punctuation.lastIndex = cursor
+        for (const match of text.matchAll(punctuation)) {
+          if (match.index >= sentence.end) break
+          const partEnd = Math.min(sentence.end, match.index + match[0].length)
+          if (partEnd > cursor) parts.push({ start: cursor, end: partEnd })
+          cursor = partEnd
+        }
+        if (cursor < sentence.end) parts.push({ start: cursor, end: sentence.end })
+        return parts
+      })()
+      for (const candidate of ranges) {
+        let start = candidate.start
+        while (start < candidate.end && /\s/u.test(text[start] ?? '')) start++
+        if (start >= candidate.end || !/[\p{L}\p{N}]/u.test(text.slice(start, candidate.end))) continue
+        candidates.push({ paragraphId: paragraph.id, paragraphOrdinal: paragraph.ordinal, start, end: candidate.end, text: text.slice(start, candidate.end) })
+      }
+    }
+  }
+  return candidates
+}
+
 function findSentenceTerminal(remainder: string, from: number): RegExpExecArray | null {
   const pattern = /(?:\.{3}|[.!?…])([”’"')\]]*)(?=\s|$)/gu
   pattern.lastIndex = from

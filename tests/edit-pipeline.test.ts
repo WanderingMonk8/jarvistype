@@ -6,7 +6,14 @@ import {
   createDraftSession,
   applyManualEdit,
 } from '../src/domain/draft-session'
-import { executeEditPlan, executeSequentialEditPlan, parseEditPlan, type EditPlan } from '../src/domain/edit-pipeline'
+import { executeEditPlan, executeSequentialEditPlan, findAboutTargetCandidates, parseEditPlan, type EditPlan } from '../src/domain/edit-pipeline'
+
+test('enumerates semantic sentence and punctuation-bounded phrase candidates', () => {
+  const text = 'Erin unwinds herself, then stands?! She leaves.'
+  const session = applyManualEdit(createDraftSession('about-candidates'), text, { expectedVersion: 0, editGroupId: 'seed' }).session
+  assert.deepEqual(findAboutTargetCandidates(text, session.paragraphs, 'sentence').map((candidate) => candidate.text), ['Erin unwinds herself, then stands?!', 'She leaves.'])
+  assert.deepEqual(findAboutTargetCandidates(text, session.paragraphs, 'phrase').map((candidate) => candidate.text), ['Erin unwinds herself,', 'then stands?!', 'She leaves.'])
+})
 
 function fixture() {
   const empty = createDraftSession('chat', '2026-01-01T00:00:00.000Z')

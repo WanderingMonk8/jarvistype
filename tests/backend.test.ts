@@ -3006,6 +3006,29 @@ test('offers candidate-specific phonetic evidence for a misheard about descripti
   assert.equal(ambiguousRequest.state.candidates[0]?.phoneticEvidence.some((item) => item.heard === 'cattles'), false)
 })
 
+test('corroborates near-threshold about matches only with unique draft phonetics and a clear margin', async () => {
+  const examples = [
+    ['The tap stops. The kettle’s going now, rattling.', 'cattle’s going', [0.03, 0.87, 0.02], true],
+    ['The tap stops. The kettle’s going now, rattling.', 'cattle’s going', [0.03, 0.84, 0.02], false],
+    ['The tap stops. The kettle’s going now, rattling.', 'cattle’s going', [0.76, 0.87, 0.02], false],
+    ['The tap stops. The kettle’s going now, rattling.', 'kettle’s going', [0.03, 0.87, 0.02], false],
+    ['The kettle’s boiling. The kettle’s going now.', 'cattle’s going', [0.03, 0.87], false],
+  ] as const
+  for (const [index, [draft, description, scores, expected]] of examples.entries()) {
+    const userId = `about-corroboration-user-${index}`
+    const chatId = `about-corroboration-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = true
+    aboutDecision = (id) => scores[Number(id.slice('about_'.length))] ?? 0.01
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-corroboration-${index}`, operationId: `about-corroboration-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: `Delete the phrase about ${description}.` }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type === 'edit.proposal.response', expected, description)
+    if (expected && response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, 'The tap stops. Rattling.')
+  }
+})
+
 test('about decision diagnostics record scores without dictated content', async () => {
   const userId = 'about-debug-user'
   const chatId = 'about-debug-chat'

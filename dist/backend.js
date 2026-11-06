@@ -5780,9 +5780,15 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
       const answer = result.answers[`about_${index}`];
       return { candidate, score: answer?.type === "noul" && Number.isFinite(answer.noul) && answer.noul >= 0 && answer.noul <= 1 ? answer.noul : 0 };
     }).sort((a, b) => b.score - a.score);
-    const scores = `best=${ranked[0].score.toFixed(3)} runnerUp=${(ranked[1]?.score ?? 0).toFixed(3)} threshold=0.900 margin=0.150`;
-    if (ranked[0].score < 0.9 || ranked[1] && ranked[0].score - ranked[1].score < 0.15) {
-      logOutcome(ranked[0].score < 0.9 ? "below-threshold" : "ambiguous", scores);
+    const originalWords = description.match(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu) ?? [];
+    const normalizedWords = phoneticDescription.match(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu) ?? [];
+    const correctedWords = originalWords.length === normalizedWords.length ? normalizedWords.filter((word, index) => word.toLocaleLowerCase() !== originalWords[index].toLocaleLowerCase()) : [];
+    const corroborating = correctedWords.length ? candidates.filter((candidate) => correctedWords.every((word) => editTargetTextExists(candidate.text, word))) : [];
+    const phoneticCorroborated = corroborating.length === 1 && corroborating[0] === ranked[0].candidate;
+    const effectiveThreshold = phoneticCorroborated ? 0.85 : 0.9;
+    const scores = `best=${ranked[0].score.toFixed(3)} runnerUp=${(ranked[1]?.score ?? 0).toFixed(3)} threshold=${effectiveThreshold.toFixed(3)} margin=0.150 phoneticCorroborated=${phoneticCorroborated ? "yes" : "no"}`;
+    if (ranked[0].score < effectiveThreshold || ranked[1] && ranked[0].score - ranked[1].score < 0.15) {
+      logOutcome(ranked[0].score < effectiveThreshold ? "below-threshold" : "ambiguous", scores);
       return { handled: true, plan: null };
     }
     const selected = ranked[0].candidate;

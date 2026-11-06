@@ -3202,6 +3202,28 @@ test('quotation around an exact phrase containing and keeps it as one target', a
   assert.equal(generationRequests.length, 0)
 })
 
+test('quotation around two quoted endpoints wraps the passage once', async () => {
+  const instructions = [
+    "Put quotations around 'alpha and beta' and 'omega'.",
+    'Put quotations around “alpha and beta” and “omega”.',
+    'Put quotations around "alpha and beta" and "omega".',
+  ]
+  for (const [index, instructionTranscript] of instructions.entries()) {
+    const userId = `quotation-quoted-endpoints-user-${index}`
+    const chatId = `quotation-quoted-endpoints-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, 'Before. Alpha and beta begin. Another sentence. Omega?! After.')
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `quotation-quoted-endpoints-${index}`, operationId: `quotation-quoted-endpoints-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify(proposal))
+    if (proposal?.type === 'edit.proposal.response')
+      assert.equal(proposal.proposal.afterText, 'Before. “Alpha and beta begin. Another sentence. Omega?!” After.')
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
 test('quotes through a unique spoken ellipsis without a provider call', async () => {
   for (const [index, mark] of ['…', '...'].entries()) {
     const userId = `quotation-ellipsis-user-${index}`

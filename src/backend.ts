@@ -3433,14 +3433,18 @@ function parseDeterministicQuotationRange(
   const betweenMatch = trimmed.match(
     new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:around\\s+)?(?:everything\\s+)?between\\s+(.+?)\\s+and\\s+(.+?)$`, 'iu'),
   )
-  const aroundAndMatch = betweenMatch ? null : trimmed.match(
+  const quotedEndpoint = `(?:“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')`
+  const quotedAroundAndMatch = betweenMatch ? null : trimmed.match(
+    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+around\\s+(${quotedEndpoint})\\s+and\\s+(${quotedEndpoint})[.!?]*$`, 'iu'),
+  )
+  const aroundAndMatch = betweenMatch ? null : quotedAroundAndMatch ?? trimmed.match(
     new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+around\\s+(.+?)\\s+and\\s+(.+?)$`, 'iu'),
   )
   // An exact phrase containing "and" is one target, not necessarily two endpoints.
   const wholeAroundTarget = aroundAndMatch
     ? unwrapEditArgument(stripUnquotedEditArgumentLabel(`${aroundAndMatch[2]} and ${aroundAndMatch[3]}`.replace(/[.!?]+$/u, '').trim()))
     : ''
-  const useAroundAnd = aroundAndMatch && !findTextTargetMatches(session.cleanText, session.paragraphs, wholeAroundTarget).length
+  const useAroundAnd = aroundAndMatch && (quotedAroundAndMatch || !findTextTargetMatches(session.cleanText, session.paragraphs, wholeAroundTarget).length)
   const rangeMatch = betweenMatch ?? (useAroundAnd ? aroundAndMatch : null) ?? trimmed.match(
     new RegExp(
       `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:(?:around|over)\\s+(?:everything\\s+)?(?:from\\s+)?|from\\s+|starting\\s+(?:at|from)\\s+)(.+?)\\s+(?:to|through|until|ending\\s+(?:at|with))\\s+(.+?)$`,

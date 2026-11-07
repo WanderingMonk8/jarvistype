@@ -1006,6 +1006,19 @@ test('quotation wraps close after punctuation attached to a phrase target', () =
   }
 })
 
+test('quotation wraps include opening and closing punctuation attached to a target', () => {
+  for (const [prefix, suffix] of [['(', ')?!'], ['[', '],'], ['((', '))...'], ['…', '?!'], ['—', ',']] as const) {
+    const text = `She said ${prefix}hello${suffix} then left.`
+    const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Quote the phrase.', operations: [
+        { id: 'open', type: 'insert_before', target: { exactText: 'hello' }, text: '“' },
+        { id: 'close', type: 'insert_after', target: { exactText: 'hello' }, text: '”' },
+      ],
+    })
+    assert.equal(result.ok && result.afterText, `She said “${prefix}hello${suffix}” then left.`)
+  }
+})
+
 test('deletes an inclusive range across paragraphs and joins the remaining text safely', () => {
   const text = 'Before. I remember the time we met.\n\nMore words nearly in an instant she returned.'
   const plan = {

@@ -418,8 +418,8 @@ test('supports guarded speech quotation aliases without consuming natural usage'
 })
 
 test('accepts again speech as an opening alias while preserving literal uses', () => {
-  assert.equal(normalizeDeterministically('I chuckled softly. Again speech. No, not a thing out of her, but plenty of warnings and speech.', []).text, 'I chuckled softly. “No, not a thing out of her, but plenty of warnings”.')
-  assert.equal(normalizeDeterministically('Again speech hello there end speech.', []).text, '“Hello there”.')
+  assert.equal(normalizeDeterministically('I chuckled softly. Again speech. No, not a thing out of her, but plenty of warnings and speech.', []).text, 'I chuckled softly. “No, not a thing out of her, but plenty of warnings.”')
+  assert.equal(normalizeDeterministically('Again speech hello there end speech.', []).text, '“Hello there.”')
   assert.equal(normalizeDeterministically('I said again speech remains literal.', []).text, 'I said again speech remains literal.')
   assert.equal(normalizeDeterministically('We said the phrase again speech and the phrase end speech.', []).text, 'We said again speech and end speech.')
 })
@@ -429,7 +429,7 @@ test('recovers a closing end speech alias mistranscribed as and speech', () => {
     'Begin speech. Hello there. Name your price and speech.',
     [],
   )
-  assert.equal(repaired.text, '“Hello there. Name your price”.')
+  assert.equal(repaired.text, '“Hello there. Name your price.”')
   assert.ok(repaired.reasons.includes('fuzzy spoken command recovery'))
 
   assert.equal(
@@ -483,16 +483,16 @@ test('leaves and speech literal without an unmatched opening alias', () => {
 test('formats voice-generated quotation openings without changing intentional leading punctuation', () => {
   assert.equal(
     normalizeDeterministically('quote, and I am not going anywhere quote.', []).text,
-    '“And I am not going anywhere”.',
+    '“And I am not going anywhere.”',
   )
-  assert.equal(normalizeDeterministically('open quote, hello close quote.', []).text, '“Hello”.')
+  assert.equal(normalizeDeterministically('open quote, hello close quote.', []).text, '“Hello.”')
   assert.equal(
     normalizeDeterministically('quote eBay is ready quote.', []).text,
-    '“eBay is ready”.',
+    '“eBay is ready.”',
   )
   assert.equal(
     normalizeDeterministically('quote punctuation ellipsis and then quote.', []).text,
-    '“… and then”.',
+    '“… and then.”',
   )
   assert.equal(
     normalizeDeterministically('“and I am not going anywhere.”', []).text,
@@ -503,7 +503,7 @@ test('formats voice-generated quotation openings without changing intentional le
 test('drops a provider period attached to a closing quote command after terminal punctuation', () => {
   assert.equal(normalizeDeterministically('quote Good morning. quote.', []).text, '“Good morning.”')
   assert.equal(normalizeDeterministically('open quote Really? close quote.', []).text, '“Really?”')
-  assert.equal(normalizeDeterministically('quote Good morning quote.', []).text, '“Good morning”.')
+  assert.equal(normalizeDeterministically('quote Good morning quote.', []).text, '“Good morning.”')
   assert.equal(
     normalizeDeterministically('quote You knew my coffee order, quote. I repeat her words.', [])
       .text,
@@ -581,7 +581,7 @@ test('prunes provider punctuation attached to every spoken command family', () =
   )
   assert.equal(
     normalizeDeterministically('quote Ready to leave quote? and then we left period', []).text,
-    '“Ready to leave”? and then we left.',
+    '“Ready to leave?” and then we left.',
   )
   assert.equal(normalizeDeterministically('Hello comma, world period', []).text, 'Hello, world.')
 })

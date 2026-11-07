@@ -742,7 +742,7 @@ function replaceSpokenQuotationCommands(
       (_whole: string, attachedPunctuation: string, offset: number) => {
         marks.push(closing)
         reasons.push(reason)
-        return `${closing}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`
+        return `${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}${closing}`
       },
     )
   }
@@ -761,7 +761,8 @@ function replaceSpokenQuotationCommands(
       marks.push(mark)
       reasons.push(reason)
       if (opening) return `${generatedOpeningMarker}${mark}`
-      return `${mark}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`
+      const punctuation = punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)
+      return reason === 'quote' || reason === 'single quote' ? `${punctuation}${mark}` : `${mark}${punctuation}`
     })
   }
   replaceFixed(/\bopen single quote\b([.,;:!?…—–-]*)/gi, '‘', 'single quote', true)
@@ -788,7 +789,7 @@ function replaceSpokenQuotationCommands(
       reasons.push(reason)
       return isOpening
         ? `${generatedOpeningMarker}${mark}`
-        : `${mark}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`
+        : `${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}${mark}`
     })
   }
   replacePaired(/\bsingle (?:quote|quotation)\b([.,;:!?…—–-]*)/gi, '‘', '’', 'single quote')

@@ -221,6 +221,18 @@ function normalizeErrantPunctuation(text: string, changes: string[]): string {
     pushChange(changes, 'Removed a period before a sentence ending.')
     return ''
   })
+  result = result.replace(/([,;:])(?:[ \t]+\1)+(?=[ \t]|$)/gu, (_match, separator: string) => {
+    pushChange(changes, `Removed a stray duplicate “${separator}”.`)
+    return separator
+  })
+  result = result.replace(/([.!?\u2026])([”’"])[ \t]*\.(?![.?!])/gu, (match, terminal: string, closing: string, offset: number, source: string) => {
+    if (terminal === '.') {
+      const word = source.slice(0, offset).match(/(\p{L}[\p{L}.'\u2019]*)$/u)?.[1] ?? ''
+      if (isAbbreviationOrInitialism(word)) return match
+    }
+    pushChange(changes, 'Removed a duplicate sentence ending after a closing quotation mark.')
+    return `${terminal}${closing}`
+  })
   return result
 }
 

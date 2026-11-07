@@ -758,7 +758,7 @@ function executeSequentialEditPlan(cleanText, paragraphs, currentVersion, plan, 
       ...plan,
       operations: [currentOperation]
     }, protectedCasingTerms, {
-      quotationWrap: operation.type === "insert_after" && /^[”’"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_before" && /^[“‘"']$/u.test(candidate.text ?? ""))
+      quotationWrap: operation.type === "insert_after" && /^[”’"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_before" && /^[“‘"']$/u.test(candidate.text ?? "")) || operation.type === "insert_before" && /^[“‘"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_after" && /^[”’"']$/u.test(candidate.text ?? ""))
     });
     if (!result.ok) {
       failedCommand = { index: index + 1, operationId: operation.id, reason: result.reason };
@@ -840,7 +840,7 @@ function executeEditPlan(cleanText, paragraphs, currentVersion, plan, protectedC
       operation,
       protectedCasingTerms,
       formatText,
-      options.quotationWrap === true || operation.type === "insert_after" && /^[”’"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_before" && /^[“‘"']$/u.test(candidate.text ?? ""))
+      options.quotationWrap === true || operation.type === "insert_after" && /^[”’"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_before" && /^[“‘"']$/u.test(candidate.text ?? "")) || operation.type === "insert_before" && /^[“‘"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_after" && /^[”’"']$/u.test(candidate.text ?? ""))
     );
     if (typeof patch === "string") return { ok: false, reason: patch };
     if (formatText && (operation.type === "insert_after" || operation.type === "append") && patches.length > 0) {
@@ -1168,6 +1168,12 @@ ${formattedParagraph}`,
   }
   const insertionText = operation.text ?? "";
   if (operation.type === "insert_before") {
+    if (formatText && quotationWrap && /^[“‘"']$/u.test(insertionText)) {
+      const attachedOpening = cleanText.slice(range.start, start).match(/[\p{P}]+$/u)?.[0] ?? "";
+      const boundary = start - attachedOpening.length;
+      if (attachedOpening && (boundary === range.start || /\s/u.test(cleanText[boundary - 1] ?? "")))
+        start = boundary;
+    }
     const formattedInsertion = formatText ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText) : insertionText;
     const displacedOpening = formatText && isSentenceOpeningAt(cleanText, start) && isContinuingInsertion(formattedInsertion) ? lowercaseOrdinarySentenceOpening(cleanText, start, cleanText, start, protectedCasingTerms) : null;
     return {
@@ -3225,6 +3231,18 @@ function normalizeErrantPunctuation(text, changes) {
     pushChange(changes, "Removed a period before a sentence ending.");
     return "";
   });
+  result = result.replace(/([,;:])(?:[ \t]+\1)+(?=[ \t]|$)/gu, (_match, separator) => {
+    pushChange(changes, `Removed a stray duplicate \u201C${separator}\u201D.`);
+    return separator;
+  });
+  result = result.replace(/([.!?\u2026])([”’"])[ \t]*\.(?![.?!])/gu, (match, terminal, closing, offset, source) => {
+    if (terminal === ".") {
+      const word = source.slice(0, offset).match(/(\p{L}[\p{L}.'\u2019]*)$/u)?.[1] ?? "";
+      if (isAbbreviationOrInitialism(word)) return match;
+    }
+    pushChange(changes, "Removed a duplicate sentence ending after a closing quotation mark.");
+    return `${terminal}${closing}`;
+  });
   return result;
 }
 function insertMissingSpaces(text, changes) {
@@ -3882,7 +3900,7 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
       (_whole, attachedPunctuation, offset) => {
         marks.push(closing);
         reasons.push(reason);
-        return `${closing}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`;
+        return `${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}${closing}`;
       }
     );
   };
@@ -3899,7 +3917,8 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
       marks.push(mark);
       reasons.push(reason);
       if (opening) return `${generatedOpeningMarker}${mark}`;
-      return `${mark}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`;
+      const punctuation = punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation);
+      return reason === "quote" || reason === "single quote" ? `${punctuation}${mark}` : `${mark}${punctuation}`;
     });
   };
   replaceFixed(/\bopen single quote\b([.,;:!?…—–-]*)/gi, "\u2018", "single quote", true);
@@ -3918,7 +3937,7 @@ function replaceSpokenQuotationCommands(input, hasLiteralQuoteContext) {
       occurrence += 1;
       marks.push(mark);
       reasons.push(reason);
-      return isOpening ? `${generatedOpeningMarker}${mark}` : `${mark}${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}`;
+      return isOpening ? `${generatedOpeningMarker}${mark}` : `${punctuationAfterSpokenCommand(text, offset, reason, attachedPunctuation)}${mark}`;
     });
   };
   replacePaired(/\bsingle (?:quote|quotation)\b([.,;:!?…—–-]*)/gi, "\u2018", "\u2019", "single quote");

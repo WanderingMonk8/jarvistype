@@ -152,8 +152,10 @@ export function executeSequentialEditPlan(
       ...plan,
       operations: [currentOperation],
     }, protectedCasingTerms, {
-      quotationWrap: operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? '')),
+      quotationWrap: (operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))) ||
+        (operation.type === 'insert_before' && /^[“‘"']$/u.test(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_after' && /^[”’"']$/u.test(candidate.text ?? ''))),
     })
     if (!result.ok) {
       failedCommand = { index: index + 1, operationId: operation.id, reason: result.reason }
@@ -255,7 +257,9 @@ export function executeEditPlan(
       protectedCasingTerms,
       formatText,
       options.quotationWrap === true || (operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))),
+        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))) ||
+        (operation.type === 'insert_before' && /^[“‘"']$/u.test(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_after' && /^[”’"']$/u.test(candidate.text ?? ''))),
     )
     if (typeof patch === 'string') return { ok: false, reason: patch }
     if (
@@ -719,6 +723,12 @@ function resolveOperation(
   }
   const insertionText = operation.text ?? ''
   if (operation.type === 'insert_before') {
+    if (formatText && quotationWrap && /^[“‘"']$/u.test(insertionText)) {
+      const attachedOpening = cleanText.slice(range.start, start).match(/[\p{P}]+$/u)?.[0] ?? ''
+      const boundary = start - attachedOpening.length
+      if (attachedOpening && (boundary === range.start || /\s/u.test(cleanText[boundary - 1] ?? '')))
+        start = boundary
+    }
     const formattedInsertion = formatText
       ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
       : insertionText

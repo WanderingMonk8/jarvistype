@@ -2343,7 +2343,7 @@ test('formats an opening produced by a spoken quote command', async () => {
   assert.equal(response?.type, 'transcript.normalization.response')
   if (response?.type === 'transcript.normalization.response') {
     assert.equal(response.outcome, 'review')
-    assert.equal(response.proposal.candidateText, '“And I am not going anywhere”.')
+    assert.equal(response.proposal.candidateText, '“And I am not going anywhere.”')
     assert.equal(response.proposal.contextualModelUsed, false)
   }
 })
@@ -3236,6 +3236,20 @@ test('quotation around an exact phrase containing and keeps it as one target', a
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type === 'edit.proposal.response')
     assert.equal(proposal.proposal.afterText, 'Before. “Bread and butter,” please. After.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('quotation edit includes punctuation attached to both ends of a phrase', async () => {
+  const userId = 'quotation-attached-both-user'
+  const chatId = 'quotation-attached-both-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She said (hello?!), then left.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-attached-both', operationId: 'quotation-attached-both-op', chatId, expectedVersion: 1, instructionTranscript: 'Put quotations around the phrase hello.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify(proposal))
+  if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'She said “(hello?!),” then left.')
   assert.equal(generationRequests.length, 0)
 })
 

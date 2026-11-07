@@ -129,6 +129,21 @@ test('normalizes errant punctuation left behind by edits', () => {
   assert.equal(repairDeterministicGrammar('“Stop!”, she shouted.').text, '“Stop!”, she shouted.')
 })
 
+test('removes unambiguous punctuation artifacts without changing intentional quotation punctuation', () => {
+  for (const [input, expected] of [
+    ['We waited, , then left.', 'We waited, then left.'],
+    ['She said “Hello.”. Then left.', 'She said “Hello.” Then left.'],
+    ['She asked “Really?”. Then left.', 'She asked “Really?” Then left.'],
+    ['She said “Stop!”, then left.', 'She said “Stop!”, then left.'],
+    ['The sign read “Dr.”. Then we left.', 'The sign read “Dr.”. Then we left.'],
+    ['She paused... “Wait...?”', 'She paused... “Wait...?”'],
+  ] as const) {
+    const once = repairDeterministicGrammar(input)
+    assert.equal(once.text, expected, input)
+    assert.equal(repairDeterministicGrammar(once.text).text, expected, `idempotence: ${input}`)
+  }
+})
+
 test('inserts missing spaces after punctuation without breaking numbers or URLs', () => {
   assert.equal(repairDeterministicGrammar('Hello.World').text, 'Hello. World')
   assert.equal(repairDeterministicGrammar('a,b').text, 'A, b')

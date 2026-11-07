@@ -2996,6 +2996,11 @@ test('resolves about sentence and phrase edits and move destinations with guarde
     ['Erin unwinds herself. Maeve waits.', 'Move the part about Erin relaxing to the end of the paragraph.', 0, 'Maeve waits. Erin unwinds herself.'],
     ['Erin unwinds herself. Maeve waits.', 'Move the part about Maeve waiting to the beginning of the paragraph.', 1, 'Maeve waits. Erin unwinds herself.'],
     ['Maeve waits, Erin unwinds herself, and watches.', 'Move the part about Erin relaxing to the end of the paragraph.', 1, 'Maeve waits, and watches. Erin unwinds herself,'],
+    ['Maeve waits. Erin unwinds herself.', 'Move the part about Erin relaxing before Maeve waits.', 1, 'Erin unwinds herself. Maeve waits.'],
+    ['They fought a long war. We must carry on.', 'Move the phrase “We must carry on” before the sentence about a long conflict.', 0, 'We must carry on. They fought a long war.'],
+    ['They fought a long war. We must carry on.', 'Move the phrase “We must carry on” to the beginning of the sentence about a long conflict.', 0, 'We must carry on. They fought a long war.'],
+    ['They fought a long war. We must carry on.', 'Move the phrase “We must carry on” before the part about a long conflict.', 0, 'We must carry on. They fought a long war.'],
+    ['We must carry on. They fought a long war.', 'Move the phrase “We must carry on” after the sentence about a long conflict.', 1, 'They fought a long war. We must carry on.'],
   ] as const
   for (const [index, [draft, instruction, selected, expected]] of examples.entries()) {
     const userId = `about-edit-user-${index}`

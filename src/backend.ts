@@ -1949,12 +1949,12 @@ async function interpretAboutEdit(
   connectionId: string | null, signal: AbortSignal,
 ): Promise<{ handled: boolean; plan: EditPlan | null }> {
   const command = instruction.trim().replace(/[.!?]+$/u, '').trim()
-  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+to\s+the\s+end\s+of\s+the\s+(sentence|phrase|part)\s+about\s+(.+)$/iu)
+  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+(?:to\s+the\s+(end|beginning|start)\s+of\s+the|(before|after)\s+the)\s+(sentence|phrase|part)\s+about\s+(.+)$/iu)
   if (!destinationMove && /^(?:move|relocate|shift)\s+.+?\s+to\s+the\s+(?:sentence|phrase|part)\s+about\s+/iu.test(command))
     return { handled: true, plan: null }
   const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentence|phrase|part)\s+about\s+(.+)$/iu)
   if (!destinationMove && !source) return { handled: false, plan: null }
-  let description = (destinationMove ? destinationMove[3]! : source![3]!).trim()
+  let description = (destinationMove ? destinationMove[5]! : source![3]!).trim()
   let replacement = ''
   let moveDestination = ''
   let paragraphBoundary: 'start' | 'end' | null = null
@@ -1987,7 +1987,7 @@ async function interpretAboutEdit(
     recordDebug(userId, 'edit.about', `outcome=${signal.aborted ? 'cancelled' : !description ? 'empty-description' : 'permission-unavailable'}`)
     return { handled: true, plan: null }
   }
-  const label = (destinationMove ? destinationMove[2]! : source![2]!).toLocaleLowerCase()
+  const label = (destinationMove ? destinationMove[4]! : source![2]!).toLocaleLowerCase()
   const kind: 'sentence' | 'phrase' = label === 'sentence' ? 'sentence' : 'phrase'
   const candidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind)
   const phoneticDescription = normalizeAboutDescription(description, session.cleanText)
@@ -2036,7 +2036,7 @@ async function interpretAboutEdit(
       if (anchors.length === 1) moveDestination = anchors[0]!.text
     }
     const operation = destinationMove
-      ? { id: 'about-move', type: 'move_after', target: { exactText: unwrapEditArgument(destinationMove[1]!) }, destination: selectedTarget, includeTrailingPunctuation: true }
+      ? { id: 'about-move', type: /^(?:before|beginning|start)$/iu.test(destinationMove[2] ?? destinationMove[3] ?? '') ? 'move_before' : 'move_after', target: { exactText: unwrapEditArgument(destinationMove[1]!) }, destination: selectedTarget }
       : paragraphBoundary ? { id: 'about-move-paragraph-boundary', type: paragraphBoundary === 'end' ? 'move_after' : 'move_before', target: selectedTarget, destination: { paragraphId: selected.paragraphId, ...(paragraphBoundary === 'end' ? { sentenceFromEnd: 1 } : { sentenceOrdinal: 1 }) }, includeTrailingPunctuation: kind === 'sentence' ? true : undefined }
       : moveDestination ? { id: 'about-move', type: moveDirection, target: selectedTarget, destination: { exactText: moveDestination }, includeTrailingPunctuation: kind === 'sentence' ? true : undefined }
       : verb === 'replace' || verb === 'change'

@@ -957,7 +957,8 @@ function executeInlineMove(
   }
   const sourceInsideDestinationSentence =
     (operation.destination.sentenceOrdinal !== undefined || operation.destination.sentenceFromEnd !== undefined) &&
-    operation.target.punctuation !== undefined && source.start >= destination.start && sourceEnd <= destination.end
+    (operation.target.punctuation !== undefined || operation.id === 'about-move-paragraph-boundary') &&
+    sourceStart >= destination.start && sourceEnd <= destination.end
   if (sourceStart < destination.end && destination.start < sourceEnd && !sourceInsideDestinationSentence)
     return { ok: false, reason: 'move source and destination overlap' }
 

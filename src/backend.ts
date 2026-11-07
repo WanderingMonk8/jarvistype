@@ -1949,12 +1949,15 @@ async function interpretAboutEdit(
   connectionId: string | null, signal: AbortSignal,
 ): Promise<{ handled: boolean; plan: EditPlan | null }> {
   const command = instruction.trim().replace(/[.!?]+$/u, '').trim()
-  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+to\s+the\s+(?:end\s+of\s+the\s+)?(sentence|phrase)\s+about\s+(.+)$/iu)
-  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentence|phrase)\s+about\s+(.+)$/iu)
+  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+to\s+the\s+end\s+of\s+the\s+(sentence|phrase|part)\s+about\s+(.+)$/iu)
+  if (!destinationMove && /^(?:move|relocate|shift)\s+.+?\s+to\s+the\s+(?:sentence|phrase|part)\s+about\s+/iu.test(command))
+    return { handled: true, plan: null }
+  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentence|phrase|part)\s+about\s+(.+)$/iu)
   if (!destinationMove && !source) return { handled: false, plan: null }
   let description = (destinationMove ? destinationMove[3]! : source![3]!).trim()
   let replacement = ''
   let moveDestination = ''
+  let paragraphBoundary: 'start' | 'end' | null = null
   let moveDirection: 'move_before' | 'move_after' = 'move_after'
   const verb = source?.[1]?.toLocaleLowerCase() ?? 'move'
   if (verb === 'replace' || verb === 'change') {
@@ -1964,12 +1967,18 @@ async function interpretAboutEdit(
     replacement = unwrapEditArgument(parts[2]!.trim())
   }
   if (source && ['move', 'relocate', 'shift'].includes(verb)) {
-    const parts = description.match(/^(.+?)\s+(before|after)\s+(.+)$/iu)
-    if (!parts) return { handled: true, plan: null }
-    description = parts[1]!.trim()
-    moveDirection = parts[2]!.toLocaleLowerCase() === 'before' ? 'move_before' : 'move_after'
-    moveDestination = unwrapEditArgument(parts[3]!.trim().replace(/^(?:the\s+)?(?:word|phrase|sentence)\s+/iu, ''))
-    if (!moveDestination) return { handled: true, plan: null }
+    const boundary = description.match(/^(.+?)\s+to\s+the\s+(end|beginning|start)\s+of\s+the\s+paragraph$/iu)
+    if (boundary) {
+      description = boundary[1]!.trim()
+      paragraphBoundary = boundary[2]!.toLocaleLowerCase() === 'end' ? 'end' : 'start'
+    } else {
+      const parts = description.match(/^(.+?)\s+(before|after)\s+(.+)$/iu)
+      if (!parts) return { handled: true, plan: null }
+      description = parts[1]!.trim()
+      moveDirection = parts[2]!.toLocaleLowerCase() === 'before' ? 'move_before' : 'move_after'
+      moveDestination = unwrapEditArgument(parts[3]!.trim().replace(/^(?:the\s+)?(?:word|phrase|sentence|part)\s+/iu, ''))
+      if (!moveDestination) return { handled: true, plan: null }
+    }
   }
   // Quoted descriptions and existing literal targets stay on the ordinary exact path.
   if (/^[“"‘']/u.test(description) || editTargetTextExists(session.cleanText, `about ${description}`))
@@ -1978,7 +1987,8 @@ async function interpretAboutEdit(
     recordDebug(userId, 'edit.about', `outcome=${signal.aborted ? 'cancelled' : !description ? 'empty-description' : 'permission-unavailable'}`)
     return { handled: true, plan: null }
   }
-  const kind = (destinationMove ? destinationMove[2]! : source![2]!).toLocaleLowerCase() as 'sentence' | 'phrase'
+  const label = (destinationMove ? destinationMove[2]! : source![2]!).toLocaleLowerCase()
+  const kind: 'sentence' | 'phrase' = label === 'sentence' ? 'sentence' : 'phrase'
   const candidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind)
   const phoneticDescription = normalizeAboutDescription(description, session.cleanText)
   const startedAt = performance.now()
@@ -2027,6 +2037,7 @@ async function interpretAboutEdit(
     }
     const operation = destinationMove
       ? { id: 'about-move', type: 'move_after', target: { exactText: unwrapEditArgument(destinationMove[1]!) }, destination: selectedTarget, includeTrailingPunctuation: true }
+      : paragraphBoundary ? { id: 'about-move-paragraph-boundary', type: paragraphBoundary === 'end' ? 'move_after' : 'move_before', target: selectedTarget, destination: { paragraphId: selected.paragraphId, ...(paragraphBoundary === 'end' ? { sentenceFromEnd: 1 } : { sentenceOrdinal: 1 }) }, includeTrailingPunctuation: kind === 'sentence' ? true : undefined }
       : moveDestination ? { id: 'about-move', type: moveDirection, target: selectedTarget, destination: { exactText: moveDestination }, includeTrailingPunctuation: kind === 'sentence' ? true : undefined }
       : verb === 'replace' || verb === 'change'
         ? { id: 'about-replace', type: 'replace', target: selectedTarget, text: replacement }

@@ -1307,7 +1307,7 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
     if (startsSentencePart && sourceStart === source.start)
       sourceEnd += attachedSentencePartPunctuation(cleanText, sourceEnd, source.scopeEnd).length;
   }
-  const sourceInsideDestinationSentence = (operation.destination.sentenceOrdinal !== void 0 || operation.destination.sentenceFromEnd !== void 0) && operation.target.punctuation !== void 0 && source.start >= destination.start && sourceEnd <= destination.end;
+  const sourceInsideDestinationSentence = (operation.destination.sentenceOrdinal !== void 0 || operation.destination.sentenceFromEnd !== void 0) && (operation.target.punctuation !== void 0 || operation.id === "about-move-paragraph-boundary") && sourceStart >= destination.start && sourceEnd <= destination.end;
   if (sourceStart < destination.end && destination.start < sourceEnd && !sourceInsideDestinationSentence)
     return { ok: false, reason: "move source and destination overlap" };
   const movedText = cleanText.slice(sourceStart, sourceEnd);
@@ -5781,12 +5781,15 @@ function aboutPhoneticEvidence(description, candidate) {
 }
 async function interpretAboutEdit(instruction, session, userId, connectionId, signal) {
   const command = instruction.trim().replace(/[.!?]+$/u, "").trim();
-  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+to\s+the\s+(?:end\s+of\s+the\s+)?(sentence|phrase)\s+about\s+(.+)$/iu);
-  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentence|phrase)\s+about\s+(.+)$/iu);
+  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+to\s+the\s+end\s+of\s+the\s+(sentence|phrase|part)\s+about\s+(.+)$/iu);
+  if (!destinationMove && /^(?:move|relocate|shift)\s+.+?\s+to\s+the\s+(?:sentence|phrase|part)\s+about\s+/iu.test(command))
+    return { handled: true, plan: null };
+  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentence|phrase|part)\s+about\s+(.+)$/iu);
   if (!destinationMove && !source) return { handled: false, plan: null };
   let description = (destinationMove ? destinationMove[3] : source[3]).trim();
   let replacement = "";
   let moveDestination = "";
+  let paragraphBoundary = null;
   let moveDirection = "move_after";
   const verb = source?.[1]?.toLocaleLowerCase() ?? "move";
   if (verb === "replace" || verb === "change") {
@@ -5796,12 +5799,18 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
     replacement = unwrapEditArgument(parts[2].trim());
   }
   if (source && ["move", "relocate", "shift"].includes(verb)) {
-    const parts = description.match(/^(.+?)\s+(before|after)\s+(.+)$/iu);
-    if (!parts) return { handled: true, plan: null };
-    description = parts[1].trim();
-    moveDirection = parts[2].toLocaleLowerCase() === "before" ? "move_before" : "move_after";
-    moveDestination = unwrapEditArgument(parts[3].trim().replace(/^(?:the\s+)?(?:word|phrase|sentence)\s+/iu, ""));
-    if (!moveDestination) return { handled: true, plan: null };
+    const boundary = description.match(/^(.+?)\s+to\s+the\s+(end|beginning|start)\s+of\s+the\s+paragraph$/iu);
+    if (boundary) {
+      description = boundary[1].trim();
+      paragraphBoundary = boundary[2].toLocaleLowerCase() === "end" ? "end" : "start";
+    } else {
+      const parts = description.match(/^(.+?)\s+(before|after)\s+(.+)$/iu);
+      if (!parts) return { handled: true, plan: null };
+      description = parts[1].trim();
+      moveDirection = parts[2].toLocaleLowerCase() === "before" ? "move_before" : "move_after";
+      moveDestination = unwrapEditArgument(parts[3].trim().replace(/^(?:the\s+)?(?:word|phrase|sentence|part)\s+/iu, ""));
+      if (!moveDestination) return { handled: true, plan: null };
+    }
   }
   if (/^[“"‘']/u.test(description) || editTargetTextExists(session.cleanText, `about ${description}`))
     return { handled: false, plan: null };
@@ -5809,7 +5818,8 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
     recordDebug(userId, "edit.about", `outcome=${signal.aborted ? "cancelled" : !description ? "empty-description" : "permission-unavailable"}`);
     return { handled: true, plan: null };
   }
-  const kind = (destinationMove ? destinationMove[2] : source[2]).toLocaleLowerCase();
+  const label = (destinationMove ? destinationMove[2] : source[2]).toLocaleLowerCase();
+  const kind = label === "sentence" ? "sentence" : "phrase";
   const candidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind);
   const phoneticDescription = normalizeAboutDescription(description, session.cleanText);
   const startedAt2 = performance.now();
@@ -5871,7 +5881,7 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
       const anchors = findAboutTargetCandidates(session.cleanText, session.paragraphs, "sentence").filter((candidate) => candidate.text.replace(/[.!?…]+[”’"']*$/u, "").trim().toLocaleLowerCase() === moveDestination.toLocaleLowerCase());
       if (anchors.length === 1) moveDestination = anchors[0].text;
     }
-    const operation = destinationMove ? { id: "about-move", type: "move_after", target: { exactText: unwrapEditArgument(destinationMove[1]) }, destination: selectedTarget, includeTrailingPunctuation: true } : moveDestination ? { id: "about-move", type: moveDirection, target: selectedTarget, destination: { exactText: moveDestination }, includeTrailingPunctuation: kind === "sentence" ? true : void 0 } : verb === "replace" || verb === "change" ? { id: "about-replace", type: "replace", target: selectedTarget, text: replacement } : { id: "about-delete", type: "delete", target: selectedTarget };
+    const operation = destinationMove ? { id: "about-move", type: "move_after", target: { exactText: unwrapEditArgument(destinationMove[1]) }, destination: selectedTarget, includeTrailingPunctuation: true } : paragraphBoundary ? { id: "about-move-paragraph-boundary", type: paragraphBoundary === "end" ? "move_after" : "move_before", target: selectedTarget, destination: { paragraphId: selected.paragraphId, ...paragraphBoundary === "end" ? { sentenceFromEnd: 1 } : { sentenceOrdinal: 1 } }, includeTrailingPunctuation: kind === "sentence" ? true : void 0 } : moveDestination ? { id: "about-move", type: moveDirection, target: selectedTarget, destination: { exactText: moveDestination }, includeTrailingPunctuation: kind === "sentence" ? true : void 0 } : verb === "replace" || verb === "change" ? { id: "about-replace", type: "replace", target: selectedTarget, text: replacement } : { id: "about-delete", type: "delete", target: selectedTarget };
     const preview = selected.text.length > 300 ? `${selected.text.slice(0, 300)}\u2026` : selected.text;
     const explanation = uncertainReview ? `Uncertain \u201Cabout\u201D match; verify the selected ${kind}: \u201C${preview}\u201D.` : `Edit the ${kind} matching the description.`;
     const plan = parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation, operations: [operation] });

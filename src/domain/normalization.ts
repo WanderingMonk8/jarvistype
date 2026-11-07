@@ -198,7 +198,7 @@ export function hasUnresolvedCommandSignal(text: string): boolean {
 // Only these four casing words are dictation casing commands. The phrase after the word is the
 // target: "I look to the capitalized white hawk" → "I look to the White Hawk".
 const CASING_COMMAND_PATTERN =
-  /\b(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu
+  /\b(capitalized|lowercase|uppercase|all caps)[ \t]*[.,;:!?…—–-]*[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu
 
 function titleCaseWords(value: string): string {
   return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {
@@ -210,7 +210,7 @@ function titleCaseWords(value: string): string {
 /** Finds article-prefixed casing cues left untouched by the local prose safeguard. */
 export function findArticleCasingCandidates(text: string): Array<{ start: number; end: number; cue: string; target: string }> {
   const candidates: Array<{ start: number; end: number; cue: string; target: string }> = []
-  const pattern = /\b(?:a|an)\s+(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+([\p{L}\p{M}][\p{L}\p{M}\d'’-]*)(?=[.!?,;:]|\s|$)/giu
+  const pattern = /\b(?:a|an)\s+(capitalized|lowercase|uppercase|all caps)[ \t]*[.,;:!?…—–-]*[ \t]+([\p{L}\p{M}][\p{L}\p{M}\d'’-]*)(?=[.!?,;:]|\s|$)/giu
   for (const match of text.matchAll(pattern)) {
     const target = match[2]!
     if (CASING_TARGET_STOPWORDS.has(target.toLocaleLowerCase())) continue
@@ -311,7 +311,7 @@ function applySpokenCasingCommands(text: string): string {
     (whole: string, cue: string, phrase: string, offset: number, source: string) => {
       const before = source.slice(0, offset)
       // A casing word that opens a sentence is ordinary prose ("Lowercase remains lowercase").
-      if (/(?:^|[.!?]["'”’]?|\n)\s*$/u.test(before)) return whole
+      if (/(?:^|[.!?]["'”’]?|\n)\s*$/u.test(before) && !/^[^\p{L}]*[.,;:!?…—–-]/u.test(whole.slice(cue.length))) return whole
       const previous = before.match(/(\p{L}[\p{L}\p{M}'’-]*)[ \t]*$/u)?.[1]?.toLocaleLowerCase()
       if (previous && CASING_PROSE_PRECEDERS.has(previous)) return whole
       const target = phrase.trim()

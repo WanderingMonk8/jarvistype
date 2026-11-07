@@ -3466,7 +3466,7 @@ function withinEditDistance(left, right, maximum) {
   }
   return previous[right.length] <= maximum;
 }
-var CASING_COMMAND_PATTERN = /\b(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu;
+var CASING_COMMAND_PATTERN = /\b(capitalized|lowercase|uppercase|all caps)[ \t]*[.,;:!?…—–-]*[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu;
 function titleCaseWords(value) {
   return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {
     const index = word.search(/\p{L}/u);
@@ -3475,7 +3475,7 @@ function titleCaseWords(value) {
 }
 function findArticleCasingCandidates(text) {
   const candidates = [];
-  const pattern = /\b(?:a|an)\s+(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+([\p{L}\p{M}][\p{L}\p{M}\d'’-]*)(?=[.!?,;:]|\s|$)/giu;
+  const pattern = /\b(?:a|an)\s+(capitalized|lowercase|uppercase|all caps)[ \t]*[.,;:!?…—–-]*[ \t]+([\p{L}\p{M}][\p{L}\p{M}\d'’-]*)(?=[.!?,;:]|\s|$)/giu;
   for (const match of text.matchAll(pattern)) {
     const target = match[2];
     if (CASING_TARGET_STOPWORDS.has(target.toLocaleLowerCase())) continue;
@@ -3568,7 +3568,7 @@ function applySpokenCasingCommands(text) {
     CASING_COMMAND_PATTERN,
     (whole, cue, phrase, offset, source) => {
       const before = source.slice(0, offset);
-      if (/(?:^|[.!?]["'”’]?|\n)\s*$/u.test(before)) return whole;
+      if (/(?:^|[.!?]["'”’]?|\n)\s*$/u.test(before) && !/^[^\p{L}]*[.,;:!?…—–-]/u.test(whole.slice(cue.length))) return whole;
       const previous = before.match(/(\p{L}[\p{L}\p{M}'’-]*)[ \t]*$/u)?.[1]?.toLocaleLowerCase();
       if (previous && CASING_PROSE_PRECEDERS.has(previous)) return whole;
       const target = phrase.trim();

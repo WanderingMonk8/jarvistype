@@ -7985,6 +7985,7 @@ test('uses Jev to decide ambiguous article-prefixed casing commands', async () =
     [0, 'I had a capitalized wife.', 0.99, 'I had a Wife.'],
     [1, 'This is a capitalized company.', 0.01, 'This is a capitalized company.'],
     [2, 'I had a capitalized wife.', 0.5, 'I had a capitalized wife.'],
+    [3, 'I had a capitalized, wife.', 0.99, 'I had a Wife.'],
   ] as const) {
     referenceDecisionProbability = score
     responses.length = 0

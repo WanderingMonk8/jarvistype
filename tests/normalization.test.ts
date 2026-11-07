@@ -692,3 +692,17 @@ test('applies only the strict casing words as dictation casing commands', () => 
     assert.equal(normalizeDeterministically(prose, []).text, prose)
   }
 })
+
+test('casing commands tolerate provider punctuation immediately after the cue', () => {
+  for (const [input, expected] of [
+    ['Capitalized, Criminal Minds', 'Criminal Minds'],
+    ['Capitalized. criminal minds', 'Criminal Minds'],
+    ['I see capitalized, white hawk.', 'I see White Hawk.'],
+    ['I see uppercase: white hawk.', 'I see WHITE HAWK.'],
+    ['I see lowercase. WHITE HAWK.', 'I see white hawk.'],
+    ['I see all caps?! white hawk.', 'I see WHITE HAWK.'],
+    ['We discussed the use of capitalized words.', 'We discussed the use of capitalized words.'],
+    ['Lowercase remains lowercase.', 'Lowercase remains lowercase.'],
+    ['The word capitalized, appears here.', 'The word capitalized, appears here.'],
+  ] as const) assert.equal(normalizeDeterministically(input, []).text, expected, input)
+})

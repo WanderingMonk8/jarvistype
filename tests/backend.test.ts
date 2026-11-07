@@ -3149,6 +3149,30 @@ test('moves the part about nodding to the end of its paragraph', async () => {
   assert.equal(generationRequests.length, 0)
 })
 
+test('about descriptions can select adjacent phrase parts as one atomic span', async () => {
+  for (const [index, instruction, selected] of [
+    ['Move the parts about nodding and showing respect to the end of the paragraph.', 2],
+    ['Move the part about nodding and signaling respect to the end of the paragraph.', 10],
+  ].map(([instruction, selected], index) => [index, instruction as string, selected as number] as const)) {
+    const userId = `about-combined-user-${index}`
+    const chatId = `about-combined-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = true
+    aboutDecision = (id) => id === `about_${selected}` ? 0.99 : 0.01
+    await seedDraft(userId, chatId, 'I watch her demonstration on the axe, and I nod approvingly, signaling respect. I take the axe back, copy her grip, try it a few more times before I work on another log. It cuts through, this time without the strain of having to fight the grip.')
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-combined-${index}`, operationId: `about-combined-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+    if (response?.type === 'edit.proposal.response') {
+      assert.match(response.proposal.operations[0]!.beforeText, /nod approvingly, signaling respect/iu)
+      assert.match(response.proposal.afterText, /nod approvingly, signaling respect\.$/iu)
+    }
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
 test('refuses an about destination without an explicit position', async () => {
   const userId = 'about-position-ambiguous-user'
   const chatId = 'about-position-ambiguous-chat'

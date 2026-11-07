@@ -1952,7 +1952,7 @@ async function interpretAboutEdit(
   const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part|sentence)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+(?:to\s+the\s+(end|beginning|start)\s+of\s+the|(before|after)\s+the)\s+(sentence|phrase|part)\s+about\s+(.+)$/iu)
   if (!destinationMove && /^(?:move|relocate|shift)\s+.+?\s+to\s+the\s+(?:sentence|phrase|part)\s+about\s+/iu.test(command))
     return { handled: true, plan: null }
-  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentence|phrase|part)\s+about\s+(.+)$/iu)
+  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentences?|phrases?|parts?)\s+about\s+(.+)$/iu)
   if (!destinationMove && !source) return { handled: false, plan: null }
   let description = (destinationMove ? destinationMove[5]! : source![3]!).trim()
   let replacement = ''
@@ -1990,8 +1990,22 @@ async function interpretAboutEdit(
     return { handled: true, plan: null }
   }
   const label = (destinationMove ? destinationMove[4]! : source![2]!).toLocaleLowerCase()
-  const kind: 'sentence' | 'phrase' = label === 'sentence' ? 'sentence' : 'phrase'
-  const candidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind)
+  const kind: 'sentence' | 'phrase' = /^sentences?$/u.test(label) ? 'sentence' : 'phrase'
+  const plural = /s$/u.test(label)
+  const baseCandidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind)
+  const combinedCandidates: typeof baseCandidates = []
+  if (plural || (kind === 'phrase' && /\band\b/iu.test(description))) {
+    for (let index = 0; index < baseCandidates.length; index++) {
+      const first = baseCandidates[index]!
+      for (let next = index + 1; next < Math.min(index + 3, baseCandidates.length); next++) {
+        const previous = baseCandidates[next - 1]!
+        const last = baseCandidates[next]!
+        if (first.paragraphId !== last.paragraphId || /[.!?…][”’"')\]]*$/u.test(previous.text) || !/^\s*$/u.test(session.cleanText.slice(previous.end, last.start))) break
+        combinedCandidates.push({ ...first, end: last.end, text: session.cleanText.slice(first.start, last.end) })
+      }
+    }
+  }
+  const candidates = plural ? combinedCandidates : [...baseCandidates, ...combinedCandidates]
   const phoneticDescription = normalizeAboutDescription(description, session.cleanText)
   const startedAt = performance.now()
   const logOutcome = (outcome: string, details = '') => recordDebug(userId, 'edit.about', `outcome=${outcome} kind=${kind} candidates=${candidates.length}${details ? ` ${details}` : ''} duration=${debugDuration(startedAt)}`)

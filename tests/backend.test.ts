@@ -3173,6 +3173,71 @@ test('about descriptions can select adjacent phrase parts as one atomic span', a
   }
 })
 
+test('plural about targets work across delete, replace, move, and move destinations', async () => {
+  const examples = [
+    ['Erin rests, then smiles, and leaves.', 'Delete the parts about Erin resting and smiling.', 'And leaves.'],
+    ['Erin rests, then smiles, and leaves.', 'Replace the phrases about Erin resting and smiling with Maeve waits.', 'Maeve waits and leaves.'],
+    ['Erin rests. Maeve smiles. The door opens.', 'Delete the sentences about resting and smiling.', 'The door opens.'],
+    ['Erin rests. Maeve smiles. The door opens.', 'Move the sentences about resting and smiling to the end of the paragraph.', 'The door opens. Erin rests. Maeve smiles.'],
+    ['Erin rests. Maeve smiles. The door opens.', 'Move the sentence “The door opens” before the sentences about resting and smiling.', 'The door opens. Erin rests. Maeve smiles.'],
+  ] as const
+  for (const [index, [draft, instructionTranscript, expected]] of examples.entries()) {
+    const userId = `plural-about-commands-user-${index}`
+    const chatId = `plural-about-commands-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = true
+    aboutDecision = (id) => id === 'about_0' ? 0.99 : 0.01
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `plural-about-commands-${index}`, operationId: `plural-about-commands-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', `${instructionTranscript}: ${JSON.stringify(response)}`)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('offers a flagged review for nested high-scoring about spans across edit commands', async () => {
+  const instructions = [
+    'Delete the part about nodding and signaling respect.',
+    'Replace the part about nodding and signaling respect with I bow.',
+    'Move the part about nodding and signaling respect to the end of the paragraph.',
+  ]
+  for (const [index, instructionTranscript] of instructions.entries()) {
+    const userId = `about-overlap-user-${index}`
+    const chatId = `about-overlap-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = true
+    aboutDecision = (id) => id === 'about_10' ? 0.95 : id === 'about_9' ? 0.94 : 0.01
+    await seedDraft(userId, chatId, 'I watch her demonstration on the axe, and I nod approvingly, signaling respect. I take the axe back, copy her grip, try it a few more times before I work on another log. It cuts through, this time without the strain of having to fight the grip.')
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-overlap-${index}`, operationId: `about-overlap-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+    if (response?.type === 'edit.proposal.response') {
+      assert.match(response.proposal.explanation, /Overlapping.*verify.*boundaries/iu)
+      assert.match(response.proposal.explanation, /nod approvingly, signaling respect/iu)
+    }
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('flags nested ambiguous about destinations for review', async () => {
+  const userId = 'about-overlap-destination-user'
+  const chatId = 'about-overlap-destination-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  aboutDecision = (id) => id === 'about_0' ? 0.95 : id === 'about_1' ? 0.94 : 0.01
+  await seedDraft(userId, chatId, 'Erin rests, then smiles, and waves. The door opens.')
+  responses.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-overlap-destination', operationId: 'about-overlap-destination-op', chatId, expectedVersion: 1, instructionTranscript: 'Move the sentence “The door opens” before the parts about Erin resting and smiling.' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+  if (response?.type === 'edit.proposal.response') assert.match(response.proposal.explanation, /Overlapping.*verify.*boundaries/iu)
+})
+
 test('refuses an about destination without an explicit position', async () => {
   const userId = 'about-position-ambiguous-user'
   const chatId = 'about-position-ambiguous-chat'

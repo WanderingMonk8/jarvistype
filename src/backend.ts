@@ -1949,7 +1949,7 @@ async function interpretAboutEdit(
   connectionId: string | null, signal: AbortSignal,
 ): Promise<{ handled: boolean; plan: EditPlan | null }> {
   const command = instruction.trim().replace(/[.!?]+$/u, '').trim()
-  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+(?:to\s+the\s+(end|beginning|start)\s+of\s+the|(before|after)\s+the)\s+(sentence|phrase|part)\s+about\s+(.+)$/iu)
+  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part|sentence)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+(?:to\s+the\s+(end|beginning|start)\s+of\s+the|(before|after)\s+the)\s+(sentence|phrase|part)\s+about\s+(.+)$/iu)
   if (!destinationMove && /^(?:move|relocate|shift)\s+.+?\s+to\s+the\s+(?:sentence|phrase|part)\s+about\s+/iu.test(command))
     return { handled: true, plan: null }
   const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentence|phrase|part)\s+about\s+(.+)$/iu)
@@ -1957,6 +1957,7 @@ async function interpretAboutEdit(
   let description = (destinationMove ? destinationMove[5]! : source![3]!).trim()
   let replacement = ''
   let moveDestination = ''
+  let destinationIsSentence = false
   let paragraphBoundary: 'start' | 'end' | null = null
   let moveDirection: 'move_before' | 'move_after' = 'move_after'
   const verb = source?.[1]?.toLocaleLowerCase() ?? 'move'
@@ -1976,6 +1977,7 @@ async function interpretAboutEdit(
       if (!parts) return { handled: true, plan: null }
       description = parts[1]!.trim()
       moveDirection = parts[2]!.toLocaleLowerCase() === 'before' ? 'move_before' : 'move_after'
+      destinationIsSentence = /^(?:the\s+)?sentence\s+/iu.test(parts[3]!.trim())
       moveDestination = unwrapEditArgument(parts[3]!.trim().replace(/^(?:the\s+)?(?:word|phrase|sentence|part)\s+/iu, ''))
       if (!moveDestination) return { handled: true, plan: null }
     }
@@ -2031,7 +2033,7 @@ async function interpretAboutEdit(
     if (!uncertainReview && (ranked[0]!.score < effectiveThreshold || (ranked[1] && lead < 0.15))) { logOutcome(ranked[0]!.score < effectiveThreshold ? 'below-threshold' : 'ambiguous', scores); return { handled: true, plan: null } }
     const selected = ranked[0]!.candidate
     const selectedTarget = { paragraphId: selected.paragraphId, exactText: selected.text, ignorePunctuationForMatch: false }
-    if (moveDestination && kind === 'sentence' && moveDirection === 'move_after') {
+    if (moveDestination && (destinationIsSentence || kind === 'sentence') && moveDirection === 'move_after') {
       const anchors = findAboutTargetCandidates(session.cleanText, session.paragraphs, 'sentence').filter((candidate) => candidate.text.replace(/[.!?…]+[”’"']*$/u, '').trim().toLocaleLowerCase() === moveDestination.toLocaleLowerCase())
       if (anchors.length === 1) moveDestination = anchors[0]!.text
     }

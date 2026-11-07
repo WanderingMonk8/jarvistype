@@ -1054,6 +1054,51 @@ test('deletes an inclusive range across paragraphs and joins the remaining text 
     ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
   })
   assert.equal(attachedPunctuation.ok && attachedPunctuation.afterText, 'Left, right.')
+  for (const tail of [',', ':', ';', '?!', '...', ',—']) {
+    const input = `Left, start words end${tail} right.`
+    const result = executeEditPlan(input, [], 1, {
+      ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+    })
+    assert.equal(result.ok && result.afterText, 'Left, right.', tail)
+    if (result.ok) assert.equal(result.operations[0]?.beforeText, `start words end${tail}`)
+  }
+  for (const [opening, closing] of [['“', '”'], ['(', ')'], ['[', ']']] as const) {
+    const input = `Left ${opening}start words end?!${closing}, right.`
+    const result = executeEditPlan(input, [], 1, {
+      ...plan, operations: [{ ...plan.operations[0]!, target: { exactText: 'start' }, destination: { exactText: 'end' } }],
+    })
+    assert.equal(result.ok && result.afterText, 'Left right.', input)
+    if (result.ok) assert.equal(result.operations[0]?.beforeText, `${opening}start words end?!${closing},`)
+  }
+})
+
+test('deletion removes punctuation only with a whole sentence part or quotation', () => {
+  const text = 'I say to him, “I warned you before.”'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  for (const [target, expected] of [['I warned you before', 'I say to him,'], ['before', 'I say to him, “I warned you.”']] as const) {
+    const result = executeEditPlan(text, paragraphs, 1, { schemaVersion: 2, draftVersion: 1, explanation: 'Delete text.', operations: [{ id: 'delete', type: 'delete', target: { exactText: target } }] })
+    assert.equal(result.ok && result.afterText, expected)
+  }
+  const partial = 'I say to him, “I warned you before today.”'
+  const result = executeEditPlan(partial, [{ id: 'p', ordinal: 1, lineIndex: 0, text: partial }], 1, { schemaVersion: 2, draftVersion: 1, explanation: 'Delete range.', operations: [{ id: 'range', type: 'delete_range', target: { exactText: 'before' }, destination: { exactText: 'today' } }] })
+  assert.equal(result.ok && result.afterText, 'I say to him, “I warned you.”')
+  const whole = executeEditPlan(text, paragraphs, 1, { schemaVersion: 2, draftVersion: 1, explanation: 'Delete range.', operations: [{ id: 'range', type: 'delete_range', target: { exactText: 'I warned' }, destination: { exactText: 'before' } }] })
+  assert.equal(whole.ok && whole.afterText, 'I say to him,')
+})
+
+test('moving a quotation carries its punctuation but moving part leaves it behind', () => {
+  const text = 'I say to him, “I warned you before.” Then I leave.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const plan = (target: string) => ({ schemaVersion: 2 as const, draftVersion: 1, explanation: 'Move text.', operations: [{ id: 'move', type: 'move_before' as const, target: { exactText: target }, destination: { exactText: 'I say' } }] })
+  const whole = executeEditPlan(text, paragraphs, 1, plan('I warned you before'))
+  assert.equal(whole.ok, true)
+  if (whole.ok) assert.equal(whole.operations[0]?.beforeText, '“I warned you before.”')
+  const partial = executeEditPlan(text, paragraphs, 1, plan('before'))
+  assert.equal(partial.ok, true)
+  if (partial.ok) {
+    assert.equal(partial.operations[0]?.beforeText, 'before')
+    assert.match(partial.afterText, /“I warned you\.”/u)
+  }
 })
 
 test('deletion consumes one adjacent horizontal separator without touching other text', () => {
@@ -1288,7 +1333,7 @@ test('deletion consumes one adjacent horizontal separator without touching other
   )
   assert.equal(
     middlePhraseBeforeComma.ok && middlePhraseBeforeComma.afterText,
-    'Everyday they are , despite the rain.',
+    'Everyday they are, despite the rain.',
   )
 
   const delimitedMiddlePhrase = executeEditPlan(
@@ -1384,7 +1429,7 @@ test('deleting a whole sentence without a flag removes its period, but not a wor
       ],
     },
   )
-  assert.equal(inside.ok && inside.afterText, 'I said . Done.')
+  assert.equal(inside.ok && inside.afterText, 'I said. Done.')
 })
 
 test('a target that begins with the previous sentence punctuation never deletes that punctuation', () => {
@@ -1746,7 +1791,7 @@ test('moves an exact word or phrase before or after another text target', () => 
   )
 })
 
-test('moves terminal punctuation with a short sentence only when explicitly requested', () => {
+test('moves terminal punctuation with a complete short sentence', () => {
   const text = 'Enough! Continue now.\n\nLater.'
   const paragraphs = [
     { id: 'first', ordinal: 1, lineIndex: 0, text: 'Enough! Continue now.' },
@@ -1782,7 +1827,7 @@ test('moves terminal punctuation with a short sentence only when explicitly requ
       },
     ],
   })
-  assert.equal(wordMove.ok && wordMove.afterText, '! Continue now.\n\nLater. Enough')
+  assert.equal(wordMove.ok && wordMove.afterText, 'Continue now.\n\nLater. Enough!')
 })
 
 test('rejects ambiguous, overlapping, and unchanged inline moves atomically', () => {

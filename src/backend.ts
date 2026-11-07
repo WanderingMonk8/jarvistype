@@ -1949,10 +1949,10 @@ async function interpretAboutEdit(
   connectionId: string | null, signal: AbortSignal,
 ): Promise<{ handled: boolean; plan: EditPlan | null }> {
   const command = instruction.trim().replace(/[.!?]+$/u, '').trim()
-  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part|sentence)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+(?:to\s+the\s+(end|beginning|start)\s+of\s+the|(before|after)\s+the)\s+(sentence|phrase|part)\s+about\s+(.+)$/iu)
-  if (!destinationMove && /^(?:move|relocate|shift)\s+.+?\s+to\s+the\s+(?:sentence|phrase|part)\s+about\s+/iu.test(command))
+  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part|sentence)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+(?:to\s+the\s+(end|beginning|start)\s+of\s+the|(before|after)\s+the)\s+(sentences?|phrases?|parts?)\s+about\s+(.+)$/iu)
+  if (!destinationMove && /^(?:move|relocate|shift)\s+.+?\s+to\s+the\s+(?:sentences?|phrases?|parts?)\s+about\s+/iu.test(command))
     return { handled: true, plan: null }
-  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentence|phrase|part)\s+about\s+(.+)$/iu)
+  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentences?|phrases?|parts?)\s+about\s+(.+)$/iu)
   if (!destinationMove && !source) return { handled: false, plan: null }
   let description = (destinationMove ? destinationMove[5]! : source![3]!).trim()
   let replacement = ''
@@ -1990,8 +1990,22 @@ async function interpretAboutEdit(
     return { handled: true, plan: null }
   }
   const label = (destinationMove ? destinationMove[4]! : source![2]!).toLocaleLowerCase()
-  const kind: 'sentence' | 'phrase' = label === 'sentence' ? 'sentence' : 'phrase'
-  const candidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind)
+  const kind: 'sentence' | 'phrase' = /^sentences?$/u.test(label) ? 'sentence' : 'phrase'
+  const plural = /s$/u.test(label)
+  const baseCandidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind)
+  const combinedCandidates: typeof baseCandidates = []
+  if (plural || (kind === 'phrase' && /\band\b/iu.test(description))) {
+    for (let index = 0; index < baseCandidates.length; index++) {
+      const first = baseCandidates[index]!
+      for (let next = index + 1; next < Math.min(index + 3, baseCandidates.length); next++) {
+        const previous = baseCandidates[next - 1]!
+        const last = baseCandidates[next]!
+        if (first.paragraphId !== last.paragraphId || (kind === 'phrase' && /[.!?…][”’"')\]]*$/u.test(previous.text)) || !/^\s*$/u.test(session.cleanText.slice(previous.end, last.start))) break
+        combinedCandidates.push({ ...first, end: last.end, text: session.cleanText.slice(first.start, last.end) })
+      }
+    }
+  }
+  const candidates = plural ? combinedCandidates : [...baseCandidates, ...combinedCandidates]
   const phoneticDescription = normalizeAboutDescription(description, session.cleanText)
   const startedAt = performance.now()
   const logOutcome = (outcome: string, details = '') => recordDebug(userId, 'edit.about', `outcome=${outcome} kind=${kind} candidates=${candidates.length}${details ? ` ${details}` : ''} duration=${debugDuration(startedAt)}`)
@@ -2028,7 +2042,14 @@ async function interpretAboutEdit(
     const phoneticCorroborated = corroborating.length === 1 && corroborating[0] === ranked[0]!.candidate
     const effectiveThreshold = phoneticCorroborated ? 0.85 : 0.9
     const lead = ranked[0]!.score - (ranked[1]?.score ?? 0)
-    const uncertainReview = ranked[0]!.score < effectiveThreshold && ranked[0]!.score >= 0.8 && lead >= 0.3
+    const strongest = ranked[0]!.candidate
+    const closeRivals = ranked.slice(1).filter((item) => ranked[0]!.score - item.score < 0.15)
+    const overlappingReview = ranked[0]!.score >= effectiveThreshold && closeRivals.length > 0 && closeRivals.every(({ candidate }) =>
+      candidate.paragraphId === strongest.paragraphId &&
+      ((candidate.start <= strongest.start && candidate.end >= strongest.end) ||
+        (strongest.start <= candidate.start && strongest.end >= candidate.end)),
+    )
+    const uncertainReview = overlappingReview || (ranked[0]!.score < effectiveThreshold && ranked[0]!.score >= 0.8 && lead >= 0.3)
     const scores = `best=${ranked[0]!.score.toFixed(3)} runnerUp=${(ranked[1]?.score ?? 0).toFixed(3)} threshold=${effectiveThreshold.toFixed(3)} margin=0.150 phoneticCorroborated=${phoneticCorroborated ? 'yes' : 'no'} uncertainReview=${uncertainReview ? 'yes' : 'no'}`
     if (!uncertainReview && (ranked[0]!.score < effectiveThreshold || (ranked[1] && lead < 0.15))) { logOutcome(ranked[0]!.score < effectiveThreshold ? 'below-threshold' : 'ambiguous', scores); return { handled: true, plan: null } }
     const selected = ranked[0]!.candidate
@@ -2045,7 +2066,7 @@ async function interpretAboutEdit(
         ? { id: 'about-replace', type: 'replace', target: selectedTarget, text: replacement }
         : { id: 'about-delete', type: 'delete', target: selectedTarget }
     const preview = selected.text.length > 300 ? `${selected.text.slice(0, 300)}…` : selected.text
-    const explanation = uncertainReview ? `Uncertain “about” match; verify the selected ${kind}: “${preview}”.` : `Edit the ${kind} matching the description.`
+    const explanation = overlappingReview ? `Overlapping “about” matches; verify the selected ${kind} boundaries: “${preview}”.` : uncertainReview ? `Uncertain “about” match; verify the selected ${kind}: “${preview}”.` : `Edit the ${kind} matching the description.`
     const plan = parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation, operations: [operation] })
     logOutcome(plan ? (uncertainReview ? 'review-uncertain' : 'resolved') : 'invalid-plan', scores)
     return { handled: true, plan }

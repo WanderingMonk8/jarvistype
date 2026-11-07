@@ -875,7 +875,14 @@ function executeRangeDeletion(
   if (end.start < start.end) return { ok: false, reason: 'range endpoints are reversed or overlap' }
   const endingPunctuation = text.slice(end.end).match(/^(?:\.{3}|[.!?…]+)(?=[”’"')\]]*(?:\s|$))/u)?.[0] ?? ''
   const deletionEnd = end.end + endingPunctuation.length
-  const left = text.slice(0, start.start).replace(/\s+$/u, '')
+  let deletionStart = start.start
+  const precedingQuote = text[start.start - 1]
+  const quotePairs: Record<string, string> = { '“': '”', '"': '"', '‘': '’' }
+  const closingQuote = precedingQuote ? quotePairs[precedingQuote] : undefined
+  // If the range consumes the matching closing quote, consume its immediately
+  // adjacent opening quote too, rather than leaving an orphaned mark.
+  if (closingQuote && text.slice(start.start, deletionEnd).includes(closingQuote)) deletionStart -= 1
+  const left = text.slice(0, deletionStart).replace(/\s+$/u, '')
   let right = text.slice(deletionEnd).replace(/^\s+/u, '')
   if (/[.!?…][”’"')\]]*$/u.test(left)) right = right.replace(/^[.!?…]+\s*/u, '')
   else if (/[,;:—–-]$/u.test(left)) right = right.replace(/^[,;:—–-]+\s*/u, '')
@@ -891,8 +898,8 @@ function executeRangeDeletion(
   return {
     ok: true,
     afterText,
-    operations: [{ ...operation, startOffset: start.start, endOffset: deletionEnd,
-      beforeText: text.slice(start.start, deletionEnd), afterText: '', paragraphOrdinal: start.paragraphOrdinal }],
+    operations: [{ ...operation, startOffset: deletionStart, endOffset: deletionEnd,
+      beforeText: text.slice(deletionStart, deletionEnd), afterText: '', paragraphOrdinal: start.paragraphOrdinal }],
     affectedParagraphOrdinals: [...new Set([start.paragraphOrdinal, end.paragraphOrdinal])].sort((a, b) => a - b),
   }
 }

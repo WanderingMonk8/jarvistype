@@ -1236,7 +1236,12 @@ function executeRangeDeletion(text, paragraphs, operation, protectedCasingTerms)
   if (end.start < start.end) return { ok: false, reason: "range endpoints are reversed or overlap" };
   const endingPunctuation = text.slice(end.end).match(/^(?:\.{3}|[.!?…]+)(?=[”’"')\]]*(?:\s|$))/u)?.[0] ?? "";
   const deletionEnd = end.end + endingPunctuation.length;
-  const left = text.slice(0, start.start).replace(/\s+$/u, "");
+  let deletionStart = start.start;
+  const precedingQuote = text[start.start - 1];
+  const quotePairs = { "\u201C": "\u201D", '"': '"', "\u2018": "\u2019" };
+  const closingQuote = precedingQuote ? quotePairs[precedingQuote] : void 0;
+  if (closingQuote && text.slice(start.start, deletionEnd).includes(closingQuote)) deletionStart -= 1;
+  const left = text.slice(0, deletionStart).replace(/\s+$/u, "");
   let right = text.slice(deletionEnd).replace(/^\s+/u, "");
   if (/[.!?…][”’"')\]]*$/u.test(left)) right = right.replace(/^[.!?…]+\s*/u, "");
   else if (/[,;:—–-]$/u.test(left)) right = right.replace(/^[,;:—–-]+\s*/u, "");
@@ -1254,9 +1259,9 @@ function executeRangeDeletion(text, paragraphs, operation, protectedCasingTerms)
     afterText,
     operations: [{
       ...operation,
-      startOffset: start.start,
+      startOffset: deletionStart,
       endOffset: deletionEnd,
-      beforeText: text.slice(start.start, deletionEnd),
+      beforeText: text.slice(deletionStart, deletionEnd),
       afterText: "",
       paragraphOrdinal: start.paragraphOrdinal
     }],
@@ -5056,6 +5061,8 @@ async function handleEditInterpretation(request, context, activeRequest) {
     );
     if (activeRequest.cancelled) return { error: "cancelled", session };
     if (!interpretedPlan) return { error: interpretationTimedOut ? "interpretation-timeout" : "interpretation", session };
+    if (interpretedPlan.operations.some((operation) => operation.id === "deterministic-ambiguous-range"))
+      return { error: "target", detail: "The range has multiple possible boundaries; please specify the endpoints more clearly.", session };
     const plan = applyTargetPunctuationIntent(normalizeEditReferenceTargets(
       normalizeEditInputPayloads(
         stripQualifiedAsInEditPayloads(
@@ -5498,7 +5505,7 @@ function parseDeterministicEditPlan(instructionTranscript, session) {
   if (relativeEdit) return relativeEdit;
   const punctuationMove = parseDeterministicPunctuationSentenceMove(instructionTranscript, session.draftVersion);
   if (punctuationMove) return punctuationMove;
-  const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session.draftVersion);
+  const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session);
   if (rangeDeletion) return rangeDeletion;
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
     instructionTranscript,
@@ -5607,20 +5614,43 @@ function parseDeterministicPunctuationSentenceMove(instruction, draftVersion) {
     }]
   });
 }
-function parseDeterministicRangeDeletion(instruction, draftVersion) {
+function parseDeterministicRangeDeletion(instruction, session) {
   const match = instruction.trim().match(
-    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')\s+(?:to|through|until)\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')[.!?]*$/iu
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+)?from\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')\s+(?:to|through|until)\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')[.!?]*$/iu
   );
   const unquoted = match ? null : instruction.trim().match(
-    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(.+?)\s+(?:to|through|until)\s+(.+?)[.!?]*$/iu
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+)?from\s+(.+?)\s+(?:to|through|until)\s+(.+?)[.!?]*$/iu
   );
-  if (!match && (!unquoted || /\s(?:to|through|until)\s/iu.test(unquoted[2]))) return null;
-  const from = unwrapEditArgument((match ?? unquoted)[1]);
-  const to = unwrapEditArgument((match ?? unquoted)[2]);
+  if (!match && !unquoted) return null;
+  let from = unwrapEditArgument((match ?? unquoted)[1]);
+  let to = unwrapEditArgument((match ?? unquoted)[2]);
+  if (!match && /\s(?:to|through|until)\s/iu.test(to)) {
+    const body = instruction.trim().replace(/^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+)?from\s+/iu, "").replace(/[.!?]+$/u, "");
+    const candidates = /* @__PURE__ */ new Map();
+    for (const separator of body.matchAll(/\s+(?:to|through|until)\s+/giu)) {
+      const start = unwrapEditArgument(body.slice(0, separator.index).trim());
+      const end = unwrapEditArgument(body.slice(separator.index + separator[0].length).trim());
+      if (!start || !end) continue;
+      const starts = findTextTargetMatches(session.cleanText, session.paragraphs, start);
+      const ends = findTextTargetMatches(session.cleanText, session.paragraphs, end);
+      for (const startMatch of starts) for (const endMatch of ends) {
+        if (startMatch.end <= endMatch.start)
+          candidates.set(`${startMatch.start}:${endMatch.end}`, { from: start, to: end });
+      }
+    }
+    if (candidates.size > 1) return parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: session.draftVersion,
+      explanation: "The range boundaries are ambiguous.",
+      operations: [{ id: "deterministic-ambiguous-range", type: "delete_range", target: { exactText: from }, destination: { exactText: to } }]
+    });
+    if (!candidates.size) return null;
+    ({ from, to } = [...candidates.values()][0]);
+  }
   if (!from || !to) return null;
   return parseEditPlan({
     schemaVersion: 2,
-    draftVersion,
+    draftVersion: session.draftVersion,
     explanation: `Delete the passage from \u201C${from}\u201D through \u201C${to}\u201D.`,
     operations: [{
       id: "deterministic-delete-range",

@@ -2907,6 +2907,43 @@ test('deletes a dictated inclusive passage across paragraphs without provider in
   assert.equal(generationRequests.length, 0)
 })
 
+test('resolves range deletion separators against the draft when endpoints contain to', async () => {
+  const cases = [
+    ['Before. I need to see the surgeon again. I squeeze my fist once more.', 'Delete the part from I need to see to I squeeze my fist.', 'Before. Once more.'],
+    ['Before. Start here. I need to leave now. Afterwards.', 'Delete the part from start here to I need to leave.', 'Before. Now. Afterwards.'],
+    ['Before. I need to see the surgeon. I squeeze my fist to calm down. Afterwards.', 'Delete the part from I need to see to I squeeze my fist to calm down.', 'Before. Afterwards.'],
+    ['“I need to see the chirurgeon again.” I squeeze my fist once more, accepting the pain this time. “The chirurgeon does not know.”', 'Delete the part from I need to see to I squeeze my fist.', 'Once more, accepting the pain this time. “The chirurgeon does not know.”'],
+    ['“I need to see the chirurgeon again.” I squeeze my fist once more, accepting the pain this time. “The chirurgeon does not know.”', 'Delete from I need to see to the pain this time.', '“The chirurgeon does not know.”'],
+  ] as const
+  for (const [index, [draft, instructionTranscript, expected]] of cases.entries()) {
+    const userId = `range-delimiter-user-${index}`
+    const chatId = `range-delimiter-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `range-delimiter-${index}`, operationId: `range-delimiter-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify(proposal))
+    if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, expected)
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('does not guess when multiple range boundary interpretations match', async () => {
+  const userId = 'range-delimiter-ambiguous-user'
+  const chatId = 'range-delimiter-ambiguous-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Alpha. Beta to gamma. Alpha to beta. Gamma.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'range-delimiter-ambiguous', operationId: 'range-delimiter-ambiguous-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the part from alpha to beta to gamma.' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'app.error')
+  if (response?.type === 'app.error') assert.match(response.message, /multiple possible boundaries/iu)
+  assert.equal(generationRequests.length, 0)
+})
+
 test('deletes one positional sentence without a provider interpretation', async () => {
   const userId = 'single-sentence-deletion-user'
   const chatId = 'single-sentence-deletion-chat'

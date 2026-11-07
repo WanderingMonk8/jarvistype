@@ -1188,6 +1188,8 @@ async function handleEditInterpretation(
     )
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
     if (!interpretedPlan) return { error: interpretationTimedOut ? 'interpretation-timeout' as const : 'interpretation' as const, session }
+    if (interpretedPlan.operations.some((operation) => operation.id === 'deterministic-ambiguous-range'))
+      return { error: 'target' as const, detail: 'The range has multiple possible boundaries; please specify the endpoints more clearly.', session }
     const plan = applyTargetPunctuationIntent(normalizeEditReferenceTargets(
       normalizeEditInputPayloads(
         stripQualifiedAsInEditPayloads(
@@ -1701,7 +1703,7 @@ function parseDeterministicEditPlan(
   if (relativeEdit) return relativeEdit
   const punctuationMove = parseDeterministicPunctuationSentenceMove(instructionTranscript, session.draftVersion)
   if (punctuationMove) return punctuationMove
-  const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session.draftVersion)
+  const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session)
   if (rangeDeletion) return rangeDeletion
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
     instructionTranscript,
@@ -1814,19 +1816,40 @@ function parseDeterministicPunctuationSentenceMove(instruction: string, draftVer
   })
 }
 
-function parseDeterministicRangeDeletion(instruction: string, draftVersion: number): EditPlan | null {
+function parseDeterministicRangeDeletion(instruction: string, session: PersistedDraftSession): EditPlan | null {
   const match = instruction.trim().match(
-    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')\s+(?:to|through|until)\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')[.!?]*$/iu,
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+)?from\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')\s+(?:to|through|until)\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')[.!?]*$/iu,
   )
   const unquoted = match ? null : instruction.trim().match(
-    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(.+?)\s+(?:to|through|until)\s+(.+?)[.!?]*$/iu,
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+)?from\s+(.+?)\s+(?:to|through|until)\s+(.+?)[.!?]*$/iu,
   )
-  if (!match && (!unquoted || /\s(?:to|through|until)\s/iu.test(unquoted[2]!))) return null
-  const from = unwrapEditArgument((match ?? unquoted)![1]!)
-  const to = unwrapEditArgument((match ?? unquoted)![2]!)
+  if (!match && !unquoted) return null
+  let from = unwrapEditArgument((match ?? unquoted)![1]!)
+  let to = unwrapEditArgument((match ?? unquoted)![2]!)
+  if (!match && /\s(?:to|through|until)\s/iu.test(to)) {
+    const body = instruction.trim().replace(/^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+)?from\s+/iu, '').replace(/[.!?]+$/u, '')
+    const candidates = new Map<string, { from: string; to: string }>()
+    for (const separator of body.matchAll(/\s+(?:to|through|until)\s+/giu)) {
+      const start = unwrapEditArgument(body.slice(0, separator.index).trim())
+      const end = unwrapEditArgument(body.slice(separator.index! + separator[0].length).trim())
+      if (!start || !end) continue
+      const starts = findTextTargetMatches(session.cleanText, session.paragraphs, start)
+      const ends = findTextTargetMatches(session.cleanText, session.paragraphs, end)
+      for (const startMatch of starts) for (const endMatch of ends) {
+        if (startMatch.end <= endMatch.start)
+          candidates.set(`${startMatch.start}:${endMatch.end}`, { from: start, to: end })
+      }
+    }
+    if (candidates.size > 1) return parseEditPlan({
+      schemaVersion: 2, draftVersion: session.draftVersion, explanation: 'The range boundaries are ambiguous.',
+      operations: [{ id: 'deterministic-ambiguous-range', type: 'delete_range', target: { exactText: from }, destination: { exactText: to } }],
+    })
+    if (!candidates.size) return null
+    ;({ from, to } = [...candidates.values()][0]!)
+  }
   if (!from || !to) return null
   return parseEditPlan({
-    schemaVersion: 2, draftVersion,
+    schemaVersion: 2, draftVersion: session.draftVersion,
     explanation: `Delete the passage from “${from}” through “${to}”.`,
     operations: [{ id: 'deterministic-delete-range', type: 'delete_range',
       target: { exactText: from }, destination: { exactText: to } }],

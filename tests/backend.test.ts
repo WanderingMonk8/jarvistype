@@ -2343,7 +2343,7 @@ test('formats an opening produced by a spoken quote command', async () => {
   assert.equal(response?.type, 'transcript.normalization.response')
   if (response?.type === 'transcript.normalization.response') {
     assert.equal(response.outcome, 'review')
-    assert.equal(response.proposal.candidateText, '“And I am not going anywhere”.')
+    assert.equal(response.proposal.candidateText, '“And I am not going anywhere.”')
     assert.equal(response.proposal.contextualModelUsed, false)
   }
 })
@@ -2907,6 +2907,43 @@ test('deletes a dictated inclusive passage across paragraphs without provider in
   assert.equal(generationRequests.length, 0)
 })
 
+test('resolves range deletion separators against the draft when endpoints contain to', async () => {
+  const cases = [
+    ['Before. I need to see the surgeon again. I squeeze my fist once more.', 'Delete the part from I need to see to I squeeze my fist.', 'Before. Once more.'],
+    ['Before. Start here. I need to leave now. Afterwards.', 'Delete the part from start here to I need to leave.', 'Before. Now. Afterwards.'],
+    ['Before. I need to see the surgeon. I squeeze my fist to calm down. Afterwards.', 'Delete the part from I need to see to I squeeze my fist to calm down.', 'Before. Afterwards.'],
+    ['“I need to see the chirurgeon again.” I squeeze my fist once more, accepting the pain this time. “The chirurgeon does not know.”', 'Delete the part from I need to see to I squeeze my fist.', 'Once more, accepting the pain this time. “The chirurgeon does not know.”'],
+    ['“I need to see the chirurgeon again.” I squeeze my fist once more, accepting the pain this time. “The chirurgeon does not know.”', 'Delete from I need to see to the pain this time.', '“The chirurgeon does not know.”'],
+  ] as const
+  for (const [index, [draft, instructionTranscript, expected]] of cases.entries()) {
+    const userId = `range-delimiter-user-${index}`
+    const chatId = `range-delimiter-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `range-delimiter-${index}`, operationId: `range-delimiter-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify(proposal))
+    if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, expected)
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('does not guess when multiple range boundary interpretations match', async () => {
+  const userId = 'range-delimiter-ambiguous-user'
+  const chatId = 'range-delimiter-ambiguous-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Alpha. Beta to gamma. Alpha to beta. Gamma.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'range-delimiter-ambiguous', operationId: 'range-delimiter-ambiguous-op', chatId, expectedVersion: 1, instructionTranscript: 'Delete the part from alpha to beta to gamma.' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'app.error')
+  if (response?.type === 'app.error') assert.match(response.message, /multiple possible boundaries/iu)
+  assert.equal(generationRequests.length, 0)
+})
+
 test('deletes one positional sentence without a provider interpretation', async () => {
   const userId = 'single-sentence-deletion-user'
   const chatId = 'single-sentence-deletion-chat'
@@ -2954,6 +2991,21 @@ test('resolves about sentence and phrase edits and move destinations with guarde
     ['Erin unwinds herself, then smiles. She leaves.', 'Replace the phrase about Erin relaxing with Maeve waits.', 0, 'Maeve waits then smiles. She leaves.'],
     ['We must carry on. They fought a long war.', 'Move the phrase “We must carry on” to the end of the sentence about a long conflict.', 1, 'They fought a long war. We must carry on.'],
     ['Erin unwinds herself. Maeve waits.', 'Move the sentence about Erin relaxing after Maeve waits.', 0, 'Maeve waits. Erin unwinds herself.'],
+    ['Erin unwinds herself, then smiles. She leaves.', 'Delete the part about Erin relaxing.', 0, 'Then smiles. She leaves.'],
+    ['Erin unwinds herself, then smiles. She leaves.', 'Replace the part about Erin relaxing with Maeve waits.', 0, 'Maeve waits then smiles. She leaves.'],
+    ['Erin unwinds herself. Maeve waits.', 'Move the part about Erin relaxing to the end of the paragraph.', 0, 'Maeve waits. Erin unwinds herself.'],
+    ['Erin unwinds herself. Maeve waits.', 'Move the part about Maeve waiting to the beginning of the paragraph.', 1, 'Maeve waits. Erin unwinds herself.'],
+    ['Maeve waits, Erin unwinds herself, and watches.', 'Move the part about Erin relaxing to the end of the paragraph.', 1, 'Maeve waits, and watches. Erin unwinds herself,'],
+    ['Maeve waits. Erin unwinds herself.', 'Move the part about Erin relaxing before Maeve waits.', 1, 'Erin unwinds herself. Maeve waits.'],
+    ['They fought a long war. We must carry on.', 'Move the phrase “We must carry on” before the sentence about a long conflict.', 0, 'We must carry on. They fought a long war.'],
+    ['They fought a long war. We must carry on.', 'Move the phrase “We must carry on” to the beginning of the sentence about a long conflict.', 0, 'We must carry on. They fought a long war.'],
+    ['They fought a long war. We must carry on.', 'Move the phrase “We must carry on” before the part about a long conflict.', 0, 'We must carry on. They fought a long war.'],
+    ['We must carry on. They fought a long war.', 'Move the phrase “We must carry on” after the sentence about a long conflict.', 1, 'They fought a long war. We must carry on.'],
+    ['They fought a long war. We must carry on.', 'Move the sentence “We must carry on” before the sentence about a long conflict.', 0, 'We must carry on. They fought a long war.'],
+    ['We must carry on. They fought a long war.', 'Move the sentence “We must carry on” after the sentence about a long conflict.', 1, 'They fought a long war. We must carry on.'],
+    ['They fought a long war. We must carry on.', 'Move the sentence “We must carry on” before the phrase about a long conflict.', 0, 'We must carry on. They fought a long war.'],
+    ['We must carry on. They fought a long war.', 'Move the sentence “We must carry on” after the phrase about a long conflict.', 1, 'They fought a long war. We must carry on.'],
+    ['Erin unwinds herself. Maeve waits.', 'Move the phrase about Erin relaxing after the sentence Maeve waits.', 0, 'Maeve waits. Erin unwinds herself.'],
   ] as const
   for (const [index, [draft, instruction, selected, expected]] of examples.entries()) {
     const userId = `about-edit-user-${index}`
@@ -3078,6 +3130,38 @@ test('about selection refuses tied candidates and preserves literal quoted about
   assert.equal(decisionRequests.some((request) => Object.keys((request as { questions?: Record<string, unknown> }).questions ?? {}).some((key) => key.startsWith('about_'))), false)
 })
 
+test('moves the part about nodding to the end of its paragraph', async () => {
+  const userId = 'about-nodding-paragraph-user'
+  const chatId = 'about-nodding-paragraph-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  aboutDecision = (id) => id === 'about_1' ? 0.99 : 0.01
+  await seedDraft(userId, chatId, 'I watch her demonstration on the axe, and I nod approvingly, signaling respect. I take the axe back, copy her grip, try it a few more times before I work on another log. It cuts through, this time without the strain of having to fight the grip.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-nodding-paragraph', operationId: 'about-nodding-paragraph-op', chatId, expectedVersion: 1, instructionTranscript: 'Move the part about nodding approvingly to the end of the paragraph.' }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+  if (response?.type === 'edit.proposal.response') {
+    assert.match(response.proposal.operations[0]!.beforeText, /nod approvingly/iu)
+    assert.match(response.proposal.afterText, /nod approvingly[,.;!?…]*$/iu)
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('refuses an about destination without an explicit position', async () => {
+  const userId = 'about-position-ambiguous-user'
+  const chatId = 'about-position-ambiguous-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await seedDraft(userId, chatId, 'We must carry on. They fought a long war.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-position-ambiguous', operationId: 'about-position-ambiguous-op', chatId, expectedVersion: 1, instructionTranscript: 'Move the phrase we must carry on to the sentence about a long war.' }, userId)
+  assert.equal(responses.at(-1)?.payload.type, 'app.error')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('supports relative replacement and casing with multiword anchors', async () => {
   const examples = [
     ['Most of the time, with', 'Replace the word with after most of the time with without.', 'Most of the time, without'],
@@ -3200,6 +3284,42 @@ test('quotation around an exact phrase containing and keeps it as one target', a
   if (proposal?.type === 'edit.proposal.response')
     assert.equal(proposal.proposal.afterText, 'Before. “Bread and butter,” please. After.')
   assert.equal(generationRequests.length, 0)
+})
+
+test('quotation edit includes punctuation attached to both ends of a phrase', async () => {
+  const userId = 'quotation-attached-both-user'
+  const chatId = 'quotation-attached-both-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She said (hello?!), then left.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-attached-both', operationId: 'quotation-attached-both-op', chatId, expectedVersion: 1, instructionTranscript: 'Put quotations around the phrase hello.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify(proposal))
+  if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'She said “(hello?!),” then left.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('quotation around two quoted endpoints wraps the passage once', async () => {
+  const instructions = [
+    "Put quotations around 'alpha and beta' and 'omega'.",
+    'Put quotations around “alpha and beta” and “omega”.',
+    'Put quotations around "alpha and beta" and "omega".',
+  ]
+  for (const [index, instructionTranscript] of instructions.entries()) {
+    const userId = `quotation-quoted-endpoints-user-${index}`
+    const chatId = `quotation-quoted-endpoints-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, 'Before. Alpha and beta begin. Another sentence. Omega?! After.')
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `quotation-quoted-endpoints-${index}`, operationId: `quotation-quoted-endpoints-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify(proposal))
+    if (proposal?.type === 'edit.proposal.response')
+      assert.equal(proposal.proposal.afterText, 'Before. “Alpha and beta begin. Another sentence. Omega?!” After.')
+    assert.equal(generationRequests.length, 0)
+  }
 })
 
 test('quotes through a unique spoken ellipsis without a provider call', async () => {

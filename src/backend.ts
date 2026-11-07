@@ -1188,6 +1188,8 @@ async function handleEditInterpretation(
     )
     if (activeRequest.cancelled) return { error: 'cancelled' as const, session }
     if (!interpretedPlan) return { error: interpretationTimedOut ? 'interpretation-timeout' as const : 'interpretation' as const, session }
+    if (interpretedPlan.operations.some((operation) => operation.id === 'deterministic-ambiguous-range'))
+      return { error: 'target' as const, detail: 'The range has multiple possible boundaries; please specify the endpoints more clearly.', session }
     const plan = applyTargetPunctuationIntent(normalizeEditReferenceTargets(
       normalizeEditInputPayloads(
         stripQualifiedAsInEditPayloads(
@@ -1701,7 +1703,7 @@ function parseDeterministicEditPlan(
   if (relativeEdit) return relativeEdit
   const punctuationMove = parseDeterministicPunctuationSentenceMove(instructionTranscript, session.draftVersion)
   if (punctuationMove) return punctuationMove
-  const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session.draftVersion)
+  const rangeDeletion = parseDeterministicRangeDeletion(instructionTranscript, session)
   if (rangeDeletion) return rangeDeletion
   const compoundSentenceDeletion = parseDeterministicCompoundSentenceDeletion(
     instructionTranscript,
@@ -1814,19 +1816,40 @@ function parseDeterministicPunctuationSentenceMove(instruction: string, draftVer
   })
 }
 
-function parseDeterministicRangeDeletion(instruction: string, draftVersion: number): EditPlan | null {
+function parseDeterministicRangeDeletion(instruction: string, session: PersistedDraftSession): EditPlan | null {
   const match = instruction.trim().match(
-    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')\s+(?:to|through|until)\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')[.!?]*$/iu,
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+)?from\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')\s+(?:to|through|until)\s+(“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')[.!?]*$/iu,
   )
   const unquoted = match ? null : instruction.trim().match(
-    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+from\s+(.+?)\s+(?:to|through|until)\s+(.+?)[.!?]*$/iu,
+    /^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+)?from\s+(.+?)\s+(?:to|through|until)\s+(.+?)[.!?]*$/iu,
   )
-  if (!match && (!unquoted || /\s(?:to|through|until)\s/iu.test(unquoted[2]!))) return null
-  const from = unwrapEditArgument((match ?? unquoted)![1]!)
-  const to = unwrapEditArgument((match ?? unquoted)![2]!)
+  if (!match && !unquoted) return null
+  let from = unwrapEditArgument((match ?? unquoted)![1]!)
+  let to = unwrapEditArgument((match ?? unquoted)![2]!)
+  if (!match && /\s(?:to|through|until)\s/iu.test(to)) {
+    const body = instruction.trim().replace(/^(?:delete|remove|erase|cut|take\s+(?:off|out))\s+(?:(?:the\s+)?(?:sentence|phrase|passage|part|text)\s+)?from\s+/iu, '').replace(/[.!?]+$/u, '')
+    const candidates = new Map<string, { from: string; to: string }>()
+    for (const separator of body.matchAll(/\s+(?:to|through|until)\s+/giu)) {
+      const start = unwrapEditArgument(body.slice(0, separator.index).trim())
+      const end = unwrapEditArgument(body.slice(separator.index! + separator[0].length).trim())
+      if (!start || !end) continue
+      const starts = findTextTargetMatches(session.cleanText, session.paragraphs, start)
+      const ends = findTextTargetMatches(session.cleanText, session.paragraphs, end)
+      for (const startMatch of starts) for (const endMatch of ends) {
+        if (startMatch.end <= endMatch.start)
+          candidates.set(`${startMatch.start}:${endMatch.end}`, { from: start, to: end })
+      }
+    }
+    if (candidates.size > 1) return parseEditPlan({
+      schemaVersion: 2, draftVersion: session.draftVersion, explanation: 'The range boundaries are ambiguous.',
+      operations: [{ id: 'deterministic-ambiguous-range', type: 'delete_range', target: { exactText: from }, destination: { exactText: to } }],
+    })
+    if (!candidates.size) return null
+    ;({ from, to } = [...candidates.values()][0]!)
+  }
   if (!from || !to) return null
   return parseEditPlan({
-    schemaVersion: 2, draftVersion,
+    schemaVersion: 2, draftVersion: session.draftVersion,
     explanation: `Delete the passage from “${from}” through “${to}”.`,
     operations: [{ id: 'deterministic-delete-range', type: 'delete_range',
       target: { exactText: from }, destination: { exactText: to } }],
@@ -1926,12 +1949,16 @@ async function interpretAboutEdit(
   connectionId: string | null, signal: AbortSignal,
 ): Promise<{ handled: boolean; plan: EditPlan | null }> {
   const command = instruction.trim().replace(/[.!?]+$/u, '').trim()
-  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+to\s+the\s+(?:end\s+of\s+the\s+)?(sentence|phrase)\s+about\s+(.+)$/iu)
-  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentence|phrase)\s+about\s+(.+)$/iu)
+  const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part|sentence)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+(?:to\s+the\s+(end|beginning|start)\s+of\s+the|(before|after)\s+the)\s+(sentence|phrase|part)\s+about\s+(.+)$/iu)
+  if (!destinationMove && /^(?:move|relocate|shift)\s+.+?\s+to\s+the\s+(?:sentence|phrase|part)\s+about\s+/iu.test(command))
+    return { handled: true, plan: null }
+  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentence|phrase|part)\s+about\s+(.+)$/iu)
   if (!destinationMove && !source) return { handled: false, plan: null }
-  let description = (destinationMove ? destinationMove[3]! : source![3]!).trim()
+  let description = (destinationMove ? destinationMove[5]! : source![3]!).trim()
   let replacement = ''
   let moveDestination = ''
+  let destinationIsSentence = false
+  let paragraphBoundary: 'start' | 'end' | null = null
   let moveDirection: 'move_before' | 'move_after' = 'move_after'
   const verb = source?.[1]?.toLocaleLowerCase() ?? 'move'
   if (verb === 'replace' || verb === 'change') {
@@ -1941,12 +1968,19 @@ async function interpretAboutEdit(
     replacement = unwrapEditArgument(parts[2]!.trim())
   }
   if (source && ['move', 'relocate', 'shift'].includes(verb)) {
-    const parts = description.match(/^(.+?)\s+(before|after)\s+(.+)$/iu)
-    if (!parts) return { handled: true, plan: null }
-    description = parts[1]!.trim()
-    moveDirection = parts[2]!.toLocaleLowerCase() === 'before' ? 'move_before' : 'move_after'
-    moveDestination = unwrapEditArgument(parts[3]!.trim().replace(/^(?:the\s+)?(?:word|phrase|sentence)\s+/iu, ''))
-    if (!moveDestination) return { handled: true, plan: null }
+    const boundary = description.match(/^(.+?)\s+to\s+the\s+(end|beginning|start)\s+of\s+the\s+paragraph$/iu)
+    if (boundary) {
+      description = boundary[1]!.trim()
+      paragraphBoundary = boundary[2]!.toLocaleLowerCase() === 'end' ? 'end' : 'start'
+    } else {
+      const parts = description.match(/^(.+?)\s+(before|after)\s+(.+)$/iu)
+      if (!parts) return { handled: true, plan: null }
+      description = parts[1]!.trim()
+      moveDirection = parts[2]!.toLocaleLowerCase() === 'before' ? 'move_before' : 'move_after'
+      destinationIsSentence = /^(?:the\s+)?sentence\s+/iu.test(parts[3]!.trim())
+      moveDestination = unwrapEditArgument(parts[3]!.trim().replace(/^(?:the\s+)?(?:word|phrase|sentence|part)\s+/iu, ''))
+      if (!moveDestination) return { handled: true, plan: null }
+    }
   }
   // Quoted descriptions and existing literal targets stay on the ordinary exact path.
   if (/^[“"‘']/u.test(description) || editTargetTextExists(session.cleanText, `about ${description}`))
@@ -1955,7 +1989,8 @@ async function interpretAboutEdit(
     recordDebug(userId, 'edit.about', `outcome=${signal.aborted ? 'cancelled' : !description ? 'empty-description' : 'permission-unavailable'}`)
     return { handled: true, plan: null }
   }
-  const kind = (destinationMove ? destinationMove[2]! : source![2]!).toLocaleLowerCase() as 'sentence' | 'phrase'
+  const label = (destinationMove ? destinationMove[4]! : source![2]!).toLocaleLowerCase()
+  const kind: 'sentence' | 'phrase' = label === 'sentence' ? 'sentence' : 'phrase'
   const candidates = findAboutTargetCandidates(session.cleanText, session.paragraphs, kind)
   const phoneticDescription = normalizeAboutDescription(description, session.cleanText)
   const startedAt = performance.now()
@@ -1998,12 +2033,13 @@ async function interpretAboutEdit(
     if (!uncertainReview && (ranked[0]!.score < effectiveThreshold || (ranked[1] && lead < 0.15))) { logOutcome(ranked[0]!.score < effectiveThreshold ? 'below-threshold' : 'ambiguous', scores); return { handled: true, plan: null } }
     const selected = ranked[0]!.candidate
     const selectedTarget = { paragraphId: selected.paragraphId, exactText: selected.text, ignorePunctuationForMatch: false }
-    if (moveDestination && kind === 'sentence' && moveDirection === 'move_after') {
+    if (moveDestination && (destinationIsSentence || kind === 'sentence') && moveDirection === 'move_after') {
       const anchors = findAboutTargetCandidates(session.cleanText, session.paragraphs, 'sentence').filter((candidate) => candidate.text.replace(/[.!?…]+[”’"']*$/u, '').trim().toLocaleLowerCase() === moveDestination.toLocaleLowerCase())
       if (anchors.length === 1) moveDestination = anchors[0]!.text
     }
     const operation = destinationMove
-      ? { id: 'about-move', type: 'move_after', target: { exactText: unwrapEditArgument(destinationMove[1]!) }, destination: selectedTarget, includeTrailingPunctuation: true }
+      ? { id: 'about-move', type: /^(?:before|beginning|start)$/iu.test(destinationMove[2] ?? destinationMove[3] ?? '') ? 'move_before' : 'move_after', target: { exactText: unwrapEditArgument(destinationMove[1]!) }, destination: selectedTarget }
+      : paragraphBoundary ? { id: 'about-move-paragraph-boundary', type: paragraphBoundary === 'end' ? 'move_after' : 'move_before', target: selectedTarget, destination: { paragraphId: selected.paragraphId, ...(paragraphBoundary === 'end' ? { sentenceFromEnd: 1 } : { sentenceOrdinal: 1 }) }, includeTrailingPunctuation: kind === 'sentence' ? true : undefined }
       : moveDestination ? { id: 'about-move', type: moveDirection, target: selectedTarget, destination: { exactText: moveDestination }, includeTrailingPunctuation: kind === 'sentence' ? true : undefined }
       : verb === 'replace' || verb === 'change'
         ? { id: 'about-replace', type: 'replace', target: selectedTarget, text: replacement }
@@ -3433,14 +3469,18 @@ function parseDeterministicQuotationRange(
   const betweenMatch = trimmed.match(
     new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:around\\s+)?(?:everything\\s+)?between\\s+(.+?)\\s+and\\s+(.+?)$`, 'iu'),
   )
-  const aroundAndMatch = betweenMatch ? null : trimmed.match(
+  const quotedEndpoint = `(?:“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')`
+  const quotedAroundAndMatch = betweenMatch ? null : trimmed.match(
+    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+around\\s+(${quotedEndpoint})\\s+and\\s+(${quotedEndpoint})[.!?]*$`, 'iu'),
+  )
+  const aroundAndMatch = betweenMatch ? null : quotedAroundAndMatch ?? trimmed.match(
     new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+around\\s+(.+?)\\s+and\\s+(.+?)$`, 'iu'),
   )
   // An exact phrase containing "and" is one target, not necessarily two endpoints.
   const wholeAroundTarget = aroundAndMatch
     ? unwrapEditArgument(stripUnquotedEditArgumentLabel(`${aroundAndMatch[2]} and ${aroundAndMatch[3]}`.replace(/[.!?]+$/u, '').trim()))
     : ''
-  const useAroundAnd = aroundAndMatch && !findTextTargetMatches(session.cleanText, session.paragraphs, wholeAroundTarget).length
+  const useAroundAnd = aroundAndMatch && (quotedAroundAndMatch || !findTextTargetMatches(session.cleanText, session.paragraphs, wholeAroundTarget).length)
   const rangeMatch = betweenMatch ?? (useAroundAnd ? aroundAndMatch : null) ?? trimmed.match(
     new RegExp(
       `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:(?:around|over)\\s+(?:everything\\s+)?(?:from\\s+)?|from\\s+|starting\\s+(?:at|from)\\s+)(.+?)\\s+(?:to|through|until|ending\\s+(?:at|with))\\s+(.+?)$`,

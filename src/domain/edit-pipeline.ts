@@ -152,8 +152,10 @@ export function executeSequentialEditPlan(
       ...plan,
       operations: [currentOperation],
     }, protectedCasingTerms, {
-      quotationWrap: operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? '')),
+      quotationWrap: (operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))) ||
+        (operation.type === 'insert_before' && /^[“‘"']$/u.test(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_after' && /^[”’"']$/u.test(candidate.text ?? ''))),
     })
     if (!result.ok) {
       failedCommand = { index: index + 1, operationId: operation.id, reason: result.reason }
@@ -255,7 +257,9 @@ export function executeEditPlan(
       protectedCasingTerms,
       formatText,
       options.quotationWrap === true || (operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))),
+        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))) ||
+        (operation.type === 'insert_before' && /^[“‘"']$/u.test(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_after' && /^[”’"']$/u.test(candidate.text ?? ''))),
     )
     if (typeof patch === 'string') return { ok: false, reason: patch }
     if (
@@ -704,7 +708,7 @@ function resolveOperation(
       const hasSeparatorBefore = start > range.start && /[ \t]/.test(cleanText[start - 1] ?? '')
       const hasSeparatorAfter = end < range.end && /[ \t]/.test(cleanText[end] ?? '')
       const endsLine = end >= range.end || /[\r\n]/.test(cleanText[end] ?? '')
-      const endsBeforeClosingWrapper = /^[”’"')\]}]+(?=\s|$)/u.test(
+      const endsBeforeClosingWrapper = /^(?:[.,;:!?…—–-]*[”’"')\]}]+|[.,;:!?…]+)(?=\s|$)/u.test(
         cleanText.slice(end, range.end),
       )
       if (hasSeparatorBefore && (hasSeparatorAfter || endsLine || endsBeforeClosingWrapper))
@@ -719,6 +723,12 @@ function resolveOperation(
   }
   const insertionText = operation.text ?? ''
   if (operation.type === 'insert_before') {
+    if (formatText && quotationWrap && /^[“‘"']$/u.test(insertionText)) {
+      const attachedOpening = cleanText.slice(range.start, start).match(/[\p{P}]+$/u)?.[0] ?? ''
+      const boundary = start - attachedOpening.length
+      if (attachedOpening && (boundary === range.start || /\s/u.test(cleanText[boundary - 1] ?? '')))
+        start = boundary
+    }
     const formattedInsertion = formatText
       ? capitalizeReplacementAtSentenceOpening(cleanText, start, insertionText)
       : insertionText
@@ -873,9 +883,29 @@ function executeRangeDeletion(
   const end = resolveTextTarget(text, paragraphs, operation.destination, 'range end')
   if (typeof end === 'string') return { ok: false, reason: end }
   if (end.start < start.end) return { ok: false, reason: 'range endpoints are reversed or overlap' }
-  const endingPunctuation = text.slice(end.end).match(/^(?:\.{3}|[.!?…]+)(?=[”’"')\]]*(?:\s|$))/u)?.[0] ?? ''
-  const deletionEnd = end.end + endingPunctuation.length
-  const left = text.slice(0, start.start).replace(/\s+$/u, '')
+  let deletionStart = start.start
+  const attachedTail = text.slice(end.end).match(/^[\p{P}]+/u)?.[0] ?? ''
+  const completeWrapper = expandThroughPairedPunctuation(text, start.start, end.end, 0, text.length)
+  const startsSentencePart = /(?:^|[\n.,;:!?…—–-])[ \t]*[“‘"'([{]*[ \t]*$/u.test(text.slice(0, start.start))
+  const removeAttached = startsSentencePart || completeWrapper.start !== start.start
+  const pairs: Record<string, string> = { '“': '”', '"': '"', '‘': '’', '(': ')', '[': ']', '{': '}' }
+  // Include opening marks immediately attached to the start only when their
+  // closing marks are also in the deleted span or its attached tail.
+  while (removeAttached && deletionStart > 0) {
+    const opening = text[deletionStart - 1]!
+    const closing = pairs[opening]
+    if (!closing || !text.slice(deletionStart, end.end + attachedTail.length).includes(closing)) break
+    deletionStart -= 1
+  }
+  const removedBody = text.slice(deletionStart, end.end)
+  let tailLength = 0
+  for (const mark of removeAttached ? attachedTail : '') {
+    const opening = Object.keys(pairs).find((key) => pairs[key] === mark)
+    if (opening && !removedBody.includes(opening)) break
+    tailLength += mark.length
+  }
+  const deletionEnd = end.end + tailLength
+  const left = text.slice(0, deletionStart).replace(/\s+$/u, '')
   let right = text.slice(deletionEnd).replace(/^\s+/u, '')
   if (/[.!?…][”’"')\]]*$/u.test(left)) right = right.replace(/^[.!?…]+\s*/u, '')
   else if (/[,;:—–-]$/u.test(left)) right = right.replace(/^[,;:—–-]+\s*/u, '')
@@ -891,8 +921,8 @@ function executeRangeDeletion(
   return {
     ok: true,
     afterText,
-    operations: [{ ...operation, startOffset: start.start, endOffset: deletionEnd,
-      beforeText: text.slice(start.start, deletionEnd), afterText: '', paragraphOrdinal: start.paragraphOrdinal }],
+    operations: [{ ...operation, startOffset: deletionStart, endOffset: deletionEnd,
+      beforeText: text.slice(deletionStart, deletionEnd), afterText: '', paragraphOrdinal: start.paragraphOrdinal }],
     affectedParagraphOrdinals: [...new Set([start.paragraphOrdinal, end.paragraphOrdinal])].sort((a, b) => a - b),
   }
 }
@@ -913,17 +943,27 @@ function executeInlineMove(
     'move destination',
   )
   if (typeof destination === 'string') return { ok: false, reason: destination }
-  const sourceEnd = operation.includeTrailingPunctuation
+  let sourceStart = source.start
+  let sourceEnd = operation.includeTrailingPunctuation
     ? extendThroughTerminalPunctuation(cleanText, source.end, source.scopeEnd)
     : source.end
+  if (operation.target.punctuation === undefined) {
+    const wrapped = expandThroughPairedPunctuation(cleanText, sourceStart, sourceEnd, source.scopeStart, source.scopeEnd)
+    sourceStart = wrapped.start
+    sourceEnd = wrapped.end
+    const startsSentencePart = /(?:^|[\n.,;:!?…—–-])[ \t]*[“‘"'([{]*[ \t]*$/u.test(cleanText.slice(source.scopeStart, sourceStart))
+    if (startsSentencePart && sourceStart === source.start)
+      sourceEnd += attachedSentencePartPunctuation(cleanText, sourceEnd, source.scopeEnd).length
+  }
   const sourceInsideDestinationSentence =
     (operation.destination.sentenceOrdinal !== undefined || operation.destination.sentenceFromEnd !== undefined) &&
-    operation.target.punctuation !== undefined && source.start >= destination.start && sourceEnd <= destination.end
-  if (source.start < destination.end && destination.start < sourceEnd && !sourceInsideDestinationSentence)
+    (operation.target.punctuation !== undefined || operation.id === 'about-move-paragraph-boundary') &&
+    sourceStart >= destination.start && sourceEnd <= destination.end
+  if (sourceStart < destination.end && destination.start < sourceEnd && !sourceInsideDestinationSentence)
     return { ok: false, reason: 'move source and destination overlap' }
 
-  const movedText = cleanText.slice(source.start, sourceEnd)
-  let removalStart = source.start
+  const movedText = cleanText.slice(sourceStart, sourceEnd)
+  let removalStart = sourceStart
   let removalEnd = sourceEnd
   const hasSeparatorBefore =
     removalStart > source.scopeStart && /[ \t]/.test(cleanText[removalStart - 1] ?? '')
@@ -990,7 +1030,7 @@ function executeInlineMove(
     operations: [
       {
         ...operation,
-        startOffset: source.start,
+        startOffset: sourceStart,
         endOffset: sourceEnd,
         beforeText: movedText,
         afterText: formattedMovedText,

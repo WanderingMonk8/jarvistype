@@ -120,7 +120,7 @@ export const COMMAND_GROUPS = [
         'Say “delete,” “remove,” “take off,” “take out,” “erase,” or “cut,” followed by the target—for example, “Take off the second sentence in paragraph 1.”',
       ],
       ['Delete a range', 'Remove the passage from “I remember the time” to “nearly in an instant.” Both endpoint phrases and the text between them are removed.'],
-      ['About a sentence or phrase', 'Say “delete the sentence about Erin unwinding,” “replace the phrase about Erin unwinding with she rests,” or “move the sentence about Erin unwinding after Maeve waits.” You can also say “move the phrase we must carry on to the end of the sentence about a long war.” A clear near-threshold match is flagged for review; low-confidence or ambiguous matches stop. Quote a literal target containing “about” to keep it exact.'],
+      ['About a sentence or part', 'Say “delete the sentence about Erin unwinding,” “replace the part about Erin unwinding with she rests,” or “move the part about Erin unwinding to the end of the paragraph.” You can also move a phrase before or after the sentence about a long war, or to its beginning or end. A clear near-threshold match is flagged for review; low-confidence or ambiguous matches stop. Quote a literal target containing “about” to keep it exact.'],
       ['Move', 'Move, relocate, or shift “approved” before “pending” in paragraph 1.'],
       ['Move before', 'Move paragraph 3 before paragraph 1.'],
       ['Move after', 'Move paragraph 1 after paragraph 2.'],

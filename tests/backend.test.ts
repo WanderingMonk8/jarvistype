@@ -2907,6 +2907,40 @@ test('deletes a dictated inclusive passage across paragraphs without provider in
   assert.equal(generationRequests.length, 0)
 })
 
+test('parses target-first insertion with a dictated phrase label', async () => {
+  const examples = [
+    ['It is tolerable.', 'Insert after tolerable the phrase, my name is Ken.', 'It is tolerable. My name is Ken.'],
+    ['“Marcus the weight more tolerable.”', 'Insert after tolerable the phrase, my name is Ken.', '“Marcus the weight more tolerable.” My name is Ken.'],
+    ['We leave now.', 'Insert before the word now the phrase, right about', 'We leave right about now.'],
+    ['We leave now.', 'Add after the phrase leave using the phrase, right', 'We leave right now.'],
+  ] as const
+  for (const [index, [draft, instructionTranscript, expected]] of examples.entries()) {
+    const userId = `target-first-insert-user-${index}`
+    const chatId = `target-first-insert-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `target-first-insert-${index}`, operationId: `target-first-insert-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected)
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('target-first insertion does not silently pick a repeated anchor', async () => {
+  const userId = 'target-first-insert-ambiguous-user'
+  const chatId = 'target-first-insert-ambiguous-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Tolerable. Tolerable.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'target-first-insert-ambiguous', operationId: 'target-first-insert-ambiguous-op', chatId, expectedVersion: 1, instructionTranscript: 'Insert after tolerable the phrase, my name is Ken.' }, userId)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('resolves range deletion separators against the draft when endpoints contain to', async () => {
   const cases = [
     ['Before. I need to see the surgeon again. I squeeze my fist once more.', 'Delete the part from I need to see to I squeeze my fist.', 'Before. Once more.'],

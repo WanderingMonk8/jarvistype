@@ -3168,9 +3168,11 @@ function parseDeterministicInlineInsertion(
     .trim()
     .match(
       /^(?:insert|add|place|put)\s+(before|after)\s+(?:the\s+)?(?:sentence|phrase|words?|text)\s+(.+?)\s+(?:with|using)\s+([\s\S]+)$/iu,
+    ) ?? instructionTranscript.trim().match(
+      /^(?:insert|add|place|put)\s+(before|after)\s+(.+?)\s+the\s+(?:phrase|words?|text)\b\s*[,;:]?\s+([\s\S]+)$/iu,
     )
   if (!match) return null
-  const target = unwrapEditArgument((match[2] ?? '').replace(/[,;:]\s*$/u, ''))
+  const target = unwrapEditArgument(stripUnquotedEditArgumentLabel((match[2] ?? '').replace(/[,;:]\s*$/u, '')))
   const insertion = unwrapEditArgument(stripUnquotedEditArgumentLabel(match[3] ?? ''))
   if (!target || !insertion) return null
   const targetText = adoptUnambiguousDraftCasing(session, target, undefined)

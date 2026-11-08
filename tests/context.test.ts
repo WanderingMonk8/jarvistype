@@ -536,6 +536,23 @@ test('does not conflate short names with different consonant structures', () => 
   assert.equal(correctEditTargetFromConversationReferences('Walt', ['Watt']).text, 'Walt')
 })
 
+test('keeps th, sh, and ch digraphs phonetically distinct from t, s, and k', () => {
+  // "this" (/ð/) and "tess" (/t/) are not phonetically similar enough to match,
+  // and the same holds for the other digraphs. Genuinely similar sounds still match.
+  assert.equal(correctFromConversationReferences('This is fine.', ['Tess']).text, 'This is fine.')
+  assert.equal(correctEditTargetFromConversationReferences('this', ['Tess']).text, 'this')
+  assert.equal(correctFromConversationReferences('That is fine.', ['Tat']).text, 'That is fine.')
+  assert.equal(correctFromConversationReferences('Shane is here.', ['Sane']).text, 'Shane is here.')
+  assert.equal(correctFromConversationReferences('Sane is here.', ['Shane']).text, 'Sane is here.')
+  assert.equal(correctFromConversationReferences('Chase is here.', ['Case']).text, 'Chase is here.')
+  // Same-sound substitutions still match.
+  assert.equal(correctFromConversationReferences("Cat's coat.", ['Kat']).text, "Kat's coat.")
+  assert.equal(
+    correctFromConversationReferences('Please ask Can tomorrow.', ['Ken']).text,
+    'Please ask Ken tomorrow.',
+  )
+})
+
 test('corrects provider consonant substitutions in recording and edit reference paths', () => {
   assert.deepEqual(correctFromConversationReferences('Ervode turns around.', ['Erbold']), {
     text: 'Erbold turns around.',

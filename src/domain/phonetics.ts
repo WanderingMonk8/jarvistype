@@ -4,6 +4,13 @@
  * The groups cover common provider substitutions between voiced/unvoiced or
  * closely articulated consonants. A trailing vowel is ignored for longer
  * terms because providers frequently add or drop an unstressed final vowel.
+ *
+ * Digraphs that are distinct English phonemes are kept distinct:
+ * `th` (dental fricative, e.g. "this" /ð/) is not `t` ("tess" /t/),
+ * `sh` (/ʃ/) is not `s` (/s/), and `ch` (/tʃ/) is not `k` (/k/) or `t` (/t/).
+ * Collapsing `th` → `t` via h-dropping is what made "this" collide with
+ * "tess"; keeping those sounds distinct reduces false fuzzy matches
+ * without using word categories.
  */
 export function speechPhoneticKey(value: string): string {
   const prepared = value
@@ -11,6 +18,9 @@ export function speechPhoneticKey(value: string): string {
     .replace(/\p{M}/gu, '')
     .toLocaleLowerCase()
     .replace(/ph/gu, 'f')
+    .replace(/th/gu, 'D')
+    .replace(/sh/gu, 'X')
+    .replace(/ch/gu, 'J')
     .replace(/ght/gu, 't')
     .replace(/gh/gu, '')
     .replace(/ck/gu, 'k')

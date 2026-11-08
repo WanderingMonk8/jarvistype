@@ -660,7 +660,7 @@ function clip(value, limit) {
 
 // src/domain/phonetics.ts
 function speechPhoneticKey(value) {
-  const prepared = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/ph/gu, "f").replace(/ght/gu, "t").replace(/gh/gu, "").replace(/ck/gu, "k").replace(/kn/gu, "n").replace(/wr/gu, "r").replace(/qu/gu, "kw");
+  const prepared = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/ph/gu, "f").replace(/th/gu, "D").replace(/sh/gu, "X").replace(/ch/gu, "J").replace(/ght/gu, "t").replace(/gh/gu, "").replace(/ck/gu, "k").replace(/kn/gu, "n").replace(/wr/gu, "r").replace(/qu/gu, "kw");
   let key = "";
   for (const character of prepared) {
     const sound = speechSoundGroup(character);
@@ -4090,7 +4090,7 @@ function escapeRegExp2(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.15";
+var APP_VERSION = "1.6.16";
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
 var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
 var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;

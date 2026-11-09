@@ -45,13 +45,50 @@ export function speechPhoneticKey(value: string): string {
   return key.length >= 4 ? key.replace(/A$/u, '') : key
 }
 
-/** A one-group difference is allowed only for substantial, same-opening keys. */
+/**
+ * A key may gain or lose one sound group while still describing the same name.
+ * Substitutions are not neighbors: families that describe genuinely different
+ * sounds (for example `j` and `k`) must stay apart at every word length.
+ */
 export function areSpeechPhoneticNeighbors(left: string, right: string): boolean {
   const leftKey = speechPhoneticKey(left)
   const rightKey = speechPhoneticKey(right)
-  if (Math.min(leftKey.length, rightKey.length) < 4 || leftKey.charAt(0) !== rightKey.charAt(0))
+  if (leftKey === rightKey) return true
+  if (
+    Math.min(leftKey.length, rightKey.length) < 4 ||
+    leftKey.charAt(0) !== rightKey.charAt(0) ||
+    Math.abs(leftKey.length - rightKey.length) !== 1
+  )
     return false
-  return editDistanceAtMost(leftKey, rightKey, 1)
+  const shorter = leftKey.length < rightKey.length ? leftKey : rightKey
+  const longer = leftKey.length < rightKey.length ? rightKey : leftKey
+  let shortIndex = 0
+  let longIndex = 0
+  let skipped = false
+  while (shortIndex < shorter.length && longIndex < longer.length) {
+    if (shorter[shortIndex] === longer[longIndex]) {
+      shortIndex += 1
+      longIndex += 1
+      continue
+    }
+    if (skipped) return false
+    skipped = true
+    longIndex += 1
+  }
+  return true
+}
+
+/**
+ * Whether swapping one letter for another is a plausible recognition variant.
+ * Substitution is only allowed inside one sound family, so vowels replace
+ * vowels and consonants replace consonants of the same family. Crossing from a
+ * vowel to a consonant changes the word ("Willie" vs "Willum"), and `j` must
+ * never stand in for `k`, however long the word is.
+ */
+export function areSpeechLettersCompatible(left: string, right: string): boolean {
+  return (
+    speechSoundGroup(left.toLocaleLowerCase()) === speechSoundGroup(right.toLocaleLowerCase())
+  )
 }
 
 /**
@@ -84,26 +121,4 @@ function speechSoundGroup(character: string): string {
   for (const [pattern, family] of CONSONANT_FAMILIES)
     if (pattern.test(character)) return family
   return /[\p{L}\p{N}]/u.test(character) ? character : ''
-}
-
-function editDistanceAtMost(left: string, right: string, maximum: number): boolean {
-  if (Math.abs(left.length - right.length) > maximum) return false
-  let previous = Array.from({ length: right.length + 1 }, (_, index) => index)
-  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
-    const current = [leftIndex]
-    let rowMinimum = leftIndex
-    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
-      const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1
-      const distance = Math.min(
-        previous[rightIndex]! + 1,
-        current[rightIndex - 1]! + 1,
-        previous[rightIndex - 1]! + cost,
-      )
-      current.push(distance)
-      rowMinimum = Math.min(rowMinimum, distance)
-    }
-    if (rowMinimum > maximum) return false
-    previous = current
-  }
-  return previous[right.length]! <= maximum
 }

@@ -671,9 +671,28 @@ function speechPhoneticKey(value) {
 function areSpeechPhoneticNeighbors(left, right) {
   const leftKey = speechPhoneticKey(left);
   const rightKey = speechPhoneticKey(right);
-  if (Math.min(leftKey.length, rightKey.length) < 4 || leftKey.charAt(0) !== rightKey.charAt(0))
+  if (leftKey === rightKey) return true;
+  if (Math.min(leftKey.length, rightKey.length) < 4 || leftKey.charAt(0) !== rightKey.charAt(0) || Math.abs(leftKey.length - rightKey.length) !== 1)
     return false;
-  return editDistanceAtMost(leftKey, rightKey, 1);
+  const shorter = leftKey.length < rightKey.length ? leftKey : rightKey;
+  const longer = leftKey.length < rightKey.length ? rightKey : leftKey;
+  let shortIndex = 0;
+  let longIndex = 0;
+  let skipped = false;
+  while (shortIndex < shorter.length && longIndex < longer.length) {
+    if (shorter[shortIndex] === longer[longIndex]) {
+      shortIndex += 1;
+      longIndex += 1;
+      continue;
+    }
+    if (skipped) return false;
+    skipped = true;
+    longIndex += 1;
+  }
+  return true;
+}
+function areSpeechLettersCompatible(left, right) {
+  return speechSoundGroup(left.toLocaleLowerCase()) === speechSoundGroup(right.toLocaleLowerCase());
 }
 var CONSONANT_FAMILIES = [
   // Labials cross the stop/fricative boundary in recognition (Ervode → Erbold).
@@ -698,27 +717,6 @@ function speechSoundGroup(character) {
   for (const [pattern, family] of CONSONANT_FAMILIES)
     if (pattern.test(character)) return family;
   return /[\p{L}\p{N}]/u.test(character) ? character : "";
-}
-function editDistanceAtMost(left, right, maximum) {
-  if (Math.abs(left.length - right.length) > maximum) return false;
-  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
-    const current = [leftIndex];
-    let rowMinimum = leftIndex;
-    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
-      const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
-      const distance = Math.min(
-        previous[rightIndex] + 1,
-        current[rightIndex - 1] + 1,
-        previous[rightIndex - 1] + cost
-      );
-      current.push(distance);
-      rowMinimum = Math.min(rowMinimum, distance);
-    }
-    if (rowMinimum > maximum) return false;
-    previous = current;
-  }
-  return previous[right.length] <= maximum;
 }
 
 // src/domain/edit-pipeline.ts
@@ -2650,7 +2648,7 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
         return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase());
       });
       const spellingClose = candidates.filter(
-        (reference) => editDistanceAtMost2(baseKey, reference.toLocaleLowerCase(), 1)
+        (reference) => editDistanceAtMost(baseKey, reference.toLocaleLowerCase(), 1)
       );
       const pool = spellingClose.length ? spellingClose : candidates;
       const uniqueCandidates = [
@@ -2899,17 +2897,49 @@ function isReferenceTerm(term) {
 function isHighConfidenceReferenceMatch(heard, reference) {
   const maximumLengthDifference = Math.min(heard.length, reference.length) >= 6 ? 2 : 1;
   if (Math.abs(heard.length - reference.length) > maximumLengthDifference) return false;
+  const heardPhonetic = speechPhoneticKey(heard);
+  const referencePhonetic = speechPhoneticKey(reference);
   if (Math.max(heard.length, reference.length) <= 5) {
-    const heardPhonetic = speechPhoneticKey(heard);
-    return heardPhonetic.length >= 3 && heardPhonetic === speechPhoneticKey(reference);
+    return heardPhonetic.length >= 3 && heardPhonetic === referencePhonetic;
   }
   if (heard.charAt(0) !== reference.charAt(0)) return false;
-  if (editDistanceAtMost2(heard, reference, 1)) return true;
-  if (heard.slice(0, 2) === reference.slice(0, 2) && areSpeechPhoneticNeighbors(heard, reference))
-    return true;
-  return Math.min(heard.length, reference.length) >= 6 && heard.slice(0, 4) === reference.slice(0, 4) && editDistanceAtMost2(heard, reference, 2);
+  if (hasIncompatibleKeySubstitution(heardPhonetic, referencePhonetic)) return false;
+  if (phoneticEditDistanceAtMost(heard, reference, 1)) return true;
+  return heard.slice(0, 2) === reference.slice(0, 2) && areSpeechPhoneticNeighbors(heard, reference);
 }
-function editDistanceAtMost2(left, right, maximum) {
+function hasIncompatibleKeySubstitution(leftKey, rightKey) {
+  if (leftKey.length !== rightKey.length) return false;
+  for (let index = 0; index < leftKey.length; index += 1) {
+    const left = leftKey[index];
+    const right = rightKey[index];
+    if (left !== right && left !== "A" && right !== "A") return true;
+  }
+  return false;
+}
+function phoneticEditDistanceAtMost(left, right, maximum) {
+  if (Math.abs(left.length - right.length) > maximum) return false;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    let rowMinimum = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const leftCharacter = left[leftIndex - 1];
+      const rightCharacter = right[rightIndex - 1];
+      const cost = leftCharacter === rightCharacter ? 0 : areSpeechLettersCompatible(leftCharacter, rightCharacter) ? 1 : Infinity;
+      const distance = Math.min(
+        previous[rightIndex] + 1,
+        current[rightIndex - 1] + 1,
+        previous[rightIndex - 1] + cost
+      );
+      current.push(distance);
+      rowMinimum = Math.min(rowMinimum, distance);
+    }
+    if (rowMinimum > maximum) return false;
+    previous = current;
+  }
+  return previous[right.length] <= maximum;
+}
+function editDistanceAtMost(left, right, maximum) {
   if (Math.abs(left.length - right.length) > maximum) return false;
   let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
   for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
@@ -4108,7 +4138,7 @@ function escapeRegExp2(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.19";
+var APP_VERSION = "1.6.20";
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
 var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
 var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;

@@ -418,11 +418,13 @@ test('draft-extracted proper nouns can correct lowercase edit targets', () => {
   )
 })
 
-test('corrects a unique two-character name ending only after a stable prefix', () => {
-  assert.deepEqual(correctFromConversationReferences('Willie carried the lamp.', ['Willum']), {
-    text: 'Willum carried the lamp.',
-    correctedTerms: [{ heard: 'Willie', canonical: 'Willum' }],
-  })
+test('does not substitute a different final sound after a stable prefix', () => {
+  // "Willie" (/ˈwɪli/) and "Willum" (/ˈwɪləm/) share a prefix but not a final
+  // sound, so a two-edit substitution must not force the reference.
+  assert.equal(
+    correctFromConversationReferences('Willie carried the lamp.', ['Willum']).text,
+    'Willie carried the lamp.',
+  )
   assert.equal(
     correctFromConversationReferences('Willie carried the lamp.', ['Willum', 'Willem']).text,
     'Willie carried the lamp.',
@@ -557,6 +559,23 @@ test('keeps distinct consonant families apart while matching same-sound spelling
   assert.equal(correctFromConversationReferences('Celia waited.', ['Kelia']).text, 'Celia waited.')
   // The same sounds still match even when the spelling differs.
   assert.equal(correctFromConversationReferences('Celia waited.', ['Selia']).text, 'Selia waited.')
+})
+
+test('applies consonant-family separation to long words too', () => {
+  // The same sound rule must hold at every word length, not only for short
+  // names: j vs k, sh vs s, and th vs t stay different sounds.
+  assert.equal(correctFromConversationReferences('Marjorie arrived.', ['Markorie']).text, 'Marjorie arrived.')
+  assert.equal(correctFromConversationReferences('Benjamin arrived.', ['Benkamin']).text, 'Benjamin arrived.')
+  assert.equal(correctFromConversationReferences('Jasper arrived.', ['Kasper']).text, 'Jasper arrived.')
+  assert.equal(correctFromConversationReferences('Shannon arrived.', ['Sannon']).text, 'Shannon arrived.')
+  // Long words that really do share a sound still match.
+  assert.equal(correctFromConversationReferences('Lucinda arrived.', ['Lusinda']).text, 'Lusinda arrived.')
+  assert.equal(correctFromConversationReferences('Donovan arrived.', ['Donovon']).text, 'Donovon arrived.')
+  assert.equal(correctFromConversationReferences('Juanita arrived.', ['Juannita']).text, 'Juannita arrived.')
+  assert.equal(
+    correctFromConversationReferences('Kensai carried the lamp.', ['Kansai']).text,
+    'Kansai carried the lamp.',
+  )
 })
 
 test('keeps th, sh, and ch digraphs phonetically distinct from t, s, and k', () => {

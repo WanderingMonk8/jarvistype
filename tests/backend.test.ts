@@ -909,7 +909,7 @@ test('uses strong temporary active-draft names as casing authority', async () =>
     assert.equal(response.proposal.candidateText, 'I look at Erbold.')
 })
 
-test('recovers a unique recent-chat name with a stable prefix and mistranscribed ending', async () => {
+test('recovers a unique recent-chat name with a sound-compatible ending', async () => {
   decisionsEnabled = true
   const userId = 'recent-name-ending-user'
   const chatId = 'recent-name-ending-chat'
@@ -926,7 +926,7 @@ test('recovers a unique recent-chat name with a stable prefix and mistranscribed
       chatId,
       'recent-name-ending-segment',
       0,
-      'As Willie leaves with the lamp, we stay at the table.',
+      'As Willam leaves with the lamp, we stay at the table.',
     ),
     userId,
   )
@@ -938,7 +938,7 @@ test('recovers a unique recent-chat name with a stable prefix and mistranscribed
       response.proposal.candidateText,
       'As Willum leaves with the lamp, we stay at the table.',
     )
-    assert.ok(response.proposal.reasons.includes('recent conversation spelling: Willie → Willum'))
+    assert.ok(response.proposal.reasons.includes('recent conversation spelling: Willam → Willum'))
   }
 })
 

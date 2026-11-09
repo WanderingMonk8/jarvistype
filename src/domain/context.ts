@@ -1,4 +1,8 @@
-import { areSpeechPhoneticNeighbors, speechPhoneticKey } from './phonetics'
+import {
+  areSpeechLettersCompatible,
+  areSpeechPhoneticNeighbors,
+  speechPhoneticKey,
+} from './phonetics'
 
 export const DEFAULT_CONTEXT_MESSAGE_COUNT = 5
 export const MAX_CONTEXT_MESSAGE_COUNT = 20
@@ -857,19 +861,73 @@ function isReferenceTerm(term: string): boolean {
 function isHighConfidenceReferenceMatch(heard: string, reference: string): boolean {
   const maximumLengthDifference = Math.min(heard.length, reference.length) >= 6 ? 2 : 1
   if (Math.abs(heard.length - reference.length) > maximumLengthDifference) return false
+  const heardPhonetic = speechPhoneticKey(heard)
+  const referencePhonetic = speechPhoneticKey(reference)
   if (Math.max(heard.length, reference.length) <= 5) {
-    const heardPhonetic = speechPhoneticKey(heard)
-    return heardPhonetic.length >= 3 && heardPhonetic === speechPhoneticKey(reference)
+    return heardPhonetic.length >= 3 && heardPhonetic === referencePhonetic
   }
   if (heard.charAt(0) !== reference.charAt(0)) return false
-  if (editDistanceAtMost(heard, reference, 1)) return true
-  if (heard.slice(0, 2) === reference.slice(0, 2) && areSpeechPhoneticNeighbors(heard, reference))
-    return true
-  return (
-    Math.min(heard.length, reference.length) >= 6 &&
-    heard.slice(0, 4) === reference.slice(0, 4) &&
-    editDistanceAtMost(heard, reference, 2)
-  )
+  // The short-word path already compares whole phonetic keys. Apply the same
+  // rule at every length: an equal-length key that swaps one consonant family
+  // for another (for example j → k) is a different sound, however long the
+  // word is. Insertions and deletions remain allowed.
+  if (hasIncompatibleKeySubstitution(heardPhonetic, referencePhonetic)) return false
+  if (phoneticEditDistanceAtMost(heard, reference, 1)) return true
+  // A shared spelling prefix is not a sound match. "Willie" and "Willum" both
+  // start with "Will" but end in different sounds, so no prefix-based
+  // two-edit allowance is applied here.
+  return heard.slice(0, 2) === reference.slice(0, 2) && areSpeechPhoneticNeighbors(heard, reference)
+}
+
+/**
+ * Equal-length keys may only differ at a vowel marker. Key characters are
+ * already family markers, so they must be compared directly: re-running a
+ * marker such as `X` (the `sh` sound) through `areSpeechLettersCompatible`
+ * would read it as the letter "x" in the `s` family and let "Shannon" match
+ * "Sannon".
+ */
+function hasIncompatibleKeySubstitution(leftKey: string, rightKey: string): boolean {
+  if (leftKey.length !== rightKey.length) return false
+  for (let index = 0; index < leftKey.length; index += 1) {
+    const left = leftKey[index]!
+    const right = rightKey[index]!
+    if (left !== right && left !== 'A' && right !== 'A') return true
+  }
+  return false
+}
+
+/**
+ * Edit distance where a substitution between different consonant families is
+ * impossible. Insertions and deletions still cost one edit, so a provider's
+ * extra or missing sound is tolerated at any word length.
+ */
+function phoneticEditDistanceAtMost(left: string, right: string, maximum: number): boolean {
+  if (Math.abs(left.length - right.length) > maximum) return false
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index)
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex]
+    let rowMinimum = leftIndex
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const leftCharacter = left[leftIndex - 1]!
+      const rightCharacter = right[rightIndex - 1]!
+      const cost =
+        leftCharacter === rightCharacter
+          ? 0
+          : areSpeechLettersCompatible(leftCharacter, rightCharacter)
+            ? 1
+            : Infinity
+      const distance = Math.min(
+        previous[rightIndex]! + 1,
+        current[rightIndex - 1]! + 1,
+        previous[rightIndex - 1]! + cost,
+      )
+      current.push(distance)
+      rowMinimum = Math.min(rowMinimum, distance)
+    }
+    if (rowMinimum > maximum) return false
+    previous = current
+  }
+  return previous[right.length]! <= maximum
 }
 
 function editDistanceAtMost(left: string, right: string, maximum: number): boolean {

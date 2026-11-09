@@ -5432,14 +5432,21 @@ function referenceVerdictPath(chatId: string): string {
 function glossaryForPrompt(glossary: GlossaryState): Array<{
   canonical: string
   variants: string[]
+  forbidden?: string[]
   hint: string
 }> {
-  const selected = [] as Array<{ canonical: string; variants: string[]; hint: string }>
+  const selected = [] as Array<{
+    canonical: string
+    variants: string[]
+    forbidden?: string[]
+    hint: string
+  }>
   let size = 0
   for (const entry of [...glossary.entries].reverse()) {
     const candidate = {
       canonical: entry.canonical,
       variants: entry.variants,
+      ...(entry.forbidden?.length ? { forbidden: entry.forbidden } : {}),
       hint: entry.hint,
     }
     const candidateSize = JSON.stringify(candidate).length
@@ -5602,6 +5609,7 @@ async function handleGlossaryUpsert(
     id: request.entryId,
     canonical: request.canonical,
     variants: request.variants,
+    forbidden: request.forbidden,
     hint: request.hint,
     source: 'manual',
     scope:

@@ -15,6 +15,30 @@ test('preserves an ellipsis through punctuation cleanup', () => {
   assert.equal(normalizeDeterministically('Wait.. What??', []).text, 'Wait. What?')
 })
 
+test('forces words that must never be transcribed back to the canonical spelling', () => {
+  const glossary = [
+    {
+      id: 'ellis',
+      canonical: 'Ellis',
+      variants: [],
+      forbidden: ['Alice', 'Alyce'],
+      hint: '',
+      source: 'manual' as const,
+      useCount: 0,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ]
+  const result = normalizeDeterministically('Alice met Alyce, and Ellis waited.', glossary)
+  assert.equal(result.text, 'Ellis met Ellis, and Ellis waited.')
+  assert.ok(result.reasons.includes('glossary: Ellis'))
+  // Whole words only: a longer word containing the forbidden spelling is untouched.
+  assert.equal(
+    normalizeDeterministically('Alicetown stayed open.', glossary).text,
+    'Alicetown stayed open.',
+  )
+})
+
 test('uses qualified as-in spelling references in recording text', () => {
   assert.equal(
     normalizeQualifiedAsInReferences(

@@ -2955,12 +2955,17 @@ function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).to
   const canonical = input.canonical.trim();
   if (!canonical) return { state, changed: false };
   const variants = unique([...input.variants ?? []].map((value) => value.trim()).filter(Boolean));
+  const forbidden = unique(
+    [...input.forbidden ?? []].map((value) => value.trim()).filter(Boolean)
+  ).slice(0, 20);
   const scope = input.scope ?? "global";
   const chatId = scope === "local" ? input.chatId?.trim() : void 0;
   if (scope === "local" && !chatId) return { state, changed: false };
-  const keys = new Set([canonical, ...variants].map(normalizeKey));
+  const keys = new Set([canonical, ...variants, ...forbidden].map(normalizeKey));
   const conflict = state.entries.find(
-    (entry2) => entry2.id !== input.id && glossaryScopeKey(entry2) === `${scope}:${chatId ?? ""}` && [entry2.canonical, ...entry2.variants].some((value) => keys.has(normalizeKey(value)))
+    (entry2) => entry2.id !== input.id && glossaryScopeKey(entry2) === `${scope}:${chatId ?? ""}` && [entry2.canonical, ...entry2.variants, ...entry2.forbidden ?? []].some(
+      (value) => keys.has(normalizeKey(value))
+    )
   );
   if (conflict) return { state, changed: false, conflict };
   const existing = input.id ? state.entries.find((entry2) => entry2.id === input.id) : void 0;
@@ -2968,6 +2973,7 @@ function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).to
     ...existing,
     canonical,
     variants,
+    forbidden,
     hint: input.hint?.trim() ?? "",
     source: input.source,
     scope,
@@ -2977,6 +2983,7 @@ function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).to
     id: createId(),
     canonical,
     variants,
+    forbidden,
     hint: input.hint?.trim() ?? "",
     source: input.source,
     scope,
@@ -3062,7 +3069,7 @@ function unique(values) {
   return [...new Set(values)];
 }
 function isGlossaryEntry(value) {
-  return isRecord3(value) && typeof value.id === "string" && typeof value.canonical === "string" && value.canonical.trim().length > 0 && Array.isArray(value.variants) && value.variants.every((item) => typeof item === "string") && typeof value.hint === "string" && (value.source === "explicit-spelling" || value.source === "manual") && (value.scope === void 0 || value.scope === "local" || value.scope === "global") && (value.chatId === void 0 || typeof value.chatId === "string") && (value.scope !== "local" || typeof value.chatId === "string" && value.chatId.length > 0) && Number.isSafeInteger(value.useCount) && Number(value.useCount) >= 0 && typeof value.createdAt === "string" && typeof value.updatedAt === "string";
+  return isRecord3(value) && typeof value.id === "string" && typeof value.canonical === "string" && value.canonical.trim().length > 0 && Array.isArray(value.variants) && value.variants.every((item) => typeof item === "string") && (value.forbidden === void 0 || Array.isArray(value.forbidden) && value.forbidden.every((item) => typeof item === "string")) && typeof value.hint === "string" && (value.source === "explicit-spelling" || value.source === "manual") && (value.scope === void 0 || value.scope === "local" || value.scope === "global") && (value.chatId === void 0 || typeof value.chatId === "string") && (value.scope !== "local" || typeof value.chatId === "string" && value.chatId.length > 0) && Number.isSafeInteger(value.useCount) && Number(value.useCount) >= 0 && typeof value.createdAt === "string" && typeof value.updatedAt === "string";
 }
 function glossaryScopeKey(entry) {
   const scope = entry.scope ?? "global";
@@ -3653,7 +3660,7 @@ function normalizeDeterministically(raw, glossary, options = {}) {
     (_, index) => protectedLiterals[Number(index)] ?? ""
   );
   for (const entry of glossary) {
-    for (const variant of entry.variants) {
+    for (const variant of [...entry.variants, ...entry.forbidden ?? []]) {
       if (!variant.trim() || variant.localeCompare(entry.canonical, void 0, { sensitivity: "accent" }) === 0)
         continue;
       const pattern = new RegExp(`\\b${escapeRegExp2(variant)}\\b`, "gi");
@@ -4090,7 +4097,7 @@ function escapeRegExp2(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.16";
+var APP_VERSION = "1.6.17";
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
 var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
 var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;
@@ -4138,7 +4145,7 @@ function isFrontendRequest(value) {
   if (value.type === "phase4.settings.update.request")
     return isPhaseFourSettings(value.settings) && (value.chatId === void 0 || isIdentifier2(value.chatId));
   if (value.type === "glossary.upsert.request") {
-    return (value.entryId === void 0 || isIdentifier2(value.entryId)) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.length <= 20 && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && typeof value.hint === "string" && value.hint.length <= 500 && (value.scope === void 0 || value.scope === "local" || value.scope === "global") && (value.chatId === void 0 || isIdentifier2(value.chatId));
+    return (value.entryId === void 0 || isIdentifier2(value.entryId)) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.length <= 20 && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && (value.forbidden === void 0 || Array.isArray(value.forbidden) && value.forbidden.length <= 20 && value.forbidden.every((word) => isBoundedString(word, 1, 200))) && typeof value.hint === "string" && value.hint.length <= 500 && (value.scope === void 0 || value.scope === "local" || value.scope === "global") && (value.chatId === void 0 || isIdentifier2(value.chatId));
   }
   if (value.type === "glossary.delete.request")
     return isIdentifier2(value.entryId) && (value.chatId === void 0 || isIdentifier2(value.chatId));
@@ -8617,6 +8624,7 @@ function glossaryForPrompt(glossary) {
     const candidate = {
       canonical: entry.canonical,
       variants: entry.variants,
+      ...entry.forbidden?.length ? { forbidden: entry.forbidden } : {},
       hint: entry.hint
     };
     const candidateSize = JSON.stringify(candidate).length;
@@ -8744,6 +8752,7 @@ async function handleGlossaryUpsert(request, context, activeRequest) {
     id: request.entryId,
     canonical: request.canonical,
     variants: request.variants,
+    forbidden: request.forbidden,
     hint: request.hint,
     source: "manual",
     scope: request.scope ?? (request.chatId ? settings.glossaryDefaultScope ?? "local" : "global"),

@@ -4,7 +4,7 @@ import type { SpellingLearningCandidate } from '../domain/normalization'
 import type { EditPlan, ResolvedEditOperation } from '../domain/edit-pipeline'
 
 export const PROTOCOL_VERSION = 7 as const
-export const APP_VERSION = '1.6.16'
+export const APP_VERSION = '1.6.17'
 export const REQUEST_TIMEOUT_MS = 15_000
 export const NORMALIZATION_TIMEOUT_MS = 120_000
 export const DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120
@@ -199,6 +199,7 @@ export type FrontendRequest =
       entryId?: string
       canonical: string
       variants: string[]
+      forbidden?: string[]
       hint: string
       scope?: 'local' | 'global'
       chatId?: string

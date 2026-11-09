@@ -492,6 +492,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     tab.root,
     '[data-glossary-variants]',
   )
+  const glossaryForbiddenInput = requireElement<HTMLInputElement>(
+    tab.root,
+    '[data-glossary-forbidden]',
+  )
   const glossaryHintInput = requireElement<HTMLInputElement>(tab.root, '[data-glossary-hint]')
   const glossaryGlobalInput = requireElement<HTMLInputElement>(tab.root, '[data-glossary-global]')
   const glossaryDefaultScopeSelect = requireElement<HTMLSelectElement>(
@@ -519,6 +523,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const floatingGlossaryVariantsInput = requireElement<HTMLInputElement>(
     floatingWidget.root,
     '[data-floating-glossary-variants]',
+  )
+  const floatingGlossaryForbiddenInput = requireElement<HTMLInputElement>(
+    floatingWidget.root,
+    '[data-floating-glossary-forbidden]',
   )
   const floatingGlossaryHintInput = requireElement<HTMLInputElement>(
     floatingWidget.root,
@@ -1858,6 +1866,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       surface === 'floating' ? floatingGlossaryCanonicalInput : glossaryCanonicalInput
     const variantsInput =
       surface === 'floating' ? floatingGlossaryVariantsInput : glossaryVariantsInput
+    const forbiddenInput =
+      surface === 'floating' ? floatingGlossaryForbiddenInput : glossaryForbiddenInput
     const hintInput = surface === 'floating' ? floatingGlossaryHintInput : glossaryHintInput
     const editingEntry = editingGlossaryEntryId
       ? state.glossary.find((entry) => entry.id === editingGlossaryEntryId)
@@ -1873,6 +1883,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       .map((value) => value.trim())
       .filter(Boolean)
       .slice(0, 20)
+    const forbidden = forbiddenInput.value
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .slice(0, 20)
     const outcome = await performRequest({
       protocolVersion: PROTOCOL_VERSION,
       type: 'glossary.upsert.request',
@@ -1880,6 +1895,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       ...(editingGlossaryEntryId ? { entryId: editingGlossaryEntryId } : {}),
       canonical,
       variants,
+      forbidden,
       hint: hintInput.value.trim(),
       scope:
         !state.activeChatId ||
@@ -1903,9 +1919,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     editingGlossaryEntryId = undefined
     glossaryCanonicalInput.value = ''
     glossaryVariantsInput.value = ''
+    glossaryForbiddenInput.value = ''
     glossaryHintInput.value = ''
     floatingGlossaryCanonicalInput.value = ''
     floatingGlossaryVariantsInput.value = ''
+    floatingGlossaryForbiddenInput.value = ''
     floatingGlossaryHintInput.value = ''
     const useGlobal = !state.activeChatId || (state.settings.glossaryDefaultScope ?? 'local') === 'global'
     glossaryGlobalInput.checked = useGlobal
@@ -1928,6 +1946,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         entryId: entry.id,
         canonical: entry.canonical,
         variants: entry.variants,
+        forbidden: entry.forbidden ?? [],
         hint: entry.hint,
         scope: global ? 'global' : 'local',
         chatId: state.activeChatId ?? undefined,
@@ -1942,9 +1961,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       editingGlossaryEntryId = entry.id
       glossaryCanonicalInput.value = entry.canonical
       glossaryVariantsInput.value = entry.variants.join(', ')
+      glossaryForbiddenInput.value = (entry.forbidden ?? []).join(', ')
       glossaryHintInput.value = entry.hint
       floatingGlossaryCanonicalInput.value = entry.canonical
       floatingGlossaryVariantsInput.value = entry.variants.join(', ')
+      floatingGlossaryForbiddenInput.value = (entry.forbidden ?? []).join(', ')
       floatingGlossaryHintInput.value = entry.hint
       const isGlobal = (entry.scope ?? 'global') === 'global'
       glossaryGlobalInput.checked = isGlobal
@@ -2816,7 +2837,7 @@ function renderGlossary(
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const visibleEntries = normalizedQuery
     ? entries.filter((entry) =>
-        [entry.canonical, ...entry.variants, entry.hint].some((value) =>
+        [entry.canonical, ...entry.variants, ...(entry.forbidden ?? []), entry.hint].some((value) =>
           value.toLocaleLowerCase().includes(normalizedQuery),
         ),
       )
@@ -2835,7 +2856,7 @@ function renderGlossary(
     const row = document.createElement('div')
     row.className = 'jt-glossary-row'
     const text = document.createElement('p')
-    text.textContent = `${entry.canonical}${entry.variants.length ? ` — heard as: ${entry.variants.join(', ')}` : ''}${entry.hint ? ` — ${entry.hint}` : ''} — source: ${entry.source === 'explicit-spelling' ? 'explicit spelling' : 'manual'} — used ${entry.useCount} ${entry.useCount === 1 ? 'time' : 'times'}`
+    text.textContent = `${entry.canonical}${entry.variants.length ? ` — heard as: ${entry.variants.join(', ')}` : ''}${entry.forbidden?.length ? ` — never transcribed as: ${entry.forbidden.join(', ')}` : ''}${entry.hint ? ` — ${entry.hint}` : ''} — source: ${entry.source === 'explicit-spelling' ? 'explicit spelling' : 'manual'} — used ${entry.useCount} ${entry.useCount === 1 ? 'time' : 'times'}`
     const actions = document.createElement('div')
     actions.className = 'jt-actions'
     const globalLabel = document.createElement('label')
@@ -3154,9 +3175,10 @@ function floatingMarkup(): string {
             <details>
               <summary>Glossary</summary>
               <div class="jt-form-grid">
-                <label>Search glossary<input type="search" placeholder="Search spellings, variants, or hints" data-floating-glossary-search></label>
+                <label>Search glossary<input type="search" placeholder="Search spellings, variants, forbidden words, or hints" data-floating-glossary-search></label>
                 <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-floating-glossary-canonical></label>
                 <label>Heard-as variants<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-floating-glossary-variants></label>
+                <label>Never transcribe as<input type="text" maxlength="1000" placeholder="Alice, Alyce" data-floating-glossary-forbidden></label>
                 <label>Optional hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-floating-glossary-hint></label>
                 <label>Default glossary scope<select data-floating-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
                 <label><span><input type="checkbox" data-floating-glossary-global> Use this entry in all chats</span></label>
@@ -3457,10 +3479,11 @@ function shellMarkup(): string {
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings…</p>
 
         <h4>Personal glossary</h4>
-        <label class="jt-form-grid">Search glossary<input type="search" placeholder="Search spellings, variants, or hints" data-glossary-search></label>
+        <label class="jt-form-grid">Search glossary<input type="search" placeholder="Search spellings, variants, forbidden words, or hints" data-glossary-search></label>
         <div class="jt-form-grid">
           <label>Canonical spelling<input type="text" maxlength="200" placeholder="Pip-Boy" data-glossary-canonical></label>
           <label>Heard-as variants, comma separated<input type="text" maxlength="1000" placeholder="pip boy, Pipboy" data-glossary-variants></label>
+          <label>Never transcribe as, comma separated<input type="text" maxlength="1000" placeholder="Alice, Alyce" data-glossary-forbidden></label>
           <label>Optional reference or hint<input type="text" maxlength="500" placeholder="Fallout wrist device" data-glossary-hint></label>
           <label>Default glossary scope<select data-glossary-default-scope><option value="local">This chat</option><option value="global">All chats</option></select></label>
           <label><span><input type="checkbox" data-glossary-global> Use this entry in all chats</span></label>

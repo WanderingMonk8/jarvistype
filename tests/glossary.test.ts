@@ -71,6 +71,46 @@ test('allows the same glossary spelling in different local chats', () => {
   assert.equal(second.changed, true)
 })
 
+test('records words that must never be transcribed and treats them as conflicts', () => {
+  const first = upsertGlossaryEntry(
+    createGlossaryState(),
+    {
+      canonical: 'Ellis',
+      forbidden: [' Alice ', 'Alice', '', 'Alyce'],
+      source: 'manual',
+    },
+    undefined,
+    () => 'ellis',
+  )
+  assert.deepEqual(first.entry?.forbidden, ['Alice', 'Alyce'])
+
+  const conflict = upsertGlossaryEntry(
+    first.state,
+    { canonical: 'Alicia', forbidden: ['alice'], source: 'manual' },
+    undefined,
+    () => 'alicia',
+  )
+  assert.equal(conflict.changed, false)
+  assert.equal(conflict.conflict?.canonical, 'Ellis')
+})
+
+test('keeps forbidden words when explicit spelling adds a variant', () => {
+  const first = upsertGlossaryEntry(
+    createGlossaryState(),
+    { canonical: 'Ellis', forbidden: ['Alice'], source: 'manual' },
+    undefined,
+    () => 'ellis',
+  )
+  const learned = learnExplicitSpelling(
+    first.state,
+    'Ellis',
+    'Elliss',
+    '2026-01-01T00:00:00.000Z',
+  )
+  assert.deepEqual(learned.entry?.forbidden, ['Alice'])
+  assert.deepEqual(learned.entry?.variants, ['Elliss'])
+})
+
 test('does not overwrite a conflicting canonical or variant', () => {
   const first = upsertGlossaryEntry(
     createGlossaryState(),

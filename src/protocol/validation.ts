@@ -124,6 +124,10 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
       Array.isArray(value.variants) &&
       value.variants.length <= 20 &&
       value.variants.every((variant) => isBoundedString(variant, 1, 200)) &&
+      (value.forbidden === undefined ||
+        (Array.isArray(value.forbidden) &&
+          value.forbidden.length <= 20 &&
+          value.forbidden.every((word) => isBoundedString(word, 1, 200)))) &&
       typeof value.hint === 'string' &&
       value.hint.length <= 500 &&
       (value.scope === undefined || value.scope === 'local' || value.scope === 'global') &&
@@ -502,6 +506,9 @@ function isGlossaryEntry(value: unknown): boolean {
     isBoundedString(value.canonical, 1, 200) &&
     Array.isArray(value.variants) &&
     value.variants.every((variant) => isBoundedString(variant, 1, 200)) &&
+    (value.forbidden === undefined ||
+      (Array.isArray(value.forbidden) &&
+        value.forbidden.every((word) => isBoundedString(word, 1, 200)))) &&
     typeof value.hint === 'string' &&
     value.hint.length <= 500 &&
     (value.source === 'explicit-spelling' || value.source === 'manual') &&

@@ -942,6 +942,43 @@ test('recovers a unique recent-chat name with a stable prefix and mistranscribed
   }
 })
 
+test('forces glossary words that must never be transcribed back to the canonical spelling', async () => {
+  const userId = 'glossary-forbidden-user'
+  const chatId = 'glossary-forbidden-chat'
+  activeChatId = chatId
+  chatMessages = []
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'glossary.upsert.request',
+      requestId: 'glossary-forbidden-entry',
+      canonical: 'Ellis',
+      variants: [],
+      forbidden: ['Alice'],
+      hint: '',
+      scope: 'global',
+    },
+    userId,
+  )
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'glossary-forbidden-segment',
+      0,
+      'Alice went to the market, and Alice came back.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'Ellis went to the market, and Ellis came back.')
+})
+
 test('recovers a short possessive character name from recent chat', async () => {
   decisionsEnabled = true
   const userId = 'recent-short-possessive-name-user'

@@ -405,7 +405,7 @@ export function normalizeDeterministically(
   )
 
   for (const entry of glossary) {
-    for (const variant of entry.variants) {
+    for (const variant of [...entry.variants, ...(entry.forbidden ?? [])]) {
       if (
         !variant.trim() ||
         variant.localeCompare(entry.canonical, undefined, { sensitivity: 'accent' }) === 0

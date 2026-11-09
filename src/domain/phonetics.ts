@@ -1,19 +1,24 @@
 /**
  * Produces a deliberately coarse key for speech-recognition comparisons.
  *
- * The groups cover common provider substitutions between voiced/unvoiced or
- * closely articulated consonants. A trailing vowel is ignored for longer
- * terms because providers frequently add or drop an unstressed final vowel.
+ * Sounds are grouped by articulation, not by spelling or word category, so the
+ * key stays a sound comparison. The groups only combine phonemes that
+ * recognizers genuinely confuse: voiced/unvoiced pairs (`d`/`t`, `s`/`z`),
+ * hard velar stops (`c`/`g`/`k`/`q`), and labials that cross the stop/fricative
+ * boundary (`b`/`p`/`f`/`v`, for example "Ervode" → "Erbold").
  *
- * Digraphs and letters that are distinct English phonemes are kept distinct:
+ * Distinct places of articulation stay distinct:
  * `th` (dental fricative, e.g. "this" /ð/) is not `t` ("tess" /t/),
- * `sh` (/ʃ/) is not `s` (/s/), and `ch` (/tʃ/) is not `k` (/k/) or `t` (/t/).
- * `j` (/dʒ/, the voiced affricate) is also not a velar stop, so it must not
- * collapse into the `[cgkq]` group: "Juan" (/xwan/ or /hwɑːn/) and "Ken"
- * (/kɛn/) both collapsed to `KAN` before this split.
- * Collapsing `th` → `t` via h-dropping is what made "this" collide with
- * "tess"; keeping those sounds distinct reduces false fuzzy matches
- * without using word categories.
+ * `sh` (/ʃ/) is not `s` (/s/), `ch` (/tʃ/) is not `k` (/k/) or `t` (/t/),
+ * and `j` (/dʒ/) is an affricate, not a velar stop ("Juan" vs "Ken").
+ *
+ * Vowels intentionally collapse to one group because providers vary them
+ * heavily. `h` is elided because h-dropping is a common pronunciation and
+ * recognition pattern. `w` is not elided: dropping /w/ changes the word
+ * identity ("Weston" vs "Easton"), so it keeps its own group.
+ *
+ * A trailing vowel is ignored for longer terms because providers frequently
+ * add or drop an unstressed final vowel.
  */
 export function speechPhoneticKey(value: string): string {
   const prepared = value
@@ -30,6 +35,8 @@ export function speechPhoneticKey(value: string): string {
     .replace(/kn/gu, 'n')
     .replace(/wr/gu, 'r')
     .replace(/qu/gu, 'kw')
+    // Soft "c" before a front vowel is /s/, not the hard velar /k/.
+    .replace(/c(?=[eiy])/gu, 's')
   let key = ''
   for (const character of prepared) {
     const sound = speechSoundGroup(character)
@@ -47,22 +54,35 @@ export function areSpeechPhoneticNeighbors(left: string, right: string): boolean
   return editDistanceAtMost(leftKey, rightKey, 1)
 }
 
+/**
+ * One entry per consonant family. Family letters double as the key alphabet,
+ * so an uppercase marker produced by a digraph rewrite (`th` → `D`, `sh` → `X`,
+ * `ch`/`j` → `J`) simply falls through unchanged.
+ */
+const CONSONANT_FAMILIES: ReadonlyArray<readonly [RegExp, string]> = [
+  // Labials cross the stop/fricative boundary in recognition (Ervode → Erbold).
+  [/[bpfv]/u, 'B'],
+  // Alveolar stops, a voiced/unvoiced pair.
+  [/[dt]/u, 'T'],
+  // Hard velar stops. Soft "c" was rewritten to "s" above.
+  [/[cgkq]/u, 'K'],
+  // Sibilant fricatives.
+  [/[sxz]/u, 'S'],
+  // Affricates, a voiced/unvoiced pair; kept apart from the stop families.
+  [/j/u, 'J'],
+  [/l/u, 'L'],
+  [/m/u, 'M'],
+  [/n/u, 'N'],
+  [/r/u, 'R'],
+  [/w/u, 'W'],
+]
+
 function speechSoundGroup(character: string): string {
   if (/[aeiouy]/u.test(character)) return 'A'
-  // Speech recognition commonly crosses the stop/fricative boundary here
-  // (for example, Ervode -> Erbold), so keep all labials in one group.
-  if (/[bpfv]/u.test(character)) return 'B'
-  // `j` is the voiced affricate /dʒ/, not a velar stop. It joins the `ch` marker
-  // (both are affricates) instead of the `[cgkq]` stop group.
-  if (character === 'j' || character === 'J') return 'J'
-  if (/[cgkq]/u.test(character)) return 'K'
-  if (/[dt]/u.test(character)) return 'T'
-  if (/[sxz]/u.test(character)) return 'S'
-  if (character === 'l') return 'L'
-  if (character === 'm') return 'M'
-  if (character === 'n') return 'N'
-  if (character === 'r') return 'R'
-  if (/[hw]/u.test(character)) return ''
+  // H-dropping is a common pronunciation and recognition pattern.
+  if (character === 'h') return ''
+  for (const [pattern, family] of CONSONANT_FAMILIES)
+    if (pattern.test(character)) return family
   return /[\p{L}\p{N}]/u.test(character) ? character : ''
 }
 

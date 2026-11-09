@@ -549,6 +549,16 @@ test('does not conflate j sounds with k sounds in short references', () => {
   assert.equal(correctFromConversationReferences("Cat's coat.", ['Kat']).text, "Kat's coat.")
 })
 
+test('keeps distinct consonant families apart while matching same-sound spellings', () => {
+  // /w/ is a consonant: losing it must not turn "Weston" into "Easton" or
+  // "Wade" into "Ade". Soft "c" is /s/, not the /k/ of "Kelia".
+  assert.equal(correctFromConversationReferences('Weston waited.', ['Easton']).text, 'Weston waited.')
+  assert.equal(correctFromConversationReferences('Wade waited.', ['Ade']).text, 'Wade waited.')
+  assert.equal(correctFromConversationReferences('Celia waited.', ['Kelia']).text, 'Celia waited.')
+  // The same sounds still match even when the spelling differs.
+  assert.equal(correctFromConversationReferences('Celia waited.', ['Selia']).text, 'Selia waited.')
+})
+
 test('keeps th, sh, and ch digraphs phonetically distinct from t, s, and k', () => {
   // "this" (/ð/) and "tess" (/t/) are not phonetically similar enough to match,
   // and the same holds for the other digraphs. Genuinely similar sounds still match.

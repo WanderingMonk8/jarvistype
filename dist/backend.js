@@ -660,7 +660,7 @@ function clip(value, limit) {
 
 // src/domain/phonetics.ts
 function speechPhoneticKey(value) {
-  const prepared = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/ph/gu, "f").replace(/th/gu, "D").replace(/sh/gu, "X").replace(/ch/gu, "J").replace(/ght/gu, "t").replace(/gh/gu, "").replace(/ck/gu, "k").replace(/kn/gu, "n").replace(/wr/gu, "r").replace(/qu/gu, "kw");
+  const prepared = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/ph/gu, "f").replace(/th/gu, "D").replace(/sh/gu, "X").replace(/ch/gu, "J").replace(/ght/gu, "t").replace(/gh/gu, "").replace(/ck/gu, "k").replace(/kn/gu, "n").replace(/wr/gu, "r").replace(/qu/gu, "kw").replace(/c(?=[eiy])/gu, "s");
   let key = "";
   for (const character of prepared) {
     const sound = speechSoundGroup(character);
@@ -675,18 +675,28 @@ function areSpeechPhoneticNeighbors(left, right) {
     return false;
   return editDistanceAtMost(leftKey, rightKey, 1);
 }
+var CONSONANT_FAMILIES = [
+  // Labials cross the stop/fricative boundary in recognition (Ervode → Erbold).
+  [/[bpfv]/u, "B"],
+  // Alveolar stops, a voiced/unvoiced pair.
+  [/[dt]/u, "T"],
+  // Hard velar stops. Soft "c" was rewritten to "s" above.
+  [/[cgkq]/u, "K"],
+  // Sibilant fricatives.
+  [/[sxz]/u, "S"],
+  // Affricates, a voiced/unvoiced pair; kept apart from the stop families.
+  [/j/u, "J"],
+  [/l/u, "L"],
+  [/m/u, "M"],
+  [/n/u, "N"],
+  [/r/u, "R"],
+  [/w/u, "W"]
+];
 function speechSoundGroup(character) {
   if (/[aeiouy]/u.test(character)) return "A";
-  if (/[bpfv]/u.test(character)) return "B";
-  if (character === "j" || character === "J") return "J";
-  if (/[cgkq]/u.test(character)) return "K";
-  if (/[dt]/u.test(character)) return "T";
-  if (/[sxz]/u.test(character)) return "S";
-  if (character === "l") return "L";
-  if (character === "m") return "M";
-  if (character === "n") return "N";
-  if (character === "r") return "R";
-  if (/[hw]/u.test(character)) return "";
+  if (character === "h") return "";
+  for (const [pattern, family] of CONSONANT_FAMILIES)
+    if (pattern.test(character)) return family;
   return /[\p{L}\p{N}]/u.test(character) ? character : "";
 }
 function editDistanceAtMost(left, right, maximum) {
@@ -4098,7 +4108,7 @@ function escapeRegExp2(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.18";
+var APP_VERSION = "1.6.19";
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
 var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
 var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;

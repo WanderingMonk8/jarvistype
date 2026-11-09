@@ -536,6 +536,19 @@ test('does not conflate short names with different consonant structures', () => 
   assert.equal(correctEditTargetFromConversationReferences('Walt', ['Watt']).text, 'Walt')
 })
 
+test('does not conflate j sounds with k sounds in short references', () => {
+  // "Juan" and "Ken" must not share a phonetic key just because both used to
+  // collapse into the [cgkq] stop group.
+  assert.equal(correctFromConversationReferences('What about Juan?', ['Ken']).text, 'What about Juan?')
+  assert.equal(correctEditTargetFromConversationReferences('Juan', ['Ken']).text, 'Juan')
+  // Genuine stop substitutions still match.
+  assert.equal(
+    correctFromConversationReferences('Please ask Can tomorrow.', ['Ken']).text,
+    'Please ask Ken tomorrow.',
+  )
+  assert.equal(correctFromConversationReferences("Cat's coat.", ['Kat']).text, "Kat's coat.")
+})
+
 test('keeps th, sh, and ch digraphs phonetically distinct from t, s, and k', () => {
   // "this" (/ð/) and "tess" (/t/) are not phonetically similar enough to match,
   // and the same holds for the other digraphs. Genuinely similar sounds still match.

@@ -678,7 +678,8 @@ function areSpeechPhoneticNeighbors(left, right) {
 function speechSoundGroup(character) {
   if (/[aeiouy]/u.test(character)) return "A";
   if (/[bpfv]/u.test(character)) return "B";
-  if (/[cgjkq]/u.test(character)) return "K";
+  if (character === "j" || character === "J") return "J";
+  if (/[cgkq]/u.test(character)) return "K";
   if (/[dt]/u.test(character)) return "T";
   if (/[sxz]/u.test(character)) return "S";
   if (character === "l") return "L";
@@ -4097,7 +4098,7 @@ function escapeRegExp2(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.17";
+var APP_VERSION = "1.6.18";
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
 var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
 var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;

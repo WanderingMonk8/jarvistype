@@ -5,9 +5,12 @@
  * closely articulated consonants. A trailing vowel is ignored for longer
  * terms because providers frequently add or drop an unstressed final vowel.
  *
- * Digraphs that are distinct English phonemes are kept distinct:
+ * Digraphs and letters that are distinct English phonemes are kept distinct:
  * `th` (dental fricative, e.g. "this" /ð/) is not `t` ("tess" /t/),
  * `sh` (/ʃ/) is not `s` (/s/), and `ch` (/tʃ/) is not `k` (/k/) or `t` (/t/).
+ * `j` (/dʒ/, the voiced affricate) is also not a velar stop, so it must not
+ * collapse into the `[cgkq]` group: "Juan" (/xwan/ or /hwɑːn/) and "Ken"
+ * (/kɛn/) both collapsed to `KAN` before this split.
  * Collapsing `th` → `t` via h-dropping is what made "this" collide with
  * "tess"; keeping those sounds distinct reduces false fuzzy matches
  * without using word categories.
@@ -49,7 +52,10 @@ function speechSoundGroup(character: string): string {
   // Speech recognition commonly crosses the stop/fricative boundary here
   // (for example, Ervode -> Erbold), so keep all labials in one group.
   if (/[bpfv]/u.test(character)) return 'B'
-  if (/[cgjkq]/u.test(character)) return 'K'
+  // `j` is the voiced affricate /dʒ/, not a velar stop. It joins the `ch` marker
+  // (both are affricates) instead of the `[cgkq]` stop group.
+  if (character === 'j' || character === 'J') return 'J'
+  if (/[cgkq]/u.test(character)) return 'K'
   if (/[dt]/u.test(character)) return 'T'
   if (/[sxz]/u.test(character)) return 'S'
   if (character === 'l') return 'L'

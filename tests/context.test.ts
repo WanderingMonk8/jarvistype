@@ -418,11 +418,13 @@ test('draft-extracted proper nouns can correct lowercase edit targets', () => {
   )
 })
 
-test('corrects a unique two-character name ending only after a stable prefix', () => {
-  assert.deepEqual(correctFromConversationReferences('Willie carried the lamp.', ['Willum']), {
-    text: 'Willum carried the lamp.',
-    correctedTerms: [{ heard: 'Willie', canonical: 'Willum' }],
-  })
+test('does not substitute a different final sound after a stable prefix', () => {
+  // "Willie" (/ˈwɪli/) and "Willum" (/ˈwɪləm/) share a prefix but not a final
+  // sound, so a two-edit substitution must not force the reference.
+  assert.equal(
+    correctFromConversationReferences('Willie carried the lamp.', ['Willum']).text,
+    'Willie carried the lamp.',
+  )
   assert.equal(
     correctFromConversationReferences('Willie carried the lamp.', ['Willum', 'Willem']).text,
     'Willie carried the lamp.',
@@ -534,6 +536,63 @@ test('does not conflate short names with different consonant structures', () => 
     'Walt will never do this.',
   )
   assert.equal(correctEditTargetFromConversationReferences('Walt', ['Watt']).text, 'Walt')
+})
+
+test('does not conflate j sounds with k sounds in short references', () => {
+  // "Juan" and "Ken" must not share a phonetic key just because both used to
+  // collapse into the [cgkq] stop group.
+  assert.equal(correctFromConversationReferences('What about Juan?', ['Ken']).text, 'What about Juan?')
+  assert.equal(correctEditTargetFromConversationReferences('Juan', ['Ken']).text, 'Juan')
+  // Genuine stop substitutions still match.
+  assert.equal(
+    correctFromConversationReferences('Please ask Can tomorrow.', ['Ken']).text,
+    'Please ask Ken tomorrow.',
+  )
+  assert.equal(correctFromConversationReferences("Cat's coat.", ['Kat']).text, "Kat's coat.")
+})
+
+test('keeps distinct consonant families apart while matching same-sound spellings', () => {
+  // /w/ is a consonant: losing it must not turn "Weston" into "Easton" or
+  // "Wade" into "Ade". Soft "c" is /s/, not the /k/ of "Kelia".
+  assert.equal(correctFromConversationReferences('Weston waited.', ['Easton']).text, 'Weston waited.')
+  assert.equal(correctFromConversationReferences('Wade waited.', ['Ade']).text, 'Wade waited.')
+  assert.equal(correctFromConversationReferences('Celia waited.', ['Kelia']).text, 'Celia waited.')
+  // The same sounds still match even when the spelling differs.
+  assert.equal(correctFromConversationReferences('Celia waited.', ['Selia']).text, 'Selia waited.')
+})
+
+test('applies consonant-family separation to long words too', () => {
+  // The same sound rule must hold at every word length, not only for short
+  // names: j vs k, sh vs s, and th vs t stay different sounds.
+  assert.equal(correctFromConversationReferences('Marjorie arrived.', ['Markorie']).text, 'Marjorie arrived.')
+  assert.equal(correctFromConversationReferences('Benjamin arrived.', ['Benkamin']).text, 'Benjamin arrived.')
+  assert.equal(correctFromConversationReferences('Jasper arrived.', ['Kasper']).text, 'Jasper arrived.')
+  assert.equal(correctFromConversationReferences('Shannon arrived.', ['Sannon']).text, 'Shannon arrived.')
+  // Long words that really do share a sound still match.
+  assert.equal(correctFromConversationReferences('Lucinda arrived.', ['Lusinda']).text, 'Lusinda arrived.')
+  assert.equal(correctFromConversationReferences('Donovan arrived.', ['Donovon']).text, 'Donovon arrived.')
+  assert.equal(correctFromConversationReferences('Juanita arrived.', ['Juannita']).text, 'Juannita arrived.')
+  assert.equal(
+    correctFromConversationReferences('Kensai carried the lamp.', ['Kansai']).text,
+    'Kansai carried the lamp.',
+  )
+})
+
+test('keeps th, sh, and ch digraphs phonetically distinct from t, s, and k', () => {
+  // "this" (/ð/) and "tess" (/t/) are not phonetically similar enough to match,
+  // and the same holds for the other digraphs. Genuinely similar sounds still match.
+  assert.equal(correctFromConversationReferences('This is fine.', ['Tess']).text, 'This is fine.')
+  assert.equal(correctEditTargetFromConversationReferences('this', ['Tess']).text, 'this')
+  assert.equal(correctFromConversationReferences('That is fine.', ['Tat']).text, 'That is fine.')
+  assert.equal(correctFromConversationReferences('Shane is here.', ['Sane']).text, 'Shane is here.')
+  assert.equal(correctFromConversationReferences('Sane is here.', ['Shane']).text, 'Sane is here.')
+  assert.equal(correctFromConversationReferences('Chase is here.', ['Case']).text, 'Chase is here.')
+  // Same-sound substitutions still match.
+  assert.equal(correctFromConversationReferences("Cat's coat.", ['Kat']).text, "Kat's coat.")
+  assert.equal(
+    correctFromConversationReferences('Please ask Can tomorrow.', ['Ken']).text,
+    'Please ask Ken tomorrow.',
+  )
 })
 
 test('corrects provider consonant substitutions in recording and edit reference paths', () => {

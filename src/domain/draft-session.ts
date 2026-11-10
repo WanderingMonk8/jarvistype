@@ -1,3 +1,5 @@
+import { createId } from './id'
+
 export const DRAFT_SCHEMA_VERSION = 4 as const
 export const MAX_DRAFT_CHARACTERS = 100_000
 export const MAX_HISTORY_ENTRIES = 200
@@ -932,5 +934,5 @@ function isPositiveInteger(value: unknown): value is number {
 }
 
 function defaultId(): string {
-  return crypto.randomUUID()
+  return createId()
 }

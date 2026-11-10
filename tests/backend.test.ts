@@ -909,7 +909,7 @@ test('uses strong temporary active-draft names as casing authority', async () =>
     assert.equal(response.proposal.candidateText, 'I look at Erbold.')
 })
 
-test('recovers a unique recent-chat name with a stable prefix and mistranscribed ending', async () => {
+test('recovers a unique recent-chat name with a sound-compatible ending', async () => {
   decisionsEnabled = true
   const userId = 'recent-name-ending-user'
   const chatId = 'recent-name-ending-chat'
@@ -926,7 +926,7 @@ test('recovers a unique recent-chat name with a stable prefix and mistranscribed
       chatId,
       'recent-name-ending-segment',
       0,
-      'As Willie leaves with the lamp, we stay at the table.',
+      'As Willam leaves with the lamp, we stay at the table.',
     ),
     userId,
   )
@@ -938,8 +938,45 @@ test('recovers a unique recent-chat name with a stable prefix and mistranscribed
       response.proposal.candidateText,
       'As Willum leaves with the lamp, we stay at the table.',
     )
-    assert.ok(response.proposal.reasons.includes('recent conversation spelling: Willie → Willum'))
+    assert.ok(response.proposal.reasons.includes('recent conversation spelling: Willam → Willum'))
   }
+})
+
+test('forces glossary words that must never be transcribed back to the canonical spelling', async () => {
+  const userId = 'glossary-forbidden-user'
+  const chatId = 'glossary-forbidden-chat'
+  activeChatId = chatId
+  chatMessages = []
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'glossary.upsert.request',
+      requestId: 'glossary-forbidden-entry',
+      canonical: 'Ellis',
+      variants: [],
+      forbidden: ['Alice'],
+      hint: '',
+      scope: 'global',
+    },
+    userId,
+  )
+  responses.length = 0
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'glossary-forbidden-segment',
+      0,
+      'Alice went to the market, and Alice came back.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response')
+    assert.equal(response.proposal.candidateText, 'Ellis went to the market, and Ellis came back.')
 })
 
 test('recovers a short possessive character name from recent chat', async () => {
@@ -2904,6 +2941,40 @@ test('deletes a dictated inclusive passage across paragraphs without provider in
   assert.equal(proposal?.type, 'edit.proposal.response')
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'Before. She returned.')
+  assert.equal(generationRequests.length, 0)
+})
+
+test('parses target-first insertion with a dictated phrase label', async () => {
+  const examples = [
+    ['It is tolerable.', 'Insert after tolerable the phrase, my name is Ken.', 'It is tolerable. My name is Ken.'],
+    ['“Marcus the weight more tolerable.”', 'Insert after tolerable the phrase, my name is Ken.', '“Marcus the weight more tolerable.” My name is Ken.'],
+    ['We leave now.', 'Insert before the word now the phrase, right about', 'We leave right about now.'],
+    ['We leave now.', 'Add after the phrase leave using the phrase, right', 'We leave right now.'],
+  ] as const
+  for (const [index, [draft, instructionTranscript, expected]] of examples.entries()) {
+    const userId = `target-first-insert-user-${index}`
+    const chatId = `target-first-insert-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `target-first-insert-${index}`, operationId: `target-first-insert-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', JSON.stringify(response))
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected)
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
+test('target-first insertion does not silently pick a repeated anchor', async () => {
+  const userId = 'target-first-insert-ambiguous-user'
+  const chatId = 'target-first-insert-ambiguous-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Tolerable. Tolerable.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'target-first-insert-ambiguous', operationId: 'target-first-insert-ambiguous-op', chatId, expectedVersion: 1, instructionTranscript: 'Insert after tolerable the phrase, my name is Ken.' }, userId)
+  assert.notEqual(responses.at(-1)?.payload.type, 'edit.proposal.response')
   assert.equal(generationRequests.length, 0)
 })
 
@@ -7951,6 +8022,7 @@ test('uses Jev to decide ambiguous article-prefixed casing commands', async () =
     [0, 'I had a capitalized wife.', 0.99, 'I had a Wife.'],
     [1, 'This is a capitalized company.', 0.01, 'This is a capitalized company.'],
     [2, 'I had a capitalized wife.', 0.5, 'I had a capitalized wife.'],
+    [3, 'I had a capitalized, wife.', 0.99, 'I had a Wife.'],
   ] as const) {
     referenceDecisionProbability = score
     responses.length = 0

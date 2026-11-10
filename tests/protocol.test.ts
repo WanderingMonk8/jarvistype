@@ -143,6 +143,26 @@ test('validates bounded draft mutations', () => {
   )
 })
 
+test('validates glossary words that must never be transcribed', () => {
+  const request = {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'glossary.upsert.request',
+    requestId: 'glossary-forbidden',
+    canonical: 'Ellis',
+    variants: [],
+    hint: '',
+  }
+  assert.equal(isFrontendRequest({ ...request, forbidden: ['Alice', 'Alyce'] }), true)
+  assert.equal(isFrontendRequest({ ...request, forbidden: [] }), true)
+  assert.equal(isFrontendRequest(request), true)
+  assert.equal(isFrontendRequest({ ...request, forbidden: 'Alice' }), false)
+  assert.equal(isFrontendRequest({ ...request, forbidden: [''] }), false)
+  assert.equal(
+    isFrontendRequest({ ...request, forbidden: Array.from({ length: 21 }, (_, index) => `w${index}`) }),
+    false,
+  )
+})
+
 test('validates normalization connection and custom-model settings', () => {
   for (const [seconds, valid] of [[5, true], [40, true], [180, true], [4, false], [181, false], [40.5, false]] as const) {
     assert.equal(isFrontendRequest({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'timeout-settings', settings: { contextMessageCount: 5, contextualNormalizationEnabled: true, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', normalizationModelTimeoutSeconds: seconds } }), valid)

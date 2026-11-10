@@ -1,3 +1,19 @@
+// src/domain/id.ts
+function createId() {
+  const bytes = new Uint8Array(16);
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    cryptoApi.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1)
+      bytes[index] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = bytes[6] & 15 | 64;
+  bytes[8] = bytes[8] & 63 | 128;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 // src/domain/draft-session.ts
 var DRAFT_SCHEMA_VERSION = 4;
 var MAX_DRAFT_CHARACTERS = 1e5;
@@ -33,7 +49,7 @@ function applyManualEdit(session, nextText, options) {
     return { applied: false, reason: "unchanged", session };
   }
   const now = options.now ?? (/* @__PURE__ */ new Date()).toISOString();
-  const createId = options.createId ?? defaultId;
+  const createId2 = options.createId ?? defaultId;
   const beforeText = session.cleanText;
   const nextVersion = session.draftVersion + 1;
   const diff = createDiff(beforeText, nextText);
@@ -50,7 +66,7 @@ function applyManualEdit(session, nextText, options) {
   ] : [
     ...session.history,
     {
-      id: createId(),
+      id: createId2(),
       kind: "manual-edit",
       editGroupId: options.editGroupId,
       beforeVersion: session.draftVersion,
@@ -66,7 +82,7 @@ function applyManualEdit(session, nextText, options) {
       ...session,
       draftVersion: nextVersion,
       cleanText: nextText,
-      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId2),
       history,
       latestDiff: diff,
       undoStack,
@@ -107,7 +123,7 @@ function applyAutomatedEdit(session, nextText, options) {
     return { applied: false, reason: "unchanged", session };
   }
   const now = options.now ?? (/* @__PURE__ */ new Date()).toISOString();
-  const createId = options.createId ?? defaultId;
+  const createId2 = options.createId ?? defaultId;
   const beforeText = session.cleanText;
   const nextVersion = session.draftVersion + 1;
   const diff = createDiff(beforeText, nextText);
@@ -118,7 +134,7 @@ function applyAutomatedEdit(session, nextText, options) {
       ...session,
       draftVersion: nextVersion,
       cleanText: nextText,
-      paragraphs: options.paragraphIdOrder && hasValidParagraphIdOrder(nextText, options.paragraphIdOrder) ? paragraphsWithIdOrder(nextText, options.paragraphIdOrder) : reconcileParagraphs(session.paragraphs, nextText, createId),
+      paragraphs: options.paragraphIdOrder && hasValidParagraphIdOrder(nextText, options.paragraphIdOrder) ? paragraphsWithIdOrder(nextText, options.paragraphIdOrder) : reconcileParagraphs(session.paragraphs, nextText, createId2),
       history: [
         ...session.history,
         {
@@ -141,7 +157,7 @@ function applyAutomatedEdit(session, nextText, options) {
     }
   };
 }
-function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId = defaultId) {
+function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId2 = defaultId) {
   if (expectedVersion !== session.draftVersion) {
     return { applied: false, reason: "stale-version", session };
   }
@@ -159,11 +175,11 @@ function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
       ...session,
       draftVersion: nextVersion,
       cleanText: previousText,
-      paragraphs: reconcileParagraphs(session.paragraphs, previousText, createId),
+      paragraphs: reconcileParagraphs(session.paragraphs, previousText, createId2),
       history: [
         ...session.history,
         {
-          id: createId(),
+          id: createId2(),
           kind: "undo",
           beforeVersion: session.draftVersion,
           afterVersion: nextVersion,
@@ -187,7 +203,7 @@ function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
     }
   };
 }
-function redoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId = defaultId) {
+function redoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId2 = defaultId) {
   if (expectedVersion !== session.draftVersion) {
     return { applied: false, reason: "stale-version", session };
   }
@@ -203,11 +219,11 @@ function redoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
       ...session,
       draftVersion: nextVersion,
       cleanText: nextText,
-      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId2),
       history: [
         ...session.history,
         {
-          id: createId(),
+          id: createId2(),
           kind: "redo",
           beforeVersion: session.draftVersion,
           afterVersion: nextVersion,
@@ -263,7 +279,7 @@ function appendRecordingTranscript(session, rawTranscript, options) {
     return { applied: false, reason: "too-large", session };
   }
   const now = options.now ?? (/* @__PURE__ */ new Date()).toISOString();
-  const createId = options.createId ?? defaultId;
+  const createId2 = options.createId ?? defaultId;
   const nextVersion = session.draftVersion + 1;
   const diff = createDiff(session.cleanText, nextText);
   const committedText = nextText.slice(session.cleanText.length);
@@ -294,11 +310,11 @@ function appendRecordingTranscript(session, rawTranscript, options) {
       ...session,
       draftVersion: nextVersion,
       cleanText: nextText,
-      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId2),
       history: [
         ...session.history,
         {
-          id: createId(),
+          id: createId2(),
           kind: "recording-append",
           beforeVersion: session.draftVersion,
           afterVersion: nextVersion,
@@ -318,7 +334,7 @@ function appendRecordingTranscript(session, rawTranscript, options) {
     }
   };
 }
-function undoLastRecording(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId = defaultId) {
+function undoLastRecording(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId2 = defaultId) {
   if (expectedVersion !== session.draftVersion) {
     return { applied: false, reason: "stale-version", session };
   }
@@ -337,11 +353,11 @@ function undoLastRecording(session, expectedVersion, now = (/* @__PURE__ */ new 
       ...session,
       draftVersion: nextVersion,
       cleanText: nextText,
-      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId2),
       history: [
         ...session.history,
         {
-          id: createId(),
+          id: createId2(),
           kind: "recording-undo",
           beforeVersion: session.draftVersion,
           afterVersion: nextVersion,
@@ -450,7 +466,7 @@ function createDiff(before, after) {
     affectedParagraphOrdinals: [...new Set([beforeStart, afterStart].filter(isPositiveInteger))]
   };
 }
-function reconcileParagraphs(previous, cleanText, createId) {
+function reconcileParagraphs(previous, cleanText, createId2) {
   const nextLines = cleanText.split("\n");
   const nextTexts = nextLines.filter(isNonEmptyParagraph);
   const matches = longestCommonSubsequenceMatches(
@@ -473,7 +489,7 @@ function reconcileParagraphs(previous, cleanText, createId) {
   for (const [lineIndex, text] of nextLines.entries()) {
     if (!isNonEmptyParagraph(text)) continue;
     paragraphs.push({
-      id: ids[paragraphIndex] ?? createId(),
+      id: ids[paragraphIndex] ?? createId2(),
       ordinal: paragraphIndex + 1,
       lineIndex,
       text
@@ -593,7 +609,7 @@ function isPositiveInteger(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 function defaultId() {
-  return crypto.randomUUID();
+  return createId();
 }
 
 // src/domain/debug.ts
@@ -660,7 +676,7 @@ function clip(value, limit) {
 
 // src/domain/phonetics.ts
 function speechPhoneticKey(value) {
-  const prepared = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/ph/gu, "f").replace(/ght/gu, "t").replace(/gh/gu, "").replace(/ck/gu, "k").replace(/kn/gu, "n").replace(/wr/gu, "r").replace(/qu/gu, "kw");
+  const prepared = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/ph/gu, "f").replace(/th/gu, "D").replace(/sh/gu, "X").replace(/ch/gu, "J").replace(/ght/gu, "t").replace(/gh/gu, "").replace(/ck/gu, "k").replace(/kn/gu, "n").replace(/wr/gu, "r").replace(/qu/gu, "kw").replace(/c(?=[eiy])/gu, "s");
   let key = "";
   for (const character of prepared) {
     const sound = speechSoundGroup(character);
@@ -671,43 +687,52 @@ function speechPhoneticKey(value) {
 function areSpeechPhoneticNeighbors(left, right) {
   const leftKey = speechPhoneticKey(left);
   const rightKey = speechPhoneticKey(right);
-  if (Math.min(leftKey.length, rightKey.length) < 4 || leftKey.charAt(0) !== rightKey.charAt(0))
+  if (leftKey === rightKey) return true;
+  if (Math.min(leftKey.length, rightKey.length) < 4 || leftKey.charAt(0) !== rightKey.charAt(0) || Math.abs(leftKey.length - rightKey.length) !== 1)
     return false;
-  return editDistanceAtMost(leftKey, rightKey, 1);
+  const shorter = leftKey.length < rightKey.length ? leftKey : rightKey;
+  const longer = leftKey.length < rightKey.length ? rightKey : leftKey;
+  let shortIndex = 0;
+  let longIndex = 0;
+  let skipped = false;
+  while (shortIndex < shorter.length && longIndex < longer.length) {
+    if (shorter[shortIndex] === longer[longIndex]) {
+      shortIndex += 1;
+      longIndex += 1;
+      continue;
+    }
+    if (skipped) return false;
+    skipped = true;
+    longIndex += 1;
+  }
+  return true;
 }
+function areSpeechLettersCompatible(left, right) {
+  return speechSoundGroup(left.toLocaleLowerCase()) === speechSoundGroup(right.toLocaleLowerCase());
+}
+var CONSONANT_FAMILIES = [
+  // Labials cross the stop/fricative boundary in recognition (Ervode → Erbold).
+  [/[bpfv]/u, "B"],
+  // Alveolar stops, a voiced/unvoiced pair.
+  [/[dt]/u, "T"],
+  // Hard velar stops. Soft "c" was rewritten to "s" above.
+  [/[cgkq]/u, "K"],
+  // Sibilant fricatives.
+  [/[sxz]/u, "S"],
+  // Affricates, a voiced/unvoiced pair; kept apart from the stop families.
+  [/j/u, "J"],
+  [/l/u, "L"],
+  [/m/u, "M"],
+  [/n/u, "N"],
+  [/r/u, "R"],
+  [/w/u, "W"]
+];
 function speechSoundGroup(character) {
   if (/[aeiouy]/u.test(character)) return "A";
-  if (/[bpfv]/u.test(character)) return "B";
-  if (/[cgjkq]/u.test(character)) return "K";
-  if (/[dt]/u.test(character)) return "T";
-  if (/[sxz]/u.test(character)) return "S";
-  if (character === "l") return "L";
-  if (character === "m") return "M";
-  if (character === "n") return "N";
-  if (character === "r") return "R";
-  if (/[hw]/u.test(character)) return "";
+  if (character === "h") return "";
+  for (const [pattern, family] of CONSONANT_FAMILIES)
+    if (pattern.test(character)) return family;
   return /[\p{L}\p{N}]/u.test(character) ? character : "";
-}
-function editDistanceAtMost(left, right, maximum) {
-  if (Math.abs(left.length - right.length) > maximum) return false;
-  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
-    const current = [leftIndex];
-    let rowMinimum = leftIndex;
-    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
-      const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
-      const distance = Math.min(
-        previous[rightIndex] + 1,
-        current[rightIndex - 1] + 1,
-        previous[rightIndex - 1] + cost
-      );
-      current.push(distance);
-      rowMinimum = Math.min(rowMinimum, distance);
-    }
-    if (rowMinimum > maximum) return false;
-    previous = current;
-  }
-  return previous[right.length] <= maximum;
 }
 
 // src/domain/edit-pipeline.ts
@@ -723,7 +748,7 @@ function executeSequentialEditPlan(cleanText, paragraphs, currentVersion, plan, 
   let failedCommand;
   let generated = 0;
   const usedIds = new Set(currentParagraphs.map((paragraph) => paragraph.id));
-  const createId = () => {
+  const createId2 = () => {
     let id;
     do
       id = `chain:${plan.draftVersion}:${++generated}`;
@@ -776,7 +801,7 @@ function executeSequentialEditPlan(cleanText, paragraphs, currentVersion, plan, 
       });
       for (const paragraph of currentParagraphs) usedIds.add(paragraph.id);
     } else {
-      currentParagraphs = reconcileParagraphs(currentParagraphs, result.afterText, createId);
+      currentParagraphs = reconcileParagraphs(currentParagraphs, result.afterText, createId2);
     }
     text = result.afterText;
   }
@@ -2639,7 +2664,7 @@ function correctReferenceTerms(text, references, protectedTerms, requireInitialU
         return isHighConfidenceReferenceMatch(baseKey, reference.toLocaleLowerCase());
       });
       const spellingClose = candidates.filter(
-        (reference) => editDistanceAtMost2(baseKey, reference.toLocaleLowerCase(), 1)
+        (reference) => editDistanceAtMost(baseKey, reference.toLocaleLowerCase(), 1)
       );
       const pool = spellingClose.length ? spellingClose : candidates;
       const uniqueCandidates = [
@@ -2888,17 +2913,49 @@ function isReferenceTerm(term) {
 function isHighConfidenceReferenceMatch(heard, reference) {
   const maximumLengthDifference = Math.min(heard.length, reference.length) >= 6 ? 2 : 1;
   if (Math.abs(heard.length - reference.length) > maximumLengthDifference) return false;
+  const heardPhonetic = speechPhoneticKey(heard);
+  const referencePhonetic = speechPhoneticKey(reference);
   if (Math.max(heard.length, reference.length) <= 5) {
-    const heardPhonetic = speechPhoneticKey(heard);
-    return heardPhonetic.length >= 3 && heardPhonetic === speechPhoneticKey(reference);
+    return heardPhonetic.length >= 3 && heardPhonetic === referencePhonetic;
   }
   if (heard.charAt(0) !== reference.charAt(0)) return false;
-  if (editDistanceAtMost2(heard, reference, 1)) return true;
-  if (heard.slice(0, 2) === reference.slice(0, 2) && areSpeechPhoneticNeighbors(heard, reference))
-    return true;
-  return Math.min(heard.length, reference.length) >= 6 && heard.slice(0, 4) === reference.slice(0, 4) && editDistanceAtMost2(heard, reference, 2);
+  if (hasIncompatibleKeySubstitution(heardPhonetic, referencePhonetic)) return false;
+  if (phoneticEditDistanceAtMost(heard, reference, 1)) return true;
+  return heard.slice(0, 2) === reference.slice(0, 2) && areSpeechPhoneticNeighbors(heard, reference);
 }
-function editDistanceAtMost2(left, right, maximum) {
+function hasIncompatibleKeySubstitution(leftKey, rightKey) {
+  if (leftKey.length !== rightKey.length) return false;
+  for (let index = 0; index < leftKey.length; index += 1) {
+    const left = leftKey[index];
+    const right = rightKey[index];
+    if (left !== right && left !== "A" && right !== "A") return true;
+  }
+  return false;
+}
+function phoneticEditDistanceAtMost(left, right, maximum) {
+  if (Math.abs(left.length - right.length) > maximum) return false;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    let rowMinimum = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const leftCharacter = left[leftIndex - 1];
+      const rightCharacter = right[rightIndex - 1];
+      const cost = leftCharacter === rightCharacter ? 0 : areSpeechLettersCompatible(leftCharacter, rightCharacter) ? 1 : Infinity;
+      const distance = Math.min(
+        previous[rightIndex] + 1,
+        current[rightIndex - 1] + 1,
+        previous[rightIndex - 1] + cost
+      );
+      current.push(distance);
+      rowMinimum = Math.min(rowMinimum, distance);
+    }
+    if (rowMinimum > maximum) return false;
+    previous = current;
+  }
+  return previous[right.length] <= maximum;
+}
+function editDistanceAtMost(left, right, maximum) {
   if (Math.abs(left.length - right.length) > maximum) return false;
   let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
   for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
@@ -2951,16 +3008,21 @@ function hasNearIdenticalHintWording(spoken, hint) {
 function createGlossaryState() {
   return { schemaVersion: GLOSSARY_SCHEMA_VERSION, entries: [], undoStack: [] };
 }
-function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).toISOString(), createId = () => crypto.randomUUID()) {
+function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).toISOString(), createId2 = createId) {
   const canonical = input.canonical.trim();
   if (!canonical) return { state, changed: false };
   const variants = unique([...input.variants ?? []].map((value) => value.trim()).filter(Boolean));
+  const forbidden = unique(
+    [...input.forbidden ?? []].map((value) => value.trim()).filter(Boolean)
+  ).slice(0, 20);
   const scope = input.scope ?? "global";
   const chatId = scope === "local" ? input.chatId?.trim() : void 0;
   if (scope === "local" && !chatId) return { state, changed: false };
-  const keys = new Set([canonical, ...variants].map(normalizeKey));
+  const keys = new Set([canonical, ...variants, ...forbidden].map(normalizeKey));
   const conflict = state.entries.find(
-    (entry2) => entry2.id !== input.id && glossaryScopeKey(entry2) === `${scope}:${chatId ?? ""}` && [entry2.canonical, ...entry2.variants].some((value) => keys.has(normalizeKey(value)))
+    (entry2) => entry2.id !== input.id && glossaryScopeKey(entry2) === `${scope}:${chatId ?? ""}` && [entry2.canonical, ...entry2.variants, ...entry2.forbidden ?? []].some(
+      (value) => keys.has(normalizeKey(value))
+    )
   );
   if (conflict) return { state, changed: false, conflict };
   const existing = input.id ? state.entries.find((entry2) => entry2.id === input.id) : void 0;
@@ -2968,15 +3030,17 @@ function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).to
     ...existing,
     canonical,
     variants,
+    forbidden,
     hint: input.hint?.trim() ?? "",
     source: input.source,
     scope,
     ...chatId ? { chatId } : { chatId: void 0 },
     updatedAt: now
   } : {
-    id: createId(),
+    id: createId2(),
     canonical,
     variants,
+    forbidden,
     hint: input.hint?.trim() ?? "",
     source: input.source,
     scope,
@@ -2988,7 +3052,7 @@ function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).to
   const entries = existing ? state.entries.map((item) => item.id === existing.id ? entry : item) : [...state.entries, entry].slice(-MAX_GLOSSARY_ENTRIES);
   return { state: pushUndo(state, entries), changed: true, entry };
 }
-function learnExplicitSpelling(state, canonical, spokenVariant, now = (/* @__PURE__ */ new Date()).toISOString(), createId, scope = "global", chatId) {
+function learnExplicitSpelling(state, canonical, spokenVariant, now = (/* @__PURE__ */ new Date()).toISOString(), createId2, scope = "global", chatId) {
   const key = normalizeKey(canonical);
   const scopeKey = `${scope}:${scope === "local" ? chatId ?? "" : ""}`;
   const existing = state.entries.find(
@@ -3016,7 +3080,7 @@ function learnExplicitSpelling(state, canonical, spokenVariant, now = (/* @__PUR
       chatId
     },
     now,
-    createId
+    createId2
   );
   if (result.entry) result.entry.useCount = 1;
   return result;
@@ -3062,7 +3126,7 @@ function unique(values) {
   return [...new Set(values)];
 }
 function isGlossaryEntry(value) {
-  return isRecord3(value) && typeof value.id === "string" && typeof value.canonical === "string" && value.canonical.trim().length > 0 && Array.isArray(value.variants) && value.variants.every((item) => typeof item === "string") && typeof value.hint === "string" && (value.source === "explicit-spelling" || value.source === "manual") && (value.scope === void 0 || value.scope === "local" || value.scope === "global") && (value.chatId === void 0 || typeof value.chatId === "string") && (value.scope !== "local" || typeof value.chatId === "string" && value.chatId.length > 0) && Number.isSafeInteger(value.useCount) && Number(value.useCount) >= 0 && typeof value.createdAt === "string" && typeof value.updatedAt === "string";
+  return isRecord3(value) && typeof value.id === "string" && typeof value.canonical === "string" && value.canonical.trim().length > 0 && Array.isArray(value.variants) && value.variants.every((item) => typeof item === "string") && (value.forbidden === void 0 || Array.isArray(value.forbidden) && value.forbidden.every((item) => typeof item === "string")) && typeof value.hint === "string" && (value.source === "explicit-spelling" || value.source === "manual") && (value.scope === void 0 || value.scope === "local" || value.scope === "global") && (value.chatId === void 0 || typeof value.chatId === "string") && (value.scope !== "local" || typeof value.chatId === "string" && value.chatId.length > 0) && Number.isSafeInteger(value.useCount) && Number(value.useCount) >= 0 && typeof value.createdAt === "string" && typeof value.updatedAt === "string";
 }
 function glossaryScopeKey(entry) {
   const scope = entry.scope ?? "global";
@@ -3466,7 +3530,7 @@ function withinEditDistance(left, right, maximum) {
   }
   return previous[right.length] <= maximum;
 }
-var CASING_COMMAND_PATTERN = /\b(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu;
+var CASING_COMMAND_PATTERN = /\b(capitalized|lowercase|uppercase|all caps)[ \t]*[.,;:!?…—–-]*[ \t]+((?:[\p{L}\p{M}\d'’-]+[ \t]*){1,4}?)(?=[.!?,;:]|\n|$)/giu;
 function titleCaseWords(value) {
   return value.replace(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}+)*/gu, (word) => {
     const index = word.search(/\p{L}/u);
@@ -3475,7 +3539,7 @@ function titleCaseWords(value) {
 }
 function findArticleCasingCandidates(text) {
   const candidates = [];
-  const pattern = /\b(?:a|an)\s+(capitalized|lowercase|uppercase|all caps)[ \t]*[,:]?[ \t]+([\p{L}\p{M}][\p{L}\p{M}\d'’-]*)(?=[.!?,;:]|\s|$)/giu;
+  const pattern = /\b(?:a|an)\s+(capitalized|lowercase|uppercase|all caps)[ \t]*[.,;:!?…—–-]*[ \t]+([\p{L}\p{M}][\p{L}\p{M}\d'’-]*)(?=[.!?,;:]|\s|$)/giu;
   for (const match of text.matchAll(pattern)) {
     const target = match[2];
     if (CASING_TARGET_STOPWORDS.has(target.toLocaleLowerCase())) continue;
@@ -3568,7 +3632,7 @@ function applySpokenCasingCommands(text) {
     CASING_COMMAND_PATTERN,
     (whole, cue, phrase, offset, source) => {
       const before = source.slice(0, offset);
-      if (/(?:^|[.!?]["'”’]?|\n)\s*$/u.test(before)) return whole;
+      if (/(?:^|[.!?]["'”’]?|\n)\s*$/u.test(before) && !/^[^\p{L}]*[.,;:!?…—–-]/u.test(whole.slice(cue.length))) return whole;
       const previous = before.match(/(\p{L}[\p{L}\p{M}'’-]*)[ \t]*$/u)?.[1]?.toLocaleLowerCase();
       if (previous && CASING_PROSE_PRECEDERS.has(previous)) return whole;
       const target = phrase.trim();
@@ -3653,7 +3717,7 @@ function normalizeDeterministically(raw, glossary, options = {}) {
     (_, index) => protectedLiterals[Number(index)] ?? ""
   );
   for (const entry of glossary) {
-    for (const variant of entry.variants) {
+    for (const variant of [...entry.variants, ...entry.forbidden ?? []]) {
       if (!variant.trim() || variant.localeCompare(entry.canonical, void 0, { sensitivity: "accent" }) === 0)
         continue;
       const pattern = new RegExp(`\\b${escapeRegExp2(variant)}\\b`, "gi");
@@ -4090,7 +4154,7 @@ function escapeRegExp2(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.15";
+var APP_VERSION = "1.6.22";
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
 var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
 var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;
@@ -4138,7 +4202,7 @@ function isFrontendRequest(value) {
   if (value.type === "phase4.settings.update.request")
     return isPhaseFourSettings(value.settings) && (value.chatId === void 0 || isIdentifier2(value.chatId));
   if (value.type === "glossary.upsert.request") {
-    return (value.entryId === void 0 || isIdentifier2(value.entryId)) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.length <= 20 && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && typeof value.hint === "string" && value.hint.length <= 500 && (value.scope === void 0 || value.scope === "local" || value.scope === "global") && (value.chatId === void 0 || isIdentifier2(value.chatId));
+    return (value.entryId === void 0 || isIdentifier2(value.entryId)) && isBoundedString(value.canonical, 1, 200) && Array.isArray(value.variants) && value.variants.length <= 20 && value.variants.every((variant) => isBoundedString(variant, 1, 200)) && (value.forbidden === void 0 || Array.isArray(value.forbidden) && value.forbidden.length <= 20 && value.forbidden.every((word) => isBoundedString(word, 1, 200))) && typeof value.hint === "string" && value.hint.length <= 500 && (value.scope === void 0 || value.scope === "local" || value.scope === "global") && (value.chatId === void 0 || isIdentifier2(value.chatId));
   }
   if (value.type === "glossary.delete.request")
     return isIdentifier2(value.entryId) && (value.chatId === void 0 || isIdentifier2(value.chatId));
@@ -4310,7 +4374,7 @@ async function handleRequest(request, context) {
     }
   } catch (error) {
     if (activeRequest.cancelled) return;
-    const diagnosticId = logSafeFailure("error", "REQUEST", error);
+    const diagnosticId = await logSafeFailure("error", "REQUEST", error);
     send(
       {
         protocolVersion: PROTOCOL_VERSION,
@@ -6770,9 +6834,11 @@ function parseDeterministicInlineInsertion(instructionTranscript, session) {
     return null;
   const match = instructionTranscript.trim().match(
     /^(?:insert|add|place|put)\s+(before|after)\s+(?:the\s+)?(?:sentence|phrase|words?|text)\s+(.+?)\s+(?:with|using)\s+([\s\S]+)$/iu
+  ) ?? instructionTranscript.trim().match(
+    /^(?:insert|add|place|put)\s+(before|after)\s+(.+?)\s+the\s+(?:phrase|words?|text)\b\s*[,;:]?\s+([\s\S]+)$/iu
   );
   if (!match) return null;
-  const target = unwrapEditArgument((match[2] ?? "").replace(/[,;:]\s*$/u, ""));
+  const target = unwrapEditArgument(stripUnquotedEditArgumentLabel((match[2] ?? "").replace(/[,;:]\s*$/u, "")));
   const insertion = unwrapEditArgument(stripUnquotedEditArgumentLabel(match[3] ?? ""));
   if (!target || !insertion) return null;
   const targetText = adoptUnambiguousDraftCasing(session, target, void 0);
@@ -8615,6 +8681,7 @@ function glossaryForPrompt(glossary) {
     const candidate = {
       canonical: entry.canonical,
       variants: entry.variants,
+      ...entry.forbidden?.length ? { forbidden: entry.forbidden } : {},
       hint: entry.hint
     };
     const candidateSize = JSON.stringify(candidate).length;
@@ -8742,6 +8809,7 @@ async function handleGlossaryUpsert(request, context, activeRequest) {
     id: request.entryId,
     canonical: request.canonical,
     variants: request.variants,
+    forbidden: request.forbidden,
     hint: request.hint,
     source: "manual",
     scope: request.scope ?? (request.chatId ? settings.glossaryDefaultScope ?? "local" : "global"),
@@ -9074,7 +9142,7 @@ async function handleDraftSend(request, context) {
       rememberCompletedSend(sendKey, completed2);
       return { completed: completed2 };
     } catch (error) {
-      const diagnosticId = logSafeFailure("error", "SEND", error);
+      const diagnosticId = await logSafeFailure("error", "SEND", error);
       return { error: "send", diagnosticId, session };
     }
   });
@@ -9367,13 +9435,24 @@ function draftKey(userId, chatId) {
 function draftPath(chatId) {
   return `draft-${encodeURIComponent(chatId)}.json`;
 }
-function logSafeFailure(level, category, error) {
-  const diagnosticId = `JT-${category}-${crypto.randomUUID()}`;
+async function logSafeFailure(level, category, error) {
+  const diagnosticId = `JT-${category}-${await safeUuid()}`;
   const errorKind = error instanceof Error ? error.name : typeof error;
   const message = `JarvisType failure [${diagnosticId}] (${errorKind}). Private provider details were redacted.`;
-  if (level === "warn") spindle.log.warn(message);
-  else spindle.log.error(message);
+  try {
+    if (level === "warn") spindle.log.warn(message);
+    else spindle.log.error(message);
+  } catch {
+  }
   return diagnosticId;
+}
+async function safeUuid() {
+  try {
+    const uuid = spindle.uuid;
+    if (uuid && typeof uuid.v4 === "function") return await uuid.v4();
+  } catch {
+  }
+  return createId();
 }
 function isRecord5(value) {
   return typeof value === "object" && value !== null;

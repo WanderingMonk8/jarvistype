@@ -15,6 +15,30 @@ test('preserves an ellipsis through punctuation cleanup', () => {
   assert.equal(normalizeDeterministically('Wait.. What??', []).text, 'Wait. What?')
 })
 
+test('forces words that must never be transcribed back to the canonical spelling', () => {
+  const glossary = [
+    {
+      id: 'ellis',
+      canonical: 'Ellis',
+      variants: [],
+      forbidden: ['Alice', 'Alyce'],
+      hint: '',
+      source: 'manual' as const,
+      useCount: 0,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ]
+  const result = normalizeDeterministically('Alice met Alyce, and Ellis waited.', glossary)
+  assert.equal(result.text, 'Ellis met Ellis, and Ellis waited.')
+  assert.ok(result.reasons.includes('glossary: Ellis'))
+  // Whole words only: a longer word containing the forbidden spelling is untouched.
+  assert.equal(
+    normalizeDeterministically('Alicetown stayed open.', glossary).text,
+    'Alicetown stayed open.',
+  )
+})
+
 test('uses qualified as-in spelling references in recording text', () => {
   assert.equal(
     normalizeQualifiedAsInReferences(
@@ -691,4 +715,18 @@ test('applies only the strict casing words as dictation casing commands', () => 
   ]) {
     assert.equal(normalizeDeterministically(prose, []).text, prose)
   }
+})
+
+test('casing commands tolerate provider punctuation immediately after the cue', () => {
+  for (const [input, expected] of [
+    ['Capitalized, Criminal Minds', 'Criminal Minds'],
+    ['Capitalized. criminal minds', 'Criminal Minds'],
+    ['I see capitalized, white hawk.', 'I see White Hawk.'],
+    ['I see uppercase: white hawk.', 'I see WHITE HAWK.'],
+    ['I see lowercase. WHITE HAWK.', 'I see white hawk.'],
+    ['I see all caps?! white hawk.', 'I see WHITE HAWK.'],
+    ['We discussed the use of capitalized words.', 'We discussed the use of capitalized words.'],
+    ['Lowercase remains lowercase.', 'Lowercase remains lowercase.'],
+    ['The word capitalized, appears here.', 'The word capitalized, appears here.'],
+  ] as const) assert.equal(normalizeDeterministically(input, []).text, expected, input)
 })

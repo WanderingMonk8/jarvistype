@@ -1,3 +1,5 @@
+import { createId as defaultCreateId } from './id'
+
 export const GLOSSARY_SCHEMA_VERSION = 1 as const
 export const MAX_GLOSSARY_ENTRIES = 500
 
@@ -37,6 +39,11 @@ export interface GlossaryEntry {
   id: string
   canonical: string
   variants: string[]
+  /**
+   * Words that must never be transcribed. Whenever one appears, it is forced back
+   * to the canonical spelling (for example canonical "Ellis" with forbidden "Alice").
+   */
+  forbidden?: string[]
   hint: string
   source: 'explicit-spelling' | 'manual'
   /** Missing on legacy entries, which are treated as global. */
@@ -71,26 +78,32 @@ export function upsertGlossaryEntry(
     id?: string
     canonical: string
     variants?: string[]
+    forbidden?: string[]
     hint?: string
     source: GlossaryEntry['source']
     scope?: 'local' | 'global'
     chatId?: string
   },
   now = new Date().toISOString(),
-  createId: () => string = () => crypto.randomUUID(),
+  createId: () => string = defaultCreateId,
 ): GlossaryMutation {
   const canonical = input.canonical.trim()
   if (!canonical) return { state, changed: false }
   const variants = unique([...(input.variants ?? [])].map((value) => value.trim()).filter(Boolean))
+  const forbidden = unique(
+    [...(input.forbidden ?? [])].map((value) => value.trim()).filter(Boolean),
+  ).slice(0, 20)
   const scope = input.scope ?? 'global'
   const chatId = scope === 'local' ? input.chatId?.trim() : undefined
   if (scope === 'local' && !chatId) return { state, changed: false }
-  const keys = new Set([canonical, ...variants].map(normalizeKey))
+  const keys = new Set([canonical, ...variants, ...forbidden].map(normalizeKey))
   const conflict = state.entries.find(
     (entry) =>
       entry.id !== input.id &&
       glossaryScopeKey(entry) === `${scope}:${chatId ?? ''}` &&
-      [entry.canonical, ...entry.variants].some((value) => keys.has(normalizeKey(value))),
+      [entry.canonical, ...entry.variants, ...(entry.forbidden ?? [])].some((value) =>
+        keys.has(normalizeKey(value)),
+      ),
   )
   if (conflict) return { state, changed: false, conflict }
 
@@ -100,6 +113,7 @@ export function upsertGlossaryEntry(
         ...existing,
         canonical,
         variants,
+        forbidden,
         hint: input.hint?.trim() ?? '',
         source: input.source,
         scope,
@@ -110,6 +124,7 @@ export function upsertGlossaryEntry(
         id: createId(),
         canonical,
         variants,
+        forbidden,
         hint: input.hint?.trim() ?? '',
         source: input.source,
         scope,
@@ -234,6 +249,9 @@ function isGlossaryEntry(value: unknown): value is GlossaryEntry {
     value.canonical.trim().length > 0 &&
     Array.isArray(value.variants) &&
     value.variants.every((item) => typeof item === 'string') &&
+    (value.forbidden === undefined ||
+      (Array.isArray(value.forbidden) &&
+        value.forbidden.every((item) => typeof item === 'string'))) &&
     typeof value.hint === 'string' &&
     (value.source === 'explicit-spelling' || value.source === 'manual') &&
     (value.scope === undefined || value.scope === 'local' || value.scope === 'global') &&

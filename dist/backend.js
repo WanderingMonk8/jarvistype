@@ -1,3 +1,19 @@
+// src/domain/id.ts
+function createId() {
+  const bytes = new Uint8Array(16);
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    cryptoApi.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1)
+      bytes[index] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = bytes[6] & 15 | 64;
+  bytes[8] = bytes[8] & 63 | 128;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 // src/domain/draft-session.ts
 var DRAFT_SCHEMA_VERSION = 4;
 var MAX_DRAFT_CHARACTERS = 1e5;
@@ -33,7 +49,7 @@ function applyManualEdit(session, nextText, options) {
     return { applied: false, reason: "unchanged", session };
   }
   const now = options.now ?? (/* @__PURE__ */ new Date()).toISOString();
-  const createId = options.createId ?? defaultId;
+  const createId2 = options.createId ?? defaultId;
   const beforeText = session.cleanText;
   const nextVersion = session.draftVersion + 1;
   const diff = createDiff(beforeText, nextText);
@@ -50,7 +66,7 @@ function applyManualEdit(session, nextText, options) {
   ] : [
     ...session.history,
     {
-      id: createId(),
+      id: createId2(),
       kind: "manual-edit",
       editGroupId: options.editGroupId,
       beforeVersion: session.draftVersion,
@@ -66,7 +82,7 @@ function applyManualEdit(session, nextText, options) {
       ...session,
       draftVersion: nextVersion,
       cleanText: nextText,
-      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId2),
       history,
       latestDiff: diff,
       undoStack,
@@ -107,7 +123,7 @@ function applyAutomatedEdit(session, nextText, options) {
     return { applied: false, reason: "unchanged", session };
   }
   const now = options.now ?? (/* @__PURE__ */ new Date()).toISOString();
-  const createId = options.createId ?? defaultId;
+  const createId2 = options.createId ?? defaultId;
   const beforeText = session.cleanText;
   const nextVersion = session.draftVersion + 1;
   const diff = createDiff(beforeText, nextText);
@@ -118,7 +134,7 @@ function applyAutomatedEdit(session, nextText, options) {
       ...session,
       draftVersion: nextVersion,
       cleanText: nextText,
-      paragraphs: options.paragraphIdOrder && hasValidParagraphIdOrder(nextText, options.paragraphIdOrder) ? paragraphsWithIdOrder(nextText, options.paragraphIdOrder) : reconcileParagraphs(session.paragraphs, nextText, createId),
+      paragraphs: options.paragraphIdOrder && hasValidParagraphIdOrder(nextText, options.paragraphIdOrder) ? paragraphsWithIdOrder(nextText, options.paragraphIdOrder) : reconcileParagraphs(session.paragraphs, nextText, createId2),
       history: [
         ...session.history,
         {
@@ -141,7 +157,7 @@ function applyAutomatedEdit(session, nextText, options) {
     }
   };
 }
-function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId = defaultId) {
+function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId2 = defaultId) {
   if (expectedVersion !== session.draftVersion) {
     return { applied: false, reason: "stale-version", session };
   }
@@ -159,11 +175,11 @@ function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
       ...session,
       draftVersion: nextVersion,
       cleanText: previousText,
-      paragraphs: reconcileParagraphs(session.paragraphs, previousText, createId),
+      paragraphs: reconcileParagraphs(session.paragraphs, previousText, createId2),
       history: [
         ...session.history,
         {
-          id: createId(),
+          id: createId2(),
           kind: "undo",
           beforeVersion: session.draftVersion,
           afterVersion: nextVersion,
@@ -187,7 +203,7 @@ function undoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
     }
   };
 }
-function redoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId = defaultId) {
+function redoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId2 = defaultId) {
   if (expectedVersion !== session.draftVersion) {
     return { applied: false, reason: "stale-version", session };
   }
@@ -203,11 +219,11 @@ function redoLatestDraftMutation(session, expectedVersion, now = (/* @__PURE__ *
       ...session,
       draftVersion: nextVersion,
       cleanText: nextText,
-      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId2),
       history: [
         ...session.history,
         {
-          id: createId(),
+          id: createId2(),
           kind: "redo",
           beforeVersion: session.draftVersion,
           afterVersion: nextVersion,
@@ -263,7 +279,7 @@ function appendRecordingTranscript(session, rawTranscript, options) {
     return { applied: false, reason: "too-large", session };
   }
   const now = options.now ?? (/* @__PURE__ */ new Date()).toISOString();
-  const createId = options.createId ?? defaultId;
+  const createId2 = options.createId ?? defaultId;
   const nextVersion = session.draftVersion + 1;
   const diff = createDiff(session.cleanText, nextText);
   const committedText = nextText.slice(session.cleanText.length);
@@ -294,11 +310,11 @@ function appendRecordingTranscript(session, rawTranscript, options) {
       ...session,
       draftVersion: nextVersion,
       cleanText: nextText,
-      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId2),
       history: [
         ...session.history,
         {
-          id: createId(),
+          id: createId2(),
           kind: "recording-append",
           beforeVersion: session.draftVersion,
           afterVersion: nextVersion,
@@ -318,7 +334,7 @@ function appendRecordingTranscript(session, rawTranscript, options) {
     }
   };
 }
-function undoLastRecording(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId = defaultId) {
+function undoLastRecording(session, expectedVersion, now = (/* @__PURE__ */ new Date()).toISOString(), createId2 = defaultId) {
   if (expectedVersion !== session.draftVersion) {
     return { applied: false, reason: "stale-version", session };
   }
@@ -337,11 +353,11 @@ function undoLastRecording(session, expectedVersion, now = (/* @__PURE__ */ new 
       ...session,
       draftVersion: nextVersion,
       cleanText: nextText,
-      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId),
+      paragraphs: reconcileParagraphs(session.paragraphs, nextText, createId2),
       history: [
         ...session.history,
         {
-          id: createId(),
+          id: createId2(),
           kind: "recording-undo",
           beforeVersion: session.draftVersion,
           afterVersion: nextVersion,
@@ -450,7 +466,7 @@ function createDiff(before, after) {
     affectedParagraphOrdinals: [...new Set([beforeStart, afterStart].filter(isPositiveInteger))]
   };
 }
-function reconcileParagraphs(previous, cleanText, createId) {
+function reconcileParagraphs(previous, cleanText, createId2) {
   const nextLines = cleanText.split("\n");
   const nextTexts = nextLines.filter(isNonEmptyParagraph);
   const matches = longestCommonSubsequenceMatches(
@@ -473,7 +489,7 @@ function reconcileParagraphs(previous, cleanText, createId) {
   for (const [lineIndex, text] of nextLines.entries()) {
     if (!isNonEmptyParagraph(text)) continue;
     paragraphs.push({
-      id: ids[paragraphIndex] ?? createId(),
+      id: ids[paragraphIndex] ?? createId2(),
       ordinal: paragraphIndex + 1,
       lineIndex,
       text
@@ -593,7 +609,7 @@ function isPositiveInteger(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 function defaultId() {
-  return crypto.randomUUID();
+  return createId();
 }
 
 // src/domain/debug.ts
@@ -732,7 +748,7 @@ function executeSequentialEditPlan(cleanText, paragraphs, currentVersion, plan, 
   let failedCommand;
   let generated = 0;
   const usedIds = new Set(currentParagraphs.map((paragraph) => paragraph.id));
-  const createId = () => {
+  const createId2 = () => {
     let id;
     do
       id = `chain:${plan.draftVersion}:${++generated}`;
@@ -785,7 +801,7 @@ function executeSequentialEditPlan(cleanText, paragraphs, currentVersion, plan, 
       });
       for (const paragraph of currentParagraphs) usedIds.add(paragraph.id);
     } else {
-      currentParagraphs = reconcileParagraphs(currentParagraphs, result.afterText, createId);
+      currentParagraphs = reconcileParagraphs(currentParagraphs, result.afterText, createId2);
     }
     text = result.afterText;
   }
@@ -2992,7 +3008,7 @@ function hasNearIdenticalHintWording(spoken, hint) {
 function createGlossaryState() {
   return { schemaVersion: GLOSSARY_SCHEMA_VERSION, entries: [], undoStack: [] };
 }
-function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).toISOString(), createId = () => crypto.randomUUID()) {
+function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).toISOString(), createId2 = createId) {
   const canonical = input.canonical.trim();
   if (!canonical) return { state, changed: false };
   const variants = unique([...input.variants ?? []].map((value) => value.trim()).filter(Boolean));
@@ -3021,7 +3037,7 @@ function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).to
     ...chatId ? { chatId } : { chatId: void 0 },
     updatedAt: now
   } : {
-    id: createId(),
+    id: createId2(),
     canonical,
     variants,
     forbidden,
@@ -3036,7 +3052,7 @@ function upsertGlossaryEntry(state, input, now = (/* @__PURE__ */ new Date()).to
   const entries = existing ? state.entries.map((item) => item.id === existing.id ? entry : item) : [...state.entries, entry].slice(-MAX_GLOSSARY_ENTRIES);
   return { state: pushUndo(state, entries), changed: true, entry };
 }
-function learnExplicitSpelling(state, canonical, spokenVariant, now = (/* @__PURE__ */ new Date()).toISOString(), createId, scope = "global", chatId) {
+function learnExplicitSpelling(state, canonical, spokenVariant, now = (/* @__PURE__ */ new Date()).toISOString(), createId2, scope = "global", chatId) {
   const key = normalizeKey(canonical);
   const scopeKey = `${scope}:${scope === "local" ? chatId ?? "" : ""}`;
   const existing = state.entries.find(
@@ -3064,7 +3080,7 @@ function learnExplicitSpelling(state, canonical, spokenVariant, now = (/* @__PUR
       chatId
     },
     now,
-    createId
+    createId2
   );
   if (result.entry) result.entry.useCount = 1;
   return result;
@@ -4138,7 +4154,7 @@ function escapeRegExp2(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.20";
+var APP_VERSION = "1.6.21";
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
 var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
 var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;
@@ -4358,7 +4374,7 @@ async function handleRequest(request, context) {
     }
   } catch (error) {
     if (activeRequest.cancelled) return;
-    const diagnosticId = logSafeFailure("error", "REQUEST", error);
+    const diagnosticId = await logSafeFailure("error", "REQUEST", error);
     send(
       {
         protocolVersion: PROTOCOL_VERSION,
@@ -9126,7 +9142,7 @@ async function handleDraftSend(request, context) {
       rememberCompletedSend(sendKey, completed2);
       return { completed: completed2 };
     } catch (error) {
-      const diagnosticId = logSafeFailure("error", "SEND", error);
+      const diagnosticId = await logSafeFailure("error", "SEND", error);
       return { error: "send", diagnosticId, session };
     }
   });
@@ -9419,13 +9435,24 @@ function draftKey(userId, chatId) {
 function draftPath(chatId) {
   return `draft-${encodeURIComponent(chatId)}.json`;
 }
-function logSafeFailure(level, category, error) {
-  const diagnosticId = `JT-${category}-${crypto.randomUUID()}`;
+async function logSafeFailure(level, category, error) {
+  const diagnosticId = `JT-${category}-${await safeUuid()}`;
   const errorKind = error instanceof Error ? error.name : typeof error;
   const message = `JarvisType failure [${diagnosticId}] (${errorKind}). Private provider details were redacted.`;
-  if (level === "warn") spindle.log.warn(message);
-  else spindle.log.error(message);
+  try {
+    if (level === "warn") spindle.log.warn(message);
+    else spindle.log.error(message);
+  } catch {
+  }
   return diagnosticId;
+}
+async function safeUuid() {
+  try {
+    const uuid = spindle.uuid;
+    if (uuid && typeof uuid.v4 === "function") return await uuid.v4();
+  } catch {
+  }
+  return createId();
 }
 function isRecord5(value) {
   return typeof value === "object" && value !== null;

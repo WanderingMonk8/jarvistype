@@ -1,3 +1,19 @@
+// src/domain/id.ts
+function createId() {
+  const bytes = new Uint8Array(16);
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    cryptoApi.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1)
+      bytes[index] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = bytes[6] & 15 | 64;
+  bytes[8] = bytes[8] & 63 | 128;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 // src/domain/draft-session.ts
 var MAX_DRAFT_CHARACTERS = 1e5;
 var MAX_HISTORY_ENTRIES = 200;
@@ -47,7 +63,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.20";
+var APP_VERSION = "1.6.21";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
@@ -62,7 +78,7 @@ var PHASE_FOUR_PERMISSIONS = [
   "characters"
 ];
 function createRequestId(prefix = "request") {
-  return `${prefix}-${Date.now().toString(36)}-${crypto.randomUUID()}`;
+  return `${prefix}-${Date.now().toString(36)}-${createId()}`;
 }
 
 // src/domain/edit-pipeline.ts

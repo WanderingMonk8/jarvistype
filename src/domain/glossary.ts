@@ -1,3 +1,5 @@
+import { createId as defaultCreateId } from './id'
+
 export const GLOSSARY_SCHEMA_VERSION = 1 as const
 export const MAX_GLOSSARY_ENTRIES = 500
 
@@ -83,7 +85,7 @@ export function upsertGlossaryEntry(
     chatId?: string
   },
   now = new Date().toISOString(),
-  createId: () => string = () => crypto.randomUUID(),
+  createId: () => string = defaultCreateId,
 ): GlossaryMutation {
   const canonical = input.canonical.trim()
   if (!canonical) return { state, changed: false }

@@ -1,5 +1,6 @@
 import type { SpindleAPI } from 'lumiverse-spindle-types'
 
+import { createId } from './domain/id'
 import {
   appendRecordingTranscript,
   applyAutomatedEdit,
@@ -277,7 +278,7 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
     }
   } catch (error) {
     if (activeRequest.cancelled) return
-    const diagnosticId = logSafeFailure('error', 'REQUEST', error)
+    const diagnosticId = await logSafeFailure('error', 'REQUEST', error)
     send(
       {
         protocolVersion: PROTOCOL_VERSION,
@@ -6027,7 +6028,7 @@ async function handleDraftSend(
       rememberCompletedSend(sendKey, completed)
       return { completed }
     } catch (error) {
-      const diagnosticId = logSafeFailure('error', 'SEND', error)
+      const diagnosticId = await logSafeFailure('error', 'SEND', error)
       return { error: 'send' as const, diagnosticId, session }
     }
   })
@@ -6405,13 +6406,33 @@ function draftPath(chatId: string): string {
   return `draft-${encodeURIComponent(chatId)}.json`
 }
 
-function logSafeFailure(level: 'warn' | 'error', category: string, error: unknown): string {
-  const diagnosticId = `JT-${category}-${crypto.randomUUID()}`
+/**
+ * Redacted failure reporter. Uses the Spindle UUID helper (feature-detected,
+ * never-throwing) so it works without secure-context crypto; falls back to the
+ * insecure-context-safe local generator.
+ */
+async function logSafeFailure(level: 'warn' | 'error', category: string, error: unknown): Promise<string> {
+  const diagnosticId = `JT-${category}-${await safeUuid()}`
   const errorKind = error instanceof Error ? error.name : typeof error
   const message = `JarvisType failure [${diagnosticId}] (${errorKind}). Private provider details were redacted.`
-  if (level === 'warn') spindle.log.warn(message)
-  else spindle.log.error(message)
+  try {
+    if (level === 'warn') spindle.log.warn(message)
+    else spindle.log.error(message)
+  } catch {
+    // Logging must never take down the failure path.
+  }
   return diagnosticId
+}
+
+/** Spindle UUID v4 when the host provides it (free tier, `uuid-v1`); otherwise the local safe generator. */
+async function safeUuid(): Promise<string> {
+  try {
+    const uuid = (spindle as unknown as { uuid?: { v4?: () => Promise<string> } }).uuid
+    if (uuid && typeof uuid.v4 === 'function') return await uuid.v4()
+  } catch {
+    // Fall through to the local generator.
+  }
+  return createId()
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

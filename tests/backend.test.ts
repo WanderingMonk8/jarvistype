@@ -2045,7 +2045,7 @@ test('passes extra hint modifiers to semantic evaluation without treating natura
   assert.ok(decisionRequests.some((request) => {
     const questions = (request as { questions?: Record<string, { instructions?: string }> }).questions ?? {}
     return questions.semantic_0_0_0?.instructions?.includes('candidate reference_0_0_0') &&
-      questions.semantic_0_0_0.instructions.includes('extra descriptive modifiers')
+      questions.semantic_0_0_0.instructions.includes('compatible modifiers')
   }))
 })
 

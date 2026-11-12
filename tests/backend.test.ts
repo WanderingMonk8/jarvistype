@@ -8517,3 +8517,48 @@ async function settleAsyncWork(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve))
   await new Promise((resolve) => setImmediate(resolve))
 }
+
+test('comparison mode applies the reduced batch while a shadow twin logs the baseline', async () => {
+  const userId = 'comparison-user'
+  const chatId = 'comparison-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'comparison-settings', settings: { contextMessageCount: 5, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', debugLoggingEnabled: true, jevCompareEnabled: true, jevComponents: { boundaryPrompt: true, semanticPrompt: true, commandPrompt: true, variantsWire: true } } }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'comparison-entry', canonical: 'Tudor', variants: ['Tudors'], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.99
+  const before = decisionRequests.length
+  await dispatch(recordingAppendRequest(chatId, 'comparison-segment', 1, "They faced the Tudor army hint Midland's long-term enemy."), userId)
+  const hintCalls = decisionRequests.slice(before).filter((request) =>
+    Object.keys((request as { questions?: Record<string, unknown> }).questions ?? {}).some((key) => key.startsWith('reference_')),
+  ) as Array<{ questions: Record<string, { instructions: string }>; state: { candidates: Array<Record<string, unknown>> } }>
+  assert.equal(hintCalls.length, 2, 'comparison mode must evaluate both the pipeline and the shadow twin')
+  const reduced = hintCalls.find((call) => call.questions.reference_0_0_0!.instructions.includes('complete clarification span'))
+  const baseline = hintCalls.find((call) => call.questions.reference_0_0_0!.instructions.includes('proposed explanation'))
+  assert.ok(reduced, 'pipeline call must use the reduced boundary prompt')
+  assert.ok(baseline, 'shadow twin must use the original boundary prompt')
+  assert.ok(!JSON.stringify(reduced!.state.candidates).includes('variants'), 'pipeline payload excludes variants when variantsWire is on')
+  assert.ok(JSON.stringify(baseline!.state.candidates).includes('variants'), 'baseline twin keeps the variants in the payload')
+  responses.length = 0
+})
+
+test('a disabled reduction component reverts only that component to the original prompt', async () => {
+  const userId = 'partial-reduction-user'
+  const chatId = 'partial-reduction-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'partial-reduction-settings', settings: { contextMessageCount: 5, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', debugLoggingEnabled: true, jevCompareEnabled: false, jevComponents: { boundaryPrompt: false, semanticPrompt: true, commandPrompt: true, variantsWire: true } } }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'partial-reduction-entry', canonical: 'Tudor', variants: [], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.99
+  const before = decisionRequests.length
+  await dispatch(recordingAppendRequest(chatId, 'partial-reduction-segment', 1, "They faced the Tudor army hint Midland's long-term enemy."), userId)
+  const hintCalls = decisionRequests.slice(before).filter((request) =>
+    Object.keys((request as { questions?: Record<string, unknown> }).questions ?? {}).some((key) => key.startsWith('reference_')),
+  ) as Array<{ questions: Record<string, { instructions: string }> }>
+  assert.equal(hintCalls.length, 1, 'comparison mode is off, so the batch runs once')
+  const call = hintCalls[0]!
+  assert.ok(call.questions.reference_0_0_0!.instructions.includes('proposed explanation'), 'boundaryPrompt=false reverts only the boundary prompt')
+  assert.ok(call.questions.semantic_0_0_0!.instructions.includes('Compare only'), 'semanticPrompt=true keeps the reduced semantic prompt')
+  responses.length = 0
+})

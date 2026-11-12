@@ -380,7 +380,14 @@ function isPhaseFourSettings(value: unknown): boolean {
     value.normalizationModelOverride.length <= 200 &&
     (value.normalizationModelTimeoutSeconds === undefined ||
       (isNonNegativeInteger(value.normalizationModelTimeoutSeconds) && value.normalizationModelTimeoutSeconds >= 5 && value.normalizationModelTimeoutSeconds <= 180)) &&
-    (value.debugLoggingEnabled === undefined || typeof value.debugLoggingEnabled === 'boolean')
+    (value.debugLoggingEnabled === undefined || typeof value.debugLoggingEnabled === 'boolean') &&
+    (value.jevCompareEnabled === undefined || typeof value.jevCompareEnabled === 'boolean') &&
+    (value.jevComponents === undefined ||
+      (isRecord(value.jevComponents) &&
+        typeof value.jevComponents.boundaryPrompt === 'boolean' &&
+        typeof value.jevComponents.semanticPrompt === 'boolean' &&
+        typeof value.jevComponents.commandPrompt === 'boolean' &&
+        typeof value.jevComponents.variantsWire === 'boolean'))
   )
 }
 

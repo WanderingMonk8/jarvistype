@@ -5,7 +5,7 @@ import type { SpellingLearningCandidate } from '../domain/normalization'
 import type { EditPlan, ResolvedEditOperation } from '../domain/edit-pipeline'
 
 export const PROTOCOL_VERSION = 7 as const
-export const APP_VERSION = '1.6.23'
+export const APP_VERSION = '1.6.24'
 export const REQUEST_TIMEOUT_MS = 15_000
 export const NORMALIZATION_TIMEOUT_MS = 120_000
 export const DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120
@@ -23,6 +23,25 @@ export const PHASE_FOUR_PERMISSIONS = [
 
 export type PermissionName = (typeof PHASE_FOUR_PERMISSIONS)[number]
 
+/**
+ * Reduction levers for the Jev (decision-model) glossary-hint boundary batch.
+ * Each component can be reverted independently; when every component is true the
+ * full reduction is applied.
+ */
+export interface JevReductionComponents {
+  boundaryPrompt: boolean
+  semanticPrompt: boolean
+  commandPrompt: boolean
+  variantsWire: boolean
+}
+
+export const DEFAULT_JEV_COMPONENTS: JevReductionComponents = {
+  boundaryPrompt: true,
+  semanticPrompt: true,
+  commandPrompt: true,
+  variantsWire: true,
+}
+
 export interface PhaseFourSettings {
   contextMessageCount: number
   referenceCacheLimit?: number
@@ -35,6 +54,13 @@ export interface PhaseFourSettings {
   normalizationModelOverride: string
   normalizationModelTimeoutSeconds?: number
   debugLoggingEnabled?: boolean
+  /**
+   * Comparison mode: the pipeline always runs the fully reduced boundary batch,
+   * and a shadow twin with the unreduced (original) prompts is evaluated only to
+   * populate the reduction-comparison report. Requires debug logging (auto-enabled).
+   */
+  jevCompareEnabled?: boolean
+  jevComponents?: JevReductionComponents
 }
 
 export interface NormalizationConnectionOption {

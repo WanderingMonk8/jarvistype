@@ -7,9 +7,11 @@ import type {
 import { MAX_DRAFT_CHARACTERS, type DraftSnapshot } from './domain/draft-session'
 import type { EditTarget } from './domain/edit-pipeline'
 import type { GlossaryEntry } from './domain/glossary'
+import { createZip } from './domain/zip'
 import { RequestRegistry, type RequestOutcome } from './domain/request-registry'
 import {
   APP_VERSION,
+  DEFAULT_JEV_COMPONENTS,
   DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
   MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
   MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
@@ -26,6 +28,7 @@ import {
   type DecisionConnectionOption,
   type NormalizationProposal,
   type PhaseFourSettings,
+  type JevReductionComponents,
   type PermissionSnapshot,
 } from './protocol/messages'
 import { isBackendResponse, sanitizeGrantedPermissions } from './protocol/validation'
@@ -475,6 +478,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const debugCopyButton = requireElement<HTMLButtonElement>(tab.root, '[data-debug-copy]')
   const debugClearButton = requireElement<HTMLButtonElement>(tab.root, '[data-debug-clear]')
   const debugStatus = requireElement<HTMLElement>(tab.root, '[data-debug-status]')
+  const jevCompareToggle = requireElement<HTMLInputElement>(tab.root, '[data-jev-compare]')
+  const jevComponentToggles = [...tab.root.querySelectorAll<HTMLInputElement>('[data-jev-component]')]
+  const jevReportDownloadButton = requireElement<HTMLButtonElement>(tab.root, '[data-jev-report-download]')
+  const jevReportResetButton = requireElement<HTMLButtonElement>(tab.root, '[data-jev-report-reset]')
+  const jevCompareStatus = requireElement<HTMLElement>(tab.root, '[data-jev-compare-status]')
   const normalizationConnectionSelect = requireElement<HTMLSelectElement>(
     tab.root,
     '[data-normalization-connection]',
@@ -602,6 +610,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       normalizationModelOverride: '',
       normalizationModelTimeoutSeconds: DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
       debugLoggingEnabled: false,
+      jevCompareEnabled: false,
+      jevComponents: { ...DEFAULT_JEV_COMPONENTS },
     },
     normalizationConnections: [],
     decisionConnections: [],
@@ -947,6 +957,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     debugRefreshButton.disabled = state.settings.debugLoggingEnabled !== true
     debugCopyButton.disabled = false
     debugClearButton.disabled = state.settings.debugLoggingEnabled !== true
+    syncJevCompareControls()
     renderConnectionOptions(
       normalizationConnectionSelect,
       state.normalizationConnections,
@@ -1473,6 +1484,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     })
     render()
     const outcome = await pending
+    void archiveJevCompareFromBackend()
     if (activeNormalizationRequestId === requestId) { activeNormalizationRequestId = null; activeNormalizationMode = null }
     if (!alive) return
     if (outcome.status === 'cancelled') return
@@ -1547,6 +1559,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     })
     render()
     const outcome = await pending
+    void archiveJevCompareFromBackend()
     if (activeNormalizationRequestId === requestId) { activeNormalizationRequestId = null; activeNormalizationMode = null }
     if (!alive) return
     if (outcome.status === 'cancelled') return
@@ -1798,6 +1811,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         normalizationModelOverride: state.settings.normalizationModelOverride,
         normalizationModelTimeoutSeconds: state.settings.normalizationModelTimeoutSeconds,
         debugLoggingEnabled: debugEnabledToggle.checked,
+        jevCompareEnabled: state.settings.jevCompareEnabled === true,
+        jevComponents: { ...(state.settings.jevComponents ?? DEFAULT_JEV_COMPONENTS) },
       },
       chatId: state.activeChatId ?? undefined,
     })
@@ -1859,6 +1874,283 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       debugStatus.textContent =
         'Clipboard access is unavailable. The log is selected; copy it manually.'
     }
+  }
+
+  // --- Jev reduction comparison mode ------------------------------------------
+  // Comparison mode runs the reduced boundary batch as the applied pipeline and a
+  // shadow twin with the unreduced prompts to log `[jev.compare]` entries. Those
+  // entries are archived to host-origin localStorage so the accumulated report
+  // survives extension updates, deletion, and reinstallation.
+  const JEV_COMPARE_KEY = 'jarvistype.jevCompare.v1'
+  const JEV_COMPARE_PREV_DEBUG_KEY = 'jarvistype.jevCompare.prevDebug'
+  const JEV_COMPARE_MAX_BYTES = 3_500_000
+
+  interface JevCompareEntry {
+    id: string
+    t: string | null
+    side: 'pipeline' | 'baseline'
+    outcome: string
+    inputTokens: number | null
+    outputTokens: number | null
+    cost: number | null
+    candidates: number | null
+    topBoundary: number | null
+    topSemantic: number | null
+    topCommand: number | null
+    boundaryPass: number | null
+    wouldPass: 0 | 1 | null
+    raw: string
+  }
+
+  const JEV_COMPARE_LINE =
+    /side=(pipeline|baseline) outcome=(\w+) in=(\d+|unknown) out=(\d+|unknown)(?: cost=([\d.eE+-]+))? candidates=(\d+) topBoundary=([\d.]+) topSemantic=([\d.]+) topCommand=([\d.]+) boundaryPass=(\d+) wouldPass=([01]) id=(\S+)/
+
+  const readJevCompareEntries = (): JevCompareEntry[] => {
+    try {
+      const raw = window.localStorage.getItem(JEV_COMPARE_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw) as unknown
+      return Array.isArray(parsed) ? (parsed as JevCompareEntry[]) : []
+    } catch {
+      return []
+    }
+  }
+
+  const writeJevCompareEntries = (entries: JevCompareEntry[]) => {
+    // Drop the oldest entries when the accumulated report would grow too large.
+    try {
+      while (entries.length && JSON.stringify(entries).length > JEV_COMPARE_MAX_BYTES) entries.shift()
+      window.localStorage.setItem(JEV_COMPARE_KEY, JSON.stringify(entries))
+    } catch {
+      // Storage may be unavailable; keep the session usable without persistence.
+    }
+  }
+
+  const archiveJevCompareEntries = (lines: readonly string[]): number => {
+    const entries = readJevCompareEntries()
+    const seen = new Set(entries.map((entry) => entry.id))
+    let added = 0
+    for (const line of lines) {
+      const marker = line.indexOf('[jev.compare]')
+      if (marker < 0) continue
+      const match = JEV_COMPARE_LINE.exec(line)
+      if (!match) continue
+      const id = match[12]!
+      if (seen.has(id)) continue
+      seen.add(id)
+      const stamp = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(line)
+      const number = (value: string | undefined) =>
+        value === undefined || value === 'unknown' ? null : Number(value)
+      entries.push({
+        id,
+        t: stamp?.[1] ?? null,
+        side: match[1] as 'pipeline' | 'baseline',
+        outcome: match[2]!,
+        inputTokens: number(match[3]),
+        outputTokens: number(match[4]),
+        cost: number(match[5]),
+        candidates: number(match[6]),
+        topBoundary: number(match[7]),
+        topSemantic: number(match[8]),
+        topCommand: number(match[9]),
+        boundaryPass: number(match[10]),
+        wouldPass: Number(match[11]) as 0 | 1,
+        raw: line,
+      })
+      added += 1
+    }
+    if (added) writeJevCompareEntries(entries)
+    return added
+  }
+
+  const updateJevCompareStatus = () => {
+    const entries = readJevCompareEntries()
+    const count = entries.length
+    jevReportDownloadButton.disabled = count === 0
+    jevReportResetButton.disabled = count === 0
+    if (count === 0) {
+      jevCompareStatus.textContent =
+        state.settings.jevCompareEnabled === true
+          ? 'No comparison entries accumulated yet.'
+          : 'Comparison mode is off; the report is still available if entries were captured earlier.'
+      return
+    }
+    let flips = 0
+    for (let index = 0; index + 1 < entries.length; index += 1) {
+      const current = entries[index]!
+      const next = entries[index + 1]!
+      if (current.side === 'pipeline' && next.side === 'baseline' && current.wouldPass !== next.wouldPass)
+        flips += 1
+    }
+    jevCompareStatus.textContent = `${count} comparison ${count === 1 ? 'entry' : 'entries'} accumulated${flips ? `; ${flips} outcome flip${flips === 1 ? '' : 's'} recorded` : ''}. Download to export.`
+  }
+
+  const archiveJevCompareFromBackend = async () => {
+    if (state.settings.jevCompareEnabled !== true || state.settings.debugLoggingEnabled !== true) return
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'debug.log.request',
+      requestId: createRequestId('jev-archive'),
+    })
+    if (outcome.status === 'resolved' && outcome.value.type === 'debug.log.response') {
+      const added = archiveJevCompareEntries(outcome.value.entries)
+      if (added) updateJevCompareStatus()
+    }
+  }
+
+  const averageJevCompare = (values: ReadonlyArray<number | null>) => {
+    const usable = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    return usable.length ? usable.reduce((sum, value) => sum + value, 0) / usable.length : null
+  }
+
+  const sumJevCompare = (values: ReadonlyArray<number | null>) =>
+    values.reduce<number>((sum, value) => (typeof value === 'number' && Number.isFinite(value) ? sum + value : sum), 0)
+
+  const summarizeJevCompare = (entries: readonly JevCompareEntry[]) => {
+    const pipeline = entries.filter((entry) => entry.side === 'pipeline')
+    const baseline = entries.filter((entry) => entry.side === 'baseline')
+    let flips = 0
+    for (let index = 0; index + 1 < entries.length; index += 1) {
+      const current = entries[index]!
+      const next = entries[index + 1]!
+      if (current.side === 'pipeline' && next.side === 'baseline' && current.wouldPass !== next.wouldPass)
+        flips += 1
+    }
+    const summarizeSide = (side: readonly JevCompareEntry[]) => ({
+      calls: side.length,
+      totalInputTokens: sumJevCompare(side.map((entry) => entry.inputTokens)),
+      totalOutputTokens: sumJevCompare(side.map((entry) => entry.outputTokens)),
+      totalCost: side.some((entry) => entry.cost !== null) ? sumJevCompare(side.map((entry) => entry.cost)) : null,
+      averageInputTokens: averageJevCompare(side.map((entry) => entry.inputTokens)),
+      averageOutputTokens: averageJevCompare(side.map((entry) => entry.outputTokens)),
+      averageTopSemantic: averageJevCompare(side.map((entry) => entry.topSemantic)),
+      wouldPass: side.filter((entry) => entry.wouldPass === 1).length,
+    })
+    return {
+      schema: 'jarvistype/jev-compare-report/1',
+      generatedAt: new Date().toISOString(),
+      appVersion: APP_VERSION,
+      hostOrigin: window.location.origin,
+      entries: entries.length,
+      pipeline: summarizeSide(pipeline),
+      baseline: summarizeSide(baseline),
+      approxInputTokenDelta: sumJevCompare(pipeline.map((entry) => entry.inputTokens)) - sumJevCompare(baseline.map((entry) => entry.inputTokens)),
+      outcomeFlips: flips,
+      note: 'Pipeline is the applied reduced batch; baseline is the shadow twin with the original prompts. Negative delta means the reduction saved input tokens.',
+    }
+  }
+
+  const downloadJevCompareReport = async () => {
+    const entries = readJevCompareEntries()
+    if (!entries.length) return
+    const summary = summarizeJevCompare(entries)
+    const readme = [
+      'JarvisType Jev reduction comparison report',
+      '==========================================',
+      '',
+      'This report was accumulated locally on the device that produced it while',
+      'comparison mode was enabled. It is metadata only: it contains no draft text,',
+      'transcript, replacement text, prompt content, or provider answers.',
+      '',
+      'pipeline = the fully reduced glossary-hint decision batch (the applied result)',
+      'baseline = the shadow twin with the original unreduced prompts (report only)',
+      '',
+      'entries.jsonl  — one archived entry per line, in accumulation order',
+      'summary.json   — counts, token totals, flips (wouldPass differences)',
+      'manifest.json  — report schema, app version, and components used',
+      'README.txt     — this file',
+    ].join('\n')
+    const manifest = {
+      schema: 'jarvistype/jev-compare-report/1',
+      appVersion: APP_VERSION,
+      exportedAt: new Date().toISOString(),
+      hostOrigin: window.location.origin,
+      entryCount: entries.length,
+      jevComponents: state.settings.jevComponents,
+      survival: 'Stored in host-origin localStorage (key jarvistype.jevCompare.v1); survives extension updates, deletion, and reinstallation on this browser profile.',
+    }
+    const zip = await createZip([
+      { name: 'README.txt', data: readme },
+      { name: 'manifest.json', data: JSON.stringify(manifest, null, 2) },
+      { name: 'entries.jsonl', data: entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n' },
+      { name: 'summary.json', data: JSON.stringify(summary, null, 2) },
+    ])
+    const url = URL.createObjectURL(zip)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `jev-comparison-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip`
+    document.body.append(anchor)
+    anchor.click()
+    anchor.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    jevCompareStatus.textContent = `Downloaded report with ${entries.length} entries.`
+  }
+
+  /** Sync checkboxes, disabled states, and the status line with settings + local storage. */
+  const syncJevCompareControls = () => {
+    const enabled = state.settings.jevCompareEnabled === true
+    jevCompareToggle.checked = enabled
+    const components = state.settings.jevComponents ?? DEFAULT_JEV_COMPONENTS
+    for (const toggle of jevComponentToggles) {
+      const key = toggle.dataset.jevComponent as keyof JevReductionComponents | undefined
+      if (!key) continue
+      toggle.checked = enabled ? true : components[key] !== false
+      toggle.disabled = enabled
+      const fieldset = toggle.closest('fieldset')
+      if (fieldset) fieldset.disabled = enabled
+    }
+    updateJevCompareStatus()
+  }
+
+  const handleJevCompareToggle = () => {
+    const enabled = jevCompareToggle.checked
+    if (enabled) {
+      // Comparison mode requires debug capture; remember the prior debug state to restore it.
+      window.localStorage.setItem(JEV_COMPARE_PREV_DEBUG_KEY, state.settings.debugLoggingEnabled === true ? '1' : '0')
+      state.settings.debugLoggingEnabled = true
+      debugEnabledToggle.checked = true
+    } else {
+      const previous = window.localStorage.getItem(JEV_COMPARE_PREV_DEBUG_KEY)
+      if (previous === '0' || previous === '1') {
+        state.settings.debugLoggingEnabled = previous === '1'
+        debugEnabledToggle.checked = previous === '1'
+      }
+      window.localStorage.removeItem(JEV_COMPARE_PREV_DEBUG_KEY)
+    }
+    state.settings.jevCompareEnabled = enabled
+    scheduleSettingsSave(0)
+    syncJevCompareControls()
+  }
+
+  const handleJevComponentChange = () => {
+    const components = { ...DEFAULT_JEV_COMPONENTS, ...(state.settings.jevComponents ?? {}) }
+    for (const toggle of jevComponentToggles) {
+      const key = toggle.dataset.jevComponent as keyof JevReductionComponents | undefined
+      if (key) components[key] = toggle.checked
+    }
+    state.settings.jevComponents = components
+    scheduleSettingsSave(0)
+  }
+
+  const handleJevReportDownload = () => void downloadJevCompareReport()
+
+  let jevResetArmed = false
+  let jevResetTimer: number | null = null
+  const handleJevReportReset = () => {
+    if (!jevResetArmed) {
+      jevResetArmed = true
+      jevReportResetButton.textContent = 'Confirm reset'
+      jevResetTimer = window.setTimeout(() => {
+        jevResetArmed = false
+        jevReportResetButton.textContent = 'Reset report'
+      }, 3000)
+      return
+    }
+    if (jevResetTimer !== null) window.clearTimeout(jevResetTimer)
+    jevResetArmed = false
+    jevReportResetButton.textContent = 'Reset report'
+    window.localStorage.removeItem(JEV_COMPARE_KEY)
+    updateJevCompareStatus()
   }
 
   const saveGlossaryEntry = async (surface: 'drawer' | 'floating' = 'drawer') => {
@@ -2673,6 +2965,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cancelEditCandidatesButton.addEventListener('click', handleCancelEditCandidatesClick)
   grammarRepairSelect.addEventListener('change', handleGrammarRepairModeChange)
   debugEnabledToggle.addEventListener('change', handleDebugEnabledChange)
+  jevCompareToggle.addEventListener('change', handleJevCompareToggle)
+  for (const toggle of jevComponentToggles) toggle.addEventListener('change', handleJevComponentChange)
+  jevReportDownloadButton.addEventListener('click', handleJevReportDownload)
+  jevReportResetButton.addEventListener('click', handleJevReportReset)
   contextCountInput.addEventListener('input', handleContextCountInput)
   referenceCacheLimitInput.addEventListener('input', handleReferenceCacheLimitInput)
   referenceAdmissionOccurrencesInput.addEventListener(
@@ -2761,6 +3057,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     debugRefreshButton.removeEventListener('click', handleDebugRefreshClick)
     debugCopyButton.removeEventListener('click', handleDebugCopyClick)
     debugClearButton.removeEventListener('click', handleDebugClearClick)
+    jevCompareToggle.removeEventListener('change', handleJevCompareToggle)
+    for (const toggle of jevComponentToggles) toggle.removeEventListener('change', handleJevComponentChange)
+    jevReportDownloadButton.removeEventListener('click', handleJevReportDownload)
+    jevReportResetButton.removeEventListener('click', handleJevReportReset)
+    if (jevResetTimer !== null) window.clearTimeout(jevResetTimer)
     normalizationConnectionSelect.removeEventListener('change', handleNormalizationConnectionChange)
     decisionConnectionSelect.removeEventListener('change', handleDecisionConnectionChange)
     glossaryDefaultScopeSelect.removeEventListener('change', handleGlossaryDefaultScopeChange)
@@ -3268,6 +3569,10 @@ function shellMarkup(): string {
       .jt-proposal__details { display: grid; gap: .55rem; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: .45rem; padding: .55rem; }
       .jt-proposal__details summary { cursor: pointer; font-weight: 700; }
       .jt-proposal__details[open] summary { margin-bottom: .55rem; }
+      .jt-jev-compare { display: grid; gap: .45rem; padding: .6rem; border: 1px dashed color-mix(in srgb, currentColor 26%, transparent); border-radius: .45rem; }
+      .jt-jev-components { display: grid; gap: .3rem; margin: 0; padding: .45rem .6rem .6rem; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: .45rem; }
+      .jt-jev-components legend { font-size: .8rem; opacity: .85; padding: 0 .3rem; }
+      .jt-jev-components:disabled { opacity: .6; }
       .jt-debug-output { width: 100%; min-height: 12rem; resize: vertical; padding: .55rem; border-radius: .45rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .78rem; white-space: pre; overflow: auto; }
       .jt-candidate-list { display: grid; gap: .5rem; }
       .jt-candidate-list button { text-align: start; white-space: normal; }
@@ -3475,6 +3780,22 @@ function shellMarkup(): string {
           </div>
           <textarea class="jt-debug-output" readonly data-debug-output rows="14" spellcheck="false" aria-label="JarvisType debug timing log"></textarea>
           <p role="status" aria-live="polite" data-debug-status></p>
+          <div class="jt-jev-compare">
+            <label><span><input type="checkbox" data-jev-compare> Comparison mode (Jev reduction baseline)</span></label>
+            <small class="jt-shell__notice">The applied pipeline always runs the fully reduced glossary-hint decision batch, and a shadow twin with the original unreduced prompts is evaluated only to populate the comparison report — that twin never affects the draft. Expect roughly double Jev spend on hint-relevant normalizations while enabled. Debug logging is switched on automatically and restored when this is turned off. Nothing about the draft, replacements, or prompts is stored; only anonymous scores and token counts. The report accumulates locally on this device and survives extension updates and reinstalls.</small>
+            <fieldset class="jt-jev-components">
+              <legend>Reduction components (applied individually when comparison mode is off; all forced on while it is on)</legend>
+              <label><span><input type="checkbox" checked data-jev-component="boundaryPrompt"> Shorten boundary prompt</span></label>
+              <label><span><input type="checkbox" checked data-jev-component="semanticPrompt"> Shorten semantic prompt</span></label>
+              <label><span><input type="checkbox" checked data-jev-component="commandPrompt"> Shorten command prompt</span></label>
+              <label><span><input type="checkbox" checked data-jev-component="variantsWire"> Exclude glossary variants from the model payload</span></label>
+            </fieldset>
+            <div class="jt-actions">
+              <button type="button" data-jev-report-download disabled>Download report</button>
+              <button type="button" data-jev-report-reset disabled>Reset report</button>
+            </div>
+            <p role="status" aria-live="polite" data-jev-compare-status>No comparison entries accumulated yet.</p>
+          </div>
         </details>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings…</p>
 

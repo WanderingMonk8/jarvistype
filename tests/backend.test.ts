@@ -129,6 +129,15 @@ const spindleMock = {
       stored.delete(`${userId}:${path}`)
       return Promise.resolve()
     },
+    read: (path: string, userId?: string) => {
+      const value = stored.get(`${userId}:${path}`)
+      if (value === undefined) return Promise.reject(new Error('not found'))
+      return Promise.resolve(String(value))
+    },
+    write: (path: string, data: string, userId?: string) => {
+      stored.set(`${userId}:${path}`, data)
+      return Promise.resolve()
+    },
   },
   chats: {
     get: (chatId: string) =>
@@ -2045,7 +2054,7 @@ test('passes extra hint modifiers to semantic evaluation without treating natura
   assert.ok(decisionRequests.some((request) => {
     const questions = (request as { questions?: Record<string, { instructions?: string }> }).questions ?? {}
     return questions.semantic_0_0_0?.instructions?.includes('candidate reference_0_0_0') &&
-      questions.semantic_0_0_0.instructions.includes('extra descriptive modifiers')
+      questions.semantic_0_0_0.instructions.includes('compatible modifiers')
   }))
 })
 
@@ -8517,3 +8526,25 @@ async function settleAsyncWork(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve))
   await new Promise((resolve) => setImmediate(resolve))
 }
+
+test('hint boundary batch runs the settled configuration with variants excluded', async () => {
+  const userId = 'golden-user'
+  const chatId = 'golden-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'golden-entry', canonical: 'Tudor', variants: ['Tudors'], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.99
+  const before = decisionRequests.length
+  await dispatch(recordingAppendRequest(chatId, 'golden-segment', 1, "They faced the Tudor army hint Midland's long-term enemy."), userId)
+  const hintCalls = decisionRequests.slice(before).filter((request) =>
+    Object.keys((request as { questions?: Record<string, unknown> }).questions ?? {}).some((key) => key.startsWith('reference_')),
+  ) as Array<{ questions: Record<string, { instructions: string }>; state: { candidates: Array<Record<string, unknown>> } }>
+  assert.equal(hintCalls.length, 1, 'the boundary batch evaluates once')
+  const call = hintCalls[0]!
+  assert.ok(call.questions.reference_0_0_0!.instructions.includes('complete clarification span'), 'boundary prompt uses the settled reduced form')
+  assert.ok(call.questions.semantic_0_0_0!.instructions.includes('Compare only'), 'semantic prompt uses the settled reduced form')
+  assert.ok(call.questions.command_0_0_0!.instructions.includes('is the wording an instruction'), 'command prompt keeps the original wording')
+  assert.ok(!JSON.stringify(call.state.candidates).includes('variants'), 'payload excludes glossary variants')
+  responses.length = 0
+})

@@ -19,128 +19,6 @@ var MAX_DRAFT_CHARACTERS = 1e5;
 var MAX_HISTORY_ENTRIES = 200;
 var MAX_RECORDING_SEGMENTS = 200;
 
-// src/domain/zip.ts
-var CRC_TABLE = new Uint32Array(256);
-for (let index = 0; index < 256; index += 1) {
-  let value = index;
-  for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 3988292384 ^ value >>> 1 : value >>> 1;
-  CRC_TABLE[index] = value >>> 0;
-}
-function crc32(data) {
-  let crc = 4294967295;
-  for (let index = 0; index < data.length; index += 1)
-    crc = (CRC_TABLE[(crc ^ data[index]) & 255] ^ crc >>> 8) >>> 0;
-  return (crc ^ 4294967295) >>> 0;
-}
-function utf8(text) {
-  return new TextEncoder().encode(text);
-}
-var u16 = (view, offset, value) => view.setUint16(offset, value & 65535, true);
-var u32 = (view, offset, value) => view.setUint32(offset, value >>> 0, true);
-function dosDateTime(date) {
-  const time = (date.getHours() & 31) << 11 | (date.getMinutes() & 63) << 5 | date.getSeconds() >> 1 & 31;
-  const day = (date.getFullYear() - 1980 & 127) << 9 | date.getMonth() + 1 << 5 | date.getDate() & 31;
-  return { time, date: day };
-}
-async function deflateRaw(data) {
-  try {
-    const input = data.slice();
-    const stream = new CompressionStream("deflate-raw");
-    const writer = stream.writable.getWriter();
-    const done = writer.write(input).then(() => writer.close());
-    const reader = stream.readable.getReader();
-    const chunks = [];
-    let length = 0;
-    for (; ; ) {
-      const { done: chunkDone, value } = await reader.read();
-      if (chunkDone) break;
-      if (value) {
-        chunks.push(value);
-        length += value.length;
-      }
-    }
-    await done;
-    const result = new Uint8Array(length);
-    let offset = 0;
-    for (const chunk of chunks) {
-      result.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return result;
-  } catch {
-    return null;
-  }
-}
-async function createZip(files) {
-  const encoder = new TextEncoder();
-  const now = dosDateTime(/* @__PURE__ */ new Date());
-  const localParts = [];
-  const centralEntries = [];
-  let offset = 0;
-  for (const file of files) {
-    const data = typeof file.data === "string" ? utf8(file.data) : file.data;
-    const nameBytes = encoder.encode(file.name);
-    const compressed = await deflateRaw(data);
-    const method = compressed && compressed.length < data.length ? 8 : 0;
-    const payload = method === 8 ? compressed : data;
-    const crc = crc32(data);
-    const local = new Uint8Array(30 + nameBytes.length);
-    const view = new DataView(local.buffer);
-    u32(view, 0, 67324752);
-    u16(view, 4, 20);
-    u16(view, 6, 2048);
-    u16(view, 8, method);
-    u16(view, 10, now.time);
-    u16(view, 12, now.date);
-    u32(view, 14, crc);
-    u32(view, 18, payload.length);
-    u32(view, 22, data.length);
-    u16(view, 26, nameBytes.length);
-    u16(view, 28, 0);
-    local.set(nameBytes, 30);
-    localParts.push(local, payload);
-    centralEntries.push({ nameBytes, method, crc, compressedSize: payload.length, uncompressedSize: data.length, localHeaderOffset: offset });
-    offset += local.length + payload.length;
-  }
-  let centralSize = 0;
-  const centralParts = [];
-  for (const entry of centralEntries) {
-    const central = new Uint8Array(46 + entry.nameBytes.length);
-    const view = new DataView(central.buffer);
-    u32(view, 0, 33639248);
-    u16(view, 4, 20);
-    u16(view, 6, 20);
-    u16(view, 8, 2048);
-    u16(view, 10, entry.method);
-    u16(view, 12, now.time);
-    u16(view, 14, now.date);
-    u32(view, 16, entry.crc);
-    u32(view, 20, entry.compressedSize);
-    u32(view, 24, entry.uncompressedSize);
-    u16(view, 28, entry.nameBytes.length);
-    u16(view, 30, 0);
-    u16(view, 32, 0);
-    u16(view, 34, 0);
-    u16(view, 36, 0);
-    u32(view, 38, 0);
-    u32(view, 42, entry.localHeaderOffset);
-    central.set(entry.nameBytes, 46);
-    centralParts.push(central);
-    centralSize += central.length;
-  }
-  const eocd = new Uint8Array(22);
-  const end = new DataView(eocd.buffer);
-  u32(end, 0, 101010256);
-  u16(end, 4, 0);
-  u16(end, 6, 0);
-  u16(end, 8, centralEntries.length);
-  u16(end, 10, centralEntries.length);
-  u32(end, 12, centralSize);
-  u32(end, 16, offset);
-  u16(end, 20, 0);
-  return new Blob([...localParts, ...centralParts, eocd], { type: "application/zip" });
-}
-
 // src/domain/request-registry.ts
 var RequestRegistry = class {
   constructor(timeoutMs, onTimeout) {
@@ -185,7 +63,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.25";
+var APP_VERSION = "1.6.26";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
@@ -199,12 +77,6 @@ var PHASE_FOUR_PERMISSIONS = [
   "generation",
   "characters"
 ];
-var DEFAULT_JEV_COMPONENTS = {
-  boundaryPrompt: true,
-  semanticPrompt: true,
-  commandPrompt: true,
-  variantsWire: true
-};
 function createRequestId(prefix = "request") {
   return `${prefix}-${Date.now().toString(36)}-${createId()}`;
 }
@@ -454,10 +326,6 @@ function isBackendResponse(value) {
   if (value.type === "debug.log.response") {
     return value.ok === true && Array.isArray(value.entries) && value.entries.length <= 2100 && value.entries.every((entry) => typeof entry === "string" && entry.length <= 2e3);
   }
-  if (value.type === "jev.compare.report.response") {
-    return value.ok === true && Array.isArray(value.lines) && value.lines.length <= 4100 && value.lines.every((line) => typeof line === "string" && line.length <= 2e3);
-  }
-  if (value.type === "jev.compare.report.reset.response") return value.ok === true;
   if (value.type === "app.error") {
     return value.ok === false && typeof value.code === "string" && ERROR_CODES.includes(value.code) && isBoundedString(value.message, 1, 2e3) && typeof value.retryable === "boolean" && (value.diagnosticId === void 0 || isBoundedString(value.diagnosticId, 1, 100)) && (value.operationId === void 0 || isIdentifier2(value.operationId)) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot));
   }
@@ -494,7 +362,7 @@ function isPermissionSnapshot(value) {
   return value.declared.length === PHASE_FOUR_PERMISSIONS.length && value.declared.every((permission, index) => permission === PHASE_FOUR_PERMISSIONS[index]) && value.granted.length <= PHASE_FOUR_PERMISSIONS.length && value.granted.every((permission) => PHASE_FOUR_PERMISSIONS.includes(permission)) && new Set(value.granted).size === value.granted.length;
 }
 function isPhaseFourSettings(value) {
-  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger2(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger2(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.glossaryDefaultScope === void 0 || value.glossaryDefaultScope === "local" || value.glossaryDefaultScope === "global") && (value.decisionConnectionId === void 0 || value.decisionConnectionId === null || isIdentifier2(value.decisionConnectionId)) && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.normalizationModelTimeoutSeconds === void 0 || isNonNegativeInteger2(value.normalizationModelTimeoutSeconds) && value.normalizationModelTimeoutSeconds >= 5 && value.normalizationModelTimeoutSeconds <= 180) && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean") && (value.jevCompareEnabled === void 0 || typeof value.jevCompareEnabled === "boolean") && (value.jevComponents === void 0 || isRecord2(value.jevComponents) && typeof value.jevComponents.boundaryPrompt === "boolean" && typeof value.jevComponents.semanticPrompt === "boolean" && typeof value.jevComponents.commandPrompt === "boolean" && typeof value.jevComponents.variantsWire === "boolean");
+  return isRecord2(value) && isNonNegativeInteger2(value.contextMessageCount) && value.contextMessageCount <= 20 && (value.referenceCacheLimit === void 0 || isNonNegativeInteger2(value.referenceCacheLimit) && value.referenceCacheLimit <= 200) && (value.referenceAdmissionOccurrences === void 0 || isNonNegativeInteger2(value.referenceAdmissionOccurrences) && value.referenceAdmissionOccurrences >= 1 && value.referenceAdmissionOccurrences <= 5) && typeof value.contextualNormalizationEnabled === "boolean" && (value.grammarRepairMode === "off" || value.grammarRepairMode === "when_needed" || value.grammarRepairMode === "always") && (value.glossaryDefaultScope === void 0 || value.glossaryDefaultScope === "local" || value.glossaryDefaultScope === "global") && (value.decisionConnectionId === void 0 || value.decisionConnectionId === null || isIdentifier2(value.decisionConnectionId)) && (value.normalizationConnectionId === null || isIdentifier2(value.normalizationConnectionId)) && typeof value.normalizationModelOverride === "string" && value.normalizationModelOverride.length <= 200 && (value.normalizationModelTimeoutSeconds === void 0 || isNonNegativeInteger2(value.normalizationModelTimeoutSeconds) && value.normalizationModelTimeoutSeconds >= 5 && value.normalizationModelTimeoutSeconds <= 180) && (value.debugLoggingEnabled === void 0 || typeof value.debugLoggingEnabled === "boolean");
 }
 function isNormalizationConnectionOption(value) {
   return isRecord2(value) && isIdentifier2(value.id) && isBoundedString(value.name, 1, 200) && isBoundedString(value.provider, 1, 200) && typeof value.model === "string" && value.model.length <= 200 && typeof value.isDefault === "boolean";
@@ -908,11 +776,6 @@ function setup(ctx) {
   const debugCopyButton = requireElement(tab.root, "[data-debug-copy]");
   const debugClearButton = requireElement(tab.root, "[data-debug-clear]");
   const debugStatus = requireElement(tab.root, "[data-debug-status]");
-  const jevCompareToggle = requireElement(tab.root, "[data-jev-compare]");
-  const jevComponentToggles = [...tab.root.querySelectorAll("[data-jev-component]")];
-  const jevReportDownloadButton = requireElement(tab.root, "[data-jev-report-download]");
-  const jevReportResetButton = requireElement(tab.root, "[data-jev-report-reset]");
-  const jevCompareStatus = requireElement(tab.root, "[data-jev-compare-status]");
   const normalizationConnectionSelect = requireElement(
     tab.root,
     "[data-normalization-connection]"
@@ -1035,9 +898,7 @@ function setup(ctx) {
       normalizationConnectionId: null,
       normalizationModelOverride: "",
       normalizationModelTimeoutSeconds: DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS,
-      debugLoggingEnabled: false,
-      jevCompareEnabled: false,
-      jevComponents: { ...DEFAULT_JEV_COMPONENTS }
+      debugLoggingEnabled: false
     },
     normalizationConnections: [],
     decisionConnections: [],
@@ -1255,7 +1116,6 @@ function setup(ctx) {
     debugRefreshButton.disabled = state.settings.debugLoggingEnabled !== true;
     debugCopyButton.disabled = false;
     debugClearButton.disabled = state.settings.debugLoggingEnabled !== true;
-    syncJevCompareControls();
     renderConnectionOptions(
       normalizationConnectionSelect,
       state.normalizationConnections,
@@ -1692,7 +1552,6 @@ function setup(ctx) {
     });
     render();
     const outcome = await pending;
-    if (state.settings.jevCompareEnabled === true) void refreshJevCompareStatus();
     if (activeNormalizationRequestId === requestId) {
       activeNormalizationRequestId = null;
       activeNormalizationMode = null;
@@ -1754,7 +1613,6 @@ function setup(ctx) {
     });
     render();
     const outcome = await pending;
-    if (state.settings.jevCompareEnabled === true) void refreshJevCompareStatus();
     if (activeNormalizationRequestId === requestId) {
       activeNormalizationRequestId = null;
       activeNormalizationMode = null;
@@ -1918,7 +1776,6 @@ function setup(ctx) {
     state.canUndoGlossary = response.canUndoGlossary;
     state.decisionModelAvailable = response.decisionModelAvailable;
     state.phaseFourMessage = response.notice ?? "Context and glossary settings ready.";
-    void refreshJevCompareStatus();
   };
   const saveSettings = async () => {
     const contextMessageCount = Math.min(
@@ -1957,9 +1814,7 @@ function setup(ctx) {
         normalizationConnectionId: state.settings.normalizationConnectionId,
         normalizationModelOverride: state.settings.normalizationModelOverride,
         normalizationModelTimeoutSeconds: state.settings.normalizationModelTimeoutSeconds,
-        debugLoggingEnabled: debugEnabledToggle.checked,
-        jevCompareEnabled: state.settings.jevCompareEnabled === true,
-        jevComponents: { ...state.settings.jevComponents ?? DEFAULT_JEV_COMPONENTS }
+        debugLoggingEnabled: debugEnabledToggle.checked
       },
       chatId: state.activeChatId ?? void 0
     });
@@ -2016,270 +1871,6 @@ function setup(ctx) {
       debugOutput.select();
       debugStatus.textContent = "Clipboard access is unavailable. The log is selected; copy it manually.";
     }
-  };
-  const JEV_COMPARE_KEY = "jarvistype.jevCompare.v1";
-  const JEV_COMPARE_PREV_DEBUG_KEY = "jarvistype.jevCompare.prevDebug";
-  const JEV_COMPARE_MAX_BYTES = 35e5;
-  const JEV_COMPARE_LINE = /side=(pipeline|baseline) outcome=(\w+) in=(\d+|unknown) out=(\d+|unknown)(?: cost=([\d.eE+-]+))? candidates=(\d+) topBoundary=([\d.]+) topSemantic=([\d.]+) topCommand=([\d.]+) boundaryPass=(\d+) wouldPass=([01]) id=(\S+)/;
-  const readJevCompareEntries = () => {
-    try {
-      const raw = window.localStorage.getItem(JEV_COMPARE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  };
-  const writeJevCompareEntries = (entries) => {
-    try {
-      while (entries.length && JSON.stringify(entries).length > JEV_COMPARE_MAX_BYTES) entries.shift();
-      window.localStorage.setItem(JEV_COMPARE_KEY, JSON.stringify(entries));
-    } catch {
-    }
-  };
-  const parseJevCompareLines = (lines) => {
-    const parsed = [];
-    for (const line of lines) {
-      const match = JEV_COMPARE_LINE.exec(line);
-      if (!match) continue;
-      const stamp = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(line);
-      const number = (value) => value === void 0 || value === "unknown" ? null : Number(value);
-      parsed.push({
-        id: match[12],
-        t: stamp?.[1] ?? null,
-        side: match[1],
-        outcome: match[2],
-        inputTokens: number(match[3]),
-        outputTokens: number(match[4]),
-        cost: number(match[5]),
-        candidates: number(match[6]),
-        topBoundary: number(match[7]),
-        topSemantic: number(match[8]),
-        topCommand: number(match[9]),
-        boundaryPass: number(match[10]),
-        wouldPass: Number(match[11]),
-        raw: line
-      });
-    }
-    return parsed;
-  };
-  const archiveJevCompareEntries = (lines) => {
-    const entries = readJevCompareEntries();
-    const seen = new Set(entries.map((entry) => entry.id));
-    let added = 0;
-    for (const entry of parseJevCompareLines(lines)) {
-      if (seen.has(entry.id)) continue;
-      seen.add(entry.id);
-      entries.push(entry);
-      added += 1;
-    }
-    if (added) writeJevCompareEntries(entries);
-    return added;
-  };
-  const mergeJevCompareSources = (backend, local) => {
-    const byId = /* @__PURE__ */ new Map();
-    for (const entry of local) byId.set(entry.id, entry);
-    for (const entry of backend) byId.set(entry.id, entry);
-    return [...byId.values()];
-  };
-  const fetchBackendJevCompareEntries = async () => {
-    const outcome = await performRequest({
-      protocolVersion: PROTOCOL_VERSION,
-      type: "jev.compare.report.request",
-      requestId: createRequestId("jev-compare")
-    });
-    if (outcome.status === "resolved" && outcome.value.type === "jev.compare.report.response") {
-      return { entries: parseJevCompareLines(outcome.value.lines), raw: outcome.value.lines };
-    }
-    return null;
-  };
-  const updateJevCompareStatus = () => {
-    const entries = readJevCompareEntries();
-    const count = entries.length;
-    jevReportDownloadButton.disabled = count === 0;
-    jevReportResetButton.disabled = count === 0;
-    if (count === 0) {
-      jevCompareStatus.textContent = state.settings.jevCompareEnabled === true ? "No comparison entries accumulated yet. They are captured only when a dictated \u201Chint\u201D/\u201Cclue\u201D cue matches a hinted glossary entry." : "Comparison mode is off; the report is still available if entries were captured earlier.";
-      return;
-    }
-    let flips = 0;
-    for (let index = 0; index + 1 < entries.length; index += 1) {
-      const current = entries[index];
-      const next = entries[index + 1];
-      if (current.side === "pipeline" && next.side === "baseline" && current.wouldPass !== next.wouldPass)
-        flips += 1;
-    }
-    jevCompareStatus.textContent = `${count} comparison ${count === 1 ? "entry" : "entries"} accumulated${flips ? `; ${flips} outcome flip${flips === 1 ? "" : "s"} recorded` : ""}. Download to export.`;
-  };
-  const refreshJevCompareStatus = async () => {
-    const backend = await fetchBackendJevCompareEntries();
-    if (backend) archiveJevCompareEntries(backend.raw);
-    updateJevCompareStatus();
-    return backend?.entries.length ?? 0;
-  };
-  const averageJevCompare = (values) => {
-    const usable = values.filter((value) => typeof value === "number" && Number.isFinite(value));
-    return usable.length ? usable.reduce((sum, value) => sum + value, 0) / usable.length : null;
-  };
-  const sumJevCompare = (values) => values.reduce((sum, value) => typeof value === "number" && Number.isFinite(value) ? sum + value : sum, 0);
-  const summarizeJevCompare = (entries) => {
-    const pipeline = entries.filter((entry) => entry.side === "pipeline");
-    const baseline = entries.filter((entry) => entry.side === "baseline");
-    let flips = 0;
-    for (let index = 0; index + 1 < entries.length; index += 1) {
-      const current = entries[index];
-      const next = entries[index + 1];
-      if (current.side === "pipeline" && next.side === "baseline" && current.wouldPass !== next.wouldPass)
-        flips += 1;
-    }
-    const summarizeSide = (side) => ({
-      calls: side.length,
-      totalInputTokens: sumJevCompare(side.map((entry) => entry.inputTokens)),
-      totalOutputTokens: sumJevCompare(side.map((entry) => entry.outputTokens)),
-      totalCost: side.some((entry) => entry.cost !== null) ? sumJevCompare(side.map((entry) => entry.cost)) : null,
-      averageInputTokens: averageJevCompare(side.map((entry) => entry.inputTokens)),
-      averageOutputTokens: averageJevCompare(side.map((entry) => entry.outputTokens)),
-      averageTopSemantic: averageJevCompare(side.map((entry) => entry.topSemantic)),
-      wouldPass: side.filter((entry) => entry.wouldPass === 1).length
-    });
-    return {
-      schema: "jarvistype/jev-compare-report/1",
-      generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      appVersion: APP_VERSION,
-      hostOrigin: window.location.origin,
-      entries: entries.length,
-      pipeline: summarizeSide(pipeline),
-      baseline: summarizeSide(baseline),
-      approxInputTokenDelta: sumJevCompare(pipeline.map((entry) => entry.inputTokens)) - sumJevCompare(baseline.map((entry) => entry.inputTokens)),
-      outcomeFlips: flips,
-      note: "Pipeline is the applied reduced batch; baseline is the shadow twin with the original prompts. Negative delta means the reduction saved input tokens."
-    };
-  };
-  const downloadJevCompareReport = async () => {
-    const backend = await fetchBackendJevCompareEntries();
-    const entries = mergeJevCompareSources(backend?.entries ?? [], readJevCompareEntries());
-    if (!entries.length) {
-      jevCompareStatus.textContent = "No comparison entries have been captured yet.";
-      return;
-    }
-    const summary = summarizeJevCompare(entries);
-    const readme = [
-      "JarvisType Jev reduction comparison report",
-      "==========================================",
-      "",
-      "This report was accumulated locally on the device that produced it while",
-      "comparison mode was enabled. It is metadata only: it contains no draft text,",
-      "transcript, replacement text, prompt content, or provider answers.",
-      "",
-      "pipeline = the fully reduced glossary-hint decision batch (the applied result)",
-      "baseline = the shadow twin with the original unreduced prompts (report only)",
-      "",
-      "entries.jsonl  \u2014 one archived entry per line, in accumulation order",
-      "summary.json   \u2014 counts, token totals, flips (wouldPass differences)",
-      "manifest.json  \u2014 report schema, app version, and components used",
-      "README.txt     \u2014 this file"
-    ].join("\n");
-    const manifest = {
-      schema: "jarvistype/jev-compare-report/1",
-      appVersion: APP_VERSION,
-      exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      hostOrigin: window.location.origin,
-      entryCount: entries.length,
-      jevComponents: state.settings.jevComponents,
-      survival: "Stored in host-origin localStorage (key jarvistype.jevCompare.v1); survives extension updates, deletion, and reinstallation on this browser profile."
-    };
-    const zip = await createZip([
-      { name: "README.txt", data: readme },
-      { name: "manifest.json", data: JSON.stringify(manifest, null, 2) },
-      { name: "entries.jsonl", data: entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n" },
-      { name: "summary.json", data: JSON.stringify(summary, null, 2) }
-    ]);
-    const url = URL.createObjectURL(zip);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `jev-comparison-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace(/[:T]/g, "-")}.zip`;
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1e4);
-    jevCompareStatus.textContent = `Downloaded report with ${entries.length} entries.`;
-  };
-  const syncJevCompareControls = () => {
-    const enabled = state.settings.jevCompareEnabled === true;
-    jevCompareToggle.checked = enabled;
-    const components = state.settings.jevComponents ?? DEFAULT_JEV_COMPONENTS;
-    for (const toggle of jevComponentToggles) {
-      const key = toggle.dataset.jevComponent;
-      if (!key) continue;
-      toggle.checked = enabled ? true : components[key] !== false;
-      toggle.disabled = enabled;
-      const fieldset = toggle.closest("fieldset");
-      if (fieldset) fieldset.disabled = enabled;
-    }
-    updateJevCompareStatus();
-  };
-  const handleJevCompareToggle = () => {
-    const enabled = jevCompareToggle.checked;
-    const storage = (() => {
-      try {
-        return window.localStorage;
-      } catch {
-        return null;
-      }
-    })();
-    if (enabled) {
-      storage?.setItem(JEV_COMPARE_PREV_DEBUG_KEY, state.settings.debugLoggingEnabled === true ? "1" : "0");
-      state.settings.debugLoggingEnabled = true;
-      debugEnabledToggle.checked = true;
-    } else {
-      const previous = storage?.getItem(JEV_COMPARE_PREV_DEBUG_KEY);
-      if (previous === "0" || previous === "1") {
-        state.settings.debugLoggingEnabled = previous === "1";
-        debugEnabledToggle.checked = previous === "1";
-      }
-      storage?.removeItem(JEV_COMPARE_PREV_DEBUG_KEY);
-    }
-    state.settings.jevCompareEnabled = enabled;
-    scheduleSettingsSave(0);
-    syncJevCompareControls();
-  };
-  const handleJevComponentChange = () => {
-    const components = { ...DEFAULT_JEV_COMPONENTS, ...state.settings.jevComponents ?? {} };
-    for (const toggle of jevComponentToggles) {
-      const key = toggle.dataset.jevComponent;
-      if (key) components[key] = toggle.checked;
-    }
-    state.settings.jevComponents = components;
-    scheduleSettingsSave(0);
-  };
-  const handleJevReportDownload = () => void downloadJevCompareReport();
-  const handleJevReportResetClick = () => void handleJevReportReset();
-  let jevResetArmed = false;
-  let jevResetTimer = null;
-  const handleJevReportReset = async () => {
-    if (!jevResetArmed) {
-      jevResetArmed = true;
-      jevReportResetButton.textContent = "Confirm reset";
-      jevResetTimer = window.setTimeout(() => {
-        jevResetArmed = false;
-        jevReportResetButton.textContent = "Reset report";
-      }, 3e3);
-      return;
-    }
-    if (jevResetTimer !== null) window.clearTimeout(jevResetTimer);
-    jevResetArmed = false;
-    jevReportResetButton.textContent = "Reset report";
-    await performRequest({
-      protocolVersion: PROTOCOL_VERSION,
-      type: "jev.compare.report.reset.request",
-      requestId: createRequestId("jev-compare-reset")
-    });
-    try {
-      window.localStorage.removeItem(JEV_COMPARE_KEY);
-    } catch {
-    }
-    updateJevCompareStatus();
   };
   const saveGlossaryEntry = async (surface = "drawer") => {
     const canonicalInput = surface === "floating" ? floatingGlossaryCanonicalInput : glossaryCanonicalInput;
@@ -2981,10 +2572,6 @@ function setup(ctx) {
   cancelEditCandidatesButton.addEventListener("click", handleCancelEditCandidatesClick);
   grammarRepairSelect.addEventListener("change", handleGrammarRepairModeChange);
   debugEnabledToggle.addEventListener("change", handleDebugEnabledChange);
-  jevCompareToggle.addEventListener("change", handleJevCompareToggle);
-  for (const toggle of jevComponentToggles) toggle.addEventListener("change", handleJevComponentChange);
-  jevReportDownloadButton.addEventListener("click", handleJevReportDownload);
-  jevReportResetButton.addEventListener("click", handleJevReportResetClick);
   contextCountInput.addEventListener("input", handleContextCountInput);
   referenceCacheLimitInput.addEventListener("input", handleReferenceCacheLimitInput);
   referenceAdmissionOccurrencesInput.addEventListener(
@@ -3071,11 +2658,6 @@ function setup(ctx) {
     debugRefreshButton.removeEventListener("click", handleDebugRefreshClick);
     debugCopyButton.removeEventListener("click", handleDebugCopyClick);
     debugClearButton.removeEventListener("click", handleDebugClearClick);
-    jevCompareToggle.removeEventListener("change", handleJevCompareToggle);
-    for (const toggle of jevComponentToggles) toggle.removeEventListener("change", handleJevComponentChange);
-    jevReportDownloadButton.removeEventListener("click", handleJevReportDownload);
-    jevReportResetButton.removeEventListener("click", handleJevReportResetClick);
-    if (jevResetTimer !== null) window.clearTimeout(jevResetTimer);
     normalizationConnectionSelect.removeEventListener("change", handleNormalizationConnectionChange);
     decisionConnectionSelect.removeEventListener("change", handleDecisionConnectionChange);
     glossaryDefaultScopeSelect.removeEventListener("change", handleGlossaryDefaultScopeChange);
@@ -3505,10 +3087,6 @@ function shellMarkup() {
       .jt-proposal__details { display: grid; gap: .55rem; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: .45rem; padding: .55rem; }
       .jt-proposal__details summary { cursor: pointer; font-weight: 700; }
       .jt-proposal__details[open] summary { margin-bottom: .55rem; }
-      .jt-jev-compare { display: grid; gap: .45rem; padding: .6rem; border: 1px dashed color-mix(in srgb, currentColor 26%, transparent); border-radius: .45rem; }
-      .jt-jev-components { display: grid; gap: .3rem; margin: 0; padding: .45rem .6rem .6rem; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: .45rem; }
-      .jt-jev-components legend { font-size: .8rem; opacity: .85; padding: 0 .3rem; }
-      .jt-jev-components:disabled { opacity: .6; }
       .jt-debug-output { width: 100%; min-height: 12rem; resize: vertical; padding: .55rem; border-radius: .45rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .78rem; white-space: pre; overflow: auto; }
       .jt-candidate-list { display: grid; gap: .5rem; }
       .jt-candidate-list button { text-align: start; white-space: normal; }
@@ -3716,22 +3294,6 @@ function shellMarkup() {
           </div>
           <textarea class="jt-debug-output" readonly data-debug-output rows="14" spellcheck="false" aria-label="JarvisType debug timing log"></textarea>
           <p role="status" aria-live="polite" data-debug-status></p>
-          <div class="jt-jev-compare">
-            <label><span><input type="checkbox" data-jev-compare> Comparison mode (Jev reduction baseline)</span></label>
-            <small class="jt-shell__notice">The applied pipeline always runs the fully reduced glossary-hint decision batch, and a shadow twin with the original unreduced prompts is evaluated only to populate the comparison report \u2014 that twin never affects the draft. Expect roughly double Jev spend on hint-relevant normalizations while enabled. Debug logging is switched on automatically and restored when this is turned off. Nothing about the draft, replacements, or prompts is stored; only anonymous scores and token counts. The report accumulates locally on this device and survives extension updates and reinstalls.</small>
-            <fieldset class="jt-jev-components">
-              <legend>Reduction components (applied individually when comparison mode is off; all forced on while it is on)</legend>
-              <label><span><input type="checkbox" checked data-jev-component="boundaryPrompt"> Shorten boundary prompt</span></label>
-              <label><span><input type="checkbox" checked data-jev-component="semanticPrompt"> Shorten semantic prompt</span></label>
-              <label><span><input type="checkbox" checked data-jev-component="commandPrompt"> Shorten command prompt</span></label>
-              <label><span><input type="checkbox" checked data-jev-component="variantsWire"> Exclude glossary variants from the model payload</span></label>
-            </fieldset>
-            <div class="jt-actions">
-              <button type="button" data-jev-report-download disabled>Download report</button>
-              <button type="button" data-jev-report-reset disabled>Reset report</button>
-            </div>
-            <p role="status" aria-live="polite" data-jev-compare-status>No comparison entries accumulated yet.</p>
-          </div>
         </details>
         <p role="status" aria-live="polite" data-phase4-status>Loading context and glossary settings\u2026</p>
 

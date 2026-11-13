@@ -5,7 +5,8 @@ import type { SpellingLearningCandidate } from '../domain/normalization'
 import type { EditPlan, ResolvedEditOperation } from '../domain/edit-pipeline'
 
 export const PROTOCOL_VERSION = 7 as const
-export const APP_VERSION = '1.6.22'
+export const APP_VERSION = '1.6.26'
+
 export const REQUEST_TIMEOUT_MS = 15_000
 export const NORMALIZATION_TIMEOUT_MS = 120_000
 export const DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120
@@ -23,6 +24,13 @@ export const PHASE_FOUR_PERMISSIONS = [
 
 export type PermissionName = (typeof PHASE_FOUR_PERMISSIONS)[number]
 
+/**
+ * Final reduction configuration for the Jev glossary-hint boundary batch, settled
+ * by the 2026-11-13 comparison capture (`JEV-COMPARISON-FINDINGS.md`): semantic
+ * and boundary prompts are shortened (no measured degradation), the command
+ * prompt keeps its original form (measured −0.118 depression), and glossary
+ * variants are excluded from the payload. Not configurable by design.
+ */
 export interface PhaseFourSettings {
   contextMessageCount: number
   referenceCacheLimit?: number

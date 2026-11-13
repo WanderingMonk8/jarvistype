@@ -4310,7 +4310,7 @@ function escapeRegExp2(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.27";
+var APP_VERSION = "1.6.28";
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
 var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
 var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;
@@ -6004,9 +6004,17 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
   const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part|sentence)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+(?:to\s+the\s+(end|beginning|start)\s+of\s+the|(before|after)\s+the)\s+(sentences?|phrases?|parts?)\s+about\s+(.+)$/iu);
   if (!destinationMove && /^(?:move|relocate|shift)\s+.+?\s+to\s+the\s+(?:sentences?|phrases?|parts?)\s+about\s+/iu.test(command))
     return { handled: true, plan: null };
-  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentences?|phrases?|parts?)\s+about\s+(.+)$/iu);
+  const source = destinationMove ? null : command.match(/^(continue|delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:(?:from|after)\s+)?(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(sentences?|phrases?|parts?)\s+about\s+(.+)$/iu);
   if (!destinationMove && !source) return { handled: false, plan: null };
   let description = (destinationMove ? destinationMove[5] : source[3]).trim();
+  let continuationText = "";
+  if (!destinationMove && source?.[1]?.toLocaleLowerCase() === "continue") {
+    const split = description.match(/^(.*?)\s+(?:with|and)\s+(.+)$/iu);
+    if (!split || !split[1] || !split[2])
+      return { handled: true, plan: null };
+    description = split[1].trim();
+    continuationText = split[2].trim();
+  }
   let replacement = "";
   let moveDestination = "";
   let destinationIsSentence = false;
@@ -6123,7 +6131,7 @@ async function interpretAboutEdit(instruction, session, userId, connectionId, si
       const anchors = findAboutTargetCandidates(session.cleanText, session.paragraphs, "sentence").filter((candidate) => candidate.text.replace(/[.!?…]+[”’"']*$/u, "").trim().toLocaleLowerCase() === moveDestination.toLocaleLowerCase());
       if (anchors.length === 1) moveDestination = anchors[0].text;
     }
-    const operation = destinationMove ? { id: "about-move", type: /^(?:before|beginning|start)$/iu.test(destinationMove[2] ?? destinationMove[3] ?? "") ? "move_before" : "move_after", target: { exactText: unwrapEditArgument(destinationMove[1]) }, destination: selectedTarget } : paragraphBoundary ? { id: "about-move-paragraph-boundary", type: paragraphBoundary === "end" ? "move_after" : "move_before", target: selectedTarget, destination: { paragraphId: selected.paragraphId, ...paragraphBoundary === "end" ? { sentenceFromEnd: 1 } : { sentenceOrdinal: 1 } }, includeTrailingPunctuation: kind === "sentence" ? true : void 0 } : moveDestination ? { id: "about-move", type: moveDirection, target: selectedTarget, destination: { exactText: moveDestination }, includeTrailingPunctuation: kind === "sentence" ? true : void 0 } : verb === "replace" || verb === "change" ? { id: "about-replace", type: "replace", target: selectedTarget, text: replacement } : { id: "about-delete", type: "delete", target: selectedTarget };
+    const operation = destinationMove ? { id: "about-move", type: /^(?:before|beginning|start)$/iu.test(destinationMove[2] ?? destinationMove[3] ?? "") ? "move_before" : "move_after", target: { exactText: unwrapEditArgument(destinationMove[1]) }, destination: selectedTarget } : paragraphBoundary ? { id: "about-move-paragraph-boundary", type: paragraphBoundary === "end" ? "move_after" : "move_before", target: selectedTarget, destination: { paragraphId: selected.paragraphId, ...paragraphBoundary === "end" ? { sentenceFromEnd: 1 } : { sentenceOrdinal: 1 } }, includeTrailingPunctuation: kind === "sentence" ? true : void 0 } : moveDestination ? { id: "about-move", type: moveDirection, target: selectedTarget, destination: { exactText: moveDestination }, includeTrailingPunctuation: kind === "sentence" ? true : void 0 } : verb === "replace" || verb === "change" ? { id: "about-replace", type: "replace", target: selectedTarget, text: replacement } : verb === "continue" ? { id: "about-continue", type: "continue", target: selectedTarget, text: unwrapEditArgument(continuationText) } : { id: "about-delete", type: "delete", target: selectedTarget };
     const preview = selected.text.length > 300 ? `${selected.text.slice(0, 300)}\u2026` : selected.text;
     const explanation = overlappingReview ? `Overlapping \u201Cabout\u201D matches; verify the selected ${kind} boundaries: \u201C${preview}\u201D.` : uncertainReview ? `Uncertain \u201Cabout\u201D match; verify the selected ${kind}: \u201C${preview}\u201D.` : `Edit the ${kind} matching the description.`;
     const plan = parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation, operations: [operation] });

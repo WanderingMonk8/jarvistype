@@ -1953,9 +1953,17 @@ async function interpretAboutEdit(
   const destinationMove = command.match(/^(?:move|relocate|shift)\s+(?:the\s+)?(?:word|phrase|part|sentence)\s+([“"‘'][^”"’']+[”"’']|.+?)\s+(?:to\s+the\s+(end|beginning|start)\s+of\s+the|(before|after)\s+the)\s+(sentences?|phrases?|parts?)\s+about\s+(.+)$/iu)
   if (!destinationMove && /^(?:move|relocate|shift)\s+.+?\s+to\s+the\s+(?:sentences?|phrases?|parts?)\s+about\s+/iu.test(command))
     return { handled: true, plan: null }
-  const source = destinationMove ? null : command.match(/^(delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:the\s+)?(sentences?|phrases?|parts?)\s+about\s+(.+)$/iu)
+  const source = destinationMove ? null : command.match(/^(continue|delete|remove|erase|cut|replace|change|move|relocate|shift)\s+(?:(?:from|after)\s+)?(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(sentences?|phrases?|parts?)\s+about\s+(.+)$/iu)
   if (!destinationMove && !source) return { handled: false, plan: null }
   let description = (destinationMove ? destinationMove[5]! : source![3]!).trim()
+  let continuationText = ''
+  if (!destinationMove && source?.[1]?.toLocaleLowerCase() === 'continue') {
+    const split = description.match(/^(.*?)\s+(?:with|and)\s+(.+)$/iu)
+    if (!split || !split[1] || !split[2])
+      return { handled: true, plan: null }
+    description = split[1]!.trim()
+    continuationText = split[2]!.trim()
+  }
   let replacement = ''
   let moveDestination = ''
   let destinationIsSentence = false
@@ -2066,7 +2074,9 @@ async function interpretAboutEdit(
       : moveDestination ? { id: 'about-move', type: moveDirection, target: selectedTarget, destination: { exactText: moveDestination }, includeTrailingPunctuation: kind === 'sentence' ? true : undefined }
       : verb === 'replace' || verb === 'change'
         ? { id: 'about-replace', type: 'replace', target: selectedTarget, text: replacement }
-        : { id: 'about-delete', type: 'delete', target: selectedTarget }
+        : verb === 'continue'
+          ? { id: 'about-continue', type: 'continue', target: selectedTarget, text: unwrapEditArgument(continuationText) }
+          : { id: 'about-delete', type: 'delete', target: selectedTarget }
     const preview = selected.text.length > 300 ? `${selected.text.slice(0, 300)}…` : selected.text
     const explanation = overlappingReview ? `Overlapping “about” matches; verify the selected ${kind} boundaries: “${preview}”.` : uncertainReview ? `Uncertain “about” match; verify the selected ${kind}: “${preview}”.` : `Edit the ${kind} matching the description.`
     const plan = parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation, operations: [operation] })

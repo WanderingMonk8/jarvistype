@@ -2,7 +2,7 @@
 
 JarvisType is a [Lumiverse](https://lumiverse.chat/) extension for composing chat messages by voice. It provides a private working draft where users can dictate a message in multiple recordings, inspect context-aware normalization, manage a personal glossary, and approve the final text before it is sent.
 
-> **Project status:** Phase 7 release-candidate hardening is underway in `1.6.27`. Phases 0–6.5 passed local and hosted validation. Routine composition lives exclusively in the floating workspace; the drawer retains launch, diagnostics, context settings, and permanent searchable glossary management.
+> **Project status:** Phase 7 release-candidate hardening is underway in `1.6.28`. Phases 0–6.5 passed local and hosted validation. Routine composition lives exclusively in the floating workspace; the drawer retains launch, diagnostics, context settings, and permanent searchable glossary management.
 
 ## What JarvisType is designed to do
 
@@ -126,7 +126,7 @@ The validated primary placement is an extension-owned floating workspace opened 
 
 ## Current development build
 
-Version `1.6.27` is the Phase 7 release-candidate hardening build. It retains the accepted Phase 6.5 floating workflow and adds:
+Version `1.6.28` is the Phase 7 release-candidate hardening build. It retains the accepted Phase 6.5 floating workflow and adds:
 
 - Redacted operational failures with bounded diagnostic references instead of provider exception text.
 - Failure-injection and protocol-hardening coverage for draft preservation and safe retries.
@@ -136,7 +136,7 @@ Version `1.6.27` is the Phase 7 release-candidate hardening build. It retains th
 - Context-aware spoken punctuation with literal-word protection, explicit punctuation fallbacks, paired single quotes, ellipsis aliases, semicolon variants, and distinct hyphen/en-dash/em-dash commands.
 - Reliable proposal review when Lumiverse's backend active-chat lookup is transient: non-mutating normalization may complete, while the frontend discards proposals after a real chat transition and confirmation still revalidates backend ownership before any draft mutation.
 - Glossary entries can list words that must never be transcribed, so a known mishearing such as "Alice" is always rewritten to its canonical spelling "Ellis".
-- A new `Continue` command merges a spoken sentence with the sentence after it, or with an explicit continuation phrase, by replacing the terminal punctuation with a comma and lowering the first word; it supports `X…` → `X, Y…` and inherits `?`, `!`, `…`, and their combinations.
+- A new `Continue` command merges a spoken sentence with the sentence after it, or with an explicit continuation phrase, by replacing the terminal punctuation with a comma and lowering the first word; it supports `X…` → `X, Y…` and inherits `?`, `!`, `…`, and their combinations. It can locate the source by description, as in `Continue the sentence about Erin relaxing with and then she slouches`, using the same guarded about-resolution flow as delete, move, and replace.
 - The existing review-first recording, structured editing, glossary, undo/redo, and exactly-once confirmed-send safeguards.
 
 See [PHASE7-VALIDATION.md](./PHASE7-VALIDATION.md) for current automated evidence and the hosted release-candidate test sequence.

@@ -1088,7 +1088,7 @@ test('deletes an inclusive range across paragraphs and joins the remaining text 
 test('deletion removes punctuation only with a whole sentence part or quotation', () => {
   const text = 'I say to him, “I warned you before.”'
   const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
-  for (const [target, expected] of [['I warned you before', 'I say to him,'], ['before', 'I say to him, “I warned you.”']] as const) {
+  for (const [target, expected] of [['I warned you before', 'I say to him.'], ['before', 'I say to him, “I warned you.”']] as const) {
     const result = executeEditPlan(text, paragraphs, 1, { schemaVersion: 2, draftVersion: 1, explanation: 'Delete text.', operations: [{ id: 'delete', type: 'delete', target: { exactText: target } }] })
     assert.equal(result.ok && result.afterText, expected)
   }
@@ -2484,4 +2484,171 @@ test('matches an expanded contraction against contracted draft text', () => {
     colloquial.ok && colloquial.afterText,
     'They are gonna wait until most of those are trapped in the funnel before they let loose the arrows.',
   )
+})
+
+test('Continue attaches a continuation to a matched source with a comma', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      {
+        id: 'continue',
+        type: 'continue',
+        target: { exactText: 'his left and turn' },
+        text: 'And then he begins to shout.',
+      },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'He looks to his left and turn, and then he begins to shout.')
+  assert.equal(result.ok && result.operations[0]?.afterText, 'and then he begins to shout.')
+})
+
+test('Continue lowers the first ordinary word of the continuation and keeps names', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const lowered = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'c1', type: 'continue', target: { exactText: 'his left and turn' }, text: 'Then he sits.' },
+    ],
+  })
+  assert.equal(lowered.ok && lowered.afterText, 'He looks to his left and turn, then he sits.')
+  const kept = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'c2', type: 'continue', target: { exactText: 'his left and turn' }, text: 'Then Erin shouts.' },
+    ],
+  })
+  assert.equal(kept.ok && kept.afterText, 'He looks to his left and turn, Then Erin shouts.')
+})
+
+test('Continue handles Continuation with proper first ordinals and I', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const pronoun = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'c3', type: 'continue', target: { exactText: 'his left and turn' }, text: 'I decide to wave.' },
+    ],
+  })
+  assert.equal(pronoun.ok && pronoun.afterText, 'He looks to his left and turn, I decide to wave.')
+})
+
+test('Continue replaces a closing wrapper that belongs to the source', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const wrapped = 'She said, \"He looks to his left and turn.\"'
+  const paragraphsW = [{ id: 'p', ordinal: 1, lineIndex: 0, text: wrapped }]
+  const result = executeEditPlan(wrapped, paragraphsW, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      {
+        id: 'w1',
+        type: 'continue',
+        target: { exactText: 'his left and turn' },
+        text: 'and then he begins to shout.',
+      },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'She said, \"He looks to his left and turn, and then he begins to shout.\"')
+})
+
+test('Continue inherits question mark and paired punctuation from the source', () => {
+  const text = 'He looks to his left and turn?'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const questioned = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      {
+        id: 'q1',
+        type: 'continue',
+        target: { exactText: 'his left and turn' },
+        text: 'And then he begins to shout.',
+      },
+    ],
+  })
+  assert.equal(questioned.ok && questioned.afterText, 'He looks to his left and turn, and then he begins to shout?')
+  const exclaimed = executeEditPlan('He looks to his left and turn!', [{ id: 'p', ordinal: 1, lineIndex: 0, text: 'He looks to his left and turn!' }], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'e1', type: 'continue', target: { exactText: 'his left and turn' }, text: 'And then he begins to shout.' },
+    ],
+  })
+  assert.equal(exclaimed.ok && exclaimed.afterText, 'He looks to his left and turn, and then he begins to shout!')
+})
+
+test('Continue handles combinations of ? ! … at the end of X', () => {
+  const base = 'He looks to his left and turn'
+  const pass = (terminator: string, continuation: string, expected: string) => {
+    const text = base + terminator
+    const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'continue',
+      operations: [{ id: 'comb', type: 'continue', target: { exactText: 'his left and turn' }, text: continuation }],
+    })
+    assert.equal(result.ok && result.afterText, expected)
+  }
+  pass('!?', 'And then he begins to shout.', 'He looks to his left and turn, and then he begins to shout!?')
+  pass('?!', 'And then he begins to shout.', 'He looks to his left and turn, and then he begins to shout?!')
+  pass('!!', 'And then he begins to shout.', 'He looks to his left and turn, and then he begins to shout!!')
+  pass('…', 'And then he begins to shout.', 'He looks to his left and turn, and then he begins to shout…')
+})
+
+test('Continue replaces the closing terminator after X instead of appending to it', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'replace-end', type: 'continue', target: { exactText: 'his left and turn' }, text: 'And then he shouts.' },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'He looks to his left and turn, and then he shouts.')
+})
+
+test('Continue accepts trailing punctuation in X indistinguished from an ordinary target', () => {
+  const before = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: before }]
+  const result = executeEditPlan(before, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'period-included', type: 'continue', target: { exactText: 'his left and turn.' }, text: 'And then he shouts.' },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'He looks to his left and turn, and then he shouts.')
+})
+
+test('Continue surfaces target-not-found on miss', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'miss', type: 'continue', target: { exactText: 'totally unrelated text' }, text: 'And then he shouts.' },
+    ],
+  })
+  assert.equal(result.ok, false)
+  if (!result.ok) assert.match(result.reason, /target was not found|continue source/i)
 })

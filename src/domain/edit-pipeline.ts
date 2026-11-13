@@ -18,6 +18,7 @@ export type EditOperationType =
   | 'join_next'
   | 'move_before'
   | 'move_after'
+  | 'continue'
 
 export type PunctuationTarget =
   | 'period'
@@ -127,7 +128,14 @@ export function executeSequentialEditPlan(
     const nextOperation = plan.operations[index + 1]
     const nextQuotePart = nextOperation?.id.match(/^(.*)deterministic-(open|close)-quotation-range$/u)
     if (quotePart && nextQuotePart && quotePart[1] === nextQuotePart[1] && quotePart[2] !== nextQuotePart[2]) {
-      const checked = executeEditPlan(text, currentParagraphs, currentVersion, { ...plan, operations: [operation, nextOperation!] }, protectedCasingTerms)
+      const checked = executeEditPlan(
+        text,
+        currentParagraphs,
+        currentVersion,
+        { ...plan, operations: [operation, nextOperation!] },
+        protectedCasingTerms,
+        { skipSentenceRepair: true },
+      )
       if (!checked.ok) {
         failedCommand = { index: index + 1, operationId: operation.id, reason: checked.reason }
         break
@@ -152,6 +160,7 @@ export function executeSequentialEditPlan(
       ...plan,
       operations: [currentOperation],
     }, protectedCasingTerms, {
+      skipSentenceRepair: true,
       quotationWrap: (operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
         plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))) ||
         (operation.type === 'insert_before' && /^[“‘"']$/u.test(operation.text ?? '') &&
@@ -177,6 +186,9 @@ export function executeSequentialEditPlan(
     }
     text = result.afterText
   }
+  const final = repairParagraphBoundaries(text)
+  if (!final.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+  text = final.text
   if (!operations.length || text === cleanText)
     return { ok: false, reason: failedCommand ? `Command ${failedCommand.index}: ${failedCommand.reason}` : 'edit would not change the draft' }
   return {
@@ -216,6 +228,12 @@ export interface EditExecutionOptions {
    * against the universal deterministic cleanup.
    */
   skipOperationFormatting?: boolean
+  /**
+   * Internal switch used by the sequential executor for intermediate steps:
+   * skip the end-of-plan sentence repair so later operations see the exact
+   * intermediate text; the executor applies the same repair once at the end.
+   */
+  skipSentenceRepair?: boolean
 }
 
 export function executeEditPlan(
@@ -230,6 +248,19 @@ export function executeEditPlan(
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
   if (plan.operations.length === 1 && plan.operations[0]?.type === 'delete_range')
     return executeRangeDeletion(cleanText, paragraphs, plan.operations[0], protectedCasingTerms)
+  const inlineContinue = plan.operations.filter(isContinueSentenceOperation)
+  if (inlineContinue.length) {
+    if (inlineContinue.length !== plan.operations.length || inlineContinue.length > 1)
+      return { ok: false, reason: 'a continue must be the only operation in its edit plan' }
+    return executeContinueSentence(
+      cleanText,
+      paragraphs,
+      inlineContinue[0]!,
+      protectedCasingTerms,
+      formatText,
+      options.skipSentenceRepair === true,
+    )
+  }
   const inlineMoves = plan.operations.filter(isInlineMoveOperation)
   if (inlineMoves.length) {
     if (inlineMoves.length !== plan.operations.length || inlineMoves.length > 1)
@@ -240,6 +271,7 @@ export function executeEditPlan(
       inlineMoves[0]!,
       protectedCasingTerms,
       formatText,
+      options.skipSentenceRepair === true,
     )
   }
   const structural = plan.operations.filter(isStructuralOperation)
@@ -309,6 +341,11 @@ export function executeEditPlan(
     return { ok: false, reason: 'edited draft is too large' }
   if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  if (formatText && options.skipSentenceRepair !== true) {
+    const repaired = repairParagraphBoundaries(afterText)
+    if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+    afterText = repaired.text
+  }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
   return {
     ok: true,
@@ -353,7 +390,8 @@ function parseOperation(value: unknown): EditOperation | null {
     type !== 'split' &&
     type !== 'join_next' &&
     type !== 'move_before' &&
-    type !== 'move_after'
+    type !== 'move_after' &&
+    type !== 'continue'
   )
     return null
   const target = parseTarget(value.target)
@@ -909,15 +947,18 @@ function executeRangeDeletion(
   let right = text.slice(deletionEnd).replace(/^\s+/u, '')
   if (/[.!?…][”’"')\]]*$/u.test(left)) right = right.replace(/^[.!?…]+\s*/u, '')
   else if (/[,;:—–-]$/u.test(left)) right = right.replace(/^[,;:—–-]+\s*/u, '')
-  if (right && /[.!?…][”’"')\]]*$/u.test(left))
+  if (right && (!left || /[.!?…][”’"')\]]*$/u.test(left)))
     right = capitalizeReplacementAtSentenceOpening(left, left.length, right)
   else if (right && /[,;:—–-][”’"')\]]*$/u.test(left))
     right = formatInsertionCasing(left, left.length, right, protectedCasingTerms)
   const spacing = left && right && !/^[,.;:!?…)}\]”’]/u.test(right) ? ' ' : ''
-  const afterText = `${left}${spacing}${right}`
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(text))
+  const after = `${left}${spacing}${right}`
+  if (countFloatingQuotationMarks(after) > countFloatingQuotationMarks(text))
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
-  if (afterText === text) return { ok: false, reason: 'edit would not change the draft' }
+  if (after === text) return { ok: false, reason: 'edit would not change the draft' }
+  const repaired = repairParagraphBoundaries(after)
+  if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+  const afterText = repaired.text
   return {
     ok: true,
     afterText,
@@ -933,6 +974,7 @@ function executeInlineMove(
   operation: InlineMoveOperation,
   protectedCasingTerms: readonly string[],
   formatText: boolean,
+  skipSentenceRepair = false,
 ): EditPipelineResult {
   const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'move source')
   if (typeof source === 'string') return { ok: false, reason: source }
@@ -1003,6 +1045,7 @@ function executeInlineMove(
     formatText &&
     operation.type === 'move_before' &&
     isSentenceOpeningAt(withoutSource, insertionPoint) &&
+    isContinuingInsertion(formattedMovedText) &&
     /\p{L}/u.test(formattedMovedText)
       ? lowercaseOrdinarySentenceOpening(
           withoutSource,
@@ -1017,11 +1060,16 @@ function executeInlineMove(
   const insertion = formatText
     ? addBoundarySpacing(withoutSource, insertionPoint, formattedMovedText)
     : formattedMovedText
-  const afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`
+  let afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
   if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  if (formatText && !skipSentenceRepair) {
+    const repaired = repairParagraphBoundaries(afterText)
+    if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+    afterText = repaired.text
+  }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
 
   return {
@@ -1041,6 +1089,107 @@ function executeInlineMove(
       ...new Set([source.paragraphOrdinal, destination.paragraphOrdinal]),
     ].sort((left, right) => left - right),
   }
+}
+
+/**
+ * Continue (`"Continue X with Y"`) — join a phrase to a continuation inline.
+ * The matched source is kept verbatim, the sentence-ending punctuation at the
+ * end of the source is replaced with `, continuation`, and the continuation's
+ * first ordinary word is lowered (names and "I" stay in their original casing).
+ * Closing wrappers (quotes, parens, brackets) are re-attached after the
+ * continuation.
+ */
+function executeContinueSentence(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  operation: EditOperation & { type: 'continue' },
+  protectedCasingTerms: readonly string[],
+  formatText: boolean,
+  skipSentenceRepair = false,
+): EditPipelineResult {
+  const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'continue source')
+  if (typeof source === 'string') return { ok: false, reason: source }
+  const start = source.start
+  let end = source.end
+  // Trim trailing punctuation inside the matched span so X stops at the last word character.
+  while (end > start && /[.,;:!?…—–-]/u.test(cleanText[end - 1]!)) end -= 1
+  const text = operation.text ?? ''
+  // Consume the terminal punctuation run and any closing wrapper that belongs
+  // to it; the merged sentence inherits the exact run.
+  const after = cleanText.slice(end)
+  const closeMatch = after.match(/^([.!?…—–-]+)([”’"')\]}]*)/u)
+  const raw = closeMatch?.[1] ?? ''
+  const closers = closeMatch?.[2] ?? ''
+  const consumed = (closeMatch?.[0].length ?? 0)
+  const inheritedTermination = /[!?…]/u.test(raw) ? raw : ''
+  // Capitalise the first ordinary word of the continuation the way an inline
+  // rewrite would: lowercase names and "I" stay; evidence decides the rest.
+  const continuationCore = formatText
+    ? (() => {
+        const lower = lowercaseOrdinarySentenceOpening(text, 0, text, 0, protectedCasingTerms)
+        return lower ? `${lower.text}${text.slice(lower.end)}` : text
+      })()
+    : text
+  // If the original source ended with ?, !, or …, the merged sentence keeps
+  // that exact terminator instead of adopting Y's: X? -> X, Y?   and   X! -> X, Y!
+  //   and   X… -> X, Y…
+  let continuation: string
+  if (inheritedTermination) {
+    const stripped = continuationCore.replace(/[.!?…]+$/u, '')
+    continuation = `${stripped}${inheritedTermination}`
+  } else if (/[.!?…]$/u.test(continuationCore)) {
+    continuation = continuationCore
+  } else {
+    continuation = `${continuationCore}.`
+  }
+    const afterText = `${cleanText.slice(0, end)}, ${continuation}${closers}${after.slice(consumed)}`
+  if (afterText.length > MAX_DRAFT_CHARACTERS)
+    return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
+  if (formatText && !skipSentenceRepair) {
+    const repaired = repairParagraphBoundaries(afterText)
+    if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+    return finishContinueSentence(repaired.text, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
+  }
+  return finishContinueSentence(afterText, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
+}
+
+function finishContinueSentence(
+  afterText: string,
+  paragraphs: readonly DraftParagraph[],
+  operation: EditOperation & { type: 'continue' },
+  paragraphStart: number,
+  paragraphEnd: number,
+  startOffset: number,
+  paragraphOrdinal: number,
+  continuation: string,
+): EditPipelineResult {
+  const affected = new Set<number>()
+  affected.add(paragraphOrdinal)
+  return {
+    ok: true,
+    afterText,
+    operations: [
+      {
+        ...operation,
+        startOffset,
+        endOffset: paragraphEnd,
+        beforeText: afterText.slice(paragraphStart, paragraphEnd),
+        afterText: continuation,
+        paragraphOrdinal,
+      },
+    ],
+    affectedParagraphOrdinals: [...affected].sort((left, right) => left - right),
+  }
+}
+
+
+type ContinueSentenceOperation = EditOperation & { type: 'continue' }
+
+function isContinueSentenceOperation(operation: EditOperation): operation is ContinueSentenceOperation {
+  return operation.type === 'continue'
 }
 
 /** Sentence-part punctuation that becomes orphaned when the entire part is removed. */
@@ -1503,7 +1652,6 @@ function formatInsertionCasing(
 ): string {
   if (isSentenceOpeningAt(text, point))
     return capitalizeReplacementAtSentenceOpening(text, point, insertion)
-  if (!/[,;:—–-][ \t]*$/u.test(text.slice(0, point))) return insertion
   // Quoted speech can legitimately start a new sentence after a dialogue tag.
   if (/^[ \t]*[“‘"'([{]/u.test(insertion)) return insertion
   const first = insertion.match(/^[ \t]*(\p{Lu}[\p{L}\p{M}'’-]*)/u)?.[1]
@@ -1516,6 +1664,70 @@ function formatInsertionCasing(
     protectedCasingTerms,
   )
   return lowered ? `${lowered.text}${insertion.slice(lowered.end)}` : insertion
+}
+
+const OPENING_PUNCTUATION = new Set([
+  '(', '[', '{',
+  '“', '‘', '‛', '„', '‚', '«', '‹', '„', '‚',
+  '\u0022', '\u0027', '`',
+])
+
+function isSentenceOpeningPunctuation(character: string): boolean {
+  return OPENING_PUNCTUATION.has(character)
+}
+
+function repairParagraphBoundaries(paragraph: string): { ok: boolean; text: string } {
+  let text = paragraph
+  // Strip disallowed punctuation from the start of every sentence, then repair
+  // the capitalisation of whatever sentence remains.
+  for (let pass = 0; pass < 16; pass += 1) {
+    const ranges = findSentenceRanges(text, 0, text.length)
+    let mutated = false
+    for (const range of ranges) {
+      if (range.start >= text.length) continue
+      const slice = text.slice(range.start, range.end)
+      if (!/[\p{L}\p{N}]/u.test(slice)) {
+        // A sentence with no letters or digits at all is never a sentence;
+        // refuse to drop its characters.
+        return { ok: false, text: paragraph }
+      }
+      if (
+        /[\p{P}\p{S}]/u.test(text[range.start]!) &&
+        !isSentenceOpeningPunctuation(text[range.start]!)
+      ) {
+        let cut = range.start
+        while (
+          cut < text.length &&
+          /[\p{P}\p{S}]/u.test(text[cut]!) &&
+          !isSentenceOpeningPunctuation(text[cut]!)
+        )
+          cut += 1
+        text = text.slice(0, range.start) + text.slice(cut)
+        text = capitalizeExistingSentenceOpening(text, range.start)
+        mutated = true
+        break
+      }
+    }
+    if (!mutated) break
+  }
+  // A sentence must not start with disallowed punctuation now.
+  for (const range of findSentenceRanges(text, 0, text.length)) {
+    const head = text[range.start]
+    if (head && /[\p{P}\p{S}]/u.test(head) && !isSentenceOpeningPunctuation(head))
+      return { ok: false, text: paragraph }
+  }
+  // A sentence may not end in a comma. Replace a trailing comma with a period
+  // at the end of the paragraph.
+  let tail = text.length - 1
+  while (tail >= 0 && /\s/u.test(text[tail]!)) tail -= 1
+  if (tail >= 0 && text[tail] === ',') {
+    text = text.slice(0, tail) + '.' + text.slice(tail + 1)
+  }
+  return { ok: true, text }
+}
+
+export function validateSentenceBoundaries(text: string): { ok: boolean; text: string } {
+  return repairParagraphBoundaries(text)
 }
 
 function isContinuingInsertion(value: string): boolean {
@@ -1743,11 +1955,14 @@ function executeStructuralPlan(
     })
   }
 
-  const afterText = working.map((paragraph) => paragraph.text).join('\n\n')
-  if (afterText.length > MAX_DRAFT_CHARACTERS)
+  const joined = working.map((paragraph) => paragraph.text).join('\n\n')
+  if (joined.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingQuotationMarks(joined) > countFloatingQuotationMarks(cleanText))
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  const repaired = repairParagraphBoundaries(joined)
+  if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+  const afterText = repaired.text
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
   return {
     ok: true,

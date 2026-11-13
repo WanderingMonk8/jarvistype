@@ -1091,6 +1091,23 @@ function executeInlineMove(
   }
 }
 
+const CONTINUATION_HELPER = /^(?:the|this|that|a|an)\s+(?:phrases?|sentences?|words?|clauses?|parts?|fragments?)(?=$|\s|[,.:;–—-])(?:\s*[,.:;–—-]\s*|\s+)?/iu
+
+/**
+ * Drop the filler words that may introduce a spoken continuation, along with any
+ * attached punctuation — "the phrase, only then …" → "only then …". These words
+ * are part of the command grammar, not of the continuation text the user wants.
+ */
+export function stripContinuationHelper(text: string): string {
+  let current = text.trim()
+  for (let pass = 0; pass < 4; pass += 1) {
+    const match = CONTINUATION_HELPER.exec(current)
+    if (!match) return current
+    current = current.slice(match[0].length).trim()
+  }
+  return current
+}
+
 /**
  * Continue (`"Continue X with Y"`) — join a phrase to a continuation inline.
  * The matched source is kept verbatim, the sentence-ending punctuation at the
@@ -1113,7 +1130,8 @@ function executeContinueSentence(
   let end = source.end
   // Trim trailing punctuation inside the matched span so X stops at the last word character.
   while (end > start && /[.,;:!?…—–-]/u.test(cleanText[end - 1]!)) end -= 1
-  const text = operation.text ?? ''
+  const text = stripContinuationHelper(operation.text ?? '')
+  if (!/[\p{L}\p{N}]/u.test(text)) return { ok: false, reason: 'continue target was not found' }
   // Consume the terminal punctuation run and any closing wrapper that belongs
   // to it; the merged sentence inherits the exact run.
   const after = cleanText.slice(end)

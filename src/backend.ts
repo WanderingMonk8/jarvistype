@@ -34,6 +34,7 @@ import {
   hasTargetPunctuation,
   normalizeNamedTargetPunctuation,
   parseEditPlan,
+  stripContinuationHelper,
   type EditPlan,
   type ResolvedEditOperation,
   type EditTarget,
@@ -1958,11 +1959,23 @@ async function interpretAboutEdit(
   let description = (destinationMove ? destinationMove[5]! : source![3]!).trim()
   let continuationText = ''
   if (!destinationMove && source?.[1]?.toLocaleLowerCase() === 'continue') {
-    const split = description.match(/^(.*?)\s+(?:with|and)\s+(.+)$/iu)
-    if (!split || !split[1] || !split[2])
+    // Prefer the separator whose tail matches the filler-shaped continuation
+    // ("with the phrase, …"), so an about description that itself contains
+    // "with" does not swallow the payload.
+    const matches = [...description.matchAll(/\s+(?:with|and)\s+/giu)]
+    const helper = matches.find((match) =>
+      /^(?:the|this|that|a|an)\s+(?:phrases?|sentences?|words?|clauses?|parts?|fragments?)(?:\s*[,.:;–—-]\s*|\s+)/iu.test(
+        description.slice((match.index ?? 0) + match[0].length),
+      ),
+    )
+    const chosen = helper ?? matches[0]
+    if (!chosen) return { handled: true, plan: null }
+    const index = chosen.index ?? 0
+    const tail = description.slice(index + chosen[0].length)
+    description = description.slice(0, index).trim()
+    continuationText = stripContinuationHelper(unwrapEditArgument(tail))
+    if (!description || !/[\p{L}\p{N}]/u.test(continuationText))
       return { handled: true, plan: null }
-    description = split[1]!.trim()
-    continuationText = split[2]!.trim()
   }
   let replacement = ''
   let moveDestination = ''
@@ -2075,7 +2088,7 @@ async function interpretAboutEdit(
       : verb === 'replace' || verb === 'change'
         ? { id: 'about-replace', type: 'replace', target: selectedTarget, text: replacement }
         : verb === 'continue'
-          ? { id: 'about-continue', type: 'continue', target: selectedTarget, text: unwrapEditArgument(continuationText) }
+          ? { id: 'about-continue', type: 'continue', target: selectedTarget, text: continuationText }
           : { id: 'about-delete', type: 'delete', target: selectedTarget }
     const preview = selected.text.length > 300 ? `${selected.text.slice(0, 300)}…` : selected.text
     const explanation = overlappingReview ? `Overlapping “about” matches; verify the selected ${kind} boundaries: “${preview}”.` : uncertainReview ? `Uncertain “about” match; verify the selected ${kind}: “${preview}”.` : `Edit the ${kind} matching the description.`
@@ -2151,7 +2164,7 @@ async function interpretEditInstruction(
         {
           role: 'system',
           content:
-            'Recognize flexible edit vocabulary only when the instruction supplies the arguments required for that operation. Delete aliases: delete, remove, take off, take out, erase, cut. Replace aliases: replace X with Y; change X to or into Y; swap X with or for Y; substitute X with or for Y. Insert aliases: insert, add, place, or put X before or after Y. Append aliases: append, add to the end, place at the end, put at the end, or tack onto the end. Prepend aliases: prepend, add to the beginning or start, place at the beginning or start, or put at the beginning or start. Move aliases: move, relocate, or shift X before or after Y. Split aliases: split, break, or divide a paragraph after the identified target. Join aliases: join, merge, or combine a paragraph with the following paragraph. Casing aliases: uppercase or make all caps; lowercase or make lowercase; capitalize or title case every word in the target phrase. Continue aliases: continue X with Y; continue from/after X with Y; continue X with this phrase Y (where the from/after/this/the/phrase/sentence/word/clause/part parts are optional fillers). A continue operation attaches the spoken continuation to the end of the matched target, replacing any ending sentence punctuation with a comma and lowercasing the continuation’s first ordinary word. If the matched source ends with ?, !, …, or a combination such as !?, !!, or ?!, the merged sentence inherits that exact terminator instead of the continuation’s terminal punctuation. Isolated verbs without the required target, payload, or destination are not valid edit operations.',
+            'Recognize flexible edit vocabulary only when the instruction supplies the arguments required for that operation. Delete aliases: delete, remove, take off, take out, erase, cut. Replace aliases: replace X with Y; change X to or into Y; swap X with or for Y; substitute X with or for Y. Insert aliases: insert, add, place, or put X before or after Y. Append aliases: append, add to the end, place at the end, put at the end, or tack onto the end. Prepend aliases: prepend, add to the beginning or start, place at the beginning or start, or put at the beginning or start. Move aliases: move, relocate, or shift X before or after Y. Split aliases: split, break, or divide a paragraph after the identified target. Join aliases: join, merge, or combine a paragraph with the following paragraph. Casing aliases: uppercase or make all caps; lowercase or make lowercase; capitalize or title case every word in the target phrase. Continue aliases: continue X with Y; continue from/after X with Y; continue X with this phrase Y (where the from/after/this/the/phrase/sentence/word/clause/part parts are optional fillers). When the continuation Y itself begins with words such as “the phrase,” “this sentence,” “the word,” “the clause,” “the part,” or “the fragment,” with optional attached punctuation, those words and the attached punctuation are fillers introducing the literal continuation and must be omitted from Y. A continue operation attaches the spoken continuation to the end of the matched target, replacing any ending sentence punctuation with a comma and lowercasing the continuation’s first ordinary word. If the matched source ends with ?, !, …, or a combination such as !?, !!, or ?!, the merged sentence inherits that exact terminator instead of the continuation’s terminal punctuation. Isolated verbs without the required target, payload, or destination are not valid edit operations.',
         },
         {
           role: 'user',

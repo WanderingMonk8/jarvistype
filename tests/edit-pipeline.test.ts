@@ -2652,3 +2652,33 @@ test('Continue surfaces target-not-found on miss', () => {
   assert.equal(result.ok, false)
   if (!result.ok) assert.match(result.reason, /target was not found|continue source/i)
 })
+
+test('Continue drops leading continuation filler words and attached punctuation', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const make = (id: string, payload: string) => executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id, type: 'continue', target: { exactText: 'his left and turn' }, text: payload }],
+  })
+  const withComma = make('filler-1', 'the phrase, and then he begins to shout.')
+  assert.equal(withComma.ok && withComma.afterText, 'He looks to his left and turn, and then he begins to shout.')
+  const withoutPunctuation = make('filler-2', 'this sentence and then he begins to shout.')
+  assert.equal(withoutPunctuation.ok && withoutPunctuation.afterText, 'He looks to his left and turn, and then he begins to shout.')
+  const sentenceHelper = make('filler-3', 'the word; no one believes him.')
+  assert.equal(sentenceHelper.ok && sentenceHelper.afterText, 'He looks to his left and turn, no one believes him.')
+})
+
+test('Continue rejects a continuation that is nothing but filler words', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id: 'filler-only', type: 'continue', target: { exactText: 'his left and turn' }, text: 'the phrase' }],
+  })
+  assert.equal(result.ok, false)
+  if (!result.ok) assert.match(result.reason, /target was not found/i)
+})

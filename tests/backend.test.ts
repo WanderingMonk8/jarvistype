@@ -3068,6 +3068,9 @@ test('resolves about sentence and phrase continue commands with descriptive abou
     ['Erin unwinds herself. Maeve waits.', 'Continue the phrase about Erin relaxing with and then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],
     ['Erin unwinds herself. Maeve waits.', 'Continue from the sentence about Erin relaxing with And then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],
     ['Erin unwinds herself. Maeve waits.', 'Continue the sentence about Erin relaxing with I mean seriously.', 0, 'Erin unwinds herself, I mean seriously. Maeve waits.'],
+    ['Erin unwinds herself. Maeve waits.', 'Continue the sentence about Erin relaxing with the phrase, and then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],
+    ['Erin unwinds herself. Maeve waits.', 'Continue the sentence about Erin with a groan with the phrase, and then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],
+    ['She doesn’t elaborate on that. She wipes her hands on her thighs.', 'Continue the sentence about Xu not elaborating with the phrase, only then would you know.', 0, 'She doesn’t elaborate on that, only then would you know. She wipes her hands on her thighs.'],
   ] as const
   for (const [index, [draft, instruction, selected, expected]] of examples.entries()) {
     const userId = `about-continue-user-${index}`

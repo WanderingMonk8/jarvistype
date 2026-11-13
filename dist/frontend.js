@@ -63,7 +63,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.28";
+var APP_VERSION = "1.6.29";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
@@ -471,7 +471,7 @@ var COMMAND_GROUPS = [
         "Insert after",
         "Insert, add, place, or put a new paragraph after paragraph 2 that says \u201CThe route is approved.\u201D"
       ],
-      ["Continue", "Continue the sentence \u201CI look at the man from across the room\u201D with \u201CAnd I decide to wave.\u201D \u2014 the sentence becomes \u201CI look at the man from across the room, and I decide to wave.\u201D The continuation attaches to the end of the matched sentence or fragment: the sentence-ending punctuation is replaced with a comma, the continuation starts with a lowercase first ordinary word (proper nouns and \u201CI\u201D keep their capitalization), and a wrapping pair (quote, paren, bracket, etc) stays around the whole joined text. Spell the sentence/phrase to locate, then the continuation after \u201Cwith\u201D (or \u201Cand\u201D); words like \u201Cfrom,\u201D \u201Cafter,\u201D \u201Cthis phrase,\u201D \u201Cthis sentence,\u201D or \u201Cthis word\u201D are optional fillers. You can also continue from a fragment: \u201CContinue the sentence \u2018his left and turn\u2019 with \u2018And then he begins to shout.\u2019\u201D If X ends with ?, !, \u2026, or combinations like !? or !! or ?! the merged sentence inherits X\u2019s exact terminator instead of Y\u2019s: \u201Chis left and turn?\u201D + continuation \u2192 \u201Chis left and turn, and then he begins to shout?\u201D"],
+      ["Continue", "Continue the sentence \u201CI look at the man from across the room\u201D with \u201CAnd I decide to wave.\u201D \u2014 the sentence becomes \u201CI look at the man from across the room, and I decide to wave.\u201D The continuation attaches to the end of the matched sentence or fragment: the sentence-ending punctuation is replaced with a comma, the continuation starts with a lowercase first ordinary word (proper nouns and \u201CI\u201D keep their capitalization), and a wrapping pair (quote, paren, bracket, etc) stays around the whole joined text. Spell the sentence/phrase to locate, then the continuation after \u201Cwith\u201D (or \u201Cand\u201D); words like \u201Cfrom,\u201D \u201Cafter,\u201D \u201Cthis phrase,\u201D \u201Cthis sentence,\u201D or \u201Cthis word\u201D are optional fillers. You can also continue from a fragment: \u201CContinue the sentence \u2018his left and turn\u2019 with \u2018And then he begins to shout.\u2019\u201D If X ends with ?, !, \u2026, or combinations like !? or !! or ?! the merged sentence inherits X\u2019s exact terminator instead of Y\u2019s: \u201Chis left and turn?\u201D + continuation \u2192 \u201Chis left and turn, and then he begins to shout?\u201D A leading \u201Cthe phrase,\u201D \u201Cthe sentence,\u201D \u201Cthe word,\u201D \u201Cthis sentence,\u201D etc. in the continuation (with or without attached punctuation) are optional fillers and are dropped: \u201C\u2026with the phrase, only then would you know\u201D attaches just \u201Conly then would you know.\u201D"],
       [
         "Append",
         "Append, add to the end, place at the end, put at the end, or tack onto the end of paragraph 1."

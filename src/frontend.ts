@@ -1484,7 +1484,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     })
     render()
     const outcome = await pending
-    void archiveJevCompareFromBackend()
+    if (state.settings.jevCompareEnabled === true) void refreshJevCompareStatus()
     if (activeNormalizationRequestId === requestId) { activeNormalizationRequestId = null; activeNormalizationMode = null }
     if (!alive) return
     if (outcome.status === 'cancelled') return
@@ -1559,7 +1559,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     })
     render()
     const outcome = await pending
-    void archiveJevCompareFromBackend()
+    if (state.settings.jevCompareEnabled === true) void refreshJevCompareStatus()
     if (activeNormalizationRequestId === requestId) { activeNormalizationRequestId = null; activeNormalizationMode = null }
     if (!alive) return
     if (outcome.status === 'cancelled') return
@@ -1766,6 +1766,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     state.canUndoGlossary = response.canUndoGlossary
     state.decisionModelAvailable = response.decisionModelAvailable
     state.phaseFourMessage = response.notice ?? 'Context and glossary settings ready.'
+    void refreshJevCompareStatus()
   }
 
   const saveSettings = async () => {
@@ -1926,23 +1927,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
   }
 
-  const archiveJevCompareEntries = (lines: readonly string[]): number => {
-    const entries = readJevCompareEntries()
-    const seen = new Set(entries.map((entry) => entry.id))
-    let added = 0
+  const parseJevCompareLines = (lines: readonly string[]): JevCompareEntry[] => {
+    const parsed: JevCompareEntry[] = []
     for (const line of lines) {
-      const marker = line.indexOf('[jev.compare]')
-      if (marker < 0) continue
       const match = JEV_COMPARE_LINE.exec(line)
       if (!match) continue
-      const id = match[12]!
-      if (seen.has(id)) continue
-      seen.add(id)
       const stamp = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(line)
       const number = (value: string | undefined) =>
         value === undefined || value === 'unknown' ? null : Number(value)
-      entries.push({
-        id,
+      parsed.push({
+        id: match[12]!,
         t: stamp?.[1] ?? null,
         side: match[1] as 'pipeline' | 'baseline',
         outcome: match[2]!,
@@ -1957,10 +1951,48 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         wouldPass: Number(match[11]) as 0 | 1,
         raw: line,
       })
+    }
+    return parsed
+  }
+
+  const archiveJevCompareEntries = (lines: readonly string[]): number => {
+    const entries = readJevCompareEntries()
+    const seen = new Set(entries.map((entry) => entry.id))
+    let added = 0
+    for (const entry of parseJevCompareLines(lines)) {
+      if (seen.has(entry.id)) continue
+      seen.add(entry.id)
+      entries.push(entry)
       added += 1
     }
     if (added) writeJevCompareEntries(entries)
     return added
+  }
+
+  /** Merge local and backend sources by entry id; backend wins on collision. */
+  const mergeJevCompareSources = (
+    backend: readonly JevCompareEntry[],
+    local: readonly JevCompareEntry[],
+  ): JevCompareEntry[] => {
+    const byId = new Map<string, JevCompareEntry>()
+    for (const entry of local) byId.set(entry.id, entry)
+    for (const entry of backend) byId.set(entry.id, entry)
+    return [...byId.values()]
+  }
+
+  const fetchBackendJevCompareEntries = async (): Promise<{
+    entries: JevCompareEntry[]
+    raw: string[]
+  } | null> => {
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'jev.compare.report.request',
+      requestId: createRequestId('jev-compare'),
+    })
+    if (outcome.status === 'resolved' && outcome.value.type === 'jev.compare.report.response') {
+      return { entries: parseJevCompareLines(outcome.value.lines), raw: outcome.value.lines }
+    }
+    return null
   }
 
   const updateJevCompareStatus = () => {
@@ -1971,7 +2003,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (count === 0) {
       jevCompareStatus.textContent =
         state.settings.jevCompareEnabled === true
-          ? 'No comparison entries accumulated yet.'
+          ? 'No comparison entries accumulated yet. They are captured only when a dictated “hint”/“clue” cue matches a hinted glossary entry.'
           : 'Comparison mode is off; the report is still available if entries were captured earlier.'
       return
     }
@@ -1985,17 +2017,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     jevCompareStatus.textContent = `${count} comparison ${count === 1 ? 'entry' : 'entries'} accumulated${flips ? `; ${flips} outcome flip${flips === 1 ? '' : 's'} recorded` : ''}. Download to export.`
   }
 
-  const archiveJevCompareFromBackend = async () => {
-    if (state.settings.jevCompareEnabled !== true || state.settings.debugLoggingEnabled !== true) return
-    const outcome = await performRequest({
-      protocolVersion: PROTOCOL_VERSION,
-      type: 'debug.log.request',
-      requestId: createRequestId('jev-archive'),
-    })
-    if (outcome.status === 'resolved' && outcome.value.type === 'debug.log.response') {
-      const added = archiveJevCompareEntries(outcome.value.entries)
-      if (added) updateJevCompareStatus()
-    }
+  /** Fetch the backend accumulator, merge it into the local mirror, refresh the status line. */
+  const refreshJevCompareStatus = async () => {
+    const backend = await fetchBackendJevCompareEntries()
+    if (backend) archiveJevCompareEntries(backend.raw)
+    updateJevCompareStatus()
+    return backend?.entries.length ?? 0
   }
 
   const averageJevCompare = (values: ReadonlyArray<number | null>) => {
@@ -2041,8 +2068,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
 
   const downloadJevCompareReport = async () => {
-    const entries = readJevCompareEntries()
-    if (!entries.length) return
+    // Always pull the latest backend accumulator before packaging.
+    const backend = await fetchBackendJevCompareEntries()
+    const entries = mergeJevCompareSources(backend?.entries ?? [], readJevCompareEntries())
+    if (!entries.length) {
+      jevCompareStatus.textContent = 'No comparison entries have been captured yet.'
+      return
+    }
     const summary = summarizeJevCompare(entries)
     const readme = [
       'JarvisType Jev reduction comparison report',
@@ -2104,18 +2136,19 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const handleJevCompareToggle = () => {
     const enabled = jevCompareToggle.checked
+    // localStorage may be unavailable in the host; settings still work without it.
+    const storage = (() => { try { return window.localStorage } catch { return null } })()
     if (enabled) {
-      // Comparison mode requires debug capture; remember the prior debug state to restore it.
-      window.localStorage.setItem(JEV_COMPARE_PREV_DEBUG_KEY, state.settings.debugLoggingEnabled === true ? '1' : '0')
+      storage?.setItem(JEV_COMPARE_PREV_DEBUG_KEY, state.settings.debugLoggingEnabled === true ? '1' : '0')
       state.settings.debugLoggingEnabled = true
       debugEnabledToggle.checked = true
     } else {
-      const previous = window.localStorage.getItem(JEV_COMPARE_PREV_DEBUG_KEY)
+      const previous = storage?.getItem(JEV_COMPARE_PREV_DEBUG_KEY)
       if (previous === '0' || previous === '1') {
         state.settings.debugLoggingEnabled = previous === '1'
         debugEnabledToggle.checked = previous === '1'
       }
-      window.localStorage.removeItem(JEV_COMPARE_PREV_DEBUG_KEY)
+      storage?.removeItem(JEV_COMPARE_PREV_DEBUG_KEY)
     }
     state.settings.jevCompareEnabled = enabled
     scheduleSettingsSave(0)
@@ -2133,10 +2166,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
 
   const handleJevReportDownload = () => void downloadJevCompareReport()
+  const handleJevReportResetClick = () => void handleJevReportReset()
 
   let jevResetArmed = false
   let jevResetTimer: number | null = null
-  const handleJevReportReset = () => {
+  const handleJevReportReset = async () => {
     if (!jevResetArmed) {
       jevResetArmed = true
       jevReportResetButton.textContent = 'Confirm reset'
@@ -2149,7 +2183,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (jevResetTimer !== null) window.clearTimeout(jevResetTimer)
     jevResetArmed = false
     jevReportResetButton.textContent = 'Reset report'
-    window.localStorage.removeItem(JEV_COMPARE_KEY)
+    await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'jev.compare.report.reset.request',
+      requestId: createRequestId('jev-compare-reset'),
+    })
+    try {
+      window.localStorage.removeItem(JEV_COMPARE_KEY)
+    } catch {
+      // Storage may be unavailable; the backend accumulator is cleared above.
+    }
     updateJevCompareStatus()
   }
 
@@ -2968,7 +3011,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   jevCompareToggle.addEventListener('change', handleJevCompareToggle)
   for (const toggle of jevComponentToggles) toggle.addEventListener('change', handleJevComponentChange)
   jevReportDownloadButton.addEventListener('click', handleJevReportDownload)
-  jevReportResetButton.addEventListener('click', handleJevReportReset)
+  jevReportResetButton.addEventListener('click', handleJevReportResetClick)
   contextCountInput.addEventListener('input', handleContextCountInput)
   referenceCacheLimitInput.addEventListener('input', handleReferenceCacheLimitInput)
   referenceAdmissionOccurrencesInput.addEventListener(
@@ -3060,7 +3103,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     jevCompareToggle.removeEventListener('change', handleJevCompareToggle)
     for (const toggle of jevComponentToggles) toggle.removeEventListener('change', handleJevComponentChange)
     jevReportDownloadButton.removeEventListener('click', handleJevReportDownload)
-    jevReportResetButton.removeEventListener('click', handleJevReportReset)
+    jevReportResetButton.removeEventListener('click', handleJevReportResetClick)
     if (jevResetTimer !== null) window.clearTimeout(jevResetTimer)
     normalizationConnectionSelect.removeEventListener('change', handleNormalizationConnectionChange)
     decisionConnectionSelect.removeEventListener('change', handleDecisionConnectionChange)

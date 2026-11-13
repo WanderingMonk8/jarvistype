@@ -112,6 +112,7 @@ export function isFrontendRequest(value: unknown): value is FrontendRequest {
     return value.chatId === undefined || isIdentifier(value.chatId)
   if (value.type === 'debug.log.request')
     return value.clear === undefined || typeof value.clear === 'boolean'
+  if (value.type === 'jev.compare.report.request' || value.type === 'jev.compare.report.reset.request') return true
   if (value.type === 'phase4.settings.update.request')
     return (
       isPhaseFourSettings(value.settings) &&
@@ -228,6 +229,15 @@ export function isBackendResponse(value: unknown): value is BackendResponse {
       value.entries.every((entry) => typeof entry === 'string' && entry.length <= 2_000)
     )
   }
+  if (value.type === 'jev.compare.report.response') {
+    return (
+      value.ok === true &&
+      Array.isArray(value.lines) &&
+      value.lines.length <= 4_100 &&
+      value.lines.every((line) => typeof line === 'string' && line.length <= 2_000)
+    )
+  }
+  if (value.type === 'jev.compare.report.reset.response') return value.ok === true
   if (value.type === 'app.error') {
     return (
       value.ok === false &&

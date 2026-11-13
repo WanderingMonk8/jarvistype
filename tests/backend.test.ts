@@ -129,6 +129,15 @@ const spindleMock = {
       stored.delete(`${userId}:${path}`)
       return Promise.resolve()
     },
+    read: (path: string, userId?: string) => {
+      const value = stored.get(`${userId}:${path}`)
+      if (value === undefined) return Promise.reject(new Error('not found'))
+      return Promise.resolve(String(value))
+    },
+    write: (path: string, data: string, userId?: string) => {
+      stored.set(`${userId}:${path}`, data)
+      return Promise.resolve()
+    },
   },
   chats: {
     get: (chatId: string) =>
@@ -8560,5 +8569,30 @@ test('a disabled reduction component reverts only that component to the original
   const call = hintCalls[0]!
   assert.ok(call.questions.reference_0_0_0!.instructions.includes('proposed explanation'), 'boundaryPrompt=false reverts only the boundary prompt')
   assert.ok(call.questions.semantic_0_0_0!.instructions.includes('Compare only'), 'semanticPrompt=true keeps the reduced semantic prompt')
+  responses.length = 0
+})
+
+test('comparison mode accumulates metadata lines and serves them via the report request', async () => {
+  const userId = 'compare-accumulator-user'
+  const chatId = 'compare-accumulator-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'phase4.settings.update.request', requestId: 'compare-accumulator-settings', settings: { contextMessageCount: 5, contextualNormalizationEnabled: false, grammarRepairMode: 'off', normalizationConnectionId: null, normalizationModelOverride: '', debugLoggingEnabled: true, jevCompareEnabled: true, jevComponents: { boundaryPrompt: true, semanticPrompt: true, commandPrompt: true, variantsWire: true } } }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'compare-accumulator-entry', canonical: 'Tudor', variants: ['Tudors'], hint: "Midland's enemy", scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.99
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'compare-accumulator-segment', 1, "They faced the Tudor army hint Midland's long-term enemy."), userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'jev.compare.report.request', requestId: 'compare-report' }, userId)
+  const report = responses.at(-1)?.payload
+  assert.ok(report && report.type === 'jev.compare.report.response')
+  const lines = (report as { lines: string[] }).lines
+  assert.equal(lines.length, 2)
+  assert.ok(lines.some((line) => line.includes('side=pipeline')))
+  assert.ok(lines.some((line) => line.includes('side=baseline outcome=ok')))
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'jev.compare.report.reset.request', requestId: 'compare-reset' }, userId)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'jev.compare.report.request', requestId: 'compare-report-2' }, userId)
+  const emptied = responses.at(-1)?.payload as { lines: string[] }
+  assert.equal(emptied.lines.length, 0)
   responses.length = 0
 })

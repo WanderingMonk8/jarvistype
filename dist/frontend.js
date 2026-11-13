@@ -185,7 +185,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.24";
+var APP_VERSION = "1.6.25";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
@@ -454,6 +454,10 @@ function isBackendResponse(value) {
   if (value.type === "debug.log.response") {
     return value.ok === true && Array.isArray(value.entries) && value.entries.length <= 2100 && value.entries.every((entry) => typeof entry === "string" && entry.length <= 2e3);
   }
+  if (value.type === "jev.compare.report.response") {
+    return value.ok === true && Array.isArray(value.lines) && value.lines.length <= 4100 && value.lines.every((line) => typeof line === "string" && line.length <= 2e3);
+  }
+  if (value.type === "jev.compare.report.reset.response") return value.ok === true;
   if (value.type === "app.error") {
     return value.ok === false && typeof value.code === "string" && ERROR_CODES.includes(value.code) && isBoundedString(value.message, 1, 2e3) && typeof value.retryable === "boolean" && (value.diagnosticId === void 0 || isBoundedString(value.diagnosticId, 1, 100)) && (value.operationId === void 0 || isIdentifier2(value.operationId)) && (value.snapshot === void 0 || isDraftSnapshot(value.snapshot));
   }
@@ -1688,7 +1692,7 @@ function setup(ctx) {
     });
     render();
     const outcome = await pending;
-    void archiveJevCompareFromBackend();
+    if (state.settings.jevCompareEnabled === true) void refreshJevCompareStatus();
     if (activeNormalizationRequestId === requestId) {
       activeNormalizationRequestId = null;
       activeNormalizationMode = null;
@@ -1750,7 +1754,7 @@ function setup(ctx) {
     });
     render();
     const outcome = await pending;
-    void archiveJevCompareFromBackend();
+    if (state.settings.jevCompareEnabled === true) void refreshJevCompareStatus();
     if (activeNormalizationRequestId === requestId) {
       activeNormalizationRequestId = null;
       activeNormalizationMode = null;
@@ -1914,6 +1918,7 @@ function setup(ctx) {
     state.canUndoGlossary = response.canUndoGlossary;
     state.decisionModelAvailable = response.decisionModelAvailable;
     state.phaseFourMessage = response.notice ?? "Context and glossary settings ready.";
+    void refreshJevCompareStatus();
   };
   const saveSettings = async () => {
     const contextMessageCount = Math.min(
@@ -2033,22 +2038,15 @@ function setup(ctx) {
     } catch {
     }
   };
-  const archiveJevCompareEntries = (lines) => {
-    const entries = readJevCompareEntries();
-    const seen = new Set(entries.map((entry) => entry.id));
-    let added = 0;
+  const parseJevCompareLines = (lines) => {
+    const parsed = [];
     for (const line of lines) {
-      const marker = line.indexOf("[jev.compare]");
-      if (marker < 0) continue;
       const match = JEV_COMPARE_LINE.exec(line);
       if (!match) continue;
-      const id = match[12];
-      if (seen.has(id)) continue;
-      seen.add(id);
       const stamp = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(line);
       const number = (value) => value === void 0 || value === "unknown" ? null : Number(value);
-      entries.push({
-        id,
+      parsed.push({
+        id: match[12],
         t: stamp?.[1] ?? null,
         side: match[1],
         outcome: match[2],
@@ -2063,10 +2061,38 @@ function setup(ctx) {
         wouldPass: Number(match[11]),
         raw: line
       });
+    }
+    return parsed;
+  };
+  const archiveJevCompareEntries = (lines) => {
+    const entries = readJevCompareEntries();
+    const seen = new Set(entries.map((entry) => entry.id));
+    let added = 0;
+    for (const entry of parseJevCompareLines(lines)) {
+      if (seen.has(entry.id)) continue;
+      seen.add(entry.id);
+      entries.push(entry);
       added += 1;
     }
     if (added) writeJevCompareEntries(entries);
     return added;
+  };
+  const mergeJevCompareSources = (backend, local) => {
+    const byId = /* @__PURE__ */ new Map();
+    for (const entry of local) byId.set(entry.id, entry);
+    for (const entry of backend) byId.set(entry.id, entry);
+    return [...byId.values()];
+  };
+  const fetchBackendJevCompareEntries = async () => {
+    const outcome = await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "jev.compare.report.request",
+      requestId: createRequestId("jev-compare")
+    });
+    if (outcome.status === "resolved" && outcome.value.type === "jev.compare.report.response") {
+      return { entries: parseJevCompareLines(outcome.value.lines), raw: outcome.value.lines };
+    }
+    return null;
   };
   const updateJevCompareStatus = () => {
     const entries = readJevCompareEntries();
@@ -2074,7 +2100,7 @@ function setup(ctx) {
     jevReportDownloadButton.disabled = count === 0;
     jevReportResetButton.disabled = count === 0;
     if (count === 0) {
-      jevCompareStatus.textContent = state.settings.jevCompareEnabled === true ? "No comparison entries accumulated yet." : "Comparison mode is off; the report is still available if entries were captured earlier.";
+      jevCompareStatus.textContent = state.settings.jevCompareEnabled === true ? "No comparison entries accumulated yet. They are captured only when a dictated \u201Chint\u201D/\u201Cclue\u201D cue matches a hinted glossary entry." : "Comparison mode is off; the report is still available if entries were captured earlier.";
       return;
     }
     let flips = 0;
@@ -2086,17 +2112,11 @@ function setup(ctx) {
     }
     jevCompareStatus.textContent = `${count} comparison ${count === 1 ? "entry" : "entries"} accumulated${flips ? `; ${flips} outcome flip${flips === 1 ? "" : "s"} recorded` : ""}. Download to export.`;
   };
-  const archiveJevCompareFromBackend = async () => {
-    if (state.settings.jevCompareEnabled !== true || state.settings.debugLoggingEnabled !== true) return;
-    const outcome = await performRequest({
-      protocolVersion: PROTOCOL_VERSION,
-      type: "debug.log.request",
-      requestId: createRequestId("jev-archive")
-    });
-    if (outcome.status === "resolved" && outcome.value.type === "debug.log.response") {
-      const added = archiveJevCompareEntries(outcome.value.entries);
-      if (added) updateJevCompareStatus();
-    }
+  const refreshJevCompareStatus = async () => {
+    const backend = await fetchBackendJevCompareEntries();
+    if (backend) archiveJevCompareEntries(backend.raw);
+    updateJevCompareStatus();
+    return backend?.entries.length ?? 0;
   };
   const averageJevCompare = (values) => {
     const usable = values.filter((value) => typeof value === "number" && Number.isFinite(value));
@@ -2137,8 +2157,12 @@ function setup(ctx) {
     };
   };
   const downloadJevCompareReport = async () => {
-    const entries = readJevCompareEntries();
-    if (!entries.length) return;
+    const backend = await fetchBackendJevCompareEntries();
+    const entries = mergeJevCompareSources(backend?.entries ?? [], readJevCompareEntries());
+    if (!entries.length) {
+      jevCompareStatus.textContent = "No comparison entries have been captured yet.";
+      return;
+    }
     const summary = summarizeJevCompare(entries);
     const readme = [
       "JarvisType Jev reduction comparison report",
@@ -2197,17 +2221,24 @@ function setup(ctx) {
   };
   const handleJevCompareToggle = () => {
     const enabled = jevCompareToggle.checked;
+    const storage = (() => {
+      try {
+        return window.localStorage;
+      } catch {
+        return null;
+      }
+    })();
     if (enabled) {
-      window.localStorage.setItem(JEV_COMPARE_PREV_DEBUG_KEY, state.settings.debugLoggingEnabled === true ? "1" : "0");
+      storage?.setItem(JEV_COMPARE_PREV_DEBUG_KEY, state.settings.debugLoggingEnabled === true ? "1" : "0");
       state.settings.debugLoggingEnabled = true;
       debugEnabledToggle.checked = true;
     } else {
-      const previous = window.localStorage.getItem(JEV_COMPARE_PREV_DEBUG_KEY);
+      const previous = storage?.getItem(JEV_COMPARE_PREV_DEBUG_KEY);
       if (previous === "0" || previous === "1") {
         state.settings.debugLoggingEnabled = previous === "1";
         debugEnabledToggle.checked = previous === "1";
       }
-      window.localStorage.removeItem(JEV_COMPARE_PREV_DEBUG_KEY);
+      storage?.removeItem(JEV_COMPARE_PREV_DEBUG_KEY);
     }
     state.settings.jevCompareEnabled = enabled;
     scheduleSettingsSave(0);
@@ -2223,9 +2254,10 @@ function setup(ctx) {
     scheduleSettingsSave(0);
   };
   const handleJevReportDownload = () => void downloadJevCompareReport();
+  const handleJevReportResetClick = () => void handleJevReportReset();
   let jevResetArmed = false;
   let jevResetTimer = null;
-  const handleJevReportReset = () => {
+  const handleJevReportReset = async () => {
     if (!jevResetArmed) {
       jevResetArmed = true;
       jevReportResetButton.textContent = "Confirm reset";
@@ -2238,7 +2270,15 @@ function setup(ctx) {
     if (jevResetTimer !== null) window.clearTimeout(jevResetTimer);
     jevResetArmed = false;
     jevReportResetButton.textContent = "Reset report";
-    window.localStorage.removeItem(JEV_COMPARE_KEY);
+    await performRequest({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "jev.compare.report.reset.request",
+      requestId: createRequestId("jev-compare-reset")
+    });
+    try {
+      window.localStorage.removeItem(JEV_COMPARE_KEY);
+    } catch {
+    }
     updateJevCompareStatus();
   };
   const saveGlossaryEntry = async (surface = "drawer") => {
@@ -2944,7 +2984,7 @@ function setup(ctx) {
   jevCompareToggle.addEventListener("change", handleJevCompareToggle);
   for (const toggle of jevComponentToggles) toggle.addEventListener("change", handleJevComponentChange);
   jevReportDownloadButton.addEventListener("click", handleJevReportDownload);
-  jevReportResetButton.addEventListener("click", handleJevReportReset);
+  jevReportResetButton.addEventListener("click", handleJevReportResetClick);
   contextCountInput.addEventListener("input", handleContextCountInput);
   referenceCacheLimitInput.addEventListener("input", handleReferenceCacheLimitInput);
   referenceAdmissionOccurrencesInput.addEventListener(
@@ -3034,7 +3074,7 @@ function setup(ctx) {
     jevCompareToggle.removeEventListener("change", handleJevCompareToggle);
     for (const toggle of jevComponentToggles) toggle.removeEventListener("change", handleJevComponentChange);
     jevReportDownloadButton.removeEventListener("click", handleJevReportDownload);
-    jevReportResetButton.removeEventListener("click", handleJevReportReset);
+    jevReportResetButton.removeEventListener("click", handleJevReportResetClick);
     if (jevResetTimer !== null) window.clearTimeout(jevResetTimer);
     normalizationConnectionSelect.removeEventListener("change", handleNormalizationConnectionChange);
     decisionConnectionSelect.removeEventListener("change", handleDecisionConnectionChange);

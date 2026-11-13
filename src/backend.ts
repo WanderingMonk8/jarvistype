@@ -293,6 +293,10 @@ async function handleRequest(request: FrontendRequest, context: RequestContext):
       await handleGlossaryUndo(request, context, activeRequest)
     } else if (request.type === 'debug.log.request') {
       handleDebugLogRequest(request, context)
+    } else if (request.type === 'jev.compare.report.request') {
+      await handleJevCompareReportRequest(request, context)
+    } else if (request.type === 'jev.compare.report.reset.request') {
+      await handleJevCompareReportReset(request, context)
     } else {
       await handleDraftSend(request, context)
     }
@@ -5066,11 +5070,9 @@ async function resolveGlossaryHintReferences(
     const outputTokens = typeof usage?.output_tokens === 'number' && Number.isFinite(usage.output_tokens) ? usage.output_tokens : 'unknown'
     const cost = typeof usage?.cost === 'number' && Number.isFinite(usage.cost) ? ` cost=${usage.cost}` : ''
     const wouldPass = topSemantic >= 0.85 && topCommand >= 0.9 && boundaryPass >= 1 ? 1 : 0
-    recordDebug(
-      userId,
-      'jev.compare',
-      `side=${side} outcome=${result ? 'ok' : 'timeout'} in=${inputTokens} out=${outputTokens}${cost} candidates=${candidates.length} topBoundary=${topBoundary.toFixed(3)} topSemantic=${topSemantic.toFixed(3)} topCommand=${topCommand.toFixed(3)} boundaryPass=${boundaryPass} wouldPass=${wouldPass} id=${createId()}`,
-    )
+    const line = `side=${side} outcome=${result ? 'ok' : 'timeout'} in=${inputTokens} out=${outputTokens}${cost} candidates=${candidates.length} topBoundary=${topBoundary.toFixed(3)} topSemantic=${topSemantic.toFixed(3)} topCommand=${topCommand.toFixed(3)} boundaryPass=${boundaryPass} wouldPass=${wouldPass} id=${createId()}`
+    recordDebug(userId, 'jev.compare', line)
+    void persistJevCompareLine(userId, line)
   }
   try {
     recordDebug(userId, 'glossary.hint', `start matches=${matches.length} hints=${entries.length} candidates=${candidates.length} connection=${connectionId ? 'selected' : 'default'} components=${enabledComponents} compare=${comparison ? 'on' : 'off'}`)
@@ -5638,6 +5640,44 @@ function handleDebugLogRequest(
       requestId: request.requestId,
       ok: true,
       entries: formatDebugEntries(context.userId),
+    },
+    context,
+  )
+}
+
+/** Returns every accumulated comparison line; used by "Download report". */
+async function handleJevCompareReportRequest(
+  request: Extract<FrontendRequest, { type: 'jev.compare.report.request' }>,
+  context: RequestContext,
+): Promise<void> {
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'jev.compare.report.response',
+      requestId: request.requestId,
+      ok: true,
+      lines: await loadJevCompareLines(context.userId),
+    },
+    context,
+  )
+}
+
+/** Clears the accumulated comparison report. */
+async function handleJevCompareReportReset(
+  request: Extract<FrontendRequest, { type: 'jev.compare.report.reset.request' }>,
+  context: RequestContext,
+): Promise<void> {
+  try {
+    await spindle.userStorage.delete(JEV_COMPARE_LOG_PATH, context.userId)
+  } catch {
+    // Already absent is fine.
+  }
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'jev.compare.report.reset.response',
+      requestId: request.requestId,
+      ok: true,
     },
     context,
   )
@@ -6585,6 +6625,41 @@ function logDecisionUsage(
   const parts = [`in=${input}`, `out=${output}`]
   if (typeof cost === 'number' && Number.isFinite(cost)) parts.push(`cost=${cost}`)
   recordDebug(userId, label, `usage ${parts.join(' ')}`)
+}
+
+const JEV_COMPARE_LOG_PATH = 'jev-compare-log.jsonl'
+/** Older entries are dropped once the accumulator reaches this size. */
+const JEV_COMPARE_LOG_MAX_LINES = 4_000
+
+/** Appends are queued so concurrent lines cannot overwrite each other. */
+let jevComparePersistQueue: Promise<void> = Promise.resolve()
+
+/**
+ * Persistent accumulator for the reduction-comparison report. One metadata line
+ * per side, JSON-lines. Fails silently; comparison logging must never break the
+ * decision path.
+ */
+function persistJevCompareLine(userId: string, line: string): void {
+  jevComparePersistQueue = jevComparePersistQueue.then(async () => {
+    try {
+      const raw = await spindle.userStorage.read(JEV_COMPARE_LOG_PATH, userId).catch(() => '')
+      const lines = raw ? raw.split('\n').filter((entry) => entry.trim().length > 0) : []
+      lines.push(line)
+      while (lines.length > JEV_COMPARE_LOG_MAX_LINES) lines.shift()
+      await spindle.userStorage.write(JEV_COMPARE_LOG_PATH, lines.join('\n') + '\n', userId)
+    } catch {
+      // Never surface storage failures from the decision path.
+    }
+  })
+}
+
+async function loadJevCompareLines(userId: string): Promise<string[]> {
+  try {
+    const raw = await spindle.userStorage.read(JEV_COMPARE_LOG_PATH, userId)
+    return raw.split('\n').filter((entry) => entry.trim().length > 0)
+  } catch {
+    return []
+  }
 }
 
 /** Spindle UUID v4 when the host provides it (free tier, `uuid-v1`); otherwise the local safe generator. */

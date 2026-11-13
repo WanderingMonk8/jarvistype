@@ -4154,7 +4154,7 @@ function escapeRegExp2(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.24";
+var APP_VERSION = "1.6.25";
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
 var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
 var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;
@@ -4205,6 +4205,7 @@ function isFrontendRequest(value) {
     return value.chatId === void 0 || isIdentifier2(value.chatId);
   if (value.type === "debug.log.request")
     return value.clear === void 0 || typeof value.clear === "boolean";
+  if (value.type === "jev.compare.report.request" || value.type === "jev.compare.report.reset.request") return true;
   if (value.type === "phase4.settings.update.request")
     return isPhaseFourSettings(value.settings) && (value.chatId === void 0 || isIdentifier2(value.chatId));
   if (value.type === "glossary.upsert.request") {
@@ -4388,6 +4389,10 @@ async function handleRequest(request, context) {
       await handleGlossaryUndo(request, context, activeRequest);
     } else if (request.type === "debug.log.request") {
       handleDebugLogRequest(request, context);
+    } else if (request.type === "jev.compare.report.request") {
+      await handleJevCompareReportRequest(request, context);
+    } else if (request.type === "jev.compare.report.reset.request") {
+      await handleJevCompareReportReset(request, context);
     } else {
       await handleDraftSend(request, context);
     }
@@ -8324,11 +8329,9 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
     const outputTokens = typeof usage?.output_tokens === "number" && Number.isFinite(usage.output_tokens) ? usage.output_tokens : "unknown";
     const cost = typeof usage?.cost === "number" && Number.isFinite(usage.cost) ? ` cost=${usage.cost}` : "";
     const wouldPass = topSemantic >= 0.85 && topCommand >= 0.9 && boundaryPass >= 1 ? 1 : 0;
-    recordDebug(
-      userId,
-      "jev.compare",
-      `side=${side} outcome=${result ? "ok" : "timeout"} in=${inputTokens} out=${outputTokens}${cost} candidates=${candidates.length} topBoundary=${topBoundary.toFixed(3)} topSemantic=${topSemantic.toFixed(3)} topCommand=${topCommand.toFixed(3)} boundaryPass=${boundaryPass} wouldPass=${wouldPass} id=${createId()}`
-    );
+    const line = `side=${side} outcome=${result ? "ok" : "timeout"} in=${inputTokens} out=${outputTokens}${cost} candidates=${candidates.length} topBoundary=${topBoundary.toFixed(3)} topSemantic=${topSemantic.toFixed(3)} topCommand=${topCommand.toFixed(3)} boundaryPass=${boundaryPass} wouldPass=${wouldPass} id=${createId()}`;
+    recordDebug(userId, "jev.compare", line);
+    void persistJevCompareLine(userId, line);
   };
   try {
     recordDebug(userId, "glossary.hint", `start matches=${matches.length} hints=${entries.length} candidates=${candidates.length} connection=${connectionId ? "selected" : "default"} components=${enabledComponents} compare=${comparison ? "on" : "off"}`);
@@ -8820,6 +8823,33 @@ function handleDebugLogRequest(request, context) {
       requestId: request.requestId,
       ok: true,
       entries: formatDebugEntries(context.userId)
+    },
+    context
+  );
+}
+async function handleJevCompareReportRequest(request, context) {
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "jev.compare.report.response",
+      requestId: request.requestId,
+      ok: true,
+      lines: await loadJevCompareLines(context.userId)
+    },
+    context
+  );
+}
+async function handleJevCompareReportReset(request, context) {
+  try {
+    await spindle.userStorage.delete(JEV_COMPARE_LOG_PATH, context.userId);
+  } catch {
+  }
+  send(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "jev.compare.report.reset.response",
+      requestId: request.requestId,
+      ok: true
     },
     context
   );
@@ -9559,6 +9589,29 @@ function logDecisionUsage(userId, label, result) {
   const parts = [`in=${input}`, `out=${output}`];
   if (typeof cost === "number" && Number.isFinite(cost)) parts.push(`cost=${cost}`);
   recordDebug(userId, label, `usage ${parts.join(" ")}`);
+}
+var JEV_COMPARE_LOG_PATH = "jev-compare-log.jsonl";
+var JEV_COMPARE_LOG_MAX_LINES = 4e3;
+var jevComparePersistQueue = Promise.resolve();
+function persistJevCompareLine(userId, line) {
+  jevComparePersistQueue = jevComparePersistQueue.then(async () => {
+    try {
+      const raw = await spindle.userStorage.read(JEV_COMPARE_LOG_PATH, userId).catch(() => "");
+      const lines = raw ? raw.split("\n").filter((entry) => entry.trim().length > 0) : [];
+      lines.push(line);
+      while (lines.length > JEV_COMPARE_LOG_MAX_LINES) lines.shift();
+      await spindle.userStorage.write(JEV_COMPARE_LOG_PATH, lines.join("\n") + "\n", userId);
+    } catch {
+    }
+  });
+}
+async function loadJevCompareLines(userId) {
+  try {
+    const raw = await spindle.userStorage.read(JEV_COMPARE_LOG_PATH, userId);
+    return raw.split("\n").filter((entry) => entry.trim().length > 0);
+  } catch {
+    return [];
+  }
 }
 async function safeUuid() {
   try {

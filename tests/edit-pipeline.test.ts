@@ -2765,3 +2765,37 @@ test('Continue inherits ? ! … combinations inside an enclosed continuation', (
   assert.equal(merged('…', '“I love you.”'), 'The model yielded buried in his hair, “I love you…”')
   assert.equal(merged('!', '(“Then I love you”)'), 'The model yielded buried in his hair, (“Then I love you!”)')
 })
+
+test('Continue rewrites a terminal comma inside the enclosure to a period with no period outside', () => {
+  const before = 'The model yielded buried in his hair.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: before }]
+  const run = (id: string, continuation: string) => executeEditPlan(before, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id, type: 'continue', target: { exactText: 'buried in his hair' }, text: continuation }],
+  })
+  const withQuote = run('comma-1', '“I love you,”')
+  assert.equal(withQuote.ok && withQuote.afterText, 'The model yielded buried in his hair, “I love you.”')
+  const withParen = run('comma-2', '(“I love you,”)')
+  assert.equal(withParen.ok && withParen.afterText, 'The model yielded buried in his hair, (“I love you.”)')
+  const withStraightSingle = run('comma-3', '\'Then I love you,\'')
+  assert.equal(withStraightSingle.ok && withStraightSingle.afterText, 'The model yielded buried in his hair, \'Then I love you.\'')
+  const withStraightDouble = run('comma-4', '"Then I love you,"')
+  assert.equal(withStraightDouble.ok && withStraightDouble.afterText, 'The model yielded buried in his hair, "Then I love you."')
+})
+
+test('Continue switches a terminal comma inside the enclosure to the inherited source terminator', () => {
+  const before = 'The model yielded buried in his hair?'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: before }]
+  const run = (continuation: string) => executeEditPlan(before, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id: 'comma', type: 'continue', target: { exactText: 'buried in his hair' }, text: continuation }],
+  })
+  const withTerminator = run('“I love you,”')
+  assert.equal(withTerminator.ok && withTerminator.afterText, 'The model yielded buried in his hair, “I love you?”')
+  const withInheritedTerminator = run('“Then I love you,”')
+  assert.equal(withInheritedTerminator.ok && withInheritedTerminator.afterText, 'The model yielded buried in his hair, “Then I love you?”')
+})

@@ -1464,20 +1464,21 @@ function executeContinueSentence(cleanText, paragraphs, operation, protectedCasi
     const lower = lowercaseOrdinarySentenceOpening(text, 0, text, 0, protectedCasingTerms);
     return lower ? `${lower.text}${text.slice(lower.end)}` : text;
   })() : text;
+  const normalizedCore = continuationCore.replace(/[,，](['"‘’“”)\]}»›`」』】》〉]+)$/u, ".$1");
   const terminatorInsideClosers = /[.!?…]['"‘’“”)\]}»›`」』】》〉]+$/u;
   let continuation;
   if (inheritedTermination) {
-    const enclosed = /^([\s\S]*?)([.!?…]*)(['"‘’”)\]}»›`」』】》〉]+)$/u.exec(continuationCore);
+    const enclosed = /^([\s\S]*?)([.!?…]*)(['"‘’”)\]}»›`」』】》〉]+)$/u.exec(normalizedCore);
     if (enclosed?.[1] && /[\p{L}\p{N}]/u.test(enclosed[1])) {
       continuation = `${enclosed[1]}${inheritedTermination}${enclosed[3]}`;
     } else {
-      const stripped = continuationCore.replace(/[.!?…]+$/u, "");
+      const stripped = normalizedCore.replace(/[.!?…]+$/u, "");
       continuation = `${stripped}${inheritedTermination}`;
     }
-  } else if (terminatorInsideClosers.test(continuationCore) || /[.!?…]$/u.test(continuationCore)) {
-    continuation = continuationCore;
+  } else if (terminatorInsideClosers.test(normalizedCore) || /[.!?…]$/u.test(normalizedCore)) {
+    continuation = normalizedCore;
   } else {
-    continuation = `${continuationCore}.`;
+    continuation = `${normalizedCore}.`;
   }
   const afterText = `${cleanText.slice(0, end)}, ${continuation}${closers}${after.slice(consumed)}`;
   if (afterText.length > MAX_DRAFT_CHARACTERS)

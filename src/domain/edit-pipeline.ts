@@ -1162,6 +1162,10 @@ function executeContinueSentence(
         return lower ? `${lower.text}${text.slice(lower.end)}` : text
       })()
     : text
+  // A terminal comma immediately before the closing marks is the British-quotation
+  // convention for closing the quoted sentence — it becomes a period, and the merged
+  // utterance must not grow a stray period outside the closing wrappers.
+  const normalizedCore = continuationCore.replace(/[,，](['"‘’“”)\]}»›`」』】》〉]+)$/u, '.$1')
   // If the original source ended with ?, !, or …, the merged sentence keeps
   // that exact terminator instead of adopting Y's: X? -> X, Y?   and   X! -> X, Y!
   //   and   X… -> X, Y…. When Y itself is enclosed (quotes, parens, brackets,
@@ -1170,18 +1174,18 @@ function executeContinueSentence(
   const terminatorInsideClosers = /[.!?…]['"‘’“”)\]}»›`」』】》〉]+$/u
   let continuation: string
   if (inheritedTermination) {
-    const enclosed = /^([\s\S]*?)([.!?…]*)(['"‘’”)\]}»›`」』】》〉]+)$/u.exec(continuationCore)
+    const enclosed = /^([\s\S]*?)([.!?…]*)(['"‘’”)\]}»›`」』】》〉]+)$/u.exec(normalizedCore)
     if (enclosed?.[1] && /[\p{L}\p{N}]/u.test(enclosed[1])) {
       // "I love you." + X! -> "I love you!"      and      "Then I love you" + X! -> "Then I love you!"
       continuation = `${enclosed[1]}${inheritedTermination}${enclosed[3]}`
     } else {
-      const stripped = continuationCore.replace(/[.!?…]+$/u, '')
+      const stripped = normalizedCore.replace(/[.!?…]+$/u, '')
       continuation = `${stripped}${inheritedTermination}`
     }
-  } else if (terminatorInsideClosers.test(continuationCore) || /[.!?…]$/u.test(continuationCore)) {
-    continuation = continuationCore
+  } else if (terminatorInsideClosers.test(normalizedCore) || /[.!?…]$/u.test(normalizedCore)) {
+    continuation = normalizedCore
   } else {
-    continuation = `${continuationCore}.`
+    continuation = `${normalizedCore}.`
   }
     const afterText = `${cleanText.slice(0, end)}, ${continuation}${closers}${after.slice(consumed)}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)

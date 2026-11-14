@@ -2808,18 +2808,21 @@ test('join_sentence merges adjacent sentences using Continue-style terminator ru
     explanation: 'join',
     operations: [{ id: 'join-1', type: 'join_sentence', target: source, destination }],
   })
-  assert.equal(join('She accepts. She runs.', { exactText: 'She accepts.' }, { exactText: 'She runs.' }).afterText, 'She accepts, she runs.')
-  assert.equal(join('She accepts? She runs.', { exactText: 'She accepts?' }, { exactText: 'She runs.' }).afterText, 'She accepts, she runs?')
-  assert.equal(join('She accepts! She runs.', { exactText: 'She accepts!' }, { exactText: 'She runs.' }).afterText, 'She accepts, she runs!')
-  assert.equal(join('She accepts… She runs.', { exactText: 'She accepts…' }, { exactText: 'She runs.' }).afterText, 'She accepts, she runs…')
-  assert.equal(join('Why bother?! What now? I wait.', { exactText: 'Why bother?!' }, { exactText: 'What now?' }).afterText, 'Why bother, what now?! I wait.')
-  assert.equal(join('She says "I love it." She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }).afterText, 'She says "I love it," she runs.')
-  assert.equal(join("She says 'I love it.' She runs.", { exactText: 'I love it.' }, { exactText: 'She runs.' }).afterText, "She says 'I love it,' she runs.")
-  assert.equal(join('She says (I love it.) She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }).afterText, 'She says (I love it,) she runs.')
-  assert.equal(join('She says [I love it.] She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }).afterText, 'She says [I love it,] she runs.')
-  assert.equal(join('She looks left. Erin runs now.', { exactText: 'She looks left.' }, { exactText: 'Erin runs now.' }).afterText, 'She looks left, erin runs now.')
-  const iRun = join('She looks left. I run now.', { exactText: 'She looks left.' }, { exactText: 'I run now.' })
-  assert.equal(iRun.ok && iRun.afterText, 'She looks left, I run now.')
+  const joinText = (before: string, source: object, destination: object) => {
+    const result = join(before, source, destination)
+    return result.ok ? result.afterText : `ERROR ${result.reason}`
+  }
+  assert.equal(joinText('She accepts. She runs.', { exactText: 'She accepts.' }, { exactText: 'She runs.' }), 'She accepts, she runs.')
+  assert.equal(joinText('She accepts? She runs.', { exactText: 'She accepts?' }, { exactText: 'She runs.' }), 'She accepts, she runs?')
+  assert.equal(joinText('She accepts! She runs.', { exactText: 'She accepts!' }, { exactText: 'She runs.' }), 'She accepts, she runs!')
+  assert.equal(joinText('She accepts… She runs.', { exactText: 'She accepts…' }, { exactText: 'She runs.' }), 'She accepts, she runs…')
+  assert.equal(joinText('Why bother?! What now? I wait.', { exactText: 'Why bother?!' }, { exactText: 'What now?' }), 'Why bother, what now?! I wait.')
+  assert.equal(joinText('She says "I love it." She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }), 'She says "I love it," she runs.')
+  assert.equal(joinText("She says 'I love it.' She runs.", { exactText: 'I love it.' }, { exactText: 'She runs.' }), "She says 'I love it,' she runs.")
+  assert.equal(joinText('She says (I love it.) She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }), 'She says (I love it,) she runs.')
+  assert.equal(joinText('She says [I love it.] She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }), 'She says [I love it,] she runs.')
+  assert.equal(joinText('She looks left. Erin runs now.', { exactText: 'She looks left.' }, { exactText: 'Erin runs now.' }), 'She looks left, erin runs now.')
+  assert.equal(joinText('She looks left. I run now.', { exactText: 'She looks left.' }, { exactText: 'I run now.' }), 'She looks left, I run now.')
 })
 
 test('join_sentence requires operands to be directly next to each other', () => {

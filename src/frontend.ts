@@ -130,7 +130,7 @@ export const COMMAND_GROUPS = [
   {
     title: 'Paragraphs',
     examples: [
-      ['Split', 'Split, break, or divide paragraph 1 after “The launch checklist is ready.”'],
+      ['Split', 'Split, break, or divide paragraph 1 after “The launch checklist is ready.” To split a sentence in place: “Split the sentence ‘To err is human; to forgive is divine’ before ‘to forgive.’” The split pieces become two independent sentences with sentence-end punctuation; comma or semicolon at the joint become a period (other terminators keep their character); the start of the second part is capitalized; “Split the sentence about X before/after the word/phrase Y” works the same with description-based targets.'],
       ['Join', 'Join, merge, or combine paragraph 1 with the following paragraph. Or the adjacent sentences or fragments: “Join the sentence ‘I look at the man from across the room’ with the sentence ‘And I decide to wave.’” The first operand stays verbatim — its terminal punctuation becomes a comma, the second operand starts with a lowercased ordinary word (proper nouns and “I” keep capitalization), and the merged sentence inherits the source’s ?, !, …, or combinations. The two operands must be directly next to each other. Wrapped operands keep their enclosure around the source only: “he came late” + “she left” produces “he came late,” she left.”'],
     ],
   },

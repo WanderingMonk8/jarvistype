@@ -15,6 +15,7 @@ export type EditOperationType =
   | 'prepend'
   | 'case'
   | 'split'
+  | 'split_sentence'
   | 'join_next'
   | 'join_sentence'
   | 'move_before'
@@ -65,6 +66,8 @@ export interface EditOperation {
   caseMode?: 'capitalize' | 'uppercase' | 'lowercase'
   destination?: EditTarget
   includeTrailingPunctuation?: boolean
+  /** Split sentence: place the join at Y's start (`before`) or Y's end (`after`). */
+  direction?: 'before' | 'after'
 }
 
 export interface EditPlan {
@@ -249,6 +252,19 @@ export function executeEditPlan(
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
   if (plan.operations.length === 1 && plan.operations[0]?.type === 'delete_range')
     return executeRangeDeletion(cleanText, paragraphs, plan.operations[0], protectedCasingTerms)
+  const inlineSplits = plan.operations.filter(isSplitSentenceOperation)
+  if (inlineSplits.length) {
+    if (inlineSplits.length !== plan.operations.length || inlineSplits.length > 1)
+      return { ok: false, reason: 'a split must be the only operation in its edit plan' }
+    return executeSplitSentence(
+      cleanText,
+      paragraphs,
+      inlineSplits[0]!,
+      protectedCasingTerms,
+      formatText,
+      options.skipSentenceRepair === true,
+    )
+  }
   const inlineJoins = plan.operations.filter(isJoinSentenceOperation)
   if (inlineJoins.length) {
     if (inlineJoins.length !== plan.operations.length || inlineJoins.length > 1)
@@ -389,6 +405,7 @@ function parseOperation(value: unknown): EditOperation | null {
     'caseMode',
     'destination',
     'includeTrailingPunctuation',
+    'direction',
   ])
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null
   const type = value.type
@@ -402,6 +419,7 @@ function parseOperation(value: unknown): EditOperation | null {
     type !== 'prepend' &&
     type !== 'case' &&
     type !== 'split' &&
+    type !== 'split_sentence' &&
     type !== 'join_next' &&
     type !== 'join_sentence' &&
     type !== 'move_before' &&
@@ -433,6 +451,13 @@ function parseOperation(value: unknown): EditOperation | null {
     if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null
     if (target.scope !== undefined || destination.scope !== undefined) return null
     if (includeTrailingPunctuation !== undefined) return null
+  } else if (type === 'split_sentence') {
+    if (text !== undefined || caseMode !== undefined) return null
+    if (destination === undefined || !destination) return null
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null
+    if (target.scope !== undefined || destination.scope !== undefined) return null
+    if (includeTrailingPunctuation !== undefined) return null
+    if (value.direction !== 'before' && value.direction !== 'after') return null
   } else if (type === 'delete' || type === 'split' || type === 'join_next') {
     if (text !== undefined || caseMode !== undefined) return null
     if (destination !== undefined) return null
@@ -1178,17 +1203,17 @@ function buildContinuation(
   //   and   X… -> X, Y…. When Y itself is enclosed (quotes, parens, brackets,
   // braces, …), the inherited run lands INSIDE the enclosure — X! -> X, "Y!" —
   // replacing or supplying the final mark of the enclosed utterance.
-  const terminatorInsideClosers = /[.!?…]['"‘’“”)\]}»›`」』】》〉]+$/u
+  const terminatorInsideClosers = /[\p{P}]['"‘’“”)\]}»›`」』】》〉]+$/u
   if (inheritedTermination) {
     const enclosed = /^([\s\S]*?)([.!?…]*)(['"‘’”)\]}»›`」』】》〉]+)$/u.exec(normalizedCore)
     if (enclosed?.[1] && /[\p{L}\p{N}]/u.test(enclosed[1])) {
       // "I love you." + X! -> "I love you!"      and      "Then I love you" + X! -> "Then I love you!"
       return `${enclosed[1]}${inheritedTermination}${enclosed[3]}`
     }
-    const stripped = normalizedCore.replace(/[.!?…]+$/u, '')
+    const stripped = normalizedCore.replace(/[\p{P}]+$/u, '')
     return `${stripped}${inheritedTermination}`
   }
-  if (terminatorInsideClosers.test(normalizedCore) || /[.!?…]$/u.test(normalizedCore))
+  if (terminatorInsideClosers.test(normalizedCore) || /[\p{P}]$/u.test(normalizedCore))
     return normalizedCore
   return `${normalizedCore}.`
 }
@@ -1268,26 +1293,35 @@ function executeJoinSentence(
   if (typeof destinationResult === 'string') return { ok: false, reason: destinationResult }
   if (destinationResult.start >= destinationResult.end)
     return { ok: false, reason: 'join destination was not found' }
-  if (destinationResult.start < source.end)
-    return { ok: false, reason: 'join operands overlap' }
-  const gap = cleanText.slice(source.end, destinationResult.start)
-  if (/[\p{L}\p{N}]/u.test(gap))
-    return { ok: false, reason: 'join operands are not directly next to each other' }
+  // Carry any wrappers that belong to the destination backwards/forwards so the
+  // merged sentence keeps them in order (e.g. “Y.” stays wrapped as one unit).
+  let destinationStart = destinationResult.start
+  let destinationEnd = destinationResult.end
+  while (destinationStart > source.end && /[([{“‘"']/u.test(cleanText[destinationStart - 1]!)) destinationStart -= 1
+  while (destinationEnd < cleanText.length && /[)\]}”’]/u.test(cleanText[destinationEnd]!)) destinationEnd += 1
   const start = source.start
   let end = source.end
-  // Trim trailing punctuation inside the matched span so X stops at the last word character.
-  while (end > start && /[.,;:!?…—–-]/u.test(cleanText[end - 1]!)) end -= 1
-  const gapTail = cleanText.slice(end, destinationResult.start)
-  const closeMatch = gapTail.match(/^([.!?…—–,;-]+)?([”’"')\]}»›`」』】》〉]*)\s*$/u)
-  const raw = closeMatch?.[1] ?? ''
-  const closers = closeMatch?.[2] ?? ''
-  const inheritedTermination = /[!?…]/u.test(raw) ? raw : ''
-  const text = cleanText.slice(destinationResult.start, destinationResult.end)
-  if (!/[\p{L}\p{N}]/u.test(text)) return { ok: false, reason: 'join destination was not found' }
-  const continuation = buildContinuation(text, protectedCasingTerms, formatText, inheritedTermination)
-  const afterText = closers
-    ? `${cleanText.slice(0, end)},${closers} ${continuation}${cleanText.slice(destinationResult.end)}`
-    : `${cleanText.slice(0, end)}, ${continuation}${cleanText.slice(destinationResult.end)}`
+  // Trim trailing non-word characters of X so it stops at the last letter/digit.
+  while (end > start && !/[\p{L}\p{N}’'‘-]/u.test(cleanText[end - 1]!)) end -= 1
+  if (end === start) return { ok: false, reason: 'join source was not found' }
+  if (end >= destinationStart) return { ok: false, reason: 'join operands overlap' }
+  const boundary = cleanText.slice(end, destinationStart)
+  // The boundary sits between X and Y and may include X's terminator followed by
+  // any closing wrappers on X; those belong to the first part, not to Y.
+  // Reject anything else — X and Y must be directly next to each other.
+  if (/[\p{L}\p{N}]/u.test(boundary))
+    return { ok: false, reason: 'join operands are not directly next to each other' }
+  const match = boundary.match(/^([,.!?;:…—–-]*)(["”’')\]}»›`」』】》〉]*)[ \t]*$/u)
+  const terminators = match?.[1] ?? ''
+  const closers = match?.[2] ?? ''
+  const continuation = buildContinuation(
+    cleanText.slice(destinationStart, destinationEnd),
+    protectedCasingTerms,
+    formatText,
+    /[!?…]/u.test(terminators) ? terminators : '',
+  )
+  const after = cleanText.slice(destinationEnd)
+  const afterText = `${cleanText.slice(0, end)},${closers} ${continuation}${after}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
   if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
@@ -1299,6 +1333,90 @@ function executeJoinSentence(
     return finishInlineOperation(repaired.text, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
   }
   return finishInlineOperation(afterText, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
+}
+
+type SplitSentenceOperation = EditOperation & { type: 'split_sentence'; direction: 'before' | 'after' }
+
+function isSplitSentenceOperation(operation: EditOperation): operation is SplitSentenceOperation {
+  return (
+    operation.type === 'split_sentence' &&
+    operation.destination !== undefined &&
+    operation.direction !== undefined
+  )
+}
+
+/**
+ * Split ("Split the sentence X before/after the word/phrase Y") — wrap a sentence in
+ * two sentences at the Y boundary. The first part keeps any closing wrapper attached to
+ * itself, the comma/semicolon at the joint turn into a period (other terminators are
+ * kept), the second part starts capitalized, and the sentence-end punctuation from the
+ * original X stays attached to the second part.
+ */
+function executeSplitSentence(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  operation: EditOperation & { type: 'split_sentence'; direction: 'before' | 'after' },
+  protectedCasingTerms: readonly string[],
+  formatText: boolean,
+  skipSentenceRepair = false,
+): EditPipelineResult {
+  const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'split source')
+  if (typeof source === 'string') return { ok: false, reason: source }
+  const destination = operation.destination
+  if (!destination) return { ok: false, reason: 'split anchor was not provided' }
+  const destinationResult = resolveTextTarget(cleanText, paragraphs, destination, 'split anchor')
+  if (typeof destinationResult === 'string') return { ok: false, reason: destinationResult }
+  if (destinationResult.start >= destinationResult.end)
+    return { ok: false, reason: 'split anchor was not found' }
+  if (destinationResult.start < source.start || destinationResult.end > source.end)
+    return { ok: false, reason: 'split anchor is not part of the source sentence' }
+  const before = operation.direction === 'before'
+  const boundary = before ? destinationResult.start : destinationResult.end
+  const boundaryEdge = new Set(' .,;:!?…—–-”’"\'()]}»›`」』】》〉\t-')
+  const isBoundaryEdge = (index: number) => boundaryEdge.has(cleanText[index]!)
+  let end: number
+  let splitAt: number
+  if (before) {
+    end = boundary
+    while (end > source.start && isBoundaryEdge(end - 1)) end -= 1
+    splitAt = boundary
+  } else {
+    end = boundary
+    while (end > source.start && isBoundaryEdge(end - 1)) end -= 1
+    splitAt = boundary
+    while (splitAt < source.end && isBoundaryEdge(splitAt)) splitAt += 1
+  }
+  const joint = cleanText.slice(Math.min(end, splitAt), Math.max(end, splitAt))
+  const rest = cleanText.slice(splitAt, source.end).replace(/^\s+/u, '')
+  const jointMatch = joint.match(/^([,;.!?…—–-]+[ \t]*)?([”’"')\]}»›`」』】》〉]*)[ \t]*$/u)
+  const jointPunctuation = (jointMatch?.[1] ?? '').trim()
+  const jointTerminatorsSource = jointPunctuation.replace(/[,;]/gu, '.').replace(/[.]{2,}/u, '.')
+  const jointTerminators = jointTerminatorsSource.length ? jointTerminatorsSource : '.'
+  const jointClosers = jointMatch?.[2] ?? ''
+  const beforePart = cleanText.slice(0, end)
+  const restartOffset = beforePart.length + jointTerminators.length + jointClosers.length + 1
+  const afterPartRaw = `${beforePart}${jointTerminators}${jointClosers} ${rest}${cleanText.slice(source.end)}`
+  const afterText = formatText ? capitalizeExistingSentenceOpening(afterPartRaw, restartOffset) : afterPartRaw
+  if (afterText.length > MAX_DRAFT_CHARACTERS)
+    return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
+  const paragraphOrdinal = source.paragraphOrdinal
+  let repairedText = afterText
+  if (formatText && !skipSentenceRepair) {
+    const repaired = repairParagraphBoundaries(afterText)
+    if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+    repairedText = repaired.text
+  }
+  return {
+    ok: true,
+    afterText: repairedText,
+    operations: [
+      { ...operation, startOffset: source.start, endOffset: source.end, beforeText: cleanText.slice(source.start, source.end), afterText: repairedText, paragraphOrdinal },
+    ],
+    affectedParagraphOrdinals: [paragraphOrdinal],
+  }
 }
 
 function finishInlineOperation(

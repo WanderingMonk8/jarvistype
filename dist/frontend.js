@@ -112,11 +112,12 @@ function parseOperation(value) {
     "text",
     "caseMode",
     "destination",
-    "includeTrailingPunctuation"
+    "includeTrailingPunctuation",
+    "direction"
   ]);
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null;
   const type = value.type;
-  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "delete_range" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "join_sentence" && type !== "move_before" && type !== "move_after" && type !== "continue")
+  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "delete_range" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "split_sentence" && type !== "join_next" && type !== "join_sentence" && type !== "move_before" && type !== "move_after" && type !== "continue")
     return null;
   const target = parseTarget(value.target);
   if (!target) return null;
@@ -137,6 +138,13 @@ function parseOperation(value) {
     if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null;
     if (target.scope !== void 0 || destination.scope !== void 0) return null;
     if (includeTrailingPunctuation !== void 0) return null;
+  } else if (type === "split_sentence") {
+    if (text !== void 0 || caseMode !== void 0) return null;
+    if (destination === void 0 || !destination) return null;
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null;
+    if (target.scope !== void 0 || destination.scope !== void 0) return null;
+    if (includeTrailingPunctuation !== void 0) return null;
+    if (value.direction !== "before" && value.direction !== "after") return null;
   } else if (type === "delete" || type === "split" || type === "join_next") {
     if (text !== void 0 || caseMode !== void 0) return null;
     if (destination !== void 0) return null;
@@ -505,7 +513,7 @@ var COMMAND_GROUPS = [
   {
     title: "Paragraphs",
     examples: [
-      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
+      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D To split a sentence in place: \u201CSplit the sentence \u2018To err is human; to forgive is divine\u2019 before \u2018to forgive.\u2019\u201D The split pieces become two independent sentences with sentence-end punctuation; comma or semicolon at the joint become a period (other terminators keep their character); the start of the second part is capitalized; \u201CSplit the sentence about X before/after the word/phrase Y\u201D works the same with description-based targets."],
       ["Join", "Join, merge, or combine paragraph 1 with the following paragraph. Or the adjacent sentences or fragments: \u201CJoin the sentence \u2018I look at the man from across the room\u2019 with the sentence \u2018And I decide to wave.\u2019\u201D The first operand stays verbatim \u2014 its terminal punctuation becomes a comma, the second operand starts with a lowercased ordinary word (proper nouns and \u201CI\u201D keep capitalization), and the merged sentence inherits the source\u2019s ?, !, \u2026, or combinations. The two operands must be directly next to each other. Wrapped operands keep their enclosure around the source only: \u201Che came late\u201D + \u201Cshe left\u201D produces \u201Che came late,\u201D she left.\u201D"]
     ]
   },

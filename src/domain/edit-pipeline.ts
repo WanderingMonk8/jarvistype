@@ -1164,14 +1164,16 @@ function executeContinueSentence(
     : text
   // If the original source ended with ?, !, or …, the merged sentence keeps
   // that exact terminator instead of adopting Y's: X? -> X, Y?   and   X! -> X, Y!
-  //   and   X… -> X, Y…. When Y carries its own terminator inside enclosing
-  // marks, Y is kept verbatim — the merged sentence keeps both: “Y.”!
-  // A complete sentence nested inside wrappers is not split or retyped.
+  //   and   X… -> X, Y…. When Y itself is enclosed (quotes, parens, brackets,
+  // braces, …), the inherited run lands INSIDE the enclosure — X! -> X, "Y!" —
+  // replacing or supplying the final mark of the enclosed utterance.
   const terminatorInsideClosers = /[.!?…]['"‘’“”)\]}»›`」』】》〉]+$/u
   let continuation: string
   if (inheritedTermination) {
-    if (terminatorInsideClosers.test(continuationCore)) {
-      continuation = `${continuationCore}${inheritedTermination}`
+    const enclosed = /^([\s\S]*?)([.!?…]*)(['"‘’”)\]}»›`」』】》〉]+)$/u.exec(continuationCore)
+    if (enclosed?.[1] && /[\p{L}\p{N}]/u.test(enclosed[1])) {
+      // "I love you." + X! -> "I love you!"      and      "Then I love you" + X! -> "Then I love you!"
+      continuation = `${enclosed[1]}${inheritedTermination}${enclosed[3]}`
     } else {
       const stripped = continuationCore.replace(/[.!?…]+$/u, '')
       continuation = `${stripped}${inheritedTermination}`

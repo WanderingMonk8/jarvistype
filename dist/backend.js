@@ -1467,8 +1467,9 @@ function executeContinueSentence(cleanText, paragraphs, operation, protectedCasi
   const terminatorInsideClosers = /[.!?…]['"‘’“”)\]}»›`」』】》〉]+$/u;
   let continuation;
   if (inheritedTermination) {
-    if (terminatorInsideClosers.test(continuationCore)) {
-      continuation = `${continuationCore}${inheritedTermination}`;
+    const enclosed = /^([\s\S]*?)([.!?…]*)(['"‘’”)\]}»›`」』】》〉]+)$/u.exec(continuationCore);
+    if (enclosed?.[1] && /[\p{L}\p{N}]/u.test(enclosed[1])) {
+      continuation = `${enclosed[1]}${inheritedTermination}${enclosed[3]}`;
     } else {
       const stripped = continuationCore.replace(/[.!?…]+$/u, "");
       continuation = `${stripped}${inheritedTermination}`;

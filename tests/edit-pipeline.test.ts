@@ -2725,21 +2725,43 @@ test('Continue keeps the casing of a quoted utterance and does not append an ext
   assert.equal(curlySingle.ok && curlySingle.afterText, 'The model yielded buried in his hair, ‘And then he shouts.’')
 })
 
-test('Continue keeps both terminators when the source ends in ? and Y carries a quoted terminator', () => {
+test('Continue inherits the source terminator INSIDE an enclosed continuation', () => {
   const before = 'The model yielded buried in his hair?'
   const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: before }]
-  const result = executeEditPlan(before, paragraphs, 1, {
+  const run = (id: string, continuation: string) => executeEditPlan(before, paragraphs, 1, {
     schemaVersion: 2,
     draftVersion: 1,
     explanation: 'continue',
-    operations: [{ id: 'both', type: 'continue', target: { exactText: 'buried in his hair' }, text: '“I love you.”' }],
+    operations: [{ id, type: 'continue', target: { exactText: 'buried in his hair' }, text: continuation }],
   })
-  assert.equal(result.ok && result.afterText, 'The model yielded buried in his hair, “I love you.”?')
-  const bare = executeEditPlan(before, paragraphs, 1, {
+  const withTerminator = run('both', '“I love you.”')
+  assert.equal(withTerminator.ok && withTerminator.afterText, 'The model yielded buried in his hair, “I love you?”')
+  const bare = run('bare-quote', '“Then I love you”')
+  assert.equal(bare.ok && bare.afterText, 'The model yielded buried in his hair, “Then I love you?”')
+  const paren = run('paren', '(“I love you.”)')
+  assert.equal(paren.ok && paren.afterText, 'The model yielded buried in his hair, (“I love you?”)')
+  const bracket = run('bracket', '[Then I love you.]')
+  assert.equal(bracket.ok && bracket.afterText, 'The model yielded buried in his hair, [Then I love you?]')
+  const single = run('single', '\'And then he shouts.\'')
+  assert.equal(single.ok && single.afterText, 'The model yielded buried in his hair, \'And then he shouts?\'')
+})
+
+test('Continue inherits ? ! … combinations inside an enclosed continuation', () => {
+  const base = 'The model yielded buried in his hair'
+  const run = (terminator: string, continuation: string) => executeEditPlan(base + terminator, [{ id: 'p', ordinal: 1, lineIndex: 0, text: base + terminator }], 1, {
     schemaVersion: 2,
     draftVersion: 1,
     explanation: 'continue',
-    operations: [{ id: 'bare-quote', type: 'continue', target: { exactText: 'buried in his hair' }, text: '“Then I love you”' }],
+    operations: [{ id: terminator, type: 'continue', target: { exactText: 'buried in his hair' }, text: continuation }],
   })
-  assert.equal(bare.ok && bare.afterText, 'The model yielded buried in his hair, “Then I love you”?')
+  const merged = (terminator: string, continuation: string) => {
+    const result = run(terminator, continuation)
+    return result.ok ? result.afterText : `ERROR ${result.reason}`
+  }
+  assert.equal(merged('!', '“I love you.”'), 'The model yielded buried in his hair, “I love you!”')
+  assert.equal(merged('?!', '“I love you.”'), 'The model yielded buried in his hair, “I love you?!”')
+  assert.equal(merged('!?', '“I love you.”'), 'The model yielded buried in his hair, “I love you!?”')
+  assert.equal(merged('!!', '“I love you.”'), 'The model yielded buried in his hair, “I love you!!”')
+  assert.equal(merged('…', '“I love you.”'), 'The model yielded buried in his hair, “I love you…”')
+  assert.equal(merged('!', '(“Then I love you”)'), 'The model yielded buried in his hair, (“Then I love you!”)')
 })

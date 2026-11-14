@@ -2799,3 +2799,53 @@ test('Continue switches a terminal comma inside the enclosure to the inherited s
   const withInheritedTerminator = run('“Then I love you,”')
   assert.equal(withInheritedTerminator.ok && withInheritedTerminator.afterText, 'The model yielded buried in his hair, “Then I love you?”')
 })
+
+test('join_sentence merges adjacent sentences using Continue-style terminator rules', () => {
+  const paragraphs = (text: string) => [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const join = (before: string, source: object, destination: object) => executeEditPlan(before, paragraphs(before), 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'join',
+    operations: [{ id: 'join-1', type: 'join_sentence', target: source, destination }],
+  })
+  assert.equal(join('She accepts. She runs.', { exactText: 'She accepts.' }, { exactText: 'She runs.' }).afterText, 'She accepts, she runs.')
+  assert.equal(join('She accepts? She runs.', { exactText: 'She accepts?' }, { exactText: 'She runs.' }).afterText, 'She accepts, she runs?')
+  assert.equal(join('She accepts! She runs.', { exactText: 'She accepts!' }, { exactText: 'She runs.' }).afterText, 'She accepts, she runs!')
+  assert.equal(join('She accepts… She runs.', { exactText: 'She accepts…' }, { exactText: 'She runs.' }).afterText, 'She accepts, she runs…')
+  assert.equal(join('Why bother?! What now? I wait.', { exactText: 'Why bother?!' }, { exactText: 'What now?' }).afterText, 'Why bother, what now?! I wait.')
+  assert.equal(join('She says "I love it." She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }).afterText, 'She says "I love it," she runs.')
+  assert.equal(join("She says 'I love it.' She runs.", { exactText: 'I love it.' }, { exactText: 'She runs.' }).afterText, "She says 'I love it,' she runs.")
+  assert.equal(join('She says (I love it.) She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }).afterText, 'She says (I love it,) she runs.')
+  assert.equal(join('She says [I love it.] She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }).afterText, 'She says [I love it,] she runs.')
+  assert.equal(join('She looks left. Erin runs now.', { exactText: 'She looks left.' }, { exactText: 'Erin runs now.' }).afterText, 'She looks left, erin runs now.')
+  const iRun = join('She looks left. I run now.', { exactText: 'She looks left.' }, { exactText: 'I run now.' })
+  assert.equal(iRun.ok && iRun.afterText, 'She looks left, I run now.')
+})
+
+test('join_sentence requires operands to be directly next to each other', () => {
+  const paragraphs = (text: string) => [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const instruction = 'She accepts. He waits patiently. She runs.'
+  const text = instruction
+  const first = executeEditPlan(text, paragraphs(text), 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'join',
+    operations: [{ id: 'gap', type: 'join_sentence', target: { exactText: 'She accepts.' }, destination: { exactText: 'She runs.' } }],
+  })
+  assert.equal(first.ok, false)
+  if (!first.ok) assert.match(first.reason, /directly next to each other/i)
+  const reversed = executeEditPlan('She accepts. She runs.', paragraphs('She accepts. She runs.'), 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'join',
+    operations: [{ id: 'overlap', type: 'join_sentence', target: { exactText: 'She accepts. She runs.' }, destination: { exactText: 'She runs.' } }],
+  })
+  assert.equal(reversed.ok, false)
+  if (!reversed.ok) assert.match(reversed.reason, /overlap/i)
+})
+
+test('join_sentence works with sentenceOrdinal targeting', () => {
+  const text = 'I went there, and then I left. She told me not to go. He laughed.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'join',
+    operations: [{ id: 'ord', type: 'join_sentence', target: { sentenceOrdinal: 1 }, destination: { sentenceOrdinal: 2 } }],
+  })
+  assert.equal(result.ok && result.afterText, 'I went there, and then I left, she told me not to go. He laughed.')
+})

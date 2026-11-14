@@ -116,7 +116,7 @@ function parseOperation(value) {
   ]);
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null;
   const type = value.type;
-  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "delete_range" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "move_before" && type !== "move_after" && type !== "continue")
+  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "delete_range" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "join_sentence" && type !== "move_before" && type !== "move_after" && type !== "continue")
     return null;
   const target = parseTarget(value.target);
   if (!target) return null;
@@ -131,6 +131,12 @@ function parseOperation(value) {
       return null;
     if (text !== void 0 || destination !== void 0 || includeTrailingPunctuation !== void 0)
       return null;
+  } else if (type === "join_sentence") {
+    if (text !== void 0 || caseMode !== void 0) return null;
+    if (destination === void 0 || !destination) return null;
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null;
+    if (target.scope !== void 0 || destination.scope !== void 0) return null;
+    if (includeTrailingPunctuation !== void 0) return null;
   } else if (type === "delete" || type === "split" || type === "join_next") {
     if (text !== void 0 || caseMode !== void 0) return null;
     if (destination !== void 0) return null;
@@ -490,7 +496,7 @@ var COMMAND_GROUPS = [
         "Say \u201Cdelete,\u201D \u201Cremove,\u201D \u201Ctake off,\u201D \u201Ctake out,\u201D \u201Cerase,\u201D or \u201Ccut,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
       ],
       ["Delete a range", "Remove the passage from \u201CI remember the time\u201D to \u201Cnearly in an instant.\u201D Both endpoint phrases and the text between them are removed."],
-      ["About a sentence or part", "Say \u201Cdelete the sentence about Erin unwinding,\u201D \u201Creplace the part about Erin unwinding with she rests,\u201D or \u201Cmove the part about Erin unwinding to the end of the paragraph.\u201D You can also move a phrase before or after the sentence about a long war, or to its beginning or end, or \u201Ccontinue the sentence about Erin unwinding with and then she rests.\u201D Near-threshold matches and overlapping high-confidence spans are flagged for review; unrelated ambiguous matches stop. Quote a literal target containing \u201Cabout\u201D to keep it exact."],
+      ["About a sentence or part", "Say \u201Cdelete the sentence about Erin unwinding,\u201D \u201Creplace the part about Erin unwinding with she rests,\u201D or \u201Cmove the part about Erin unwinding to the end of the paragraph.\u201D You can also move a phrase before or after the sentence about a long war, or to its beginning or end, or \u201Ccontinue the sentence about Erin unwinding with and then she rests.\u201D Join adjacent inline sentences by description: \u201Cjoin the sentence about Erin relaxing with the sentence about Maeve waiting\u201D \u2014 literal quotations work too, in either operand. Near-threshold matches and overlapping high-confidence spans are flagged for review; unrelated ambiguous matches stop. Quote a literal target containing \u201Cabout\u201D to keep it exact."],
       ["Move", "Move, relocate, or shift \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
       ["Move before", "Move paragraph 3 before paragraph 1."],
       ["Move after", "Move paragraph 1 after paragraph 2."]
@@ -500,7 +506,7 @@ var COMMAND_GROUPS = [
     title: "Paragraphs",
     examples: [
       ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
-      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph."]
+      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph. Or the adjacent sentences or fragments: \u201CJoin the sentence \u2018I look at the man from across the room\u2019 with the sentence \u2018And I decide to wave.\u2019\u201D The first operand stays verbatim \u2014 its terminal punctuation becomes a comma, the second operand starts with a lowercased ordinary word (proper nouns and \u201CI\u201D keep capitalization), and the merged sentence inherits the source\u2019s ?, !, \u2026, or combinations. The two operands must be directly next to each other. Wrapped operands keep their enclosure around the source only: \u201Che came late\u201D + \u201Cshe left\u201D produces \u201Che came late,\u201D she left.\u201D"]
     ]
   },
   {

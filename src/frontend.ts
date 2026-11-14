@@ -121,7 +121,7 @@ export const COMMAND_GROUPS = [
         'Say “delete,” “remove,” “take off,” “take out,” “erase,” or “cut,” followed by the target—for example, “Take off the second sentence in paragraph 1.”',
       ],
       ['Delete a range', 'Remove the passage from “I remember the time” to “nearly in an instant.” Both endpoint phrases and the text between them are removed.'],
-      ['About a sentence or part', 'Say “delete the sentence about Erin unwinding,” “replace the part about Erin unwinding with she rests,” or “move the part about Erin unwinding to the end of the paragraph.” You can also move a phrase before or after the sentence about a long war, or to its beginning or end, or “continue the sentence about Erin unwinding with and then she rests.” Near-threshold matches and overlapping high-confidence spans are flagged for review; unrelated ambiguous matches stop. Quote a literal target containing “about” to keep it exact.'],
+      ['About a sentence or part', 'Say “delete the sentence about Erin unwinding,” “replace the part about Erin unwinding with she rests,” or “move the part about Erin unwinding to the end of the paragraph.” You can also move a phrase before or after the sentence about a long war, or to its beginning or end, or “continue the sentence about Erin unwinding with and then she rests.” Join adjacent inline sentences by description: “join the sentence about Erin relaxing with the sentence about Maeve waiting” — literal quotations work too, in either operand. Near-threshold matches and overlapping high-confidence spans are flagged for review; unrelated ambiguous matches stop. Quote a literal target containing “about” to keep it exact.'],
       ['Move', 'Move, relocate, or shift “approved” before “pending” in paragraph 1.'],
       ['Move before', 'Move paragraph 3 before paragraph 1.'],
       ['Move after', 'Move paragraph 1 after paragraph 2.'],
@@ -131,7 +131,7 @@ export const COMMAND_GROUPS = [
     title: 'Paragraphs',
     examples: [
       ['Split', 'Split, break, or divide paragraph 1 after “The launch checklist is ready.”'],
-      ['Join', 'Join, merge, or combine paragraph 1 with the following paragraph.'],
+      ['Join', 'Join, merge, or combine paragraph 1 with the following paragraph. Or the adjacent sentences or fragments: “Join the sentence ‘I look at the man from across the room’ with the sentence ‘And I decide to wave.’” The first operand stays verbatim — its terminal punctuation becomes a comma, the second operand starts with a lowercased ordinary word (proper nouns and “I” keep capitalization), and the merged sentence inherits the source’s ?, !, …, or combinations. The two operands must be directly next to each other. Wrapped operands keep their enclosure around the source only: “he came late” + “she left” produces “he came late,” she left.”'],
     ],
   },
   {

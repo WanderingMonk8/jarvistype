@@ -16,6 +16,7 @@ export type EditOperationType =
   | 'case'
   | 'split'
   | 'join_next'
+  | 'join_sentence'
   | 'move_before'
   | 'move_after'
   | 'continue'
@@ -248,6 +249,19 @@ export function executeEditPlan(
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
   if (plan.operations.length === 1 && plan.operations[0]?.type === 'delete_range')
     return executeRangeDeletion(cleanText, paragraphs, plan.operations[0], protectedCasingTerms)
+  const inlineJoins = plan.operations.filter(isJoinSentenceOperation)
+  if (inlineJoins.length) {
+    if (inlineJoins.length !== plan.operations.length || inlineJoins.length > 1)
+      return { ok: false, reason: 'a join must be the only operation in its edit plan' }
+    return executeJoinSentence(
+      cleanText,
+      paragraphs,
+      inlineJoins[0]!,
+      protectedCasingTerms,
+      formatText,
+      options.skipSentenceRepair === true,
+    )
+  }
   const inlineContinue = plan.operations.filter(isContinueSentenceOperation)
   if (inlineContinue.length) {
     if (inlineContinue.length !== plan.operations.length || inlineContinue.length > 1)
@@ -389,6 +403,7 @@ function parseOperation(value: unknown): EditOperation | null {
     type !== 'case' &&
     type !== 'split' &&
     type !== 'join_next' &&
+    type !== 'join_sentence' &&
     type !== 'move_before' &&
     type !== 'move_after' &&
     type !== 'continue'
@@ -412,6 +427,12 @@ function parseOperation(value: unknown): EditOperation | null {
       return null
     if (text !== undefined || destination !== undefined || includeTrailingPunctuation !== undefined)
       return null
+  } else if (type === 'join_sentence') {
+    if (text !== undefined || caseMode !== undefined) return null
+    if (destination === undefined || !destination) return null
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null
+    if (target.scope !== undefined || destination.scope !== undefined) return null
+    if (includeTrailingPunctuation !== undefined) return null
   } else if (type === 'delete' || type === 'split' || type === 'join_next') {
     if (text !== undefined || caseMode !== undefined) return null
     if (destination !== undefined) return null
@@ -1129,6 +1150,49 @@ export function stripContinuationHelper(text: string): string {
  * Closing wrappers (quotes, parens, brackets) are re-attached after the
  * continuation.
  */
+/**
+ * Capitalise/lower a continuation the way an inline rewrite would: an enclosed
+ * utterance keeps its dictated casing and pairing (quoted speech is a fresh
+ * sentence boundary), names and "I" stay, evidence decides the rest. The merged
+ * sentence inherits the source's exact `! ? …` terminator when one is supplied.
+ */
+function buildContinuation(
+  text: string,
+  protectedCasingTerms: readonly string[],
+  formatText: boolean,
+  inheritedTermination: string,
+): string {
+  const continuationCore = formatText
+    ? (() => {
+        if (startsWithQuotedUtterance(text)) return text
+        const lower = lowercaseOrdinarySentenceOpening(text, 0, text, 0, protectedCasingTerms)
+        return lower ? `${lower.text}${text.slice(lower.end)}` : text
+      })()
+    : text
+  // A terminal comma immediately before the closing marks is the British-quotation
+  // convention for closing the quoted sentence — it becomes a period, and the merged
+  // utterance must not grow a stray period outside the closing wrappers.
+  const normalizedCore = continuationCore.replace(/[,，](['"‘’“”)\]}»›`」』】》〉]+)$/u, '.$1')
+  // If the original source ended with ?, !, or …, the merged sentence keeps
+  // that exact terminator instead of adopting Y's: X? -> X, Y?   and   X! -> X, Y!
+  //   and   X… -> X, Y…. When Y itself is enclosed (quotes, parens, brackets,
+  // braces, …), the inherited run lands INSIDE the enclosure — X! -> X, "Y!" —
+  // replacing or supplying the final mark of the enclosed utterance.
+  const terminatorInsideClosers = /[.!?…]['"‘’“”)\]}»›`」』】》〉]+$/u
+  if (inheritedTermination) {
+    const enclosed = /^([\s\S]*?)([.!?…]*)(['"‘’”)\]}»›`」』】》〉]+)$/u.exec(normalizedCore)
+    if (enclosed?.[1] && /[\p{L}\p{N}]/u.test(enclosed[1])) {
+      // "I love you." + X! -> "I love you!"      and      "Then I love you" + X! -> "Then I love you!"
+      return `${enclosed[1]}${inheritedTermination}${enclosed[3]}`
+    }
+    const stripped = normalizedCore.replace(/[.!?…]+$/u, '')
+    return `${stripped}${inheritedTermination}`
+  }
+  if (terminatorInsideClosers.test(normalizedCore) || /[.!?…]$/u.test(normalizedCore))
+    return normalizedCore
+  return `${normalizedCore}.`
+}
+
 function executeContinueSentence(
   cleanText: string,
   paragraphs: readonly DraftParagraph[],
@@ -1153,40 +1217,7 @@ function executeContinueSentence(
   const closers = closeMatch?.[2] ?? ''
   const consumed = (closeMatch?.[0].length ?? 0)
   const inheritedTermination = /[!?…]/u.test(raw) ? raw : ''
-  // Capitalise the first ordinary word of the continuation the way an inline
-  // rewrite would: lowercase names and "I" stay; evidence decides the rest.
-  const continuationCore = formatText
-    ? (() => {
-        if (startsWithQuotedUtterance(text)) return text
-        const lower = lowercaseOrdinarySentenceOpening(text, 0, text, 0, protectedCasingTerms)
-        return lower ? `${lower.text}${text.slice(lower.end)}` : text
-      })()
-    : text
-  // A terminal comma immediately before the closing marks is the British-quotation
-  // convention for closing the quoted sentence — it becomes a period, and the merged
-  // utterance must not grow a stray period outside the closing wrappers.
-  const normalizedCore = continuationCore.replace(/[,，](['"‘’“”)\]}»›`」』】》〉]+)$/u, '.$1')
-  // If the original source ended with ?, !, or …, the merged sentence keeps
-  // that exact terminator instead of adopting Y's: X? -> X, Y?   and   X! -> X, Y!
-  //   and   X… -> X, Y…. When Y itself is enclosed (quotes, parens, brackets,
-  // braces, …), the inherited run lands INSIDE the enclosure — X! -> X, "Y!" —
-  // replacing or supplying the final mark of the enclosed utterance.
-  const terminatorInsideClosers = /[.!?…]['"‘’“”)\]}»›`」』】》〉]+$/u
-  let continuation: string
-  if (inheritedTermination) {
-    const enclosed = /^([\s\S]*?)([.!?…]*)(['"‘’”)\]}»›`」』】》〉]+)$/u.exec(normalizedCore)
-    if (enclosed?.[1] && /[\p{L}\p{N}]/u.test(enclosed[1])) {
-      // "I love you." + X! -> "I love you!"      and      "Then I love you" + X! -> "Then I love you!"
-      continuation = `${enclosed[1]}${inheritedTermination}${enclosed[3]}`
-    } else {
-      const stripped = normalizedCore.replace(/[.!?…]+$/u, '')
-      continuation = `${stripped}${inheritedTermination}`
-    }
-  } else if (terminatorInsideClosers.test(normalizedCore) || /[.!?…]$/u.test(normalizedCore)) {
-    continuation = normalizedCore
-  } else {
-    continuation = `${normalizedCore}.`
-  }
+  const continuation = buildContinuation(text, protectedCasingTerms, formatText, inheritedTermination)
     const afterText = `${cleanText.slice(0, end)}, ${continuation}${closers}${after.slice(consumed)}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
@@ -1196,20 +1227,89 @@ function executeContinueSentence(
   if (formatText && !skipSentenceRepair) {
     const repaired = repairParagraphBoundaries(afterText)
     if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
-    return finishContinueSentence(repaired.text, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
+    return finishInlineOperation(repaired.text, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
   }
-  return finishContinueSentence(afterText, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
+  return finishInlineOperation(afterText, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
 }
 
-function finishContinueSentence(
+type JoinSentenceOperation = EditOperation & { type: 'join_sentence' }
+
+function isJoinSentenceOperation(operation: EditOperation): operation is JoinSentenceOperation {
+  return (
+    operation.type === 'join_sentence' &&
+    operation.destination !== undefined &&
+    hasInlineSelector(operation.target) &&
+    hasInlineSelector(operation.destination)
+  )
+}
+
+/**
+ * Join ("Join the sentence X with the sentence Y") — merge two adjacent inline
+ * spans into one sentence. The first operand's first word is preserved, its
+ * terminal punctuation is replaced by a comma, and the second operand's first
+ * ordinary word is lowercased (names and "I" stay). The merged sentence inherits
+ * the first operand's exact `! ? …` run when it ends with one — mirroring the
+ * Continue semantics. Closing wrappers that belonged to the first operand are
+ * re-attached right after the joining comma ("X." + Y. -> "X," Y.).
+ */
+function executeJoinSentence(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  operation: EditOperation & { type: 'join_sentence' },
+  protectedCasingTerms: readonly string[],
+  formatText: boolean,
+  skipSentenceRepair = false,
+): EditPipelineResult {
+  const destination = operation.destination
+  if (!destination) return { ok: false, reason: 'join destination was not provided' }
+  const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'join source')
+  if (typeof source === 'string') return { ok: false, reason: source }
+  const destinationResult = resolveTextTarget(cleanText, paragraphs, destination, 'join destination')
+  if (typeof destinationResult === 'string') return { ok: false, reason: destinationResult }
+  if (destinationResult.start >= destinationResult.end)
+    return { ok: false, reason: 'join destination was not found' }
+  if (destinationResult.start < source.end)
+    return { ok: false, reason: 'join operands overlap' }
+  const gap = cleanText.slice(source.end, destinationResult.start)
+  if (/[\p{L}\p{N}]/u.test(gap))
+    return { ok: false, reason: 'join operands are not directly next to each other' }
+  const start = source.start
+  let end = source.end
+  // Trim trailing punctuation inside the matched span so X stops at the last word character.
+  while (end > start && /[.,;:!?…—–-]/u.test(cleanText[end - 1]!)) end -= 1
+  const gapTail = cleanText.slice(end, destinationResult.start)
+  const closeMatch = gapTail.match(/^([.!?…—–,;-]+)?([”’"')\]}»›`」』】》〉]*)\s*$/u)
+  const raw = closeMatch?.[1] ?? ''
+  const closers = closeMatch?.[2] ?? ''
+  const inheritedTermination = /[!?…]/u.test(raw) ? raw : ''
+  const text = cleanText.slice(destinationResult.start, destinationResult.end)
+  if (!/[\p{L}\p{N}]/u.test(text)) return { ok: false, reason: 'join destination was not found' }
+  const continuation = buildContinuation(text, protectedCasingTerms, formatText, inheritedTermination)
+  const afterText = closers
+    ? `${cleanText.slice(0, end)},${closers} ${continuation}${cleanText.slice(destinationResult.end)}`
+    : `${cleanText.slice(0, end)}, ${continuation}${cleanText.slice(destinationResult.end)}`
+  if (afterText.length > MAX_DRAFT_CHARACTERS)
+    return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
+  if (formatText && !skipSentenceRepair) {
+    const repaired = repairParagraphBoundaries(afterText)
+    if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+    return finishInlineOperation(repaired.text, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
+  }
+  return finishInlineOperation(afterText, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
+}
+
+function finishInlineOperation(
   afterText: string,
   paragraphs: readonly DraftParagraph[],
-  operation: EditOperation & { type: 'continue' },
+  operation: EditOperation,
   paragraphStart: number,
   paragraphEnd: number,
   startOffset: number,
   paragraphOrdinal: number,
-  continuation: string,
+  replacementText: string,
 ): EditPipelineResult {
   const affected = new Set<number>()
   affected.add(paragraphOrdinal)
@@ -1222,7 +1322,7 @@ function finishContinueSentence(
         startOffset,
         endOffset: paragraphEnd,
         beforeText: afterText.slice(paragraphStart, paragraphEnd),
-        afterText: continuation,
+        afterText: replacementText,
         paragraphOrdinal,
       },
     ],

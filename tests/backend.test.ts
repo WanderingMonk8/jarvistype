@@ -3062,6 +3062,31 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('resolves about join commands and executes inline sentence merges', async () => {
+  const examples = [
+    ['Erin unwinds herself. Maeve waits.', 'Join the sentence about Erin relaxing with the sentence about Maeve waiting.', 'Erin unwinds herself, maeve waits.', [0.99, 0.01, 0.01, 0.99]],
+    ['Erin unwinds herself. Maeve waits.', 'Join the sentence about Erin relaxing with the sentence "Maeve waits."', 'Erin unwinds herself, maeve waits.', [0.99, 0.01]],
+    ['Erin unwinds herself. Maeve waits.', 'Join the sentence "Erin unwinds herself." with the sentence about Maeve waiting.', 'Erin unwinds herself, maeve waits.', [0.01, 0.99]],
+  ] as const
+  for (const [index, [draft, instruction, expected, scores]] of examples.entries()) {
+    const userId = `about-join-user-${index}`
+    const chatId = `about-join-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = true
+    let aboutCallIndex = 0
+    aboutDecision = () => {
+      aboutCallIndex += 1
+      return scores[aboutCallIndex - 1] ?? 0.01
+    }
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-join-${index}`, operationId: `about-join-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+  }
+})
+
 test('resolves about sentence and phrase continue commands with descriptive about targets', async () => {
   const examples = [
     ['Erin unwinds herself. Maeve waits.', 'Continue the sentence about Erin relaxing with and then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],

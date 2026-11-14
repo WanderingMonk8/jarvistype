@@ -1093,6 +1093,25 @@ function executeInlineMove(
 
 const CONTINUATION_HELPER = /^(?:the|this|that|a|an)\s+(?:phrases?|sentences?|words?|clauses?|parts?|fragments?)(?=$|\s|[,.:;–—-])(?:\s*[,.:;–—-]\s*|\s+)?/iu
 
+const CONTINUATION_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
+  ['"', '"'],
+  ["'", "'"],
+  ['“', '”'],
+  ['‘', '’'],
+]
+
+/** Unwrap one layer of argument quotes around a spoken continuation, mirroring unwrapEditArgument. */
+export function unwrapContinuationArgument(text: string): string {
+  const trimmed = text.trim()
+  const wrapper = CONTINUATION_WRAPPERS.find(
+    ([opening, closing]) =>
+      trimmed.length >= opening.length + closing.length &&
+      trimmed.startsWith(opening) &&
+      trimmed.endsWith(closing),
+  )
+  return (wrapper ? trimmed.slice(wrapper[0].length, -wrapper[1].length) : trimmed).trim()
+}
+
 /**
  * Drop the filler words that may introduce a spoken continuation, along with any
  * attached punctuation — "the phrase, only then …" → "only then …". These words
@@ -1130,7 +1149,7 @@ function executeContinueSentence(
   let end = source.end
   // Trim trailing punctuation inside the matched span so X stops at the last word character.
   while (end > start && /[.,;:!?…—–-]/u.test(cleanText[end - 1]!)) end -= 1
-  const text = stripContinuationHelper(operation.text ?? '')
+  const text = unwrapContinuationArgument(stripContinuationHelper(unwrapContinuationArgument(operation.text ?? '')))
   if (!/[\p{L}\p{N}]/u.test(text)) return { ok: false, reason: 'continue target was not found' }
   // Consume the terminal punctuation run and any closing wrapper that belongs
   // to it; the merged sentence inherits the exact run.

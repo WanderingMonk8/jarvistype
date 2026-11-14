@@ -1427,6 +1427,19 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
   };
 }
 var CONTINUATION_HELPER = /^(?:the|this|that|a|an)\s+(?:phrases?|sentences?|words?|clauses?|parts?|fragments?)(?=$|\s|[,.:;–—-])(?:\s*[,.:;–—-]\s*|\s+)?/iu;
+var CONTINUATION_WRAPPERS = [
+  ['"', '"'],
+  ["'", "'"],
+  ["\u201C", "\u201D"],
+  ["\u2018", "\u2019"]
+];
+function unwrapContinuationArgument(text) {
+  const trimmed = text.trim();
+  const wrapper = CONTINUATION_WRAPPERS.find(
+    ([opening, closing]) => trimmed.length >= opening.length + closing.length && trimmed.startsWith(opening) && trimmed.endsWith(closing)
+  );
+  return (wrapper ? trimmed.slice(wrapper[0].length, -wrapper[1].length) : trimmed).trim();
+}
 function stripContinuationHelper(text) {
   let current = text.trim();
   for (let pass = 0; pass < 4; pass += 1) {
@@ -1442,7 +1455,7 @@ function executeContinueSentence(cleanText, paragraphs, operation, protectedCasi
   const start = source.start;
   let end = source.end;
   while (end > start && /[.,;:!?…—–-]/u.test(cleanText[end - 1])) end -= 1;
-  const text = stripContinuationHelper(operation.text ?? "");
+  const text = unwrapContinuationArgument(stripContinuationHelper(unwrapContinuationArgument(operation.text ?? "")));
   if (!/[\p{L}\p{N}]/u.test(text)) return { ok: false, reason: "continue target was not found" };
   const after = cleanText.slice(end);
   const closeMatch = after.match(/^([.!?…—–-]+)([”’"')\]}]*)/u);
@@ -4321,7 +4334,7 @@ function escapeRegExp2(value) {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.29";
+var APP_VERSION = "1.6.30";
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
 var MIN_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 5;
 var MAX_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 180;

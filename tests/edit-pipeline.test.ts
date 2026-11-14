@@ -2682,3 +2682,22 @@ test('Continue rejects a continuation that is nothing but filler words', () => {
   assert.equal(result.ok, false)
   if (!result.ok) assert.match(result.reason, /target was not found/i)
 })
+
+test('Continue unwraps argument quotes around the continuation in either filler order', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const make = (id: string, payload: string) => executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id, type: 'continue', target: { exactText: 'his left and turn' }, text: payload }],
+  })
+  const pretty = make('quote-1', '\'only then would you know.\'')
+  assert.equal(pretty.ok && pretty.afterText, 'He looks to his left and turn, only then would you know.')
+  const fillerThenQuote = make('quote-2', "the phrase 'only then would you know.'")
+  assert.equal(fillerThenQuote.ok && fillerThenQuote.afterText, 'He looks to his left and turn, only then would you know.')
+  const quoteFiller = make('quote-3', "'the phrase, only then would you know.'")
+  assert.equal(quoteFiller.ok && quoteFiller.afterText, 'He looks to his left and turn, only then would you know.')
+  const curlyQuoted = make('quote-4', '“only then would you know.”')
+  assert.equal(curlyQuoted.ok && curlyQuoted.afterText, 'He looks to his left and turn, only then would you know.')
+})

@@ -1091,26 +1091,20 @@ function executeInlineMove(
   }
 }
 
-const CONTINUATION_HELPER = /^(?:the|this|that|a|an)\s+(?:phrases?|sentences?|words?|clauses?|parts?|fragments?)(?=$|\s|[,.:;–—-])(?:\s*[,.:;–—-]\s*|\s+)?/iu
+const CONTINUATION_QUOTE_OPENERS = new Set(['“', '‘', '„', '‚', '‟', '«', '‹', '"', "'"])
+const CONTINUATION_OPENERS = new Set(['(', '[', '{', '《', '「', '『', '（', '［', '｛'])
 
-const CONTINUATION_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
-  ['"', '"'],
-  ["'", "'"],
-  ['“', '”'],
-  ['‘', '’'],
-]
-
-/** Unwrap one layer of argument quotes around a spoken continuation, mirroring unwrapEditArgument. */
-export function unwrapContinuationArgument(text: string): string {
-  const trimmed = text.trim()
-  const wrapper = CONTINUATION_WRAPPERS.find(
-    ([opening, closing]) =>
-      trimmed.length >= opening.length + closing.length &&
-      trimmed.startsWith(opening) &&
-      trimmed.endsWith(closing),
-  )
-  return (wrapper ? trimmed.slice(wrapper[0].length, -wrapper[1].length) : trimmed).trim()
+/** A continuation that begins with an enclosed utterance keeps its dictated casing: the
+ * first word inside the enclosure opens a new sentence, it is not a mid-sentence continuation. */
+function startsWithQuotedUtterance(text: string): boolean {
+  for (const character of text) {
+    if (/\s/u.test(character)) continue
+    return CONTINUATION_QUOTE_OPENERS.has(character) || CONTINUATION_OPENERS.has(character)
+  }
+  return false
 }
+
+const CONTINUATION_HELPER = /^(?:the|this|that|a|an)\s+(?:phrases?|sentences?|words?|clauses?|parts?|fragments?)(?=$|\s|[,.:;–—-])(?:\s*[,.:;–—-]\s*|\s+)?/iu
 
 /**
  * Drop the filler words that may introduce a spoken continuation, along with any
@@ -1149,7 +1143,7 @@ function executeContinueSentence(
   let end = source.end
   // Trim trailing punctuation inside the matched span so X stops at the last word character.
   while (end > start && /[.,;:!?…—–-]/u.test(cleanText[end - 1]!)) end -= 1
-  const text = unwrapContinuationArgument(stripContinuationHelper(unwrapContinuationArgument(operation.text ?? '')))
+  const text = stripContinuationHelper(operation.text ?? '')
   if (!/[\p{L}\p{N}]/u.test(text)) return { ok: false, reason: 'continue target was not found' }
   // Consume the terminal punctuation run and any closing wrapper that belongs
   // to it; the merged sentence inherits the exact run.
@@ -1163,18 +1157,26 @@ function executeContinueSentence(
   // rewrite would: lowercase names and "I" stay; evidence decides the rest.
   const continuationCore = formatText
     ? (() => {
+        if (startsWithQuotedUtterance(text)) return text
         const lower = lowercaseOrdinarySentenceOpening(text, 0, text, 0, protectedCasingTerms)
         return lower ? `${lower.text}${text.slice(lower.end)}` : text
       })()
     : text
   // If the original source ended with ?, !, or …, the merged sentence keeps
   // that exact terminator instead of adopting Y's: X? -> X, Y?   and   X! -> X, Y!
-  //   and   X… -> X, Y…
+  //   and   X… -> X, Y…. When Y carries its own terminator inside enclosing
+  // marks, Y is kept verbatim — the merged sentence keeps both: “Y.”!
+  // A complete sentence nested inside wrappers is not split or retyped.
+  const terminatorInsideClosers = /[.!?…]['"‘’“”)\]}»›`」』】》〉]+$/u
   let continuation: string
   if (inheritedTermination) {
-    const stripped = continuationCore.replace(/[.!?…]+$/u, '')
-    continuation = `${stripped}${inheritedTermination}`
-  } else if (/[.!?…]$/u.test(continuationCore)) {
+    if (terminatorInsideClosers.test(continuationCore)) {
+      continuation = `${continuationCore}${inheritedTermination}`
+    } else {
+      const stripped = continuationCore.replace(/[.!?…]+$/u, '')
+      continuation = `${stripped}${inheritedTermination}`
+    }
+  } else if (terminatorInsideClosers.test(continuationCore) || /[.!?…]$/u.test(continuationCore)) {
     continuation = continuationCore
   } else {
     continuation = `${continuationCore}.`

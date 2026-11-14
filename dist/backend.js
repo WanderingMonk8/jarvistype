@@ -1426,20 +1426,16 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
     ].sort((left, right) => left - right)
   };
 }
-var CONTINUATION_HELPER = /^(?:the|this|that|a|an)\s+(?:phrases?|sentences?|words?|clauses?|parts?|fragments?)(?=$|\s|[,.:;–—-])(?:\s*[,.:;–—-]\s*|\s+)?/iu;
-var CONTINUATION_WRAPPERS = [
-  ['"', '"'],
-  ["'", "'"],
-  ["\u201C", "\u201D"],
-  ["\u2018", "\u2019"]
-];
-function unwrapContinuationArgument(text) {
-  const trimmed = text.trim();
-  const wrapper = CONTINUATION_WRAPPERS.find(
-    ([opening, closing]) => trimmed.length >= opening.length + closing.length && trimmed.startsWith(opening) && trimmed.endsWith(closing)
-  );
-  return (wrapper ? trimmed.slice(wrapper[0].length, -wrapper[1].length) : trimmed).trim();
+var CONTINUATION_QUOTE_OPENERS = /* @__PURE__ */ new Set(["\u201C", "\u2018", "\u201E", "\u201A", "\u201F", "\xAB", "\u2039", '"', "'"]);
+var CONTINUATION_OPENERS = /* @__PURE__ */ new Set(["(", "[", "{", "\u300A", "\u300C", "\u300E", "\uFF08", "\uFF3B", "\uFF5B"]);
+function startsWithQuotedUtterance(text) {
+  for (const character of text) {
+    if (/\s/u.test(character)) continue;
+    return CONTINUATION_QUOTE_OPENERS.has(character) || CONTINUATION_OPENERS.has(character);
+  }
+  return false;
 }
+var CONTINUATION_HELPER = /^(?:the|this|that|a|an)\s+(?:phrases?|sentences?|words?|clauses?|parts?|fragments?)(?=$|\s|[,.:;–—-])(?:\s*[,.:;–—-]\s*|\s+)?/iu;
 function stripContinuationHelper(text) {
   let current = text.trim();
   for (let pass = 0; pass < 4; pass += 1) {
@@ -1455,7 +1451,7 @@ function executeContinueSentence(cleanText, paragraphs, operation, protectedCasi
   const start = source.start;
   let end = source.end;
   while (end > start && /[.,;:!?…—–-]/u.test(cleanText[end - 1])) end -= 1;
-  const text = unwrapContinuationArgument(stripContinuationHelper(unwrapContinuationArgument(operation.text ?? "")));
+  const text = stripContinuationHelper(operation.text ?? "");
   if (!/[\p{L}\p{N}]/u.test(text)) return { ok: false, reason: "continue target was not found" };
   const after = cleanText.slice(end);
   const closeMatch = after.match(/^([.!?…—–-]+)([”’"')\]}]*)/u);
@@ -1464,14 +1460,20 @@ function executeContinueSentence(cleanText, paragraphs, operation, protectedCasi
   const consumed = closeMatch?.[0].length ?? 0;
   const inheritedTermination = /[!?…]/u.test(raw) ? raw : "";
   const continuationCore = formatText ? (() => {
+    if (startsWithQuotedUtterance(text)) return text;
     const lower = lowercaseOrdinarySentenceOpening(text, 0, text, 0, protectedCasingTerms);
     return lower ? `${lower.text}${text.slice(lower.end)}` : text;
   })() : text;
+  const terminatorInsideClosers = /[.!?…]['"‘’“”)\]}»›`」』】》〉]+$/u;
   let continuation;
   if (inheritedTermination) {
-    const stripped = continuationCore.replace(/[.!?…]+$/u, "");
-    continuation = `${stripped}${inheritedTermination}`;
-  } else if (/[.!?…]$/u.test(continuationCore)) {
+    if (terminatorInsideClosers.test(continuationCore)) {
+      continuation = `${continuationCore}${inheritedTermination}`;
+    } else {
+      const stripped = continuationCore.replace(/[.!?…]+$/u, "");
+      continuation = `${stripped}${inheritedTermination}`;
+    }
+  } else if (terminatorInsideClosers.test(continuationCore) || /[.!?…]$/u.test(continuationCore)) {
     continuation = continuationCore;
   } else {
     continuation = `${continuationCore}.`;
@@ -6223,7 +6225,7 @@ async function interpretEditInstruction(instructionTranscript, session, settings
         },
         {
           role: "system",
-          content: "Recognize flexible edit vocabulary only when the instruction supplies the arguments required for that operation. Delete aliases: delete, remove, take off, take out, erase, cut. Replace aliases: replace X with Y; change X to or into Y; swap X with or for Y; substitute X with or for Y. Insert aliases: insert, add, place, or put X before or after Y. Append aliases: append, add to the end, place at the end, put at the end, or tack onto the end. Prepend aliases: prepend, add to the beginning or start, place at the beginning or start, or put at the beginning or start. Move aliases: move, relocate, or shift X before or after Y. Split aliases: split, break, or divide a paragraph after the identified target. Join aliases: join, merge, or combine a paragraph with the following paragraph. Casing aliases: uppercase or make all caps; lowercase or make lowercase; capitalize or title case every word in the target phrase. Continue aliases: continue X with Y; continue from/after X with Y; continue X with this phrase Y (where the from/after/this/the/phrase/sentence/word/clause/part parts are optional fillers). When the continuation Y itself begins with words such as \u201Cthe phrase,\u201D \u201Cthis sentence,\u201D \u201Cthe word,\u201D \u201Cthe clause,\u201D \u201Cthe part,\u201D or \u201Cthe fragment,\u201D with optional attached punctuation, those words and the attached punctuation are fillers introducing the literal continuation and must be omitted from Y. A continue operation attaches the spoken continuation to the end of the matched target, replacing any ending sentence punctuation with a comma and lowercasing the continuation\u2019s first ordinary word. If the matched source ends with ?, !, \u2026, or a combination such as !?, !!, or ?!, the merged sentence inherits that exact terminator instead of the continuation\u2019s terminal punctuation. Isolated verbs without the required target, payload, or destination are not valid edit operations."
+          content: "Recognize flexible edit vocabulary only when the instruction supplies the arguments required for that operation. Delete aliases: delete, remove, take off, take out, erase, cut. Replace aliases: replace X with Y; change X to or into Y; swap X with or for Y; substitute X with or for Y. Insert aliases: insert, add, place, or put X before or after Y. Append aliases: append, add to the end, place at the end, put at the end, or tack onto the end. Prepend aliases: prepend, add to the beginning or start, place at the beginning or start, or put at the beginning or start. Move aliases: move, relocate, or shift X before or after Y. Split aliases: split, break, or divide a paragraph after the identified target. Join aliases: join, merge, or combine a paragraph with the following paragraph. Casing aliases: uppercase or make all caps; lowercase or make lowercase; capitalize or title case every word in the target phrase. Continue aliases: continue X with Y; continue from/after X with Y; continue X with this phrase Y (where the from/after/this/the/phrase/sentence/word/clause/part parts are optional fillers). When the continuation Y itself begins with words such as \u201Cthe phrase,\u201D \u201Cthis sentence,\u201D \u201Cthe word,\u201D \u201Cthe clause,\u201D \u201Cthe part,\u201D or \u201Cthe fragment,\u201D with optional attached punctuation, those words and the attached punctuation are fillers introducing the literal continuation and must be omitted from Y. If the spoken continuation itself contains quoted speech or an enclosed utterance (for example \u201Cbegin speech \u2026 end speech\u201D, a parenthesized parenthetical, or a bracketed aside), those enclosure marks are part of Y and must appear in the emitted operation text; the opening of the quoted utterance is a fresh sentence boundary whose casing must be kept \u2014 do not lowercase it. A continue operation attaches the spoken continuation to the end of the matched target, replacing any ending sentence punctuation with a comma and lowercasing the continuation\u2019s first ordinary word. If the matched source ends with ?, !, \u2026, or a combination such as !?, !!, or ?!, the merged sentence inherits that exact terminator instead of the continuation\u2019s terminal punctuation. Isolated verbs without the required target, payload, or destination are not valid edit operations."
         },
         {
           role: "user",

@@ -2683,7 +2683,7 @@ test('Continue rejects a continuation that is nothing but filler words', () => {
   if (!result.ok) assert.match(result.reason, /target was not found/i)
 })
 
-test('Continue unwraps argument quotes around the continuation in either filler order', () => {
+test('Continue keeps wrapping quotes (and other enclosures) around the continuation verbatim', () => {
   const text = 'He looks to his left and turn.'
   const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
   const make = (id: string, payload: string) => executeEditPlan(text, paragraphs, 1, {
@@ -2693,11 +2693,53 @@ test('Continue unwraps argument quotes around the continuation in either filler 
     operations: [{ id, type: 'continue', target: { exactText: 'his left and turn' }, text: payload }],
   })
   const pretty = make('quote-1', '\'only then would you know.\'')
-  assert.equal(pretty.ok && pretty.afterText, 'He looks to his left and turn, only then would you know.')
+  assert.equal(pretty.ok && pretty.afterText, 'He looks to his left and turn, \'only then would you know.\'')
   const fillerThenQuote = make('quote-2', "the phrase 'only then would you know.'")
-  assert.equal(fillerThenQuote.ok && fillerThenQuote.afterText, 'He looks to his left and turn, only then would you know.')
+  assert.equal(fillerThenQuote.ok && fillerThenQuote.afterText, 'He looks to his left and turn, \'only then would you know.\'')
   const quoteFiller = make('quote-3', "'the phrase, only then would you know.'")
-  assert.equal(quoteFiller.ok && quoteFiller.afterText, 'He looks to his left and turn, only then would you know.')
-  const curlyQuoted = make('quote-4', '“only then would you know.”')
-  assert.equal(curlyQuoted.ok && curlyQuoted.afterText, 'He looks to his left and turn, only then would you know.')
+  assert.equal(quoteFiller.ok && quoteFiller.afterText, 'He looks to his left and turn, \'the phrase, only then would you know.\'')
+  const curlyDouble = make('quote-4', '“Only then would you know.”')
+  assert.equal(curlyDouble.ok && curlyDouble.afterText, 'He looks to his left and turn, “Only then would you know.”')
+  const paren = make('quote-5', '(“Only then would you know.”)')
+  assert.equal(paren.ok && paren.afterText, 'He looks to his left and turn, (“Only then would you know.”)')
+  const bracket = make('quote-6', '[Only then would you know.]')
+  assert.equal(bracket.ok && bracket.afterText, 'He looks to his left and turn, [Only then would you know.]')
+})
+
+test('Continue keeps the casing of a quoted utterance and does not append an extra terminator', () => {
+  const text = 'The model yielded buried in his hair.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const run = (id: string, continuation: string) => executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id, type: 'continue', target: { exactText: 'buried in his hair' }, text: continuation }],
+  })
+  const straight = run('case-1', '"Oh my love, I love you so much."')
+  assert.equal(straight.ok && straight.afterText, 'The model yielded buried in his hair, "Oh my love, I love you so much."')
+  const openEnclosure = run('case-2', '“Oh my love, I love you so much.”')
+  assert.equal(openEnclosure.ok && openEnclosure.afterText, 'The model yielded buried in his hair, “Oh my love, I love you so much.”')
+  const dictatedLowercase = run('case-3', '“oh my love, I love you so much.”')
+  assert.equal(dictatedLowercase.ok && dictatedLowercase.afterText, 'The model yielded buried in his hair, “oh my love, I love you so much.”')
+  const curlySingle = run('case-4', '‘And then he shouts.’')
+  assert.equal(curlySingle.ok && curlySingle.afterText, 'The model yielded buried in his hair, ‘And then he shouts.’')
+})
+
+test('Continue keeps both terminators when the source ends in ? and Y carries a quoted terminator', () => {
+  const before = 'The model yielded buried in his hair?'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: before }]
+  const result = executeEditPlan(before, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id: 'both', type: 'continue', target: { exactText: 'buried in his hair' }, text: '“I love you.”' }],
+  })
+  assert.equal(result.ok && result.afterText, 'The model yielded buried in his hair, “I love you.”?')
+  const bare = executeEditPlan(before, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id: 'bare-quote', type: 'continue', target: { exactText: 'buried in his hair' }, text: '“Then I love you”' }],
+  })
+  assert.equal(bare.ok && bare.afterText, 'The model yielded buried in his hair, “Then I love you”?')
 })

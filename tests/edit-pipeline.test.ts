@@ -2064,7 +2064,7 @@ test('allows an insertion at the start of a replaced range but not two insertion
   assert.deepEqual(tied, { ok: false, reason: 'edit operations overlap' })
 })
 
-test('never leaves a quotation mark floating outside paragraph text', () => {
+test('never leaves a wrapping mark floating outside paragraph text', () => {
   const floating = executeEditPlan('Alpha beta gamma.', [], 1, {
     schemaVersion: 2,
     draftVersion: 1,
@@ -2080,7 +2080,7 @@ test('never leaves a quotation mark floating outside paragraph text', () => {
   })
   assert.deepEqual(floating, {
     ok: false,
-    reason: 'quotation mark would fall outside the paragraph',
+    reason: 'wrapping mark would fall outside the paragraph',
   })
 
   const attached = executeEditPlan('Alpha beta gamma.', [], 1, {

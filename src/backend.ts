@@ -72,6 +72,7 @@ import {
 } from './domain/glossary'
 import { opensInsideDoubleQuote, repairDeterministicGrammar } from './domain/grammar'
 import { areSpeechPhoneticNeighbors } from './domain/phonetics'
+import { WRAPPER_FAMILIES, findWrapperFamily, resolveWrapperFamily, WRAPPER_TOKEN_PATTERN, type WrapperFamilyId } from './domain/wrapper-families'
 import type { DeterministicGrammarOptions } from './domain/grammar'
 import {
   applySpellingCasing,
@@ -3403,13 +3404,14 @@ function parseDeterministicParagraphQuotation(
 ): EditPlan | null {
   const ordinalToken =
     '(?:\\d+(?:st|nd|rd|th)?|one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|seven|seventh|eight|eighth|nine|ninth|ten|tenth|last|final|penultimate|second[- ]to[- ]last)'
-  const quotationToken =
-    '(?:(?<style>single|double)\\s+)?(?:quotation\\s+marks?|quote\\s+marks?|quotations?|quotes?)'
+  const wrapperToken =
+    `(?:(?<style>opening|closing|open|close|single|double)\\s+)?(?<marker>${WRAPPER_TOKEN_PATTERN})`
+
   const quotedTarget = `(?:the\\s+)?(?:(?<before>${ordinalToken})\\s+)?paragraph(?:\\s+number)?(?:\\s+(?<after>${ordinalToken}))?`
   const trimmed = instructionTranscript.trim()
   const aroundMatch = trimmed.match(
     new RegExp(
-      `^(?:put|place|add|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:around|to|on|before\\s+and\\s+after|at\\s+(?:the\\s+)?(?:beginning|start)\\s+and\\s+(?:the\\s+)?end\\s+of)\\s+${quotedTarget}[.!?]*$`,
+      `^(?:put|place|add|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+(?:around|to|on|before\\s+and\\s+after|at\\s+(?:the\\s+)?(?:beginning|start)\\s+and\\s+(?:the\\s+)?end\\s+of)\\s+${quotedTarget}[.!?]*$`,
       'iu',
     ),
   )
@@ -3417,7 +3419,7 @@ function parseDeterministicParagraphQuotation(
     ? null
     : trimmed.match(
         new RegExp(
-          `^(?:put|place|add|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*${quotedTarget}\\s+(?:in|with)\\s+${quotationToken}[.!?]*$`,
+          `^(?:put|place|add|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*${quotedTarget}\\s+(?:in|with)\\s+${wrapperToken}[.!?]*$`,
           'iu',
         ),
       )
@@ -3435,26 +3437,28 @@ function parseDeterministicParagraphQuotation(
   )
   if (paragraphOrdinal === null) return null
 
-  const [opening, closing] =
-    match.groups?.style?.toLocaleLowerCase() === 'single'
-      ? ['\u2018', '\u2019']
-      : ['\u201c', '\u201d']
+  const markerSource = `${match.groups?.style ?? ''} ${match.groups?.marker ?? ''}`.trim()
+  // Backward compatibility: bare `Quote the first paragraph.` produces no marker
+  // keyword — default to double quotation marks.
+  const family = resolveWrapperFamily(markerSource)
+    ?? resolveWrapperFamily(match.groups?.marker ?? '')
+    ?? WRAPPER_FAMILIES.find((family) => family.id === 'double-quote')!
   return parseEditPlan({
     schemaVersion: 2,
     draftVersion,
-    explanation: `Put quotation marks around paragraph ${paragraphOrdinal}.`,
+    explanation: `Put ${family.name} around paragraph ${paragraphOrdinal}.`,
     operations: [
       {
         id: 'deterministic-open-paragraph-quotation',
         type: 'prepend',
         target: { paragraphOrdinal },
-        text: opening,
+        text: family.open,
       },
       {
         id: 'deterministic-close-paragraph-quotation',
         type: 'append',
         target: { paragraphOrdinal },
-        text: closing,
+        text: family.close,
       },
     ],
   })
@@ -3692,17 +3696,16 @@ function parseDeterministicQuotationRange(
 ): EditPlan | null {
   if (/[\r\n;]/u.test(instructionTranscript)) return null
   const trimmed = instructionTranscript.trim()
-  const quotationToken =
-    '(?:(single|double)\\s+)?(?:quotation\\s+marks?|quote\\s+marks?|quotations?|quotes?)'
+  const wrapperToken = `(?<marker>${WRAPPER_TOKEN_PATTERN})`
   const betweenMatch = trimmed.match(
-    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:around\\s+)?(?:everything\\s+)?between\\s+(.+?)\\s+and\\s+(.+?)$`, 'iu'),
+    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+(?:around\\s+)?(?:everything\\s+)?between\\s+(.+?)\\s+and\\s+(.+?)$`, 'iu'),
   )
   const quotedEndpoint = `(?:“[^”]+”|‘[^’]+’|"[^"]+"|'[^']+')`
   const quotedAroundAndMatch = betweenMatch ? null : trimmed.match(
-    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+around\\s+(${quotedEndpoint})\\s+and\\s+(${quotedEndpoint})[.!?]*$`, 'iu'),
+    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+around\\s+(${quotedEndpoint})\\s+and\\s+(${quotedEndpoint})[.!?]*$`, 'iu'),
   )
   const aroundAndMatch = betweenMatch ? null : quotedAroundAndMatch ?? trimmed.match(
-    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+around\\s+(.+?)\\s+and\\s+(.+?)$`, 'iu'),
+    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+around\\s+(.+?)\\s+and\\s+(.+?)$`, 'iu'),
   )
   // An exact phrase containing "and" is one target, not necessarily two endpoints.
   const wholeAroundTarget = aroundAndMatch
@@ -3711,7 +3714,7 @@ function parseDeterministicQuotationRange(
   const useAroundAnd = aroundAndMatch && (quotedAroundAndMatch || !findTextTargetMatches(session.cleanText, session.paragraphs, wholeAroundTarget).length)
   const rangeMatch = betweenMatch ?? (useAroundAnd ? aroundAndMatch : null) ?? trimmed.match(
     new RegExp(
-      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:(?:around|over)\\s+(?:everything\\s+)?(?:from\\s+)?|from\\s+|starting\\s+(?:at|from)\\s+)(.+?)\\s+(?:to|through|until|ending\\s+(?:at|with))\\s+(.+?)$`,
+      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+(?:(?:around|over)\\s+(?:everything\\s+)?(?:from\\s+)?|from\\s+|starting\\s+(?:at|from)\\s+)(.+?)\\s+(?:to|through|until|ending\\s+(?:at|with))\\s+(.+?)$`,
       'iu',
     ),
   )
@@ -3719,7 +3722,7 @@ function parseDeterministicQuotationRange(
     ? null
     : trimmed.match(
         new RegExp(
-          `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+before\\s+(.+?)\\s+(?:and\\s+)?after\\s+(.+?)$`,
+          `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+before\\s+(.+?)\\s+(?:and\\s+)?after\\s+(.+?)$`,
           'iu',
         ),
       )
@@ -3728,13 +3731,16 @@ function parseDeterministicQuotationRange(
       ? null
       : trimmed.match(
           new RegExp(
-            `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+after\\s+(.+?)\\s+(?:and\\s+)?before\\s+(.+?)$`,
+            `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+after\\s+(.+?)\\s+(?:and\\s+)?before\\s+(.+?)$`,
             'iu',
           ),
         )
   const match = rangeMatch ?? beforeAfterMatch ?? afterBeforeMatch
   if (!match) return null
-  const style = (match[1] ?? '').toLocaleLowerCase()
+  const marker = (match.groups?.marker ?? '').trim()
+  const family = resolveWrapperFamily(marker)
+  if (!family) return null
+  const { open, close, name } = family
   const firstTarget = normalizeNamedTargetPunctuation(cleanQuotationRangeTarget(
     unwrapEditArgument(
       stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[2] ?? '').trim())),
@@ -3762,9 +3768,9 @@ function parseDeterministicQuotationRange(
     const match = findPunctuationInsensitiveMatch(session.cleanText, spokenStart, 0, session.cleanText.length)
     if (typeof match === 'string') {
       if (!match.includes('ambiguous')) return null
-      return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: 'The quotation start is ambiguous.', operations: [
-        { id: 'ambiguous-quotation-start', type: 'insert_before', target: { exactText: spokenStart }, text: style === 'single' ? '‘' : '“' },
-        { id: 'unresolved-quotation-end', type: 'insert_after', target: punctuationTarget ? { punctuation: punctuationTarget } : { exactText: spokenEnd }, text: style === 'single' ? '’' : '”' },
+      return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: `The ${name} start is ambiguous.`, operations: [
+        { id: 'ambiguous-quotation-start', type: 'insert_before', target: { exactText: spokenStart }, text: open },
+        { id: 'unresolved-quotation-end', type: 'insert_after', target: punctuationTarget ? { punctuation: punctuationTarget } : { exactText: spokenEnd }, text: close },
       ] })
     }
     startIndex = match.start
@@ -3773,7 +3779,6 @@ function parseDeterministicQuotationRange(
   if (startIndex < 0) return null
   const startOccurrence =
     countExactOccurrences(session.cleanText.slice(0, startIndex), startText) + 1
-  const [opening, closing] = style === 'single' ? ['\u2018', '\u2019'] : ['\u201c', '\u201d']
 
   let closeOperation: EditPlan['operations'][number]
   if (punctuationTarget) {
@@ -3781,14 +3786,14 @@ function parseDeterministicQuotationRange(
       id: 'deterministic-close-quotation-range',
       type: 'insert_after',
       target: { punctuation: punctuationTarget },
-      text: closing,
+      text: close,
     }
   } else if (sentencePosition) {
     closeOperation = {
       id: 'deterministic-close-quotation-range',
       type: 'insert_after',
       target: sentencePosition,
-      text: closing,
+      text: close,
     }
   } else {
     let endText = adoptUnambiguousDraftCasing(session, spokenEnd, undefined)
@@ -3805,9 +3810,9 @@ function parseDeterministicQuotationRange(
         endIndex = match.start
         endText = session.cleanText.slice(match.start, match.end)
       } else if (match.includes('ambiguous')) {
-        return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: 'The quotation end is ambiguous.', operations: [
-          { id: 'ambiguous-quotation-end', type: 'insert_after', target: { exactText: spokenEnd }, text: closing },
-          { id: 'unresolved-quotation-start', type: 'insert_before', target: { exactText: startText, occurrence: startOccurrence }, text: opening },
+        return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: `The ${name} end is ambiguous.`, operations: [
+          { id: 'ambiguous-quotation-end', type: 'insert_after', target: { exactText: spokenEnd }, text: close },
+          { id: 'unresolved-quotation-start', type: 'insert_before', target: { exactText: startText, occurrence: startOccurrence }, text: open },
         ] })
       }
     }
@@ -3822,7 +3827,7 @@ function parseDeterministicQuotationRange(
       id: 'deterministic-close-quotation-range',
       type: 'insert_after',
       target: { exactText: effectiveEndText, occurrence: endOccurrence },
-      text: closing,
+      text: close,
     }
   }
 
@@ -3830,15 +3835,15 @@ function parseDeterministicQuotationRange(
     schemaVersion: 2,
     draftVersion: session.draftVersion,
     explanation: sentencePosition || punctuationTarget
-      ? `Put quotation marks from “${startText}” through the ${spokenEnd}.`
-      : `Put quotation marks from “${startText}” through “${spokenEnd}”.`,
+      ? `Put ${name} from “${startText}” through the ${spokenEnd}.`
+      : `Put ${name} from “${startText}” through “${spokenEnd}”.`,
     operations: [
       ...(punctuationTarget ? [closeOperation] : []),
       {
         id: 'deterministic-open-quotation-range',
         type: 'insert_before',
         target: { exactText: startText, occurrence: startOccurrence },
-        text: opening,
+        text: open,
       },
       ...(!punctuationTarget ? [closeOperation] : []),
     ],
@@ -3874,7 +3879,7 @@ function parseDeterministicSentenceQuotationInsertion(
   const sentenceOrdinalToken =
     '(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final|penultimate|second[- ]to[- ]last|\\d+(?:st|nd|rd|th)?)'
   const commandPrefix =
-    '(?:insert|add|put|place)\\s+(?:a|an|the)?\\s*(?:(?<style>single|double|opening|closing|open|close)\\s+)?(?:quotation\\s+marks?|quote\\s+marks?|quotations?|quotes?)\\s+(?<direction>before|after|around)\\s+'
+    `(?:insert|add|put|place|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*(?:(?<style>opening|closing|open|close)\\s+)?(?<marker>${WRAPPER_TOKEN_PATTERN})\\s+(?<direction>before|after|around)\\s+`
   const paragraphPrefix = '(?:in\\s+paragraph\\s+(?<paragraph>\\d+)\\s*,?\\s*)?'
   const positional = trimmed.match(
     new RegExp(
@@ -3892,6 +3897,7 @@ function parseDeterministicSentenceQuotationInsertion(
           ...(paragraphOrdinal === undefined ? {} : { paragraphOrdinal }),
           ...sentencePosition,
         },
+        positional.groups?.marker ?? '',
         positional.groups?.style ?? '',
         positional.groups?.direction ?? '',
         draftVersion,
@@ -3915,6 +3921,7 @@ function parseDeterministicSentenceQuotationInsertion(
       ...(paragraphOrdinal === undefined ? {} : { paragraphOrdinal }),
       exactText: targetText,
     },
+    exact.groups?.marker ?? '',
     exact.groups?.style ?? '',
     exact.groups?.direction ?? '',
     draftVersion,
@@ -3929,54 +3936,36 @@ function parseOptionalParagraphOrdinal(value: string | undefined): number | unde
 
 function buildSentenceQuotationPlan(
   target: EditTarget,
-  style: string,
+  marker: string,
+  styleFlag: string,
   direction: string,
   draftVersion: number,
 ): EditPlan | null {
-  const normalizedStyle = style.toLocaleLowerCase()
+  const family = resolveWrapperFamily(marker) ?? resolveWrapperFamily(`${styleFlag} ${marker}`.trim() || undefined)
+  if (!family) return null
+  const normalizedStyle = styleFlag.toLocaleLowerCase()
   const normalizedDirection = direction.toLocaleLowerCase()
-  const [opening, closing] =
-    normalizedStyle === 'single' ? ['\u2018', '\u2019'] : ['\u201c', '\u201d']
-  const operations: EditPlan['operations'] =
-    normalizedDirection === 'around'
-      ? [
-          {
-            id: 'deterministic-open-sentence-quotation',
-            type: 'insert_before',
-            target,
-            text: opening,
-          },
-          {
-            id: 'deterministic-close-sentence-quotation',
-            type: 'insert_after',
-            target,
-            text: closing,
-          },
-        ]
-      : [
-          {
-            id: 'deterministic-sentence-quotation',
-            type: normalizedDirection === 'before' ? 'insert_before' : 'insert_after',
-            target,
-            text:
-              normalizedStyle === 'opening' || normalizedStyle === 'open'
-                ? opening
-                : normalizedStyle === 'closing' || normalizedStyle === 'close'
-                  ? closing
-                  : normalizedDirection === 'before'
-                    ? opening
-                    : closing,
-          },
-        ]
-  return parseEditPlan({
-    schemaVersion: 2,
-    draftVersion,
-    explanation:
-      normalizedDirection === 'around'
-        ? 'Put quotation marks around the identified sentence.'
-        : `Insert a quotation mark ${normalizedDirection} the identified sentence.`,
-    operations,
-  })
+  const isOpening = normalizedStyle === 'opening' || normalizedStyle === 'open'
+  const isClosing = normalizedStyle === 'closing' || normalizedStyle === 'close'
+  const { open, close, name: label } = family
+  let operations: EditPlan['operations']
+  let explanation: string
+  if (normalizedDirection === 'around') {
+    operations = [
+      { id: 'deterministic-open-wrapper', type: 'insert_before', target, text: open },
+      { id: 'deterministic-close-wrapper', type: 'insert_after', target, text: close },
+    ]
+    explanation = `Put ${label} around the identified sentence.`
+  } else if (normalizedDirection === 'before') {
+    operations = [{ id: 'deterministic-wrapper', type: 'insert_before', target, text: isClosing ? close : open }]
+    explanation = `Insert a ${label} marker before the identified sentence.`
+  } else if (normalizedDirection === 'after') {
+    operations = [{ id: 'deterministic-wrapper', type: 'insert_after', target, text: isOpening ? open : close }]
+    explanation = `Insert a ${label} marker after the identified sentence.`
+  } else {
+    return null
+  }
+  return parseEditPlan({ schemaVersion: 2, draftVersion, explanation, operations })
 }
 
 function parseDeterministicSimpleReplacement(

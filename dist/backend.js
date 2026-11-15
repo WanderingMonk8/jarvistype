@@ -735,6 +735,119 @@ function speechSoundGroup(character) {
   return /[\p{L}\p{N}]/u.test(character) ? character : "";
 }
 
+// src/domain/wrapper-families.ts
+var WRAPPER_FAMILIES = [
+  {
+    id: "double-quote",
+    open: "\u201C",
+    close: "\u201D",
+    name: "quotation marks",
+    explanatoryName: "quotation marks",
+    tokenPattern: String.raw`(?:(?:double\s+)?(?:quotation\s+marks?|quote\s+marks?|quotations?|quotes?|double\s+quotes?))`,
+    openPattern: /^[“"]$/u,
+    closePattern: /^[”"]$/u
+  },
+  {
+    id: "single-quote",
+    open: "\u2018",
+    close: "\u2019",
+    name: "single quotation marks",
+    explanatoryName: "single quotation marks",
+    tokenPattern: String.raw`(?:(?:single\s+)?(?:single\s+(?:quotation|quote|quotations|quotes|mark)(?:\s+marks?)?|singles?|single))`,
+    openPattern: /^[‘']$/u,
+    closePattern: /^[’']$/u
+  },
+  {
+    id: "parentheses",
+    open: "(",
+    close: ")",
+    name: "parentheses",
+    explanatoryName: "parentheses",
+    tokenPattern: String.raw`(?:parens?|parentheses|parenthesis|round\s+brackets?|round\s+bracket)`,
+    openPattern: /^\($/u,
+    closePattern: /^\)$/u
+  },
+  {
+    id: "brackets",
+    open: "[",
+    close: "]",
+    name: "brackets",
+    explanatoryName: "brackets",
+    tokenPattern: String.raw`(?:square\s+brackets?|square\s+bracket|brackets?|bracket)`,
+    openPattern: /^\[$/u,
+    closePattern: /^\]$/u
+  },
+  {
+    id: "braces",
+    open: "{",
+    close: "}",
+    name: "braces",
+    explanatoryName: "braces",
+    tokenPattern: String.raw`(?:curly\s+(?:braces?|brackets?)|curly\s+ones?|braces?|brace|curly\s+bracket)`,
+    openPattern: /^\{$/u,
+    closePattern: /^\}$/u
+  },
+  {
+    id: "angle-brackets",
+    open: "<",
+    close: ">",
+    name: "angle brackets",
+    explanatoryName: "angle brackets",
+    tokenPattern: String.raw`(?:angle\s+brackets?|angle\s+bracket|less\s+than\s+greater\s+than|greater\s+than\s+less\s+than|greater\s+and\s+less\s+than|less\s+and\s+greater\s+than|greater\s+less\s+than|less\s+greater\s+than|less\s+than\s+(?:and\s+)?more\s+than|chevrons?|chevron)`,
+    openPattern: /^<$/u,
+    closePattern: /^>$/u
+  }
+];
+var OPEN_TO_FAMILY = new Map(WRAPPER_FAMILIES.map((family) => [family.open, family]));
+var CLOSE_TO_FAMILY = new Map(WRAPPER_FAMILIES.map((family) => [family.close, family]));
+var OPENERS_GROUP = `(?:${WRAPPER_FAMILIES.map((family) => [family.open]).flat().map((character) => character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|")}|"|')`;
+var CLOSERS_GROUP = `(?:${WRAPPER_FAMILIES.map((family) => [family.close]).flat().map((character) => character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|")}|"|')`;
+var CLOSERS_LITERALS = [
+  ...WRAPPER_FAMILIES.map((family) => family.close),
+  ",",
+  ";",
+  ":",
+  "!",
+  "?",
+  ".",
+  ")",
+  "}",
+  "]",
+  '"',
+  `'`
+];
+var PUNCTUATION_CLOSERS_REGEX = new RegExp(
+  `[${CLOSERS_LITERALS.map((character) => character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("")}]`,
+  "u"
+);
+var WRAPPER_OPENERS_REGEX = new RegExp(OPENERS_GROUP, "u");
+var WRAPPER_CLOSERS_REGEX = new RegExp(CLOSERS_GROUP, "u");
+function isWrapperOpener(character) {
+  return OPEN_TO_FAMILY.has(character);
+}
+function isWrapperCloser(character) {
+  return CLOSE_TO_FAMILY.has(character);
+}
+function resolveWrapperFamily(raw) {
+  if (!raw) return null;
+  let normalized = raw.trim().toLocaleLowerCase().replace(/\s+/gu, " ");
+  normalized = normalized.replace(/^(?:the|a|an)\s+/giu, "").trim();
+  const direct = findWrapperFamily(normalized);
+  if (direct) return direct;
+  if (normalized === "single" || normalized === "single quote" || normalized === "single quotation") return WRAPPER_FAMILIES.find((family) => family.id === "single-quote") ?? null;
+  if (normalized === "double" || normalized === "double quote" || normalized === "double quotation") return WRAPPER_FAMILIES.find((family) => family.id === "double-quote") ?? null;
+  return null;
+}
+function findWrapperFamily(token) {
+  const normalized = token.trim().toLocaleLowerCase().replace(/\s+/gu, " ");
+  for (const family of WRAPPER_FAMILIES) {
+    const tester = new RegExp(`^${family.tokenPattern}$`, "iu");
+    if (tester.test(normalized)) return family;
+  }
+  return void 0;
+}
+var WRAPPER_TOKEN_PATTERN = WRAPPER_FAMILIES.map((family) => family.tokenPattern).join("|");
+
 // src/domain/edit-pipeline.ts
 var EDIT_SCHEMA_VERSION = 2;
 var MAX_EDIT_OPERATIONS = 8;
@@ -791,7 +904,7 @@ function executeSequentialEditPlan(cleanText, paragraphs, currentVersion, plan, 
       operations: [currentOperation]
     }, protectedCasingTerms, {
       skipSentenceRepair: true,
-      quotationWrap: operation.type === "insert_after" && /^[”’"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_before" && /^[“‘"']$/u.test(candidate.text ?? "")) || operation.type === "insert_before" && /^[“‘"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_after" && /^[”’"']$/u.test(candidate.text ?? ""))
+      quotationWrap: operation.type === "insert_after" && isWrapperCloser(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_before" && isWrapperOpener(candidate.text ?? "")) || operation.type === "insert_before" && isWrapperOpener(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_after" && isWrapperCloser(candidate.text ?? ""))
     });
     if (!result.ok) {
       failedCommand = { index: index + 1, operationId: operation.id, reason: result.reason };
@@ -916,7 +1029,7 @@ function executeEditPlan(cleanText, paragraphs, currentVersion, plan, protectedC
       operation,
       protectedCasingTerms,
       formatText,
-      options.quotationWrap === true || operation.type === "insert_after" && /^[”’"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_before" && /^[“‘"']$/u.test(candidate.text ?? "")) || operation.type === "insert_before" && /^[“‘"']$/u.test(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_after" && /^[”’"']$/u.test(candidate.text ?? ""))
+      options.quotationWrap === true || operation.type === "insert_after" && isWrapperCloser(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_before" && isWrapperOpener(candidate.text ?? "")) || operation.type === "insert_before" && isWrapperOpener(operation.text ?? "") && plan.operations.some((candidate) => candidate.type === "insert_after" && isWrapperCloser(candidate.text ?? ""))
     );
     if (typeof patch === "string") return { ok: false, reason: patch };
     if (formatText && (operation.type === "insert_after" || operation.type === "append") && patches.length > 0) {
@@ -951,8 +1064,9 @@ function executeEditPlan(cleanText, paragraphs, currentVersion, plan, protectedC
   }
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: "edited draft is too large" };
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
+  }
   if (formatText && options.skipSentenceRepair !== true) {
     const repaired = repairParagraphBoundaries(afterText);
     if (!repaired.ok) return { ok: false, reason: "edit would break a sentence boundary" };
@@ -1263,7 +1377,7 @@ ${formattedParagraph}`,
   }
   const insertionText = operation.text ?? "";
   if (operation.type === "insert_before") {
-    if (formatText && quotationWrap && /^[“‘"']$/u.test(insertionText)) {
+    if (formatText && quotationWrap && isWrapperOpener(insertionText)) {
       const attachedOpening = cleanText.slice(range.start, start).match(/[\p{P}]+$/u)?.[0] ?? "";
       const boundary = start - attachedOpening.length;
       if (attachedOpening && (boundary === range.start || /\s/u.test(cleanText[boundary - 1] ?? "")))
@@ -1365,7 +1479,7 @@ function executeRangeDeletion(text, paragraphs, operation, protectedCasingTerms)
     right = formatInsertionCasing(left, left.length, right, protectedCasingTerms);
   const spacing = left && right && !/^[,.;:!?…)}\]”’]/u.test(right) ? " " : "";
   const after = `${left}${spacing}${right}`;
-  if (countFloatingQuotationMarks(after) > countFloatingQuotationMarks(text))
+  if (countFloatingWrapperMarks(after) > countFloatingWrapperMarks(text))
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
   if (after === text) return { ok: false, reason: "edit would not change the draft" };
   const repaired = repairParagraphBoundaries(after);
@@ -1421,7 +1535,7 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
   if (formatText && isSentenceOpeningAt(cleanText, source.start))
     withoutSource = capitalizeExistingSentenceOpening(withoutSource, removalStart);
   let originalInsertionPoint = operation.type === "move_before" ? destination.start : destination.end;
-  if (formatText && operation.type === "move_before" && (operation.destination.sentenceOrdinal !== void 0 || operation.destination.sentenceFromEnd !== void 0) && operation.target.punctuation === "quote" && /^[”"]$/u.test(movedText) && source.start > destination.start) {
+  if (formatText && operation.type === "move_before" && (operation.destination.sentenceOrdinal !== void 0 || operation.destination.sentenceFromEnd !== void 0) && operation.target.punctuation === "quote" && isWrapperCloser(movedText) && source.start > destination.start) {
     while (originalInsertionPoint > destination.scopeStart && /[ \t]/u.test(cleanText[originalInsertionPoint - 1] ?? ""))
       originalInsertionPoint -= 1;
   }
@@ -1440,8 +1554,9 @@ function executeInlineMove(cleanText, paragraphs, operation, protectedCasingTerm
   let afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`;
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: "edited draft is too large" };
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
+  }
   if (formatText && !skipSentenceRepair) {
     const repaired = repairParagraphBoundaries(afterText);
     if (!repaired.ok) return { ok: false, reason: "edit would break a sentence boundary" };
@@ -1523,8 +1638,9 @@ function executeContinueSentence(cleanText, paragraphs, operation, protectedCasi
   const afterText = `${cleanText.slice(0, end)}, ${continuation}${closers}${after.slice(consumed)}`;
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: "edited draft is too large" };
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
+  }
   if (afterText === cleanText) return { ok: false, reason: "edit would not change the draft" };
   if (formatText && !skipSentenceRepair) {
     const repaired = repairParagraphBoundaries(afterText);
@@ -1547,7 +1663,7 @@ function executeJoinSentence(cleanText, paragraphs, operation, protectedCasingTe
     return { ok: false, reason: "join destination was not found" };
   let destinationStart = destinationResult.start;
   let destinationEnd = destinationResult.end;
-  while (destinationStart > source.end && /[([{“‘"']/u.test(cleanText[destinationStart - 1])) destinationStart -= 1;
+  while (destinationStart > source.end && WRAPPER_OPENERS_REGEX.test(cleanText[destinationStart - 1])) destinationStart -= 1;
   while (destinationEnd < cleanText.length && /[)\]}”’]/u.test(cleanText[destinationEnd])) destinationEnd += 1;
   const start = source.start;
   let end = source.end;
@@ -1570,8 +1686,9 @@ function executeJoinSentence(cleanText, paragraphs, operation, protectedCasingTe
   const afterText = `${cleanText.slice(0, end)},${closers} ${continuation}${after}`;
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: "edited draft is too large" };
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
+  }
   if (afterText === cleanText) return { ok: false, reason: "edit would not change the draft" };
   if (formatText && !skipSentenceRepair) {
     const repaired = repairParagraphBoundaries(afterText);
@@ -1623,8 +1740,9 @@ function executeSplitSentence(cleanText, paragraphs, operation, protectedCasingT
   const afterText = formatText ? capitalizeExistingSentenceOpening(afterPartRaw, restartOffset) : afterPartRaw;
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: "edited draft is too large" };
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
+  }
   if (afterText === cleanText) return { ok: false, reason: "edit would not change the draft" };
   const paragraphOrdinal = source.paragraphOrdinal;
   let repairedText = afterText;
@@ -1959,9 +2077,9 @@ function addBoundarySpacing(text, point, insertion) {
   const leftIsClosingAsciiQuote = (left === '"' || left === "'") && /[.?!\u2026]/u.test(text[point - 2] ?? "");
   if (/[ \t]/.test(left)) result = result.replace(/^[ \t]+/u, "");
   if (/[ \t]/.test(right)) result = result.replace(/[ \t]+$/u, "");
-  if (left && !/\s/.test(left) && (!/[([{“‘"']/.test(left) || leftIsClosingAsciiQuote) && !/^\s/.test(result) && !/^[,.;:!?)}\]”’"']/.test(result))
+  if (left && !/\s/.test(left) && (!WRAPPER_OPENERS_REGEX.test(left) || leftIsClosingAsciiQuote) && !/^\s/.test(result) && !PUNCTUATION_CLOSERS_REGEX.test(result.charAt(0)))
     result = ` ${result}`;
-  if (right && !/\s/.test(right) && !/^[,.;:!?)}\]”’"']/.test(right) && !/\s$/.test(result) && !/[([{“‘"']$/.test(result))
+  if (right && !/\s/.test(right) && !PUNCTUATION_CLOSERS_REGEX.test(right.charAt(0)) && !/\s$/.test(result) && !WRAPPER_OPENERS_REGEX.test(result.charAt(result.length - 1)))
     result = `${result} `;
   return result;
 }
@@ -1996,6 +2114,7 @@ var OPENING_PUNCTUATION = /* @__PURE__ */ new Set([
   "(",
   "[",
   "{",
+  "<",
   "\u201C",
   "\u2018",
   "\u201B",
@@ -2007,7 +2126,8 @@ var OPENING_PUNCTUATION = /* @__PURE__ */ new Set([
   "\u201A",
   '"',
   "'",
-  "`"
+  "`",
+  "<"
 ]);
 function isSentenceOpeningPunctuation(character) {
   return OPENING_PUNCTUATION.has(character);
@@ -2217,7 +2337,7 @@ ${right}`;
   const joined = working.map((paragraph) => paragraph.text).join("\n\n");
   if (joined.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: "edited draft is too large" };
-  if (countFloatingQuotationMarks(joined) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(joined) > countFloatingWrapperMarks(cleanText))
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON };
   const repaired = repairParagraphBoundaries(joined);
   if (!repaired.ok) return { ok: false, reason: "edit would break a sentence boundary" };
@@ -2248,10 +2368,14 @@ function paragraphRange(text, paragraph) {
   for (let index = 0; index < paragraph.lineIndex; index += 1) start += lines[index].length + 1;
   return { start, end: start + lines[paragraph.lineIndex].length };
 }
-var QUOTATION_OUTSIDE_PARAGRAPH_REASON = "quotation mark would fall outside the paragraph";
-function countFloatingQuotationMarks(text) {
+var WRAPPER_OUTSIDE_PARAGRAPH_REASON = "wrapping mark would fall outside the paragraph";
+function countFloatingWrapperMarks(text) {
   let count = 0;
-  for (const match of text.matchAll(/[“”‘’"]/gu)) {
+  const openerSet = new Set(WRAPPER_FAMILIES.map((family) => family.open));
+  const closerSet = new Set(WRAPPER_FAMILIES.map((family) => family.close));
+  for (const match of text.matchAll(/[\s\S]/gu)) {
+    const character = match[0];
+    if (!openerSet.has(character) && !closerSet.has(character)) continue;
     const index = match.index;
     const before = text[index - 1] ?? "";
     const after = text[index + 1] ?? "";
@@ -2259,6 +2383,7 @@ function countFloatingQuotationMarks(text) {
   }
   return count;
 }
+var QUOTATION_OUTSIDE_PARAGRAPH_REASON = WRAPPER_OUTSIDE_PARAGRAPH_REASON;
 function findAll(text, search, start, end) {
   const matches = [];
   let offset = start;
@@ -7339,18 +7464,18 @@ function parseDeterministicInlineInsertion(instructionTranscript, session) {
 }
 function parseDeterministicParagraphQuotation(instructionTranscript, draftVersion, paragraphCount) {
   const ordinalToken = "(?:\\d+(?:st|nd|rd|th)?|one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|seven|seventh|eight|eighth|nine|ninth|ten|tenth|last|final|penultimate|second[- ]to[- ]last)";
-  const quotationToken = "(?:(?<style>single|double)\\s+)?(?:quotation\\s+marks?|quote\\s+marks?|quotations?|quotes?)";
+  const wrapperToken = `(?:(?<style>opening|closing|open|close|single|double)\\s+)?(?<marker>${WRAPPER_TOKEN_PATTERN})`;
   const quotedTarget = `(?:the\\s+)?(?:(?<before>${ordinalToken})\\s+)?paragraph(?:\\s+number)?(?:\\s+(?<after>${ordinalToken}))?`;
   const trimmed = instructionTranscript.trim();
   const aroundMatch = trimmed.match(
     new RegExp(
-      `^(?:put|place|add|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:around|to|on|before\\s+and\\s+after|at\\s+(?:the\\s+)?(?:beginning|start)\\s+and\\s+(?:the\\s+)?end\\s+of)\\s+${quotedTarget}[.!?]*$`,
+      `^(?:put|place|add|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+(?:around|to|on|before\\s+and\\s+after|at\\s+(?:the\\s+)?(?:beginning|start)\\s+and\\s+(?:the\\s+)?end\\s+of)\\s+${quotedTarget}[.!?]*$`,
       "iu"
     )
   );
   const withMatch = aroundMatch ? null : trimmed.match(
     new RegExp(
-      `^(?:put|place|add|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*${quotedTarget}\\s+(?:in|with)\\s+${quotationToken}[.!?]*$`,
+      `^(?:put|place|add|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*${quotedTarget}\\s+(?:in|with)\\s+${wrapperToken}[.!?]*$`,
       "iu"
     )
   );
@@ -7364,23 +7489,24 @@ function parseDeterministicParagraphQuotation(instructionTranscript, draftVersio
     paragraphCount
   );
   if (paragraphOrdinal === null) return null;
-  const [opening, closing] = match.groups?.style?.toLocaleLowerCase() === "single" ? ["\u2018", "\u2019"] : ["\u201C", "\u201D"];
+  const markerSource = `${match.groups?.style ?? ""} ${match.groups?.marker ?? ""}`.trim();
+  const family = resolveWrapperFamily(markerSource) ?? resolveWrapperFamily(match.groups?.marker ?? "") ?? WRAPPER_FAMILIES.find((family2) => family2.id === "double-quote");
   return parseEditPlan({
     schemaVersion: 2,
     draftVersion,
-    explanation: `Put quotation marks around paragraph ${paragraphOrdinal}.`,
+    explanation: `Put ${family.name} around paragraph ${paragraphOrdinal}.`,
     operations: [
       {
         id: "deterministic-open-paragraph-quotation",
         type: "prepend",
         target: { paragraphOrdinal },
-        text: opening
+        text: family.open
       },
       {
         id: "deterministic-close-paragraph-quotation",
         type: "append",
         target: { paragraphOrdinal },
-        text: closing
+        text: family.close
       }
     ]
   });
@@ -7558,40 +7684,43 @@ function replacementHasQualifiedReference(replacement, reference) {
 function parseDeterministicQuotationRange(instructionTranscript, session) {
   if (/[\r\n;]/u.test(instructionTranscript)) return null;
   const trimmed = instructionTranscript.trim();
-  const quotationToken = "(?:(single|double)\\s+)?(?:quotation\\s+marks?|quote\\s+marks?|quotations?|quotes?)";
+  const wrapperToken = `(?<marker>${WRAPPER_TOKEN_PATTERN})`;
   const betweenMatch = trimmed.match(
-    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:around\\s+)?(?:everything\\s+)?between\\s+(.+?)\\s+and\\s+(.+?)$`, "iu")
+    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+(?:around\\s+)?(?:everything\\s+)?between\\s+(.+?)\\s+and\\s+(.+?)$`, "iu")
   );
   const quotedEndpoint = `(?:\u201C[^\u201D]+\u201D|\u2018[^\u2019]+\u2019|"[^"]+"|'[^']+')`;
   const quotedAroundAndMatch = betweenMatch ? null : trimmed.match(
-    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+around\\s+(${quotedEndpoint})\\s+and\\s+(${quotedEndpoint})[.!?]*$`, "iu")
+    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+around\\s+(${quotedEndpoint})\\s+and\\s+(${quotedEndpoint})[.!?]*$`, "iu")
   );
   const aroundAndMatch = betweenMatch ? null : quotedAroundAndMatch ?? trimmed.match(
-    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+around\\s+(.+?)\\s+and\\s+(.+?)$`, "iu")
+    new RegExp(`^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+around\\s+(.+?)\\s+and\\s+(.+?)$`, "iu")
   );
   const wholeAroundTarget = aroundAndMatch ? unwrapEditArgument(stripUnquotedEditArgumentLabel(`${aroundAndMatch[2]} and ${aroundAndMatch[3]}`.replace(/[.!?]+$/u, "").trim())) : "";
   const useAroundAnd = aroundAndMatch && (quotedAroundAndMatch || !findTextTargetMatches(session.cleanText, session.paragraphs, wholeAroundTarget).length);
   const rangeMatch = betweenMatch ?? (useAroundAnd ? aroundAndMatch : null) ?? trimmed.match(
     new RegExp(
-      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+(?:(?:around|over)\\s+(?:everything\\s+)?(?:from\\s+)?|from\\s+|starting\\s+(?:at|from)\\s+)(.+?)\\s+(?:to|through|until|ending\\s+(?:at|with))\\s+(.+?)$`,
+      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+(?:(?:around|over)\\s+(?:everything\\s+)?(?:from\\s+)?|from\\s+|starting\\s+(?:at|from)\\s+)(.+?)\\s+(?:to|through|until|ending\\s+(?:at|with))\\s+(.+?)$`,
       "iu"
     )
   );
   const beforeAfterMatch = rangeMatch ? null : trimmed.match(
     new RegExp(
-      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+before\\s+(.+?)\\s+(?:and\\s+)?after\\s+(.+?)$`,
+      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+before\\s+(.+?)\\s+(?:and\\s+)?after\\s+(.+?)$`,
       "iu"
     )
   );
   const afterBeforeMatch = rangeMatch || beforeAfterMatch ? null : trimmed.match(
     new RegExp(
-      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${quotationToken}\\s+after\\s+(.+?)\\s+(?:and\\s+)?before\\s+(.+?)$`,
+      `^(?:put|place|add|insert)\\s+(?:a|an|the)?\\s*${wrapperToken}\\s+after\\s+(.+?)\\s+(?:and\\s+)?before\\s+(.+?)$`,
       "iu"
     )
   );
   const match = rangeMatch ?? beforeAfterMatch ?? afterBeforeMatch;
   if (!match) return null;
-  const style = (match[1] ?? "").toLocaleLowerCase();
+  const marker = (match.groups?.marker ?? "").trim();
+  const family = resolveWrapperFamily(marker);
+  if (!family) return null;
+  const { open, close, name } = family;
   const firstTarget = normalizeNamedTargetPunctuation(cleanQuotationRangeTarget(
     unwrapEditArgument(
       stripUnquotedEditArgumentLabel(stripQuotationRangeLabel((match[2] ?? "").trim()))
@@ -7617,9 +7746,9 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
     const match2 = findPunctuationInsensitiveMatch(session.cleanText, spokenStart, 0, session.cleanText.length);
     if (typeof match2 === "string") {
       if (!match2.includes("ambiguous")) return null;
-      return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: "The quotation start is ambiguous.", operations: [
-        { id: "ambiguous-quotation-start", type: "insert_before", target: { exactText: spokenStart }, text: style === "single" ? "\u2018" : "\u201C" },
-        { id: "unresolved-quotation-end", type: "insert_after", target: punctuationTarget ? { punctuation: punctuationTarget } : { exactText: spokenEnd }, text: style === "single" ? "\u2019" : "\u201D" }
+      return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: `The ${name} start is ambiguous.`, operations: [
+        { id: "ambiguous-quotation-start", type: "insert_before", target: { exactText: spokenStart }, text: open },
+        { id: "unresolved-quotation-end", type: "insert_after", target: punctuationTarget ? { punctuation: punctuationTarget } : { exactText: spokenEnd }, text: close }
       ] });
     }
     startIndex = match2.start;
@@ -7627,21 +7756,20 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   }
   if (startIndex < 0) return null;
   const startOccurrence = countExactOccurrences(session.cleanText.slice(0, startIndex), startText) + 1;
-  const [opening, closing] = style === "single" ? ["\u2018", "\u2019"] : ["\u201C", "\u201D"];
   let closeOperation;
   if (punctuationTarget) {
     closeOperation = {
       id: "deterministic-close-quotation-range",
       type: "insert_after",
       target: { punctuation: punctuationTarget },
-      text: closing
+      text: close
     };
   } else if (sentencePosition) {
     closeOperation = {
       id: "deterministic-close-quotation-range",
       type: "insert_after",
       target: sentencePosition,
-      text: closing
+      text: close
     };
   } else {
     let endText = adoptUnambiguousDraftCasing(session, spokenEnd, void 0);
@@ -7656,9 +7784,9 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
         endIndex = match2.start;
         endText = session.cleanText.slice(match2.start, match2.end);
       } else if (match2.includes("ambiguous")) {
-        return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: "The quotation end is ambiguous.", operations: [
-          { id: "ambiguous-quotation-end", type: "insert_after", target: { exactText: spokenEnd }, text: closing },
-          { id: "unresolved-quotation-start", type: "insert_before", target: { exactText: startText, occurrence: startOccurrence }, text: opening }
+        return parseEditPlan({ schemaVersion: 2, draftVersion: session.draftVersion, explanation: `The ${name} end is ambiguous.`, operations: [
+          { id: "ambiguous-quotation-end", type: "insert_after", target: { exactText: spokenEnd }, text: close },
+          { id: "unresolved-quotation-start", type: "insert_before", target: { exactText: startText, occurrence: startOccurrence }, text: open }
         ] });
       }
     }
@@ -7670,20 +7798,20 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
       id: "deterministic-close-quotation-range",
       type: "insert_after",
       target: { exactText: effectiveEndText, occurrence: endOccurrence },
-      text: closing
+      text: close
     };
   }
   const plan = parseEditPlan({
     schemaVersion: 2,
     draftVersion: session.draftVersion,
-    explanation: sentencePosition || punctuationTarget ? `Put quotation marks from \u201C${startText}\u201D through the ${spokenEnd}.` : `Put quotation marks from \u201C${startText}\u201D through \u201C${spokenEnd}\u201D.`,
+    explanation: sentencePosition || punctuationTarget ? `Put ${name} from \u201C${startText}\u201D through the ${spokenEnd}.` : `Put ${name} from \u201C${startText}\u201D through \u201C${spokenEnd}\u201D.`,
     operations: [
       ...punctuationTarget ? [closeOperation] : [],
       {
         id: "deterministic-open-quotation-range",
         type: "insert_before",
         target: { exactText: startText, occurrence: startOccurrence },
-        text: opening
+        text: open
       },
       ...!punctuationTarget ? [closeOperation] : []
     ]
@@ -7697,8 +7825,8 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
   );
   if (punctuationTarget && !resolved.ok) return plan;
   if (punctuationTarget && resolved.ok) {
-    const close = resolved.operations.find((operation) => operation.id === "deterministic-close-quotation-range");
-    if (!close || close.startOffset < startIndex + startText.length) {
+    const close2 = resolved.operations.find((operation) => operation.id === "deterministic-close-quotation-range");
+    if (!close2 || close2.startOffset < startIndex + startText.length) {
       return {
         ...plan,
         operations: plan.operations.map((operation) => operation.id === "deterministic-close-quotation-range" ? { ...operation, target: { punctuation: punctuationTarget, relativeToText: startText, relativePosition: "after" } } : operation)
@@ -7711,7 +7839,7 @@ function parseDeterministicSentenceQuotationInsertion(instructionTranscript, dra
   if (/[\r\n;]/u.test(instructionTranscript)) return null;
   const trimmed = instructionTranscript.trim();
   const sentenceOrdinalToken = "(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final|penultimate|second[- ]to[- ]last|\\d+(?:st|nd|rd|th)?)";
-  const commandPrefix = "(?:insert|add|put|place)\\s+(?:a|an|the)?\\s*(?:(?<style>single|double|opening|closing|open|close)\\s+)?(?:quotation\\s+marks?|quote\\s+marks?|quotations?|quotes?)\\s+(?<direction>before|after|around)\\s+";
+  const commandPrefix = `(?:insert|add|put|place|wrap|surround|enclose)\\s+(?:a|an|the)?\\s*(?:(?<style>opening|closing|open|close)\\s+)?(?<marker>${WRAPPER_TOKEN_PATTERN})\\s+(?<direction>before|after|around)\\s+`;
   const paragraphPrefix = "(?:in\\s+paragraph\\s+(?<paragraph>\\d+)\\s*,?\\s*)?";
   const positional = trimmed.match(
     new RegExp(
@@ -7729,6 +7857,7 @@ function parseDeterministicSentenceQuotationInsertion(instructionTranscript, dra
           ...paragraphOrdinal2 === void 0 ? {} : { paragraphOrdinal: paragraphOrdinal2 },
           ...sentencePosition
         },
+        positional.groups?.marker ?? "",
         positional.groups?.style ?? "",
         positional.groups?.direction ?? "",
         draftVersion
@@ -7751,6 +7880,7 @@ function parseDeterministicSentenceQuotationInsertion(instructionTranscript, dra
       ...paragraphOrdinal === void 0 ? {} : { paragraphOrdinal },
       exactText: targetText
     },
+    exact.groups?.marker ?? "",
     exact.groups?.style ?? "",
     exact.groups?.direction ?? "",
     draftVersion
@@ -7761,37 +7891,32 @@ function parseOptionalParagraphOrdinal(value) {
   const ordinal = Number(value);
   return Number.isSafeInteger(ordinal) && ordinal >= 1 ? ordinal : false;
 }
-function buildSentenceQuotationPlan(target, style, direction, draftVersion) {
-  const normalizedStyle = style.toLocaleLowerCase();
+function buildSentenceQuotationPlan(target, marker, styleFlag, direction, draftVersion) {
+  const family = resolveWrapperFamily(marker) ?? resolveWrapperFamily(`${styleFlag} ${marker}`.trim() || void 0);
+  if (!family) return null;
+  const normalizedStyle = styleFlag.toLocaleLowerCase();
   const normalizedDirection = direction.toLocaleLowerCase();
-  const [opening, closing] = normalizedStyle === "single" ? ["\u2018", "\u2019"] : ["\u201C", "\u201D"];
-  const operations = normalizedDirection === "around" ? [
-    {
-      id: "deterministic-open-sentence-quotation",
-      type: "insert_before",
-      target,
-      text: opening
-    },
-    {
-      id: "deterministic-close-sentence-quotation",
-      type: "insert_after",
-      target,
-      text: closing
-    }
-  ] : [
-    {
-      id: "deterministic-sentence-quotation",
-      type: normalizedDirection === "before" ? "insert_before" : "insert_after",
-      target,
-      text: normalizedStyle === "opening" || normalizedStyle === "open" ? opening : normalizedStyle === "closing" || normalizedStyle === "close" ? closing : normalizedDirection === "before" ? opening : closing
-    }
-  ];
-  return parseEditPlan({
-    schemaVersion: 2,
-    draftVersion,
-    explanation: normalizedDirection === "around" ? "Put quotation marks around the identified sentence." : `Insert a quotation mark ${normalizedDirection} the identified sentence.`,
-    operations
-  });
+  const isOpening = normalizedStyle === "opening" || normalizedStyle === "open";
+  const isClosing = normalizedStyle === "closing" || normalizedStyle === "close";
+  const { open, close, name: label } = family;
+  let operations;
+  let explanation;
+  if (normalizedDirection === "around") {
+    operations = [
+      { id: "deterministic-open-wrapper", type: "insert_before", target, text: open },
+      { id: "deterministic-close-wrapper", type: "insert_after", target, text: close }
+    ];
+    explanation = `Put ${label} around the identified sentence.`;
+  } else if (normalizedDirection === "before") {
+    operations = [{ id: "deterministic-wrapper", type: "insert_before", target, text: isClosing ? close : open }];
+    explanation = `Insert a ${label} marker before the identified sentence.`;
+  } else if (normalizedDirection === "after") {
+    operations = [{ id: "deterministic-wrapper", type: "insert_after", target, text: isOpening ? open : close }];
+    explanation = `Insert a ${label} marker after the identified sentence.`;
+  } else {
+    return null;
+  }
+  return parseEditPlan({ schemaVersion: 2, draftVersion, explanation, operations });
 }
 function parseDeterministicSimpleReplacement(instructionTranscript, session) {
   if (/[\r\n;]/u.test(instructionTranscript) || /\bas\s+in\b/iu.test(instructionTranscript) || /[,;]\s*(?:and\s+)?(?:replace|change|swap|substitute|delete|remove|insert|add|append|prepend|move|relocate|shift|split|break|join|merge)\b/iu.test(

@@ -1,5 +1,6 @@
 import { MAX_DRAFT_CHARACTERS, reconcileParagraphs, type DraftParagraph } from './draft-session'
 import { speechPhoneticKey } from './phonetics'
+import { WRAPPER_FAMILIES, isWrapperOpener, isWrapperCloser, WRAPPER_OPENERS_REGEX, WRAPPER_CLOSERS_REGEX, PUNCTUATION_CLOSERS_REGEX } from './wrapper-families'
 
 export const EDIT_SCHEMA_VERSION = 2 as const
 export const MAX_EDIT_OPERATIONS = 8
@@ -165,10 +166,10 @@ export function executeSequentialEditPlan(
       operations: [currentOperation],
     }, protectedCasingTerms, {
       skipSentenceRepair: true,
-      quotationWrap: (operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))) ||
-        (operation.type === 'insert_before' && /^[“‘"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_after' && /^[”’"']$/u.test(candidate.text ?? ''))),
+      quotationWrap: (operation.type === 'insert_after' && isWrapperCloser(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_before' && isWrapperOpener(candidate.text ?? ''))) ||
+        (operation.type === 'insert_before' && isWrapperOpener(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_after' && isWrapperCloser(candidate.text ?? ''))),
     })
     if (!result.ok) {
       failedCommand = { index: index + 1, operationId: operation.id, reason: result.reason }
@@ -318,10 +319,10 @@ export function executeEditPlan(
       operation,
       protectedCasingTerms,
       formatText,
-      options.quotationWrap === true || (operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))) ||
-        (operation.type === 'insert_before' && /^[“‘"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_after' && /^[”’"']$/u.test(candidate.text ?? ''))),
+      options.quotationWrap === true || (operation.type === 'insert_after' && isWrapperCloser(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_before' && isWrapperOpener(candidate.text ?? ''))) ||
+        (operation.type === 'insert_before' && isWrapperOpener(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_after' && isWrapperCloser(candidate.text ?? ''))),
     )
     if (typeof patch === 'string') return { ok: false, reason: patch }
     if (
@@ -369,8 +370,9 @@ export function executeEditPlan(
   }
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  }
   if (formatText && options.skipSentenceRepair !== true) {
     const repaired = repairParagraphBoundaries(afterText)
     if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
@@ -807,7 +809,7 @@ function resolveOperation(
   }
   const insertionText = operation.text ?? ''
   if (operation.type === 'insert_before') {
-    if (formatText && quotationWrap && /^[“‘"']$/u.test(insertionText)) {
+    if (formatText && quotationWrap && isWrapperOpener(insertionText)) {
       const attachedOpening = cleanText.slice(range.start, start).match(/[\p{P}]+$/u)?.[0] ?? ''
       const boundary = start - attachedOpening.length
       if (attachedOpening && (boundary === range.start || /\s/u.test(cleanText[boundary - 1] ?? '')))
@@ -999,7 +1001,7 @@ function executeRangeDeletion(
     right = formatInsertionCasing(left, left.length, right, protectedCasingTerms)
   const spacing = left && right && !/^[,.;:!?…)}\]”’]/u.test(right) ? ' ' : ''
   const after = `${left}${spacing}${right}`
-  if (countFloatingQuotationMarks(after) > countFloatingQuotationMarks(text))
+  if (countFloatingWrapperMarks(after) > countFloatingWrapperMarks(text))
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
   if (after === text) return { ok: false, reason: 'edit would not change the draft' }
   const repaired = repairParagraphBoundaries(after)
@@ -1075,7 +1077,7 @@ function executeInlineMove(
   // sentence's punctuation, not on the far side of its separating space.
   if (formatText && operation.type === 'move_before' &&
       (operation.destination.sentenceOrdinal !== undefined || operation.destination.sentenceFromEnd !== undefined) &&
-      operation.target.punctuation === 'quote' && /^[”"]$/u.test(movedText) &&
+      operation.target.punctuation === 'quote' && isWrapperCloser(movedText) &&
       source.start > destination.start) {
     while (originalInsertionPoint > destination.scopeStart && /[ \t]/u.test(cleanText[originalInsertionPoint - 1] ?? ''))
       originalInsertionPoint -= 1
@@ -1109,8 +1111,9 @@ function executeInlineMove(
   let afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  }
   if (formatText && !skipSentenceRepair) {
     const repaired = repairParagraphBoundaries(afterText)
     if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
@@ -1246,8 +1249,9 @@ function executeContinueSentence(
     const afterText = `${cleanText.slice(0, end)}, ${continuation}${closers}${after.slice(consumed)}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
   if (formatText && !skipSentenceRepair) {
     const repaired = repairParagraphBoundaries(afterText)
@@ -1297,7 +1301,7 @@ function executeJoinSentence(
   // merged sentence keeps them in order (e.g. “Y.” stays wrapped as one unit).
   let destinationStart = destinationResult.start
   let destinationEnd = destinationResult.end
-  while (destinationStart > source.end && /[([{“‘"']/u.test(cleanText[destinationStart - 1]!)) destinationStart -= 1
+  while (destinationStart > source.end && WRAPPER_OPENERS_REGEX.test(cleanText[destinationStart - 1]!)) destinationStart -= 1
   while (destinationEnd < cleanText.length && /[)\]}”’]/u.test(cleanText[destinationEnd]!)) destinationEnd += 1
   const start = source.start
   let end = source.end
@@ -1324,8 +1328,9 @@ function executeJoinSentence(
   const afterText = `${cleanText.slice(0, end)},${closers} ${continuation}${after}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
   if (formatText && !skipSentenceRepair) {
     const repaired = repairParagraphBoundaries(afterText)
@@ -1399,8 +1404,9 @@ function executeSplitSentence(
   const afterText = formatText ? capitalizeExistingSentenceOpening(afterPartRaw, restartOffset) : afterPartRaw
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
   const paragraphOrdinal = source.paragraphOrdinal
   let repairedText = afterText
@@ -1875,17 +1881,17 @@ function addBoundarySpacing(text: string, point: number, insertion: string): str
   if (
     left &&
     !/\s/.test(left) &&
-    (!/[([{“‘"']/.test(left) || leftIsClosingAsciiQuote) &&
+    (!WRAPPER_OPENERS_REGEX.test(left) || leftIsClosingAsciiQuote) &&
     !/^\s/.test(result) &&
-    !/^[,.;:!?)}\]”’"']/.test(result)
+    !PUNCTUATION_CLOSERS_REGEX.test(result.charAt(0))
   )
     result = ` ${result}`
   if (
     right &&
     !/\s/.test(right) &&
-    !/^[,.;:!?)}\]”’"']/.test(right) &&
+    !PUNCTUATION_CLOSERS_REGEX.test(right.charAt(0)) &&
     !/\s$/.test(result) &&
-    !/[([{“‘"']$/.test(result)
+    !WRAPPER_OPENERS_REGEX.test(result.charAt(result.length - 1))
   )
     result = `${result} `
   return result
@@ -1930,9 +1936,9 @@ function formatInsertionCasing(
 }
 
 const OPENING_PUNCTUATION = new Set([
-  '(', '[', '{',
+  '(', '[', '{', '<',
   '“', '‘', '‛', '„', '‚', '«', '‹', '„', '‚',
-  '\u0022', '\u0027', '`',
+  '\u0022', '\u0027', '`', '<',
 ])
 
 function isSentenceOpeningPunctuation(character: string): boolean {
@@ -2221,7 +2227,7 @@ function executeStructuralPlan(
   const joined = working.map((paragraph) => paragraph.text).join('\n\n')
   if (joined.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
-  if (countFloatingQuotationMarks(joined) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(joined) > countFloatingWrapperMarks(cleanText))
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
   const repaired = repairParagraphBoundaries(joined)
   if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
@@ -2261,18 +2267,25 @@ function paragraphRange(text: string, paragraph: DraftParagraph): { start: numbe
   return { start, end: start + lines[paragraph.lineIndex]!.length }
 }
 
-const QUOTATION_OUTSIDE_PARAGRAPH_REASON = 'quotation mark would fall outside the paragraph'
+const WRAPPER_OUTSIDE_PARAGRAPH_REASON = 'wrapping mark would fall outside the paragraph'
 
-function countFloatingQuotationMarks(text: string): number {
+function countFloatingWrapperMarks(text: string): number {
   let count = 0
-  for (const match of text.matchAll(/[“”‘’"]/gu)) {
+  const openerSet = new Set(WRAPPER_FAMILIES.map((family) => family.open))
+  const closerSet = new Set(WRAPPER_FAMILIES.map((family) => family.close))
+  for (const match of text.matchAll(/[\s\S]/gu)) {
+    const character = match[0]!
+    if (!openerSet.has(character) && !closerSet.has(character)) continue
     const index = match.index
     const before = text[index - 1] ?? ''
     const after = text[index + 1] ?? ''
+    // console.error('floating check', index, JSON.stringify(character), 'before', JSON.stringify(before), 'after', JSON.stringify(after), 'isFloat', !/\S/u.test(before) && !/\S/u.test(after))
     if (!/\S/u.test(before) && !/\S/u.test(after)) count += 1
   }
   return count
 }
+
+const QUOTATION_OUTSIDE_PARAGRAPH_REASON = WRAPPER_OUTSIDE_PARAGRAPH_REASON
 
 function findAll(text: string, search: string, start: number, end: number): number[] {
   const matches: number[] = []

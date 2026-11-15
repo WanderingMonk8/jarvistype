@@ -4983,6 +4983,89 @@ test('puts one pair of quotations around a numbered paragraph instead of each se
   assert.equal(generationRequests.length, 0)
 })
 
+test('wraps the draft in each wrapper family via paragraph commands', async () => {
+  const userId = 'paragraph-wrapper-user'
+  const chatId = 'paragraph-wrapper-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph text.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases: Array<readonly [string, string, string]> = [
+    ['Put single quotes around the first paragraph.', '‘First paragraph text.’', 'single-quote'],
+    ['Put single quotation marks around the first paragraph.', '‘First paragraph text.’', 'single-quote'],
+    ['Put parens around the first paragraph.', '(First paragraph text.)', 'parentheses'],
+    ['Put parentheses around the first paragraph.', '(First paragraph text.)', 'parentheses'],
+    ['Put brackets around the first paragraph.', '[First paragraph text.]', 'brackets'],
+    ['Put square brackets around the first paragraph.', '[First paragraph text.]', 'brackets'],
+    ['Put curly braces around the first paragraph.', '{First paragraph text.}', 'braces'],
+    ['Put curly brackets around the first paragraph.', '{First paragraph text.}', 'braces'],
+    ['Put braces around the first paragraph.', '{First paragraph text.}', 'braces'],
+    ['Put angle brackets around the first paragraph.', '<First paragraph text.>', 'angle-brackets'],
+    ['Put angle brackets around the last paragraph.', '<First paragraph text.>', 'angle-brackets'],
+  ]
+  for (const [index, [instructionTranscript, afterText, family]] of cases.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `paragraph-wrapper-interpret-${index}`,
+        operationId: `paragraph-wrapper-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instructionTranscript)
+    if (response?.type === 'edit.proposal.response') {
+      assert.equal(response.proposal.afterText, afterText, instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('wraps a range of text in each wrapper family', async () => {
+  const userId = 'range-wrapper-user'
+  const chatId = 'range-wrapper-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Hello there. Start here and end there. End of story.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases: Array<readonly [string, string]> = [
+    ['Put single quotes from Start here to end there.', 'Hello there. ‘Start here and end there.’ End of story.'],
+    ['Put parens from Start here to end there.', 'Hello there. (Start here and end there.) End of story.'],
+    ['Put brackets from Start here to end there.', 'Hello there. [Start here and end there.] End of story.'],
+    ['Put curly braces from Start here to end there.', 'Hello there. {Start here and end there.} End of story.'],
+    ['Put angle brackets from Start here to end there.', 'Hello there. <Start here and end there.> End of story.'],
+    ['Put braces between Start here and end there.', 'Hello there. {Start here and end there.} End of story.'],
+  ]
+  for (const [index, [instructionTranscript, afterText]] of cases.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `range-wrapper-interpret-${index}`,
+        operationId: `range-wrapper-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instructionTranscript)
+    if (response?.type === 'edit.proposal.response') {
+      assert.equal(response.proposal.afterText, afterText, instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
 test('supports every alias and word order of the paragraph quotation command', async () => {
   const userId = 'paragraph-quotation-alias-user'
   const chatId = 'paragraph-quotation-alias-chat'

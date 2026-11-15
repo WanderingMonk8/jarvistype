@@ -81,6 +81,95 @@ function createRequestId(prefix = "request") {
   return `${prefix}-${Date.now().toString(36)}-${createId()}`;
 }
 
+// src/domain/wrapper-families.ts
+var WRAPPER_FAMILIES = [
+  {
+    id: "double-quote",
+    open: "\u201C",
+    close: "\u201D",
+    name: "quotation marks",
+    explanatoryName: "quotation marks",
+    tokenPattern: String.raw`(?:(?:double\s+)?(?:quotation\s+marks?|quote\s+marks?|quotations?|quotes?|double\s+quotes?))`,
+    openPattern: /^[“"]$/u,
+    closePattern: /^[”"]$/u
+  },
+  {
+    id: "single-quote",
+    open: "\u2018",
+    close: "\u2019",
+    name: "single quotation marks",
+    explanatoryName: "single quotation marks",
+    tokenPattern: String.raw`(?:(?:single\s+)?(?:single\s+(?:quotation|quote|quotations|quotes|mark)(?:\s+marks?)?|singles?|single))`,
+    openPattern: /^[‘']$/u,
+    closePattern: /^[’']$/u
+  },
+  {
+    id: "parentheses",
+    open: "(",
+    close: ")",
+    name: "parentheses",
+    explanatoryName: "parentheses",
+    tokenPattern: String.raw`(?:parens?|parentheses|parenthesis|round\s+brackets?|round\s+bracket)`,
+    openPattern: /^\($/u,
+    closePattern: /^\)$/u
+  },
+  {
+    id: "brackets",
+    open: "[",
+    close: "]",
+    name: "brackets",
+    explanatoryName: "brackets",
+    tokenPattern: String.raw`(?:square\s+brackets?|square\s+bracket|brackets?|bracket)`,
+    openPattern: /^\[$/u,
+    closePattern: /^\]$/u
+  },
+  {
+    id: "braces",
+    open: "{",
+    close: "}",
+    name: "braces",
+    explanatoryName: "braces",
+    tokenPattern: String.raw`(?:curly\s+(?:braces?|brackets?)|curly\s+ones?|braces?|brace|curly\s+bracket)`,
+    openPattern: /^\{$/u,
+    closePattern: /^\}$/u
+  },
+  {
+    id: "angle-brackets",
+    open: "<",
+    close: ">",
+    name: "angle brackets",
+    explanatoryName: "angle brackets",
+    tokenPattern: String.raw`(?:angle\s+brackets?|angle\s+bracket|less\s+than\s+greater\s+than|greater\s+than\s+less\s+than|greater\s+and\s+less\s+than|less\s+and\s+greater\s+than|greater\s+less\s+than|less\s+greater\s+than|less\s+than\s+(?:and\s+)?more\s+than|chevrons?|chevron)`,
+    openPattern: /^<$/u,
+    closePattern: /^>$/u
+  }
+];
+var OPEN_TO_FAMILY = new Map(WRAPPER_FAMILIES.map((family) => [family.open, family]));
+var CLOSE_TO_FAMILY = new Map(WRAPPER_FAMILIES.map((family) => [family.close, family]));
+var OPENERS_GROUP = `(?:${WRAPPER_FAMILIES.map((family) => [family.open]).flat().map((character) => character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|")}|"|')`;
+var CLOSERS_GROUP = `(?:${WRAPPER_FAMILIES.map((family) => [family.close]).flat().map((character) => character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|")}|"|')`;
+var CLOSERS_LITERALS = [
+  ...WRAPPER_FAMILIES.map((family) => family.close),
+  ",",
+  ";",
+  ":",
+  "!",
+  "?",
+  ".",
+  ")",
+  "}",
+  "]",
+  '"',
+  `'`
+];
+var PUNCTUATION_CLOSERS_REGEX = new RegExp(
+  `[${CLOSERS_LITERALS.map((character) => character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("")}]`,
+  "u"
+);
+var WRAPPER_OPENERS_REGEX = new RegExp(OPENERS_GROUP, "u");
+var WRAPPER_CLOSERS_REGEX = new RegExp(CLOSERS_GROUP, "u");
+var WRAPPER_TOKEN_PATTERN = WRAPPER_FAMILIES.map((family) => family.tokenPattern).join("|");
+
 // src/domain/edit-pipeline.ts
 var EDIT_SCHEMA_VERSION = 2;
 var MAX_EDIT_OPERATIONS = 8;

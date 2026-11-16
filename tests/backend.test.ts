@@ -3334,6 +3334,38 @@ test('offers a chooser when more than one split position matches', async () => {
   }
 })
 
+test('inserts bare open and close wrapper markers for every family', async () => {
+  const userId = 'bare-wrapper-user'
+  const chatId = 'bare-wrapper-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Last sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ['Open quote the first sentence.', '“First sentence. Last sentence.'],
+    ['Close quote the first sentence.', 'First sentence.” Last sentence.'],
+    ['Open single quote the last sentence.', 'First sentence. ‘Last sentence.'],
+    ['Close single quote the last sentence.', 'First sentence. Last sentence.’'],
+    ['Open bracket the last sentence.', 'First sentence. [Last sentence.'],
+    ['Close bracket the last sentence.', 'First sentence. Last sentence.]'],
+    ['Open angle bracket the last sentence.', 'First sentence. <Last sentence.'],
+    ['Close angle bracket the last sentence.', 'First sentence. Last sentence.>'],
+    ['Open parenthesis the last sentence.', 'First sentence. (Last sentence.'],
+    ['Close parenthesis the last sentence.', 'First sentence. Last sentence.)'],
+    ['Open brace the first sentence.', '{First sentence. Last sentence.'],
+    ['Close brace the first sentence.', 'First sentence.} Last sentence.'],
+  ]
+  for (const [index, [instructionTranscript, afterText]] of cases.entries()) {
+    responses.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `bare-wrapper-${index}`, operationId: 'bare-wrapper-op', chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instructionTranscript)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, afterText, instructionTranscript)
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
 test('resolves about join commands and executes inline sentence merges', async () => {
   const examples = [
     ['Erin unwinds herself. Maeve waits.', 'Join the sentence about Erin relaxing with the sentence about Maeve waiting.', 'Erin unwinds herself, maeve waits.', [0.99, 0.01, 0.01, 0.99]],
@@ -5263,20 +5295,20 @@ test('wraps the draft in each wrapper family via paragraph commands', async () =
   responses.length = 0
   generationRequests.length = 0
 
-  const cases: Array<readonly [string, string, string]> = [
-    ['Put single quotes around the first paragraph.', '‘First paragraph text.’', 'single-quote'],
-    ['Put single quotation marks around the first paragraph.', '‘First paragraph text.’', 'single-quote'],
-    ['Put parens around the first paragraph.', '(First paragraph text.)', 'parentheses'],
-    ['Put parentheses around the first paragraph.', '(First paragraph text.)', 'parentheses'],
-    ['Put brackets around the first paragraph.', '[First paragraph text.]', 'brackets'],
-    ['Put square brackets around the first paragraph.', '[First paragraph text.]', 'brackets'],
-    ['Put curly braces around the first paragraph.', '{First paragraph text.}', 'braces'],
-    ['Put curly brackets around the first paragraph.', '{First paragraph text.}', 'braces'],
-    ['Put braces around the first paragraph.', '{First paragraph text.}', 'braces'],
-    ['Put angle brackets around the first paragraph.', '<First paragraph text.>', 'angle-brackets'],
-    ['Put angle brackets around the last paragraph.', '<First paragraph text.>', 'angle-brackets'],
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ['Put single quotes around the first paragraph.', '‘First paragraph text.’'],
+    ['Put single quotation marks around the first paragraph.', '‘First paragraph text.’'],
+    ['Put parens around the first paragraph.', '(First paragraph text.)'],
+    ['Put parentheses around the first paragraph.', '(First paragraph text.)'],
+    ['Put brackets around the first paragraph.', '[First paragraph text.]'],
+    ['Put square brackets around the first paragraph.', '[First paragraph text.]'],
+    ['Put curly braces around the first paragraph.', '{First paragraph text.}'],
+    ['Put curly brackets around the first paragraph.', '{First paragraph text.}'],
+    ['Put braces around the first paragraph.', '{First paragraph text.}'],
+    ['Put angle brackets around the first paragraph.', '<First paragraph text.>'],
+    ['Put angle brackets around the last paragraph.', '<First paragraph text.>'],
   ]
-  for (const [index, [instructionTranscript, afterText, family]] of cases.entries()) {
+  for (const [index, [instructionTranscript, afterText]] of cases.entries()) {
     responses.length = 0
     await dispatch(
       {

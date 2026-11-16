@@ -6136,6 +6136,8 @@ function parseDeterministicEditPlan(instructionTranscript, session) {
   if (textDeletion) return finalizeInterpretedPlan(instructionTranscript, textDeletion);
   const paragraphDeletion = parseDeterministicParagraphDeletion(instructionTranscript, session);
   if (paragraphDeletion) return paragraphDeletion;
+  const wrapperInsertion = parseDeterministicWrapperInsertion(instructionTranscript, session.draftVersion, session.paragraphs.length);
+  if (wrapperInsertion) return finalizeInterpretedPlan(instructionTranscript, wrapperInsertion);
   const paragraphQuotation = parseDeterministicParagraphQuotation(
     instructionTranscript,
     session.draftVersion,
@@ -6626,7 +6628,7 @@ async function interpretAboutSplit(instruction, session, userId, connectionId, s
     recordDebug(userId, "edit.about", `outcome=${signal.aborted ? "cancelled" : "permission-unavailable"} operand=split`);
     return { handled: true, plan: null };
   }
-  let aSpans = [];
+  const aSpans = [];
   let uncertainReview = false;
   let overlappingReview = false;
   if (aboutDescription) {
@@ -8141,6 +8143,50 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
     }
   }
   return resolved.ok && resolved.afterText !== session.cleanText ? plan : null;
+}
+function parseDeterministicWrapperInsertion(instructionTranscript, draftVersion, paragraphCount) {
+  if (/[\r\n;]/u.test(instructionTranscript)) return null;
+  const trimmed = instructionTranscript.trim();
+  const ordinalToken = "(?:\\d+(?:st|nd|rd|th)?|one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|seven|seventh|eight|eighth|nine|ninth|ten|tenth|last|final|penultimate|second[- ]to[- ]last)";
+  const pattern = new RegExp(
+    `^(?<direction>open|close)\\s+(?<marker>${WRAPPER_TOKEN_PATTERN})\\s+(?:the\\s+|this\\s+|that\\s+|a\\s+|an\\s+)?(?<before>${ordinalToken})\\s+(?<unit>sentences?|paragraphs?)[.!?]*$`,
+    "iu"
+  );
+  const match = trimmed.match(pattern);
+  if (!match) return null;
+  const family = resolveWrapperFamily(match.groups?.marker ?? "");
+  if (!family) return null;
+  const isOpen = match.groups?.direction?.toLocaleLowerCase() === "open";
+  const isSentence = /^sentences?$/iu.test(match.groups?.unit ?? "");
+  const explanation = `Insert a ${family.name} ${isOpen ? "opening" : "closing"} marker at the ${isOpen ? "start" : "end"} of the ${isSentence ? "sentence" : "paragraph"}.`;
+  if (isSentence) {
+    const sentencePosition = parseSentencePosition(trimmed);
+    if (!sentencePosition) return null;
+    return parseEditPlan({
+      schemaVersion: 2,
+      draftVersion,
+      explanation,
+      operations: [{
+        id: "deterministic-wrapper-sentence-insertion",
+        type: isOpen ? "insert_before" : "insert_after",
+        target: sentencePosition,
+        text: isOpen ? family.open : family.close
+      }]
+    });
+  }
+  const paragraphOrdinal = parseParagraphOrdinalToken(match.groups?.before, paragraphCount);
+  if (paragraphOrdinal === null) return null;
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation,
+    operations: [{
+      id: "deterministic-wrapper-paragraph-insertion",
+      type: isOpen ? "prepend" : "append",
+      target: { paragraphOrdinal },
+      text: isOpen ? family.open : family.close
+    }]
+  });
 }
 function parseDeterministicSentenceQuotationInsertion(instructionTranscript, draftVersion) {
   if (/[\r\n;]/u.test(instructionTranscript)) return null;

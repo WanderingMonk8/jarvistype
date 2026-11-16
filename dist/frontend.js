@@ -585,7 +585,18 @@ var COMMAND_GROUPS = [
         "Replace",
         "Replace, change, swap, or substitute a target\u2014for example, \u201CChange \u2018pending\u2019 to \u2018approved\u2019 in paragraph 2.\u201D"
       ],
-      ["Insert before", "Insert, add, place, or put \u201CUrgent:\u201D before the first sentence."],
+      [
+        "Open or close a wrapper pair in place",
+        "Say \u201Copen quote the first sentence,\u201D \u201Cclose quote the first sentence,\u201D \u201Copen single quote the last sentence,\u201D \u201Copen bracket the first paragraph,\u201D or \u201Cclose angle bracket the last paragraph\u201D to insert one marker without wrapping: open inserts the opening mark before a sentence or paragraph; close inserts the closing mark after. The same works for every wrapper family \u2014 \u201Copen parenthesis,\u201D \u201Cclose parenthesis,\u201D \u201Copen brace,\u201D \u201Cclose brace,\u201D \u201Copen angle bracket,\u201D \u201Cclose angle bracket,\u201D \u201Copen single quote,\u201D \u201Cclose bracket,\u201D and \u201Copen double quotation mark.\u201D"
+      ],
+      [
+        "Wrap with quote marks or brackets",
+        "Say \u201Cput quotation marks around the first paragraph,\u201D \u201Cput single quotes around the first paragraph,\u201D or \u201Cput angle brackets around the second sentence\u201D to wrap a span in a pair of marks. The same range commands also work from point to point: \u201CPut single quotes from Start here to end there.\u201D or \u201CPut angle brackets between X and Y.\u201D Supported pairs are double and single quote marks, parentheses, square and curly brackets, curly braces, and angle brackets; bare forms like \u201CQuote the first paragraph.,\u201D \u201CPut the first paragraph in quotes,\u201D and \u201CAdd single quotes to the first paragraph.\u201D work too."
+      ],
+      [
+        "Insert before",
+        "Insert, add, place, or put \u201CUrgent:\u201D before the first sentence."
+      ],
       [
         "Insert after",
         "Insert, add, place, or put a new paragraph after paragraph 2 that says \u201CThe route is approved.\u201D"

@@ -2544,9 +2544,7 @@ test('Continue handles Continuation with proper first ordinals and I', () => {
 })
 
 test('Continue replaces a closing wrapper that belongs to the source', () => {
-  const text = 'He looks to his left and turn.'
-  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
-  const wrapped = 'She said, \"He looks to his left and turn.\"'
+  const wrapped = 'She said, “He looks to his left and turn.”'
   const paragraphsW = [{ id: 'p', ordinal: 1, lineIndex: 0, text: wrapped }]
   const result = executeEditPlan(wrapped, paragraphsW, 1, {
     schemaVersion: 2,
@@ -2561,7 +2559,7 @@ test('Continue replaces a closing wrapper that belongs to the source', () => {
       },
     ],
   })
-  assert.equal(result.ok && result.afterText, 'She said, \"He looks to his left and turn, and then he begins to shout.\"')
+  assert.equal(result.ok && result.afterText, 'She said, “He looks to his left and turn, and then he begins to shout.”')
 })
 
 test('Continue inherits question mark and paired punctuation from the source', () => {

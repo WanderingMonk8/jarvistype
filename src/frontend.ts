@@ -97,7 +97,18 @@ export const COMMAND_GROUPS = [
         'Replace',
         'Replace, change, swap, or substitute a target—for example, “Change ‘pending’ to ‘approved’ in paragraph 2.”',
       ],
-      ['Insert before', 'Insert, add, place, or put “Urgent:” before the first sentence.'],
+      [
+        'Open or close a wrapper pair in place',
+        'Say “open quote the first sentence,” “close quote the first sentence,” “open single quote the last sentence,” “open bracket the first paragraph,” or “close angle bracket the last paragraph” to insert one marker without wrapping: open inserts the opening mark before a sentence or paragraph; close inserts the closing mark after. The same works for every wrapper family — “open parenthesis,” “close parenthesis,” “open brace,” “close brace,” “open angle bracket,” “close angle bracket,” “open single quote,” “close bracket,” and “open double quotation mark.”',
+      ],
+      [
+        'Wrap with quote marks or brackets',
+        'Say “put quotation marks around the first paragraph,” “put single quotes around the first paragraph,” or “put angle brackets around the second sentence” to wrap a span in a pair of marks. The same range commands also work from point to point: “Put single quotes from Start here to end there.” or “Put angle brackets between X and Y.” Supported pairs are double and single quote marks, parentheses, square and curly brackets, curly braces, and angle brackets; bare forms like “Quote the first paragraph.,” “Put the first paragraph in quotes,” and “Add single quotes to the first paragraph.” work too.',
+      ],
+      [
+        'Insert before',
+        'Insert, add, place, or put “Urgent:” before the first sentence.',
+      ],
       [
         'Insert after',
         'Insert, add, place, or put a new paragraph after paragraph 2 that says “The route is approved.”',

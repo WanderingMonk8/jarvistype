@@ -1,6 +1,6 @@
 import { MAX_DRAFT_CHARACTERS, reconcileParagraphs, type DraftParagraph } from './draft-session'
 import { speechPhoneticKey } from './phonetics'
-import { WRAPPER_FAMILIES, isWrapperOpener, isWrapperCloser, WRAPPER_OPENERS_REGEX, WRAPPER_CLOSERS_REGEX, PUNCTUATION_CLOSERS_REGEX } from './wrapper-families'
+import { WRAPPER_FAMILIES, isWrapperOpener, isWrapperCloser, WRAPPER_OPENERS_REGEX, PUNCTUATION_CLOSERS_REGEX } from './wrapper-families'
 
 export const EDIT_SCHEMA_VERSION = 2 as const
 export const MAX_EDIT_OPERATIONS = 8

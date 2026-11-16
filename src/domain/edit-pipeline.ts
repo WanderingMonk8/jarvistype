@@ -1543,7 +1543,7 @@ function resolveSentenceTarget(
   return sentences[index] ?? 'sentence position was not found'
 }
 
-function findSentenceRanges(
+export function findSentenceRanges(
   text: string,
   rangeStart: number,
   rangeEnd: number,
@@ -2260,7 +2260,7 @@ function resolveStructuralParagraph(
   return matches[0]!
 }
 
-function paragraphRange(text: string, paragraph: DraftParagraph): { start: number; end: number } {
+export function paragraphRange(text: string, paragraph: DraftParagraph): { start: number; end: number } {
   const lines = text.split('\n')
   let start = 0
   for (let index = 0; index < paragraph.lineIndex; index += 1) start += lines[index]!.length + 1

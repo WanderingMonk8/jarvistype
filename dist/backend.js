@@ -6387,7 +6387,13 @@ async function scoreAboutDescription(session, kind, description, plural, userId,
   }
 }
 function parseJoinOperand(chunk) {
-  const match = chunk.trim().match(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(sentences?|phrases?|words?|clauses?|parts?|fragments?)\s+(.+)$/iu);
+  const trimmed = chunk.trim();
+  const adjacentMatch = trimmed.match(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(next|following|after|previous|prior|preceding|before)(?:\s+(?:sentence|phrase|word|clause|part|fragment))?$/iu);
+  if (adjacentMatch) {
+    const direction = /^(?:next|following|after)/iu.test(adjacentMatch[1]) ? "next" : "previous";
+    return { kind: "sentence", mode: "adjacent", plural: false, adjacentDirection: direction };
+  }
+  const match = trimmed.match(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(sentences?|phrases?|words?|clauses?|parts?|fragments?)\s+(.+)$/iu);
   if (!match) return null;
   const label = match[1].trim().toLocaleLowerCase();
   const kind = /^sentences?$/iu.test(label) ? "sentence" : /^words?$/iu.test(label) ? "word" : "phrase";
@@ -6397,6 +6403,17 @@ function parseJoinOperand(chunk) {
   const literal = unwrapEditArgument(rest);
   if (!literal) return null;
   return { kind, mode: "literal", literal, plural: /s$/iu.test(label) };
+}
+function resolveAdjacentSentence(session, span, direction) {
+  const paragraph = span.paragraphId !== void 0 ? session.paragraphs.find((candidate) => candidate.id === span.paragraphId) : session.paragraphs.find((candidate) => candidate.ordinal === span.paragraphOrdinal);
+  if (!paragraph) return null;
+  const range = paragraphRange(session.cleanText, paragraph);
+  const sentences = findSentenceRanges(session.cleanText, range.start, range.end);
+  const index = sentences.findIndex((sentence) => sentence.start <= span.start && span.end <= sentence.end);
+  if (index < 0) return null;
+  const neighbourIndex = direction === "next" ? index + 1 : index - 1;
+  if (neighbourIndex < 0 || neighbourIndex >= sentences.length) return null;
+  return { paragraphOrdinal: paragraph.ordinal, sourceOrdinal: index + 1, neighbourOrdinal: neighbourIndex + 1 };
 }
 async function interpretAboutSplit(instruction, session, userId, connectionId, signal) {
   const command = instruction.trim().replace(/[.!?]+$/u, "").trim();
@@ -6474,18 +6491,52 @@ async function interpretAboutJoin(instruction, session, userId, connectionId, si
   }
   const describe = async (operand, tag) => {
     if (operand.mode === "literal") {
-      return { target: { exactText: operand.literal }, uncertain: false, overlapping: false };
+      const matches = findTextTargetMatches(session.cleanText, session.paragraphs, operand.literal);
+      const span = matches.length === 1 ? { start: matches[0].start, end: matches[0].end, paragraphOrdinal: matches[0].paragraphOrdinal } : null;
+      return { target: { exactText: operand.literal }, uncertain: false, overlapping: false, span };
     }
     const kind = operand.kind === "sentence" ? "sentence" : "phrase";
     const scored = await scoreAboutDescription(session, kind, operand.description, operand.plural, userId, connectionId, signal, "edit.about");
-    if (typeof scored === "string") return { target: null, uncertain: false, overlapping: false };
+    if (typeof scored === "string") return { target: null, uncertain: false, overlapping: false, span: null };
     return {
       target: { paragraphId: scored.selected.paragraphId, exactText: scored.selected.text, ignorePunctuationForMatch: false },
       uncertain: scored.uncertainReview,
-      overlapping: scored.overlappingReview
+      overlapping: scored.overlappingReview,
+      span: { paragraphId: scored.selected.paragraphId, start: scored.selected.start, end: scored.selected.end }
     };
   };
+  if (source.mode === "adjacent") {
+    recordDebug(userId, "edit.about", "outcome=parse-failed operand=join");
+    return { handled: true, plan: null };
+  }
   const left = await describe(source, "source");
+  if (destination.mode === "adjacent") {
+    if (!left.target || !left.span) return { handled: true, plan: null };
+    const direction = destination.adjacentDirection ?? "next";
+    const resolved = resolveAdjacentSentence(session, left.span, direction);
+    if (!resolved) {
+      recordDebug(userId, "edit.about", `outcome=unsupported-adjacency direction=${direction} operand=join`);
+      return { handled: true, plan: null };
+    }
+    const sourceTarget = { paragraphOrdinal: resolved.paragraphOrdinal, sentenceOrdinal: resolved.sourceOrdinal };
+    const neighbourTarget = { paragraphOrdinal: resolved.paragraphOrdinal, sentenceOrdinal: resolved.neighbourOrdinal };
+    const [adjacentTarget, otherTarget] = direction === "previous" ? [neighbourTarget, sourceTarget] : [sourceTarget, neighbourTarget];
+    const uncertainAdjacent = left.overlapping || left.uncertain;
+    const explanation2 = uncertainAdjacent ? left.overlapping ? "Overlapping \u201Cabout\u201D matches; verify the selected spans boundaries." : "Uncertain \u201Cabout\u201D match; verify the selected spans." : direction === "next" ? "Join the described sentence with the following sentence." : "Join the described sentence with the previous sentence.";
+    recordDebug(userId, "edit.about", `outcome=${uncertainAdjacent ? "review-uncertain" : "resolved"} operand=join`);
+    const plan2 = parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: session.draftVersion,
+      explanation: explanation2,
+      operations: [{
+        id: "about-join-adjacent",
+        type: "join_sentence",
+        target: adjacentTarget,
+        destination: otherTarget
+      }]
+    });
+    return { handled: true, plan: plan2 };
+  }
   const right = await describe(destination, "destination");
   const reviewFlags = [left.uncertain, right.uncertain];
   if (!left.target || !right.target) return { handled: true, plan: null };

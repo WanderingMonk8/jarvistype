@@ -3062,6 +3062,107 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('resolves join sentence about A with the next|previous forms', async () => {
+  const testTriple = [
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Erin relaxing with the next.',
+      expected: 'Erin unwinds herself, maeve waits. Sam sleeps.',
+      scores: [0.99, 0.01, 0.01],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Erin relaxing with the following sentence.',
+      expected: 'Erin unwinds herself, maeve waits. Sam sleeps.',
+      scores: [0.99, 0.01, 0.01],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Maeve waiting, with the next.',
+      expected: 'Erin unwinds herself. Maeve waits, sam sleeps.',
+      scores: [0.01, 0.99, 0.01],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Maeve waiting with the previous.',
+      expected: 'Erin unwinds herself, maeve waits. Sam sleeps.',
+      scores: [0.01, 0.99, 0.01],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Sam sleeping with the previous sentence.',
+      expected: 'Erin unwinds herself. Maeve waits, sam sleeps.',
+      scores: [0.01, 0.01, 0.99],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Erin relaxing with the previous.',
+      expectedError: true,
+      scores: [0.99, 0.01, 0.01],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: "Join the sentence 'Maeve waits.' with the next.",
+      expected: 'Erin unwinds herself. Maeve waits, sam sleeps.',
+      scores: null,
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: "Join the sentence 'Maeve waits.' with the previous.",
+      expected: 'Erin unwinds herself, maeve waits. Sam sleeps.',
+      scores: null,
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: "Join the sentence 'Sam sleeps.' with the next.",
+      expectedError: true,
+      scores: null,
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: "Join the sentence 'Erin unwinds herself.' with the previous.",
+      expectedError: true,
+      scores: null,
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits.',
+      instruction: "Join the sentence 'Erin unwinds herself.' with the next.",
+      expected: 'Erin unwinds herself, maeve waits.',
+      scores: null,
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits.',
+      instruction: "Join the sentence 'Maeve waits.' with the previous.",
+      expected: 'Erin unwinds herself, maeve waits.',
+      scores: null,
+    },
+  ] as const
+  for (const [index, testCase] of testTriple.entries()) {
+    const userId = `about-join-adjacent-user-${index}`
+    const chatId = `about-join-adjacent-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = testCase.scores !== null
+    if (testCase.scores !== null) {
+      let aboutCallIndex = 0
+      const scores = testCase.scores
+      aboutDecision = () => {
+        aboutCallIndex += 1
+        return scores[aboutCallIndex - 1] ?? 0.01
+      }
+    }
+    await seedDraft(userId, chatId, testCase.draft)
+    responses.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-join-adjacent-${index}`, operationId: `about-join-adjacent-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: testCase.instruction }, userId)
+    const response = responses.at(-1)?.payload
+    if ('expectedError' in testCase && testCase.expectedError) {
+      assert.equal(response?.type, 'app.error', testCase.instruction)
+      continue
+    }
+    assert.equal(response?.type, 'edit.proposal.response', testCase.instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, testCase.expected, testCase.instruction)
+  }
+})
+
 test('resolves about join commands and executes inline sentence merges', async () => {
   const examples = [
     ['Erin unwinds herself. Maeve waits.', 'Join the sentence about Erin relaxing with the sentence about Maeve waiting.', 'Erin unwinds herself, maeve waits.', [0.99, 0.01, 0.01, 0.99]],

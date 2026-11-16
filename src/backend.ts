@@ -30,9 +30,11 @@ import {
   executeSequentialEditPlan,
   findPunctuationInsensitiveMatch,
   findAboutTargetCandidates,
+  findSentenceRanges,
   findTextTargetMatches,
   hasTargetPunctuation,
   normalizeNamedTargetPunctuation,
+  paragraphRange,
   parseEditPlan,
   stripContinuationHelper,
   type EditPlan,
@@ -2044,14 +2046,22 @@ async function scoreAboutDescription(
 
 interface ParsedJoinOperand {
   readonly kind: 'sentence' | 'phrase' | 'word'
-  readonly mode: 'about' | 'literal'
+  readonly mode: 'about' | 'literal' | 'adjacent'
   readonly description?: string
   readonly literal?: string
   readonly plural: boolean
+  /** About/literal operands are resolved relative to the source when `adjacent` names the neighbouring sentence. */
+  readonly adjacentDirection?: 'next' | 'previous'
 }
 
 function parseJoinOperand(chunk: string): ParsedJoinOperand | null {
-  const match = chunk.trim().match(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(sentences?|phrases?|words?|clauses?|parts?|fragments?)\s+(.+)$/iu)
+  const trimmed = chunk.trim()
+  const adjacentMatch = trimmed.match(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(next|following|after|previous|prior|preceding|before)(?:\s+(?:sentence|phrase|word|clause|part|fragment))?$/iu)
+  if (adjacentMatch) {
+    const direction = /^(?:next|following|after)/iu.test(adjacentMatch[1]!) ? 'next' : 'previous'
+    return { kind: 'sentence', mode: 'adjacent', plural: false, adjacentDirection: direction }
+  }
+  const match = trimmed.match(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(sentences?|phrases?|words?|clauses?|parts?|fragments?)\s+(.+)$/iu)
   if (!match) return null
   const label = match[1]!.trim().toLocaleLowerCase()
   const kind = /^sentences?$/iu.test(label) ? 'sentence' : /^words?$/iu.test(label) ? 'word' : 'phrase'
@@ -2061,6 +2071,32 @@ function parseJoinOperand(chunk: string): ParsedJoinOperand | null {
   const literal = unwrapEditArgument(rest)
   if (!literal) return null
   return { kind, mode: 'literal', literal, plural: /s$/iu.test(label) }
+}
+
+type AdjacentSourceSpan = { start: number; end: number; paragraphId?: string; paragraphOrdinal?: number }
+
+/**
+ * Locate the sentence immediately following (`direction = 'next'`) or preceding (`direction = 'previous'`)
+ * the resolved source span, scoped to the same paragraph. Returns the paragraph ordinal, the source
+ * sentence's ordinal and the neighbour's ordinal (1-based within the paragraph), or null when the
+ * span does not sit inside one sentence or no neighbour exists.
+ */
+function resolveAdjacentSentence(
+  session: PersistedDraftSession,
+  span: AdjacentSourceSpan,
+  direction: 'next' | 'previous',
+): { paragraphOrdinal: number; sourceOrdinal: number; neighbourOrdinal: number } | null {
+  const paragraph = span.paragraphId !== undefined
+    ? session.paragraphs.find((candidate) => candidate.id === span.paragraphId)
+    : session.paragraphs.find((candidate) => candidate.ordinal === span.paragraphOrdinal)
+  if (!paragraph) return null
+  const range = paragraphRange(session.cleanText, paragraph)
+  const sentences = findSentenceRanges(session.cleanText, range.start, range.end)
+  const index = sentences.findIndex((sentence) => sentence.start <= span.start && span.end <= sentence.end)
+  if (index < 0) return null
+  const neighbourIndex = direction === 'next' ? index + 1 : index - 1
+  if (neighbourIndex < 0 || neighbourIndex >= sentences.length) return null
+  return { paragraphOrdinal: paragraph.ordinal, sourceOrdinal: index + 1, neighbourOrdinal: neighbourIndex + 1 }
 }
 
 async function interpretAboutSplit(
@@ -2150,20 +2186,68 @@ async function interpretAboutJoin(
     recordDebug(userId, 'edit.about', `outcome=${signal.aborted ? 'cancelled' : 'permission-unavailable'} operand=join`)
     return { handled: true, plan: null }
   }
-  const describe = async (operand: ParsedJoinOperand, tag: 'source' | 'destination'): Promise<{ target: { paragraphId?: string; exactText: string } | null; uncertain: boolean; overlapping: boolean }> => {
+  interface DescribedOperand {
+    target: { paragraphId?: string; exactText: string } | null
+    uncertain: boolean
+    overlapping: boolean
+    span: AdjacentSourceSpan | null
+  }
+  const describe = async (operand: ParsedJoinOperand, tag: 'source' | 'destination'): Promise<DescribedOperand> => {
     if (operand.mode === 'literal') {
-      return { target: { exactText: operand.literal! }, uncertain: false, overlapping: false }
+      const matches = findTextTargetMatches(session.cleanText, session.paragraphs, operand.literal!)
+      const span = matches.length === 1
+        ? { start: matches[0]!.start, end: matches[0]!.end, paragraphOrdinal: matches[0]!.paragraphOrdinal }
+        : null
+      return { target: { exactText: operand.literal! }, uncertain: false, overlapping: false, span }
     }
     const kind = operand.kind === 'sentence' ? 'sentence' : 'phrase'
     const scored = await scoreAboutDescription(session, kind, operand.description!, operand.plural, userId, connectionId, signal, 'edit.about')
-    if (typeof scored === 'string') return { target: null, uncertain: false, overlapping: false }
+    if (typeof scored === 'string') return { target: null, uncertain: false, overlapping: false, span: null }
     return {
       target: { paragraphId: scored.selected.paragraphId, exactText: scored.selected.text, ignorePunctuationForMatch: false } as { paragraphId?: string; exactText: string },
       uncertain: scored.uncertainReview,
       overlapping: scored.overlappingReview,
+      span: { paragraphId: scored.selected.paragraphId, start: scored.selected.start, end: scored.selected.end },
     }
   }
+  if (source.mode === 'adjacent') {
+    recordDebug(userId, 'edit.about', 'outcome=parse-failed operand=join')
+    return { handled: true, plan: null }
+  }
   const left = await describe(source, 'source')
+  if (destination.mode === 'adjacent') {
+    if (!left.target || !left.span) return { handled: true, plan: null }
+    const direction = destination.adjacentDirection ?? 'next'
+    const resolved = resolveAdjacentSentence(session, left.span, direction)
+    if (!resolved) {
+      recordDebug(userId, 'edit.about', `outcome=unsupported-adjacency direction=${direction} operand=join`)
+      return { handled: true, plan: null }
+    }
+    const sourceTarget = { paragraphOrdinal: resolved.paragraphOrdinal, sentenceOrdinal: resolved.sourceOrdinal }
+    const neighbourTarget = { paragraphOrdinal: resolved.paragraphOrdinal, sentenceOrdinal: resolved.neighbourOrdinal }
+    const [adjacentTarget, otherTarget] = direction === 'previous' ? [neighbourTarget, sourceTarget] : [sourceTarget, neighbourTarget]
+    const uncertainAdjacent = left.overlapping || left.uncertain
+    const explanation = uncertainAdjacent
+      ? (left.overlapping
+        ? 'Overlapping “about” matches; verify the selected spans boundaries.'
+        : 'Uncertain “about” match; verify the selected spans.')
+      : direction === 'next'
+        ? 'Join the described sentence with the following sentence.'
+        : 'Join the described sentence with the previous sentence.'
+    recordDebug(userId, 'edit.about', `outcome=${uncertainAdjacent ? 'review-uncertain' : 'resolved'} operand=join`)
+    const plan = parseEditPlan({
+      schemaVersion: 2,
+      draftVersion: session.draftVersion,
+      explanation,
+      operations: [{
+        id: 'about-join-adjacent',
+        type: 'join_sentence',
+        target: adjacentTarget,
+        destination: otherTarget,
+      }],
+    })
+    return { handled: true, plan }
+  }
   const right = await describe(destination, 'destination')
   const reviewFlags = [left!.uncertain, right!.uncertain]
   if (!left!.target || !right!.target) return { handled: true, plan: null }

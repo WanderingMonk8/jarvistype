@@ -57,6 +57,9 @@ export interface EditTarget {
   relativeToText?: string
   /** Internal intent: punctuation is ignored for identifying this text target. */
   ignorePunctuationForMatch?: boolean
+  /** Absolute draft span — used for deterministic, plan-time-resolved operation pairs. Never fuzzy-matched. */
+  absoluteStart?: number
+  absoluteEnd?: number
 }
 
 export interface EditOperation {
@@ -504,6 +507,7 @@ function parseOperation(value: unknown): EditOperation | null {
     ...(typeof caseMode === 'string' ? { caseMode } : {}),
     ...(destination ? { destination } : {}),
     ...(includeTrailingPunctuation === true ? { includeTrailingPunctuation: true } : {}),
+    ...(type === 'split_sentence' && (value.direction === 'before' || value.direction === 'after') ? { direction: value.direction } : {}),
   }
 }
 
@@ -530,12 +534,27 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     'relativePosition',
     'relativeToText',
     'ignorePunctuationForMatch',
+    'absoluteStart',
+    'absoluteEnd',
   ])
   if (Object.keys(value).some((key) => !allowed.has(key))) return null
   const target: EditTarget = {}
   if (value.ignorePunctuationForMatch !== undefined) {
     if (typeof value.ignorePunctuationForMatch !== 'boolean') return null
     target.ignorePunctuationForMatch = value.ignorePunctuationForMatch
+  }
+  if (value.absoluteStart !== undefined) {
+    if (!isNonNegativeInteger(value.absoluteStart)) return null
+    target.absoluteStart = value.absoluteStart
+  }
+  if (value.absoluteEnd !== undefined) {
+    if (!isNonNegativeInteger(value.absoluteEnd)) return null
+    target.absoluteEnd = value.absoluteEnd
+    }
+  if (target.absoluteStart !== undefined || target.absoluteEnd !== undefined) {
+    if (target.absoluteStart === undefined || target.absoluteEnd === undefined) return null
+    if (target.absoluteStart >= target.absoluteEnd) return null
+    if (target.paragraphId !== undefined || target.paragraphOrdinal !== undefined || target.sentenceOrdinal !== undefined || target.sentenceFromEnd !== undefined || target.punctuation !== undefined || target.relativeToText !== undefined || target.relativePosition !== undefined || target.exactText !== undefined || target.approximateText !== undefined) return null
   }
   if (value.paragraphId !== undefined) {
     if (!isIdentifier(value.paragraphId)) return null
@@ -729,6 +748,12 @@ function resolveOperation(
     if (typeof match === 'string') return match
     start = match.start
     end = match.end
+  } else if (operation.target.absoluteStart !== undefined) {
+    const absoluteStart = operation.target.absoluteStart
+    const absoluteEnd = operation.target.absoluteEnd!
+    if (absoluteStart >= absoluteEnd || absoluteEnd > cleanText.length) return `${operation.type} absolute span was not found`
+    start = absoluteStart
+    end = absoluteEnd
   } else if (operation.target.approximateText !== undefined) {
     const match = findApproximateMatch(
       cleanText,
@@ -945,7 +970,8 @@ function hasInlineSelector(target: EditTarget): boolean {
     target.approximateText !== undefined ||
     target.punctuation !== undefined ||
     target.sentenceOrdinal !== undefined ||
-    target.sentenceFromEnd !== undefined
+    target.sentenceFromEnd !== undefined ||
+    target.absoluteStart !== undefined
   )
 }
 
@@ -1695,7 +1721,13 @@ function resolveTextTarget(
 
   let start: number
   let end: number
-  if (target.sentenceOrdinal !== undefined || target.sentenceFromEnd !== undefined) {
+  if (target.absoluteStart !== undefined) {
+    const absoluteStart = target.absoluteStart
+    const absoluteEnd = target.absoluteEnd!
+    if (absoluteStart >= absoluteEnd || absoluteEnd > cleanText.length) return `${label} absolute span was not found`
+    start = absoluteStart
+    end = absoluteEnd
+  } else if (target.sentenceOrdinal !== undefined || target.sentenceFromEnd !== undefined) {
     const match = resolveSentenceTarget(cleanText, range.start, range.end, target)
     if (typeof match === 'string') return `${label}: ${match}`
     start = match.start

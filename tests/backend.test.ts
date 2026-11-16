@@ -3141,13 +3141,13 @@ test('resolves join sentence about A with the next|previous forms', async () => 
     const userId = `about-join-adjacent-user-${index}`
     const chatId = `about-join-adjacent-chat-${index}`
     activeChatId = chatId
-    decisionsEnabled = testCase.scores !== null
-    if (testCase.scores !== null) {
+    const scores = 'scores' in testCase ? testCase.scores : null
+    decisionsEnabled = scores !== null
+    if (scores !== null) {
       let aboutCallIndex = 0
-      const scores = testCase.scores
       aboutDecision = () => {
         aboutCallIndex += 1
-        return scores[aboutCallIndex - 1] ?? 0.01
+        return scores?.[aboutCallIndex - 1] ?? 0.01
       }
     }
     await seedDraft(userId, chatId, testCase.draft)
@@ -3159,7 +3159,178 @@ test('resolves join sentence about A with the next|previous forms', async () => 
       continue
     }
     assert.equal(response?.type, 'edit.proposal.response', testCase.instruction)
-    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, testCase.expected, testCase.instruction)
+    if (response?.type === 'edit.proposal.response') {
+      if ('expected' in testCase) assert.equal(response.proposal.afterText, testCase.expected, testCase.instruction)
+    }
+  }
+})
+
+test('joins sentence fragments whose containing sentences are back to back', async () => {
+  const examples: ReadonlyArray<readonly [string, string, string | null]> = [
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'Maeve waits' with the sentence 'Until it’s no longer'.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'long while that Maeve waits' with the sentence 'Until it’s no longer'.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'Maeve waits' with the sentence 'it’s no longer'.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'waits' with the sentence 'no longer'.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['Erin unwinds herself. Maeve waits.', "Join the sentence 'Erin unwinds herself.' with the sentence 'Maeve waits.'", 'Erin unwinds herself, maeve waits.'],
+    ['Erin unwinds herself. Maeve waits. Sam sleeps.', "Join the sentence 'Erin unwinds herself.' with the sentence 'Sam sleeps.'", null],
+    ['It’s been a long while that Maeve waits until it’s no longer possible to do so.', "Join the sentence 'Maeve waits' with the sentence 'until it’s no longer'.", null],
+    ['It’s been a long while that Maeve waits.\n\nUntil it’s no longer possible to do so.', "Join the sentence 'Maeve waits' with the sentence 'Until it’s no longer'.", null],
+    ['She ran. Sam sleeps. He waited. Sam sleeps. He waited.', "Join the sentence 'She ran' with the sentence 'He waited'.", null],
+  ]
+  for (const [index, [draft, instruction, expected]] of examples.entries()) {
+    const userId = `fragment-join-user-${index}`
+    const chatId = `fragment-join-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `fragment-join-${index}`, operationId: `fragment-join-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    if (expected === null) {
+      assert.equal(response?.type, 'app.error', instruction)
+      continue
+    }
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+  }
+})
+
+test('joins literal fragments with the next|previous neighbour', async () => {
+  const examples: ReadonlyArray<readonly [string, string, string | null]> = [
+    ['Erin unwinds herself. Maeve waits.', "Join the sentence 'Erin unwinds herself.' with the next.", 'Erin unwinds herself, maeve waits.'],
+    ['Erin unwinds herself. Maeve waits.', "Join the sentence 'Erin' with the next.", 'Erin unwinds herself, maeve waits.'],
+    ['Erin unwinds herself. Maeve waits.', "Join the sentence 'Maeve waits.' with the previous.", 'Erin unwinds herself, maeve waits.'],
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'Maeve waits' with the next.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'no longer' with the previous.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['Erin unwinds herself. Maeve waits. Sam sleeps.', "Join the sentence 'Erin unwinds herself.' with the previous.", null],
+    ['Erin unwinds herself. Maeve waits. Sam sleeps.', "Join the sentence 'Sam sleeps.' with the next.", null],
+    ['Erin unwinds herself. Maeve waits.', "Join the sentence 'Erin unwinds herself.' with the following sentence.", 'Erin unwinds herself, maeve waits.'],
+  ]
+  for (const [index, [draft, instruction, expected]] of examples.entries()) {
+    const userId = `adjacent-fragment-join-user-${index}`
+    const chatId = `adjacent-fragment-join-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `adjacent-fragment-join-${index}`, operationId: `adjacent-fragment-join-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    if (expected === null) {
+      assert.equal(response?.type, 'app.error', instruction)
+      continue
+    }
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+  }
+})
+
+test('offers a chooser when more than one sentence pair matches', async () => {
+  const userId = 'ambiguous-pair-join-user'
+  const chatId = 'ambiguous-pair-join-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She ran to the store. He waited. She ran to the store. He waited.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'ambiguous-pair-join', operationId: 'ambiguous-pair-join-op', chatId, expectedVersion: 1, instructionTranscript: "Join the sentence 'She ran to the store' with the sentence 'He waited.'" }, userId)
+  const choices = responses.at(-1)?.payload
+  assert.equal(choices?.type, 'edit.candidates.response')
+  if (choices?.type !== 'edit.candidates.response') return
+  assert.equal(choices.candidateSet.candidates.length, 2)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.candidate.select.request', requestId: 'ambiguous-pair-join-select', operationId: 'ambiguous-pair-join-op', chatId, expectedVersion: 1, candidateId: choices.candidateSet.candidates[1]!.id }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'She ran to the store. He waited. She ran to the store, he waited.')
+  }
+})
+
+test('offers a chooser for fragment joins with the next when the anchor occurs multiple times', async () => {
+  const userId = 'ambiguous-adjacent-fragment-user'
+  const chatId = 'ambiguous-adjacent-fragment-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She ran to the store. He waited. She ran to the store. He waited.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'ambiguous-adjacent-fragment', operationId: 'ambiguous-adjacent-fragment-op', chatId, expectedVersion: 1, instructionTranscript: "Join the sentence 'She ran to the store' with the next." }, userId)
+  const choices = responses.at(-1)?.payload
+  assert.equal(choices?.type, 'edit.candidates.response')
+  if (choices?.type !== 'edit.candidates.response') return
+  assert.equal(choices.candidateSet.candidates.length, 2)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.candidate.select.request', requestId: 'ambiguous-adjacent-fragment-select', operationId: 'ambiguous-adjacent-fragment-op', chatId, expectedVersion: 1, candidateId: choices.candidateSet.candidates[1]!.id }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'She ran to the store. He waited. She ran to the store, he waited.')
+  }
+})
+
+test('splits a sentence with literal fragment source and anchor', async () => {
+  const draft = 'It’s been a long while that Maeve waits until it’s no longer possible to do so.'
+  const expected = 'It’s been a long while that Maeve waits. Until it’s no longer possible to do so.'
+  const examples: ReadonlyArray<readonly [string, string | null]> = [
+    ["Split the sentence 'it’s been a long while' after 'Maeve waits'.", expected],
+    ["Split the sentence 'long while' after 'Maeve waits'.", expected],
+    ["Split the sentence 'Maeve waits' after 'waits'.", expected],
+    ["Split the sentence 'while that Maeve waits' before 'Maeve waits'.", 'It’s been a long while that. Maeve waits until it’s no longer possible to do so.'],
+    ["Split the sentence 'it’s been a long while' before 'until it’s no longer'.", expected],
+    ["Split the sentence 'long while' after 'Sam sleeps'.", null],
+    ["Split the sentence 'it is not here' after 'Maeve waits'.", null],
+    ["Split the sentence 'while that' after 'Maeve waits'.", expected],
+  ]
+  for (const [index, [instruction, expected]] of examples.entries()) {
+    const userId = `fragment-split-user-${index}`
+    const chatId = `fragment-split-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `fragment-split-${index}`, operationId: `fragment-split-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    if (expected === null) {
+      assert.equal(response?.type, 'app.error', instruction)
+      continue
+    }
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+  }
+})
+
+test('splits a sentence source located by the about-description flow', async () => {
+  const userId = 'about-split-fragment-user'
+  const chatId = 'about-split-fragment-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  aboutDecision = (id) => id === 'about_0' ? 0.99 : 0.01
+  const draft = 'It’s been a long while that Maeve waits until it’s no longer possible to do so.'
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-split-fragment', operationId: 'about-split-fragment-op', chatId, expectedVersion: 1, instructionTranscript: "Split the sentence about the long wait after 'Maeve waits'." }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, 'It’s been a long while that Maeve waits. Until it’s no longer possible to do so.')
+  }
+})
+
+test('offers a chooser when more than one split position matches', async () => {
+  const userId = 'ambiguous-split-fragment-user'
+  const chatId = 'ambiguous-split-fragment-chat'
+  activeChatId = chatId
+  const draft = 'Maeve waits here. Sam stays. Maeve waits here. Sam stays.'
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'ambiguous-split-fragment', operationId: 'ambiguous-split-fragment-op', chatId, expectedVersion: 1, instructionTranscript: "Split the sentence 'Maeve waits' after 'waits'." }, userId)
+  const choices = responses.at(-1)?.payload
+  assert.equal(choices?.type, 'edit.candidates.response')
+  if (choices?.type !== 'edit.candidates.response') return
+  assert.equal(choices.candidateSet.candidates.length, 2)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.candidate.select.request', requestId: 'ambiguous-split-fragment-select', operationId: 'ambiguous-split-fragment-op', chatId, expectedVersion: 1, candidateId: choices.candidateSet.candidates[0]!.id }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'Maeve waits. Here. Sam stays. Maeve waits here. Sam stays.')
   }
 })
 

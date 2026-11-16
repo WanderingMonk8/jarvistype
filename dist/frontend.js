@@ -261,7 +261,8 @@ function parseOperation(value) {
     ...typeof text === "string" ? { text } : {},
     ...typeof caseMode === "string" ? { caseMode } : {},
     ...destination ? { destination } : {},
-    ...includeTrailingPunctuation === true ? { includeTrailingPunctuation: true } : {}
+    ...includeTrailingPunctuation === true ? { includeTrailingPunctuation: true } : {},
+    ...type === "split_sentence" && (value.direction === "before" || value.direction === "after") ? { direction: value.direction } : {}
   };
 }
 function trimTargetBoundary(text) {
@@ -281,13 +282,28 @@ function parseTarget(value) {
     "sentenceFromEnd",
     "relativePosition",
     "relativeToText",
-    "ignorePunctuationForMatch"
+    "ignorePunctuationForMatch",
+    "absoluteStart",
+    "absoluteEnd"
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return null;
   const target = {};
   if (value.ignorePunctuationForMatch !== void 0) {
     if (typeof value.ignorePunctuationForMatch !== "boolean") return null;
     target.ignorePunctuationForMatch = value.ignorePunctuationForMatch;
+  }
+  if (value.absoluteStart !== void 0) {
+    if (!isNonNegativeInteger(value.absoluteStart)) return null;
+    target.absoluteStart = value.absoluteStart;
+  }
+  if (value.absoluteEnd !== void 0) {
+    if (!isNonNegativeInteger(value.absoluteEnd)) return null;
+    target.absoluteEnd = value.absoluteEnd;
+  }
+  if (target.absoluteStart !== void 0 || target.absoluteEnd !== void 0) {
+    if (target.absoluteStart === void 0 || target.absoluteEnd === void 0) return null;
+    if (target.absoluteStart >= target.absoluteEnd) return null;
+    if (target.paragraphId !== void 0 || target.paragraphOrdinal !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0 || target.punctuation !== void 0 || target.relativeToText !== void 0 || target.relativePosition !== void 0 || target.exactText !== void 0 || target.approximateText !== void 0) return null;
   }
   if (value.paragraphId !== void 0) {
     if (!isIdentifier(value.paragraphId)) return null;
@@ -361,7 +377,7 @@ function parseTarget(value) {
   return Object.keys(target).some((key) => key !== "ignorePunctuationForMatch") ? target : null;
 }
 function hasInlineSelector(target) {
-  return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0;
+  return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0 || target.absoluteStart !== void 0;
 }
 function isPunctuationTarget(value) {
   return value === "period" || value === "comma" || value === "colon" || value === "semicolon" || value === "question_mark" || value === "exclamation_mark" || value === "ellipsis" || value === "quote" || value === "single_quote" || value === "apostrophe" || value === "hyphen" || value === "en_dash" || value === "em_dash" || value === "open_parenthesis" || value === "close_parenthesis" || value === "open_bracket" || value === "close_bracket";
@@ -602,8 +618,8 @@ var COMMAND_GROUPS = [
   {
     title: "Paragraphs",
     examples: [
-      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D To split a sentence in place: \u201CSplit the sentence \u2018To err is human; to forgive is divine\u2019 before \u2018to forgive.\u2019\u201D The split pieces become two independent sentences with sentence-end punctuation; comma or semicolon at the joint become a period (other terminators keep their character); the start of the second part is capitalized; \u201CSplit the sentence about X before/after the word/phrase Y\u201D works the same with description-based targets."],
-      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph. Or the adjacent sentences or fragments: \u201CJoin the sentence \u2018I look at the man from across the room\u2019 with the sentence \u2018And I decide to wave.\u2019\u201D You can also name the neighbour directly instead of restating it: \u201CJoin the sentence about Erin relaxing with the next\u201D or \u201CJoin the sentence \u2018Maeve waits.\u2019 with the previous\u201D (the neighbour is the sentence immediately before or after the resolved source, in the same paragraph). The first operand stays verbatim \u2014 its terminal punctuation becomes a comma, the second operand starts with a lowercased ordinary word (proper nouns and \u201CI\u201D keep capitalization), and the merged sentence inherits the source\u2019s ?, !, \u2026, or combinations. The two operands must be directly next to each other. Wrapped operands keep their enclosure around the source only: \u201Che came late\u201D + \u201Cshe left\u201D produces \u201Che came late,\u201D she left.\u201D"]
+      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D To split a sentence in place: \u201CSplit the sentence \u2018To err is human; to forgive is divine\u2019 before \u2018to forgive.\u2019\u201D Either operand can be a fragment of its sentence: \u201CSplit the sentence \u2018it\u2019s been a long while\u2019 after \u2018Maeve waits\u2019\u201D locates the sentence containing \u2018it\u2019s been a long while\u2019 and splits it at \u2018Maeve waits.\u2019 The split pieces become two independent sentences with sentence-end punctuation; comma or semicolon at the joint become a period (other terminators keep their character); the start of the second part is capitalized; \u201CSplit the sentence about X before/after the word/phrase Y\u201D works the same with description-based targets; if more than one sentence pair matches (or the anchor occurs more than once in the sentence), you\u2019ll be asked to choose."],
+      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph. Or the adjacent sentences or fragments: \u201CJoin the sentence \u2018I look at the man from across the room\u2019 with the sentence \u2018And I decide to wave.\u2019\u201D Either operand can also be a fragment of its sentence: \u201CJoin the sentence \u2018Maeve waits\u2019 with the sentence \u2018Until it\u2019s no longer.\u2019\u201D \u2014 the fragments may occur anywhere in their sentences; the matching sentences must be back to back in the same paragraph, and more than one matching pair opens a choose-the-target list. You can also name the neighbour directly instead of restating it: \u201CJoin the sentence about Erin relaxing with the next\u201D or \u201CJoin the sentence \u2018Maeve waits.\u2019 with the previous\u201D (the neighbour is the sentence immediately before or after the resolved source, in the same paragraph). The first operand stays verbatim \u2014 its terminal punctuation becomes a comma, the second operand starts with a lowercased ordinary word (proper nouns and \u201CI\u201D keep capitalization), and the merged sentence inherits the source\u2019s ?, !, \u2026, or combinations. The two operands must be directly next to each other. Wrapped operands keep their enclosure around the source only: \u201Che came late\u201D + \u201Cshe left\u201D produces \u201Che came late,\u201D she left.\u201D"]
     ]
   },
   {

@@ -1174,6 +1174,24 @@ async function handleEditInterpretation(
     const glossaryHintResult = await resolveGlossaryHintReferences(request.instructionTranscript, glossary, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal)
     let interpretationTimedOut = false
     const aboutResult = await interpretAboutEdit(request.instructionTranscript, session, context.userId, settings.decisionConnectionId ?? null, activeRequest.abort.signal)
+    if (aboutResult.handled && aboutResult.candidates) {
+      const candidateSet: EditCandidateSet = {
+        operationId: request.operationId,
+        chatId: request.chatId,
+        expectedVersion: session.draftVersion,
+        instructionTranscript: request.instructionTranscript,
+        candidates: aboutResult.candidates.candidates.map((candidate) => ({
+          ...candidate,
+          operationId: request.operationId,
+        })),
+      }
+      recordDebug(context.userId, 'edit.candidates', `count=${candidateSet.candidates.length}`)
+      await rememberEditCandidateContext(context.userId, request.operationId, {
+        candidateSet,
+        plans: aboutResult.candidates.plans,
+      })
+      return { candidateSet }
+    }
     if (aboutResult.handled && !aboutResult.plan) return { error: 'target' as const, detail: 'The about target could not be resolved confidently.', session }
     const interpretedPlan = aboutResult.handled ? aboutResult.plan : await interpretEditInstruction(
       canonicalEditInstruction(glossaryHintResult.text),
@@ -2081,82 +2099,348 @@ type AdjacentSourceSpan = { start: number; end: number; paragraphId?: string; pa
  * sentence's ordinal and the neighbour's ordinal (1-based within the paragraph), or null when the
  * span does not sit inside one sentence or no neighbour exists.
  */
-function resolveAdjacentSentence(
+/** Located operand span: the span itself plus the sentence that contains it, scoped to one paragraph. */
+interface LocatedJoinSpan {
+  /** Paragraph id containing both the sentence and the span. */
+  paragraphId: string
+  paragraphOrdinal: number
+  sentenceOrdinal: number
+  start: number
+  end: number
+  sentenceStart: number
+  sentenceEnd: number
+  sentenceText: string
+}
+
+interface JoinPair {
+  id: string
+  paragraphId: string
+  paragraphOrdinal: number
+  exactText: string
+  preview: string
+  x: LocatedJoinSpan
+  y: LocatedJoinSpan
+}
+
+/**
+ * Candidate payload for ambiguous sentence-pair matches handed to the candidate-selection review.
+ * The caller wraps these into the request-scoped candidate set; one plan per candidate, keyed by candidate id.
+ */
+interface JoinCandidateInfo {
+  plans: Map<string, EditPlan>
+  candidates: Array<{ id: string; paragraphId: string; paragraphOrdinal: number; exactText: string; preview: string }>
+}
+
+function locateJoinSpanInParagraph(
   session: PersistedDraftSession,
+  paragraph: PersistedDraftSession['paragraphs'][number],
   span: AdjacentSourceSpan,
-  direction: 'next' | 'previous',
-): { paragraphOrdinal: number; sourceOrdinal: number; neighbourOrdinal: number } | null {
+  sentenceIndex?: number,
+): LocatedJoinSpan | null {
+  const range = paragraphRange(session.cleanText, paragraph)
+  if (span.start < range.start || span.end > range.end) return null
+  const sentences = findSentenceRanges(session.cleanText, range.start, range.end)
+  const index = sentenceIndex ?? sentences.findIndex((sentence) => sentence.start <= span.start && span.end <= sentence.end)
+  const sentence = sentences[index]
+  if (!sentence) return null
+  return {
+    paragraphId: paragraph.id,
+    paragraphOrdinal: paragraph.ordinal,
+    sentenceOrdinal: index + 1,
+    start: span.start,
+    end: span.end,
+    sentenceStart: sentence.start,
+    sentenceEnd: sentence.end,
+    sentenceText: session.cleanText.slice(sentence.start, sentence.end),
+  }
+}
+
+function locateJoinSpan(session: PersistedDraftSession, span: AdjacentSourceSpan): LocatedJoinSpan | null {
   const paragraph = span.paragraphId !== undefined
     ? session.paragraphs.find((candidate) => candidate.id === span.paragraphId)
     : session.paragraphs.find((candidate) => candidate.ordinal === span.paragraphOrdinal)
+  if (paragraph) return locateJoinSpanInParagraph(session, paragraph, span)
+  for (const candidate of session.paragraphs) {
+    const located = locateJoinSpanInParagraph(session, candidate, span)
+    if (located) return located
+  }
+  return null
+}
+
+function locateNeighbourSentence(session: PersistedDraftSession, located: LocatedJoinSpan, direction: 'next' | 'previous'): LocatedJoinSpan | null {
+  const paragraph = session.paragraphs.find((candidate) => candidate.id === located.paragraphId)
   if (!paragraph) return null
   const range = paragraphRange(session.cleanText, paragraph)
   const sentences = findSentenceRanges(session.cleanText, range.start, range.end)
-  const index = sentences.findIndex((sentence) => sentence.start <= span.start && span.end <= sentence.end)
-  if (index < 0) return null
+  const index = located.sentenceOrdinal - 1
   const neighbourIndex = direction === 'next' ? index + 1 : index - 1
-  if (neighbourIndex < 0 || neighbourIndex >= sentences.length) return null
-  return { paragraphOrdinal: paragraph.ordinal, sourceOrdinal: index + 1, neighbourOrdinal: neighbourIndex + 1 }
+  const neighbour = sentences[neighbourIndex]
+  if (!neighbour) return null
+  const start = neighbour.start
+  const end = neighbour.end
+  return {
+    paragraphId: paragraph.id,
+    paragraphOrdinal: paragraph.ordinal,
+    sentenceOrdinal: neighbourIndex + 1,
+    start,
+    end,
+    sentenceStart: start,
+    sentenceEnd: end,
+    sentenceText: session.cleanText.slice(start, end),
+  }
+}
+
+function sentenceJoinPreview(x: string, y: string): string {
+  const summarize = (value: string) => {
+    const trimmed = value.replace(/\s+/gu, ' ').trim()
+    return trimmed.length <= 42 ? trimmed : `${trimmed.slice(0, 40).trimEnd()}…`
+  }
+  return `${summarize(x)} + ${summarize(y)}`
+}
+
+const MAX_JOIN_PAIRS = 20
+
+function enumerateJoinPairs(session: PersistedDraftSession, sourceSpans: readonly AdjacentSourceSpan[], destinationSpans: readonly AdjacentSourceSpan[]): JoinPair[] {
+  const located = new Map<AdjacentSourceSpan, LocatedJoinSpan | null>()
+  const locate = (span: AdjacentSourceSpan) => {
+    let cached = located.get(span)
+    if (cached === undefined) {
+      cached = locateJoinSpan(session, span)
+      located.set(span, cached)
+    }
+    return cached
+  }
+  const pairs: JoinPair[] = []
+  const seen = new Set<string>()
+  for (const sourceSpan of sourceSpans) {
+    const source = locate(sourceSpan)
+    if (!source) continue
+    for (const destinationSpan of destinationSpans) {
+      const destination = locate(destinationSpan)
+      if (!destination) continue
+      if (source.paragraphId !== destination.paragraphId) continue
+      if (destination.sentenceOrdinal !== source.sentenceOrdinal + 1) continue
+      const id = `join:${source.start}:${destination.start}`
+      if (seen.has(id)) continue
+      seen.add(id)
+      pairs.push({
+        id,
+        paragraphId: source.paragraphId,
+        paragraphOrdinal: source.paragraphOrdinal,
+        exactText: source.sentenceText,
+        preview: sentenceJoinPreview(source.sentenceText, destination.sentenceText),
+        x: source,
+        y: destination,
+      })
+    }
+  }
+  return pairs
+}
+
+function enumerateAdjacentPairs(session: PersistedDraftSession, sourceSpans: readonly AdjacentSourceSpan[], direction: 'next' | 'previous'): JoinPair[] {
+  const pairs: JoinPair[] = []
+  const seen = new Set<string>()
+  for (const sourceSpan of sourceSpans) {
+    const source = locateJoinSpan(session, sourceSpan)
+    if (!source) continue
+    const neighbour = locateNeighbourSentence(session, source, direction)
+    if (!neighbour) continue
+    const [orderedFirst, orderedSecond] = direction === 'next' ? [source, neighbour] : [neighbour, source]
+    const id = `join:${orderedFirst.start}:${orderedSecond.start}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    pairs.push({
+      id,
+      paragraphId: source.paragraphId,
+      paragraphOrdinal: source.paragraphOrdinal,
+      exactText: source.sentenceText,
+      preview: sentenceJoinPreview(orderedFirst.sentenceText, orderedSecond.sentenceText),
+      x: orderedFirst,
+      y: orderedSecond,
+    })
+  }
+  return pairs
+}
+
+function pairToPlan(pair: JoinPair, explanation: string, draftVersion: number, operationIdSuffix: string): EditPlan | null {
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion,
+    explanation,
+    operations: [{
+      id: operationIdSuffix,
+      type: 'join_sentence',
+      target: { paragraphOrdinal: pair.x.paragraphOrdinal, sentenceOrdinal: pair.x.sentenceOrdinal },
+      destination: { paragraphOrdinal: pair.y.paragraphOrdinal, sentenceOrdinal: pair.y.sentenceOrdinal },
+    }],
+  })
+}
+
+function pairToCandidateInfo(pairs: readonly JoinPair[], sessionVersion: number): JoinCandidateInfo {
+  const plans = new Map<string, EditPlan>()
+  const candidates: JoinCandidateInfo['candidates'] = []
+  for (const candidate of pairs) {
+    const operationId = `join-pair:${candidate.id}`
+    const plan = pairToPlan(candidate, 'Join the two selected sentences.', sessionVersion, operationId)!
+    plans.set(candidate.id, plan)
+    candidates.push({
+      id: candidate.id,
+      paragraphId: candidate.paragraphId,
+      paragraphOrdinal: candidate.paragraphOrdinal,
+      exactText: candidate.exactText,
+      preview: candidate.preview,
+    })
+  }
+  return { plans, candidates }
 }
 
 async function interpretAboutSplit(
   instruction: string, session: PersistedDraftSession, userId: string,
   connectionId: string | null, signal: AbortSignal,
-): Promise<{ handled: boolean; plan: EditPlan | null }> {
+): Promise<{ handled: boolean; plan: EditPlan | null; candidates?: JoinCandidateInfo }> {
   const command = instruction.trim().replace(/[.!?]+$/u, '').trim()
   if (!/^(?:split|break|divide)\b/iu.test(command)) return { handled: false, plan: null }
   const rest = command.replace(/^(?:split|break|divide)\s+/iu, '').trim()
   // Expected shape:
-  //   split the sentence about <description> before/after the (word|phrase|part|fragment) <Y>
-  const match = rest.match(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(sentences?|phrases?|words?|clauses?|parts?|fragments?)\s+about\s+([\s\S]+?)\s+(before|after)\s+(.+)$/iu)
+  //   split the sentence <A> before/after the (word|phrase|part|fragment) <B>
+  // where A may be "about <description>" or a literal fragment that locates its sentence.
+  const match = rest.match(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(sentences?|phrases?|words?|clauses?|parts?|fragments?)\s+([\s\S]+?)\s+(before|after)\s+([\s\S]+)$/iu)
   if (!match) {
-    if (/^(?:the\s+|this\s+|that\s+)?(?:sentences?|phrases?|words?|clauses?|parts?|fragments?)\s+about\s+/iu.test(rest)) {
+    if (/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(?:sentences?|phrases?|words?|clauses?|parts?|fragments?)\s+/iu.test(rest)) {
       recordDebug(userId, 'edit.about', 'outcome=parse-failed operand=split')
       return { handled: true, plan: null }
     }
     return { handled: false, plan: null }
   }
   const kind = /^(sentences?)$/iu.test(match[1]!) ? 'sentence' : 'phrase'
-  const description = match[2]!.trim()
   const direction = (match[3]!).toLocaleLowerCase() as 'before' | 'after'
-  const tail = stripUnquotedEditArgumentLabel(match[4]!.trim().replace(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(?:word|words|phrase|clause|part|fragment)\s+/iu, '').trim())
-  const literal = unwrapEditArgument(tail)
-  if (!literal) {
+  const aCore = match[2]!.trim()
+  const aboutMatch = aCore.match(/^about\s+([\s\S]+)$/iu)
+  const aboutDescription = aboutMatch?.[1]?.trim()
+  const anchorTail = stripUnquotedEditArgumentLabel(match[4]!.trim().replace(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(?:word|words|phrase|clause|part|fragment)\s+/iu, '').trim()).trim()
+  // Narrow: either locate the anchor by literal text or fail closed.
+  const anchorLiteral = unwrapEditArgument(anchorTail)
+  const literalSource = aboutDescription ? null : unwrapEditArgument(aCore)
+  if (!anchorLiteral || (!aboutDescription && !literalSource)) {
     recordDebug(userId, 'edit.about', 'outcome=parse-failed operand=split')
     return { handled: true, plan: null }
   }
-  if (!spindle.permissions.has('decisions') || signal.aborted) {
+  const aboutMode = Boolean(aboutDescription)
+  if (aboutMode && (!spindle.permissions.has('decisions') || signal.aborted)) {
     recordDebug(userId, 'edit.about', `outcome=${signal.aborted ? 'cancelled' : 'permission-unavailable'} operand=split`)
     return { handled: true, plan: null }
   }
-  const scored = await scoreAboutDescription(session, kind, description, false, userId, connectionId, signal, 'edit.about')
-  if (typeof scored === 'string') return { handled: true, plan: null }
-  const { selected, overlappingReview, uncertainReview } = scored
-  const explanation = overlappingReview
-    ? `Overlapping “about” matches; verify the selected ${kind} boundary.`
-    : uncertainReview
-      ? `Uncertain “about” match; verify the sentence to split: “${selected.text.length > 160 ? `${selected.text.slice(0, 160)}…` : selected.text}”.`
-      : `Split the ${kind} matching the description.`
-  recordDebug(userId, 'edit.about', `outcome=${uncertainReview ? 'review-uncertain' : 'resolved'} operand=split`)
-  const plan = parseEditPlan({
-    schemaVersion: 2,
-    draftVersion: session.draftVersion,
-    explanation,
-    operations: [{
-      id: 'about-split',
-      type: 'split_sentence',
-      target: { paragraphId: selected.paragraphId, exactText: selected.text, ignorePunctuationForMatch: false },
-      destination: { exactText: literal },
-      direction,
-    }],
-  })
-  return { handled: true, plan }
+  // Resolve A spans: the about decisions pick one; literal A sub-locations produce one span per occurrence.
+  let aSpans: AdjacentSourceSpan[] = []
+  let uncertainReview = false
+  let overlappingReview = false
+  if (aboutDescription) {
+    const scored = await scoreAboutDescription(session, kind, aboutDescription, false, userId, connectionId, signal, 'edit.about')
+    if (typeof scored === 'string') return { handled: true, plan: null }
+    uncertainReview = scored.uncertainReview
+    overlappingReview = scored.overlappingReview
+    aSpans.push({ paragraphId: scored.selected.paragraphId, start: scored.selected.start, end: scored.selected.end })
+  } else {
+    const matches = findTextTargetMatches(session.cleanText, session.paragraphs, literalSource!)
+    for (const matched of matches) {
+      const paragraph = session.paragraphs.find((candidate) => candidate.ordinal === matched.paragraphOrdinal)
+      aSpans.push({ start: matched.start, end: matched.end, ...(paragraph ? { paragraphId: paragraph.id, paragraphOrdinal: paragraph.ordinal } : { paragraphOrdinal: matched.paragraphOrdinal }) })
+    }
+  }
+  // B spans — every occurrence of the anchor; pairs live strictly inside A's sentence.
+  const bMatches = findTextTargetMatches(session.cleanText, session.paragraphs, anchorLiteral)
+  const locatedCache = new Map<AdjacentSourceSpan, LocatedJoinSpan | null>()
+  const locate = (span: AdjacentSourceSpan) => {
+    const cached = locatedCache.get(span)
+    if (cached === undefined) {
+      const result = locateJoinSpan(session, span)
+      locatedCache.set(span, result)
+      return result
+    }
+    return cached
+  }
+  const seenPairs = new Set<string>()
+  const pairs: Array<{ a: LocatedJoinSpan; b: AdjacentSourceSpan }> = []
+  for (const aSpan of aSpans) {
+    const aLocated = locate(aSpan)
+    if (!aLocated) continue
+    for (const bMatch of bMatches) {
+      if (bMatch.start < aLocated.sentenceStart || bMatch.end > aLocated.sentenceEnd) continue
+      const bSpan: AdjacentSourceSpan = { start: bMatch.start, end: bMatch.end, paragraphId: aLocated.paragraphId, paragraphOrdinal: aLocated.paragraphOrdinal }
+      const pairId = `${aLocated.start}:${bMatch.start}`
+      if (seenPairs.has(pairId)) continue
+      seenPairs.add(pairId)
+      pairs.push({ a: aLocated, b: bSpan })
+    }
+  }
+  const finish = (uncertain: boolean, overlapping: boolean): { handled: boolean; plan: EditPlan | null; candidates?: JoinCandidateInfo } => {
+    if (pairs.length === 0) {
+      recordDebug(userId, 'edit.about', 'outcome=target-not-found operand=split')
+      return { handled: true, plan: null }
+    }
+    if (pairs.length === 1) {
+      const [selected] = pairs
+      const explanation = overlapping
+        ? `Overlapping “about” matches; verify the selected ${kind} boundary.`
+        : uncertain
+          ? 'Uncertain “about” match; verify the sentence to split.'
+          : `Split the ${kind} matching the description.`
+      recordDebug(userId, 'edit.about', `outcome=${uncertain || overlapping ? 'review-uncertain' : 'resolved'} operand=split`)
+      const plan = parseEditPlan({
+        schemaVersion: 2,
+        draftVersion: session.draftVersion,
+        explanation,
+        operations: [{
+          id: 'about-split',
+          type: 'split_sentence',
+          target: { absoluteStart: selected.a.sentenceStart, absoluteEnd: selected.a.sentenceEnd },
+          destination: { absoluteStart: selected.b.start, absoluteEnd: selected.b.end },
+          direction,
+        }],
+      })
+      return { handled: true, plan }
+    }
+    const trimmedPairs = pairs.slice(0, MAX_JOIN_PAIRS)
+    if (pairs.length > trimmedPairs.length) {
+      recordDebug(userId, 'edit.about', `outcome=too-many-pairs count=${pairs.length} operand=split`)
+      return { handled: true, plan: null }
+    }
+    recordDebug(userId, 'edit.about', `outcome=ambiguous-pair count=${pairs.length} operand=split`)
+    const plans = new Map<string, EditPlan>()
+    const candidates: JoinCandidateInfo['candidates'] = []
+    for (const pair of trimmedPairs) {
+      const id = `split:${pair.a.start}:${pair.b.start}`
+      const plan = parseEditPlan({
+        schemaVersion: 2,
+        draftVersion: session.draftVersion,
+        explanation: 'Split the selected sentence.',
+        operations: [{
+          id: `about-split:${id}`,
+          type: 'split_sentence',
+          target: { absoluteStart: pair.a.sentenceStart, absoluteEnd: pair.a.sentenceEnd },
+          destination: { absoluteStart: pair.b.start, absoluteEnd: pair.b.end },
+          direction,
+        }],
+      })!
+      plans.set(id, plan)
+      candidates.push({
+        id,
+        paragraphId: pair.a.paragraphId,
+        paragraphOrdinal: pair.a.paragraphOrdinal,
+        exactText: pair.a.sentenceText,
+        preview: `${sentenceJoinPreview(pair.a.sentenceText, 'split here')}`,
+      })
+    }
+    return { handled: true, plan: null, candidates: { plans, candidates } }
+  }
+  const uncertain = uncertainReview || overlappingReview
+  return finish(uncertain, overlappingReview)
 }
 
 async function interpretAboutJoin(
   instruction: string, session: PersistedDraftSession, userId: string,
   connectionId: string | null, signal: AbortSignal,
-): Promise<{ handled: boolean; plan: EditPlan | null }> {
+): Promise<{ handled: boolean; plan: EditPlan | null; candidates?: JoinCandidateInfo }> {
   const command = instruction.trim().replace(/[.!?]+$/u, '').trim()
   if (!/^(?:join|merge|combine)\b/iu.test(command)) return { handled: false, plan: null }
   const rest = command.replace(/^(?:join|merge|combine)\s+/iu, '').trim()
@@ -2187,96 +2471,82 @@ async function interpretAboutJoin(
     return { handled: true, plan: null }
   }
   interface DescribedOperand {
-    target: { paragraphId?: string; exactText: string } | null
+    spans: AdjacentSourceSpan[]
     uncertain: boolean
     overlapping: boolean
-    span: AdjacentSourceSpan | null
+    target: { paragraphId?: string; exactText: string } | null
   }
-  const describe = async (operand: ParsedJoinOperand, tag: 'source' | 'destination'): Promise<DescribedOperand> => {
+  // Literal operands may match multiple draft locations, and each match locates a
+  // containing sentence — every back-to-back sentence pair is a candidate.
+  // About operands resolve to one span; the about decisions are the disambiguation there.
+  const describe = async (operand: ParsedJoinOperand): Promise<DescribedOperand> => {
     if (operand.mode === 'literal') {
       const matches = findTextTargetMatches(session.cleanText, session.paragraphs, operand.literal!)
-      const span = matches.length === 1
-        ? { start: matches[0]!.start, end: matches[0]!.end, paragraphOrdinal: matches[0]!.paragraphOrdinal }
-        : null
-      return { target: { exactText: operand.literal! }, uncertain: false, overlapping: false, span }
+      const spans = matches.map((match): AdjacentSourceSpan => {
+        const paragraph = session.paragraphs.find((candidate) => candidate.ordinal === match.paragraphOrdinal)
+        return {
+          start: match.start,
+          end: match.end,
+          ...(paragraph ? { paragraphId: paragraph.id, paragraphOrdinal: paragraph.ordinal } : { paragraphOrdinal: match.paragraphOrdinal }),
+        }
+      })
+      return { spans, uncertain: false, overlapping: false, target: spans.length ? { exactText: operand.literal! } : null }
     }
     const kind = operand.kind === 'sentence' ? 'sentence' : 'phrase'
     const scored = await scoreAboutDescription(session, kind, operand.description!, operand.plural, userId, connectionId, signal, 'edit.about')
-    if (typeof scored === 'string') return { target: null, uncertain: false, overlapping: false, span: null }
+    if (typeof scored === 'string') return { spans: [], uncertain: false, overlapping: false, target: null }
+    const { selected } = scored
     return {
-      target: { paragraphId: scored.selected.paragraphId, exactText: scored.selected.text, ignorePunctuationForMatch: false } as { paragraphId?: string; exactText: string },
+      spans: [{ start: selected.start, end: selected.end, paragraphId: selected.paragraphId }],
       uncertain: scored.uncertainReview,
       overlapping: scored.overlappingReview,
-      span: { paragraphId: scored.selected.paragraphId, start: scored.selected.start, end: scored.selected.end },
+      target: { paragraphId: selected.paragraphId, exactText: selected.text, ignorePunctuationForMatch: false } as { paragraphId?: string; exactText: string },
     }
   }
+
+  const finishWithPairs = (pairs: JoinPair[], uncertain: boolean, overlapping: boolean, direction: 'next' | 'previous' | null): { handled: boolean; plan: EditPlan | null; candidates?: JoinCandidateInfo } => {
+    if (pairs.length === 0) {
+      recordDebug(userId, 'edit.about', `outcome=unsupported-adjacency direction=${direction ?? 'join'} operand=join`)
+      return { handled: true, plan: null }
+    }
+    if (pairs.length === 1) {
+      const explanation = overlapping
+        ? 'Overlapping “about” matches; verify the selected spans boundaries.'
+        : uncertain
+          ? 'Uncertain “about” match; verify the selected spans.'
+          : 'Edit the spans matching the descriptions.'
+      recordDebug(userId, 'edit.about', `outcome=${uncertain || overlapping ? 'review-uncertain' : 'resolved'} operand=join`)
+      return { handled: true, plan: pairToPlan(pairs[0]!, explanation, session.draftVersion, 'about-join') }
+    }
+    if (pairs.length > MAX_JOIN_PAIRS) {
+      recordDebug(userId, 'edit.about', `outcome=too-many-pairs count=${pairs.length} operand=join`)
+      return { handled: true, plan: null }
+    }
+    recordDebug(userId, 'edit.about', `outcome=ambiguous-pair count=${pairs.length} operand=join`)
+    return { handled: true, plan: null, candidates: pairToCandidateInfo(pairs, session.draftVersion) }
+  }
+
   if (source.mode === 'adjacent') {
     recordDebug(userId, 'edit.about', 'outcome=parse-failed operand=join')
     return { handled: true, plan: null }
   }
-  const left = await describe(source, 'source')
+  const left = await describe(source)
   if (destination.mode === 'adjacent') {
-    if (!left.target || !left.span) return { handled: true, plan: null }
     const direction = destination.adjacentDirection ?? 'next'
-    const resolved = resolveAdjacentSentence(session, left.span, direction)
-    if (!resolved) {
-      recordDebug(userId, 'edit.about', `outcome=unsupported-adjacency direction=${direction} operand=join`)
-      return { handled: true, plan: null }
-    }
-    const sourceTarget = { paragraphOrdinal: resolved.paragraphOrdinal, sentenceOrdinal: resolved.sourceOrdinal }
-    const neighbourTarget = { paragraphOrdinal: resolved.paragraphOrdinal, sentenceOrdinal: resolved.neighbourOrdinal }
-    const [adjacentTarget, otherTarget] = direction === 'previous' ? [neighbourTarget, sourceTarget] : [sourceTarget, neighbourTarget]
-    const uncertainAdjacent = left.overlapping || left.uncertain
-    const explanation = uncertainAdjacent
-      ? (left.overlapping
-        ? 'Overlapping “about” matches; verify the selected spans boundaries.'
-        : 'Uncertain “about” match; verify the selected spans.')
-      : direction === 'next'
-        ? 'Join the described sentence with the following sentence.'
-        : 'Join the described sentence with the previous sentence.'
-    recordDebug(userId, 'edit.about', `outcome=${uncertainAdjacent ? 'review-uncertain' : 'resolved'} operand=join`)
-    const plan = parseEditPlan({
-      schemaVersion: 2,
-      draftVersion: session.draftVersion,
-      explanation,
-      operations: [{
-        id: 'about-join-adjacent',
-        type: 'join_sentence',
-        target: adjacentTarget,
-        destination: otherTarget,
-      }],
-    })
-    return { handled: true, plan }
+    const pairs = enumerateAdjacentPairs(session, left.spans, direction)
+    return finishWithPairs(pairs, left.uncertain, left.overlapping, direction)
   }
-  const right = await describe(destination, 'destination')
-  const reviewFlags = [left!.uncertain, right!.uncertain]
-  if (!left!.target || !right!.target) return { handled: true, plan: null }
-  const overlapping = left!.overlapping || right!.overlapping
-  const uncertain = overlapping || reviewFlags.some(Boolean)
-  const explanation = overlapping
-    ? 'Overlapping “about” matches; verify the selected spans boundaries.'
-    : uncertain
-      ? 'Uncertain “about” match; verify the selected spans.'
-      : 'Edit the spans matching the descriptions.'
-  recordDebug(userId, 'edit.about', `outcome=${uncertain ? 'review-uncertain' : 'resolved'} operand=join`)
-  const plan = parseEditPlan({
-    schemaVersion: 2,
-    draftVersion: session.draftVersion,
-    explanation,
-    operations: [{
-      id: 'about-join',
-      type: 'join_sentence',
-      target: left!.target,
-      destination: right!.target,
-    }],
-  })
-  return { handled: true, plan }
+  const right = await describe(destination)
+  const pairs = enumerateJoinPairs(session, left.spans, right.spans)
+  const overlapping = left.overlapping || right.overlapping
+  const uncertain = overlapping || left.uncertain || right.uncertain
+  return finishWithPairs(pairs, uncertain, overlapping, null)
 }
 
 async function interpretAboutEdit(
   instruction: string, session: PersistedDraftSession, userId: string,
   connectionId: string | null, signal: AbortSignal,
-): Promise<{ handled: boolean; plan: EditPlan | null }> {
+): Promise<{ handled: boolean; plan: EditPlan | null; candidates?: JoinCandidateInfo }> {
   const command = instruction.trim().replace(/[.!?]+$/u, '').trim()
   if (/^(?:join|merge|combine)\s+/iu.test(command)) return interpretAboutJoin(command, session, userId, connectionId, signal)
   if (/^(?:split|break|divide)\s+/iu.test(command)) return interpretAboutSplit(command, session, userId, connectionId, signal)

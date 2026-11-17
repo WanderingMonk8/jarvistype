@@ -77,11 +77,11 @@ export const COMMAND_GROUPS = [
     examples: [
       [
         'Spoken punctuation',
-        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “asterisk,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “begin bracket” and “end bracket” for angle brackets, “new line,” or “new paragraph.”',
+        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “asterisk,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “begin bracket” and “end bracket” for angle brackets (or “open angle bracket,” “close angle bracket,” “begin angle bracket,” and “end angle bracket”), “open brace” or “open curly brace” for “{”, “close brace” or “close curly brace” for “}”, “open curly bracket” and “close curly bracket” for curly braces, “new line,” or “new paragraph.”',
       ],
       [
         'Quotations',
-        'Say “quote” or “quotation” at both ends of a quotation; use “begin speech” (or “again speech”) and “end speech,” “beginning speech” and “ending speech,” or “begins speech” and “ends speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”',
+        'Say “quote” or “quotation” at both ends of a quotation; use “begin speech” (or “again speech”) and “end speech,” “beginning speech” and “ending speech,” or “begins speech” and “ends speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.” You can also speak any literal marker phrase: “open quote … close quote,” “open quotation mark … close quotation mark,” “open double quotation mark … close double quotation mark,” “open single quote … close single quote,” or “open single quotation mark … close single quotation mark.”',
       ],
       ['Explicit punctuation', 'Say “insert period,” “punctuation colon,” or “command new line.”'],
       [

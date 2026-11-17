@@ -511,6 +511,42 @@ test('formats voice-generated quotation openings without changing intentional le
   )
   assert.equal(normalizeDeterministically('open quote, hello close quote.', []).text, '“Hello.”')
   assert.equal(
+    normalizeDeterministically('open single quote, say it now close single quote.', []).text,
+    '‘Say it now.’',
+  )
+  assert.equal(
+    normalizeDeterministically('Open quotation mark, hello close quotation mark.', []).text,
+    '“Hello.”',
+  )
+  assert.equal(
+    normalizeDeterministically('open double quotation mark, hello close double quotation mark.', []).text,
+    '“Hello.”',
+  )
+  assert.equal(
+    normalizeDeterministically('open single quotation mark, say it now close single quotation mark.', []).text,
+    '‘Say it now.’',
+  )
+  assert.equal(
+    normalizeDeterministically('open brace Alpha close brace beta.', []).text,
+    '{ Alpha } beta.',
+  )
+  assert.equal(
+    normalizeDeterministically('open angle bracket Alpha close angle bracket beta.', []).text,
+    '<Alpha> beta.',
+  )
+  assert.equal(
+    normalizeDeterministically('open curly brace Alpha close curly brace beta.', []).text,
+    '{ Alpha } beta.',
+  )
+  assert.equal(
+    normalizeDeterministically('open curly bracket Alpha close curly bracket beta.', []).text,
+    '{ Alpha } beta.',
+  )
+  assert.equal(
+    normalizeDeterministically('Alpha open parenthesis. aside period close parenthesis.', []).text,
+    'Alpha (aside.)',
+  )
+  assert.equal(
     normalizeDeterministically('quote eBay is ready quote.', []).text,
     '“eBay is ready.”',
   )

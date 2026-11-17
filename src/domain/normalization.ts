@@ -85,6 +85,22 @@ const PUNCTUATION: Array<[RegExp, string, string]> = [
   [/\bclose bracket\b([.,;:!?…—–-]*)/gi, ']', 'close bracket'],
   [/\bbegin bracket\b([.,;:!?…—–-]*)/gi, '<', 'begin bracket'],
   [/\bend bracket\b([.,;:!?…—–-]*)/gi, '>', 'end bracket'],
+  [/\bopen angle bracket\b([.,;:!?…—–-]*)/gi, '<', 'open angle bracket'],
+  [/\bclose angle bracket\b([.,;:!?…—–-]*)/gi, '>', 'close angle bracket'],
+  [/\bbegin angle bracket\b([.,;:!?…—–-]*)/gi, '<', 'begin angle bracket'],
+  [/\bend angle bracket\b([.,;:!?…—–-]*)/gi, '>', 'end angle bracket'],
+  [/\bopen brace\b([.,;:!?…—–-]*)/gi, '{', 'open brace'],
+  [/\bclose brace\b([.,;:!?…—–-]*)/gi, '}', 'close brace'],
+  [/\bopen curly brace\b([.,;:!?…—–-]*)/gi, '{', 'open curly brace'],
+  [/\bclose curly brace\b([.,;:!?…—–-]*)/gi, '}', 'close curly brace'],
+  [/\bopen curly bracket\b([.,;:!?…—–-]*)/gi, '{', 'open curly bracket'],
+  [/\bclose curly bracket\b([.,;:!?…—–-]*)/gi, '}', 'close curly bracket'],
+  [/\bopen quotation mark\b([.,;:!?…—–-]*)/gi, '“', 'open quotation mark'],
+  [/\bclose quotation mark\b([.,;:!?…—–-]*)/gi, '”', 'close quotation mark'],
+  [/\bopen double quotation mark\b([.,;:!?…—–-]*)/gi, '“', 'open double quotation mark'],
+  [/\bclose double quotation mark\b([.,;:!?…—–-]*)/gi, '”', 'close double quotation mark'],
+  [/\bopen single quotation mark\b([.,;:!?…—–-]*)/gi, '‘', 'open single quotation mark'],
+  [/\bclose single quotation mark\b([.,;:!?…—–-]*)/gi, '’', 'close single quotation mark'],
   [/\bquestion mark\b([.,;:!?…—–-]*)/gi, '?', 'question mark'],
   [/\bexclamation(?: (?:mark|point))?\b([.,;:!?…—–-]*)/gi, '!', 'exclamation mark'],
   [/\bsemi[ -]?colon\b([.,;:!?…—–-]*)/gi, ';', 'semicolon'],
@@ -112,7 +128,7 @@ const TERMINAL_BEFORE_BOUNDARY_COMMAND = new RegExp(
 )
 
 const SPOKEN_PUNCTUATION_TERM_SOURCE =
-  'open single quote|close single quote|open quote|close quote|single quotation|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|again speech|end speech|begin single|end single|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|question mark|exclamation(?: (?:mark|point))?(?!\\s+(?:mark|point)\\b)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk'
+  'open single quote|close single quote|open quote|close quote|single quotation|single quotation mark|single quote|beginning speech|ending speech|begins speech|ends speech|begin speech|again speech|end speech|begin single|end single|open quotation mark|close quotation mark|open double quotation mark|close double quotation mark|open single quotation mark|close single quotation mark|quotation|quote|new paragraph|new line|open (?:parenthesis|paren)|close (?:parenthesis|paren)|open bracket|close bracket|begin bracket|end bracket|open angle bracket|close angle bracket|begin angle bracket|end angle bracket|open brace|close brace|open curly brace|close curly brace|open curly bracket|close curly bracket|question mark|exclamation(?: (?:mark|point))?(?!\\s+(?:mark|point)\\b)|semi[ -]?colon|colon|comma|full stop|period|ellipsis|dot dot dot|three dots|em dash|en dash|hyphen|dash|apostrophe|asterisk'
 
 const LITERAL_PUNCTUATION_CONTEXTS: RegExp[] = [
   /\bperiod(?=\s+(?:of|piece|drama|costume|between|during|when|where|in|was|is|lasted|ended|began)\b)/gi,
@@ -357,12 +373,6 @@ export function normalizeDeterministically(
   text = explicitPunctuation.text
   reasons.push(...explicitPunctuation.reasons)
   authoritativePunctuationMarks.push(...explicitPunctuation.marks)
-  for (const pattern of LITERAL_PUNCTUATION_CONTEXTS) {
-    text = text.replace(pattern, (literal: string) => {
-      const index = protectedLiterals.push(literal) - 1
-      return `\uE000${index}\uE001`
-    })
-  }
   const learningCandidates: SpellingLearningCandidate[] = []
   const spelling = replaceExplicitSpelling(text, options.compactUppercaseSpelling === true)
   text = spelling.text
@@ -380,6 +390,12 @@ export function normalizeDeterministically(
   text = quotation.text
   if (quotation.marks.length) reasons.push(...quotation.reasons)
   authoritativePunctuationMarks.push(...quotation.marks)
+  for (const pattern of LITERAL_PUNCTUATION_CONTEXTS) {
+    text = text.replace(pattern, (literal: string) => {
+      const index = protectedLiterals.push(literal) - 1
+      return `\uE000${index}\uE001`
+    })
+  }
 
   const restoredSentenceBoundaries = restoreHighConfidenceSentenceBoundaries(text)
   if (restoredSentenceBoundaries.count) reasons.push('missing sentence boundary')
@@ -625,7 +641,7 @@ function replaceExplicitPunctuationCommands(input: string): {
       reasons.push(command.reason)
       const normalizedPhrase = phrase.toLocaleLowerCase().replace(/^semi[ -]?colon$/, 'semicolon')
       const closingReason =
-        /^(?:close (?:parenthesis|paren|bracket|quote|single quote)|quote|quotation|single quote|single quotation)$/u.test(
+        /^(?:close (?:parenthesis|paren|bracket|quote|single quote|quotation mark|double quotation mark|single quotation mark|brace|curly brace|curly bracket|angle bracket)|quote|quotation|single quote|single quotation|single quotation mark|close quotation mark|close double quotation mark|close single quotation mark|close brace|close curly brace|close curly bracket|close angle bracket|end angle bracket|end brace|end curly brace|end curly bracket|end bracket)$/u.test(
           normalizedPhrase,
         )
           ? command.reason
@@ -653,6 +669,14 @@ function punctuationCommand(phrase: string): { mark: string; reason: string } | 
   if (normalized === 'close bracket') return { mark: ']', reason: 'close bracket' }
   if (normalized === 'begin bracket') return { mark: '<', reason: 'begin bracket' }
   if (normalized === 'end bracket') return { mark: '>', reason: 'end bracket' }
+  if (normalized === 'open angle bracket' || normalized === 'begin angle bracket') return { mark: '<', reason: 'open angle bracket' }
+  if (normalized === 'close angle bracket' || normalized === 'end angle bracket') return { mark: '>', reason: 'close angle bracket' }
+  if (normalized === 'open brace' || normalized === 'open curly brace' || normalized === 'open curly bracket') return { mark: '{', reason: 'open brace' }
+  if (normalized === 'close brace' || normalized === 'close curly brace' || normalized === 'close curly bracket') return { mark: '}', reason: 'close brace' }
+  if (normalized === 'open quotation mark' || normalized === 'open double quotation mark') return { mark: '“', reason: 'quote' }
+  if (normalized === 'close quotation mark' || normalized === 'close double quotation mark') return { mark: '”', reason: 'quote' }
+  if (normalized === 'open single quotation mark') return { mark: '‘', reason: 'single quote' }
+  if (normalized === 'close single quotation mark') return { mark: '’', reason: 'single quote' }
   if (normalized === 'question mark') return { mark: '?', reason: 'question mark' }
   if (
     normalized === 'exclamation' ||
@@ -698,8 +722,14 @@ function replaceSpokenQuotationCommands(
   let text = input
     .replace(/(\bopen quote\b[.,;:!?…—–-]*)[ \t]*["“”]/gi, '$1')
     .replace(/["“”][ \t]*(\bclose quote\b)/gi, '$1')
+    .replace(/(\bopen quotation mark\b[.,;:!?…—–-]*)[ \t]*["“”]/gi, '$1')
+    .replace(/["“”][ \t]*(\bclose quotation mark\b)/gi, '$1')
+    .replace(/(\bopen double quotation mark\b[.,;:!?…—–-]*)[ \t]*["“”]/gi, '$1')
+    .replace(/["“”][ \t]*(\bclose double quotation mark\b)/gi, '$1')
     .replace(/(\bopen single quote\b[.,;:!?…—–-]*)[ \t]*['‘’]/gi, '$1')
     .replace(/['‘’][ \t]*(\bclose single quote\b)/gi, '$1')
+    .replace(/(\bopen single quotation mark\b[.,;:!?…—–-]*)[ \t]*['‘’]/gi, '$1')
+    .replace(/['‘’][ \t]*(\bclose single quotation mark\b)/gi, '$1')
 
   const replaceGuardedAliasPair = (
     beginPhrase: string,
@@ -767,8 +797,14 @@ function replaceSpokenQuotationCommands(
   }
   replaceFixed(/\bopen single quote\b([.,;:!?…—–-]*)/gi, '‘', 'single quote', true)
   replaceFixed(/\bclose single quote\b([.,;:!?…—–-]*)/gi, '’', 'single quote')
+  replaceFixed(/\bopen single quotation mark\b([.,;:!?…—–-]*)/gi, '‘', 'single quote', true)
+  replaceFixed(/\bclose single quotation mark\b([.,;:!?…—–-]*)/gi, '’', 'single quote')
   replaceFixed(/\bopen quote\b([.,;:!?…—–-]*)/gi, '“', 'quote', true)
   replaceFixed(/\bclose quote\b([.,;:!?…—–-]*)/gi, '”', 'quote')
+  replaceFixed(/\bopen quotation mark\b([.,;:!?…—–-]*)/gi, '“', 'quote', true)
+  replaceFixed(/\bclose quotation mark\b([.,;:!?…—–-]*)/gi, '”', 'quote')
+  replaceFixed(/\bopen double quotation mark\b([.,;:!?…—–-]*)/gi, '“', 'quote', true)
+  replaceFixed(/\bclose double quotation mark\b([.,;:!?…—–-]*)/gi, '”', 'quote')
 
   const replacePaired = (
     pattern: RegExp,

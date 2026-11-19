@@ -888,11 +888,12 @@ function resolveOperation(
     if (following) {
       const wordStart = end + following[1]!.length + following[2]!.length
       const terminal = /[.!?…][”’"')\]]*\s*$/u.test(replacement)
-      const isPriorOpening = isSentenceOpeningAt(cleanText, wordStart)
+      const OpensWithQuotation = /[“‘"']/u.test(following[2]!)
+      const isPriorOpening = !OpensWithQuotation && isSentenceOpeningAt(cleanText, wordStart)
       const lower = !terminal && isPriorOpening
         ? lowercaseOrdinarySentenceOpening(cleanText, wordStart, cleanText, wordStart, protectedCasingTerms)
         : null
-      if (terminal && /\p{Ll}/u.test(following[3]!)) {
+      if (terminal && /\p{Ll}/u.test(following[3]!) && !OpensWithQuotation) {
         const prefix = cleanText.slice(end, wordStart)
         const letter = cleanText[wordStart]!
         return { operation, start, end: wordStart + 1, replacement: `${replacement}${prefix}${letter.toLocaleUpperCase()}`, paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset(cleanText, start) }

@@ -2081,10 +2081,10 @@ function parseJoinOperand(chunk: string): ParsedJoinOperand | null {
     const direction = /^(?:next|following|after)/iu.test(adjacentMatch[1]!) ? 'next' : 'previous'
     return { kind: 'sentence', mode: 'adjacent', plural: false, adjacentDirection: direction }
   }
-  const match = trimmed.match(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(sentences?|phrases?|words?|clauses?|parts?|fragments?)\s+(.+)$/iu)
+  const match = trimmed.match(/^(?:(?:the|this|that|a|an)\s+)?(?:(sentences?|phrases?|words?|clauses?|parts?|fragments?)\s*[,:]?\s*)?(.+)$/iu)
   if (!match) return null
-  const label = match[1]!.trim().toLocaleLowerCase()
-  const kind = /^sentences?$/iu.test(label) ? 'sentence' : /^words?$/iu.test(label) ? 'word' : 'phrase'
+  const label = (match[1] ?? '').trim().toLocaleLowerCase()
+  const kind = label === '' ? 'sentence' : /^sentences?$/iu.test(label) ? 'sentence' : /^words?$/iu.test(label) ? 'word' : 'phrase'
   const rest = match[2]!.trim()
   const aboutMatch = rest.match(/^about\s+(.+)$/iu)
   if (aboutMatch?.[1]) return { kind, mode: 'about', description: aboutMatch[1].trim(), plural: /s$/iu.test(label) }

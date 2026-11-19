@@ -1430,9 +1430,10 @@ ${formattedParagraph}`,
     if (following) {
       const wordStart = end + following[1].length + following[2].length;
       const terminal = /[.!?…][”’"')\]]*\s*$/u.test(replacement);
-      const isPriorOpening = isSentenceOpeningAt(cleanText, wordStart);
+      const OpensWithQuotation = /[“‘"']/u.test(following[2]);
+      const isPriorOpening = !OpensWithQuotation && isSentenceOpeningAt(cleanText, wordStart);
       const lower = !terminal && isPriorOpening ? lowercaseOrdinarySentenceOpening(cleanText, wordStart, cleanText, wordStart, protectedCasingTerms) : null;
-      if (terminal && /\p{Ll}/u.test(following[3])) {
+      if (terminal && /\p{Ll}/u.test(following[3]) && !OpensWithQuotation) {
         const prefix = cleanText.slice(end, wordStart);
         const letter = cleanText[wordStart];
         return { operation, start, end: wordStart + 1, replacement: `${replacement}${prefix}${letter.toLocaleUpperCase()}`, paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset2(cleanText, start) };
@@ -6471,10 +6472,10 @@ function parseJoinOperand(chunk) {
     const direction = /^(?:next|following|after)/iu.test(adjacentMatch[1]) ? "next" : "previous";
     return { kind: "sentence", mode: "adjacent", plural: false, adjacentDirection: direction };
   }
-  const match = trimmed.match(/^(?:the\s+|this\s+|that\s+|a\s+|an\s+)?(sentences?|phrases?|words?|clauses?|parts?|fragments?)\s+(.+)$/iu);
+  const match = trimmed.match(/^(?:(?:the|this|that|a|an)\s+)?(?:(sentences?|phrases?|words?|clauses?|parts?|fragments?)\s*[,:]?\s*)?(.+)$/iu);
   if (!match) return null;
-  const label = match[1].trim().toLocaleLowerCase();
-  const kind = /^sentences?$/iu.test(label) ? "sentence" : /^words?$/iu.test(label) ? "word" : "phrase";
+  const label = (match[1] ?? "").trim().toLocaleLowerCase();
+  const kind = label === "" ? "sentence" : /^sentences?$/iu.test(label) ? "sentence" : /^words?$/iu.test(label) ? "word" : "phrase";
   const rest = match[2].trim();
   const aboutMatch = rest.match(/^about\s+(.+)$/iu);
   if (aboutMatch?.[1]) return { kind, mode: "about", description: aboutMatch[1].trim(), plural: /s$/iu.test(label) };

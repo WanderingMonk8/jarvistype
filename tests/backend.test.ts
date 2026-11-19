@@ -3136,6 +3136,12 @@ test('resolves join sentence about A with the next|previous forms', async () => 
       expected: 'Erin unwinds herself, maeve waits.',
       scores: null,
     },
+    {
+      draft: 'I pulled off from the kiss, still gazing into her eyes with the same soft tenderness. “Baby, taste me with the same hunger that I did for you. Show me how much you need me.”',
+      instruction: 'Join the sentence, soft tenderness, and baby taste me.',
+      expected: 'I pulled off from the kiss, still gazing into her eyes with the same soft tenderness, “Baby, taste me with the same hunger that I did for you. Show me how much you need me.”',
+      scores: null,
+    },
   ] as const
   for (const [index, testCase] of testTriple.entries()) {
     const userId = `about-join-adjacent-user-${index}`

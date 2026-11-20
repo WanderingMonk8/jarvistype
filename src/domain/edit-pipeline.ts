@@ -1979,26 +1979,31 @@ function isSentenceOpeningPunctuation(character: string): boolean {
 }
 
 /**
- * True when the sentence starts with a Markdown emphasis run (`*`) that is closed
- * by a matching run in the same paragraph. The pair may span sentence boundaries.
- * Spacing inside the pair is tolerated because dictated emphasis commands insert
- * spaces around the markers.
+ * True when the sentence starts with a Markdown emphasis run (`*`, `**`, or `***`)
+ * that is paired with another run of the same length in the same paragraph. The
+ * pair may span sentence boundaries, and the marker may be either the opening or
+ * the closing run. Spacing inside the pair is tolerated because dictated emphasis
+ * commands insert spaces around the markers.
  */
-function isPairedEmphasisOpening(text: string, start: number, end: number): boolean {
-  const opening = text.slice(start, end).match(/^\*+/u)?.[0]
-  if (!opening || opening.length > 3) return false
-  const afterOpening = text.slice(start + opening.length).match(/^[ \t]*/u)?.[0] ?? ''
-  const contentStart = start + opening.length + afterOpening.length
-  if (contentStart >= end) return false
-  const paragraphBreak = text.indexOf('\n\n', start)
-  const limit = paragraphBreak === -1 ? text.length : paragraphBreak
-  const closing = new RegExp(`[ \\t]*(?<!\\*)\\*{${opening.length}}(?!\\*)`, 'gu')
-  const segment = text.slice(contentStart, limit)
+function isPairedEmphasisMarker(text: string, start: number, end: number): boolean {
+  const sentence = text.slice(start, end)
+  const leading = sentence.match(/^[ \t]*/u)?.[0] ?? ''
+  const marker = sentence.slice(leading.length).match(/^\*+/u)?.[0]
+  if (!marker || marker.length > 3) return false
+  const markerStart = start + leading.length
+  const paragraphBreakBefore = text.lastIndexOf('\n\n', start)
+  const paragraphStart = paragraphBreakBefore === -1 ? 0 : paragraphBreakBefore + 2
+  const paragraphEnd = text.indexOf('\n\n', start)
+  const limit = paragraphEnd === -1 ? text.length : paragraphEnd
+  const paragraph = text.slice(paragraphStart, limit)
+  const pattern = new RegExp(`(?<!\\*)\\*{${marker.length}}(?!\\*)`, 'gu')
+  const runs: number[] = []
   let match: RegExpExecArray | null
-  while ((match = closing.exec(segment))) {
-    if (segment.slice(0, match.index).trim().length > 0) return true
-  }
-  return false
+  while ((match = pattern.exec(paragraph))) runs.push(paragraphStart + match.index)
+  const index = runs.indexOf(markerStart)
+  if (index === -1) return false
+  if (index % 2 === 1) return true
+  return index + 1 < runs.length
 }
 
 function repairParagraphBoundaries(paragraph: string): { ok: boolean; text: string } {
@@ -2011,7 +2016,10 @@ function repairParagraphBoundaries(paragraph: string): { ok: boolean; text: stri
     for (const range of ranges) {
       if (range.start >= text.length) continue
       const slice = text.slice(range.start, range.end)
-      if (!/[\p{L}\p{N}]/u.test(slice)) {
+      if (
+        !/[\p{L}\p{N}]/u.test(slice) &&
+        !isPairedEmphasisMarker(text, range.start, range.end)
+      ) {
         // A sentence with no letters or digits at all is never a sentence;
         // refuse to drop its characters.
         return { ok: false, text: paragraph }
@@ -2019,7 +2027,7 @@ function repairParagraphBoundaries(paragraph: string): { ok: boolean; text: stri
       if (
         /[\p{P}\p{S}]/u.test(text[range.start]!) &&
         !isSentenceOpeningPunctuation(text[range.start]!) &&
-        !isPairedEmphasisOpening(text, range.start, range.end)
+        !isPairedEmphasisMarker(text, range.start, range.end)
       ) {
         let cut = range.start
         while (
@@ -2043,7 +2051,7 @@ function repairParagraphBoundaries(paragraph: string): { ok: boolean; text: stri
       head &&
       /[\p{P}\p{S}]/u.test(head) &&
       !isSentenceOpeningPunctuation(head) &&
-      !isPairedEmphasisOpening(text, range.start, range.end)
+      !isPairedEmphasisMarker(text, range.start, range.end)
     )
       return { ok: false, text: paragraph }
   }

@@ -1427,6 +1427,9 @@ test('keeps paired emphasis markers at sentence starts', () => {
     '*This is emphasized. It spans multiple sentences.*',
     '**Bold spans. Two sentences.**',
     '*First sentence. Second sentence.* Next.',
+    'A sentence. *Emphasis starts. It spans.* Next.',
+    'A sentence. *Emphasis starts. It spans. * Next.',
+    'A sentence. *Emphasis starts. It spans. *',
   ]) {
     assert.deepEqual(validateSentenceBoundaries(text), { ok: true, text }, text)
   }
@@ -1458,6 +1461,27 @@ test('keeps paired emphasis markers when an edit repairs sentence boundaries', (
     },
   )
   assert.equal(result.ok && result.afterText, '*Maeve waits.* It has been a long while. A third sentence.')
+})
+
+test('keeps paired emphasis markers when the closing marker starts a later sentence', () => {
+  const draft = 'Maeve waits. *It has been a long while. A second sentence. * A third sentence.'
+  const result = executeEditPlan(
+    draft,
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text: draft }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'replace second with third',
+      operations: [
+        { id: 'replace-second', type: 'replace', target: { paragraphOrdinal: 1, exactText: 'second' }, text: 'third' },
+      ],
+    },
+  )
+  assert.equal(
+    result.ok && result.afterText,
+    'Maeve waits. *It has been a long while. A third sentence. * A third sentence.',
+  )
 })
 
 test('deleting a whole sentence without a flag removes its period, but not a word inside a sentence', () => {

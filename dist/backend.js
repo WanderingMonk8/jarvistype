@@ -2161,6 +2161,17 @@ var OPENING_PUNCTUATION = /* @__PURE__ */ new Set([
 function isSentenceOpeningPunctuation(character) {
   return OPENING_PUNCTUATION.has(character);
 }
+function isPairedEmphasisOpening(text, start, end) {
+  const opening = text.slice(start, end).match(/^\*+/u)?.[0];
+  if (!opening || opening.length > 3) return false;
+  const afterOpening = text.slice(start + opening.length).match(/^[ \t]*/u)?.[0] ?? "";
+  const contentStart = start + opening.length + afterOpening.length;
+  if (contentStart >= end) return false;
+  const closing = new RegExp(`[ \\t]*(?<!\\*)\\*{${opening.length}}(?!\\*)`, "u");
+  const match = closing.exec(text.slice(contentStart, end));
+  if (!match) return false;
+  return text.slice(contentStart, contentStart + match.index).trim().length > 0;
+}
 function repairParagraphBoundaries(paragraph) {
   let text = paragraph;
   for (let pass = 0; pass < 16; pass += 1) {
@@ -2172,7 +2183,7 @@ function repairParagraphBoundaries(paragraph) {
       if (!/[\p{L}\p{N}]/u.test(slice)) {
         return { ok: false, text: paragraph };
       }
-      if (/[\p{P}\p{S}]/u.test(text[range.start]) && !isSentenceOpeningPunctuation(text[range.start])) {
+      if (/[\p{P}\p{S}]/u.test(text[range.start]) && !isSentenceOpeningPunctuation(text[range.start]) && !isPairedEmphasisOpening(text, range.start, range.end)) {
         let cut = range.start;
         while (cut < text.length && /[\p{P}\p{S}]/u.test(text[cut]) && !isSentenceOpeningPunctuation(text[cut]))
           cut += 1;
@@ -2186,7 +2197,7 @@ function repairParagraphBoundaries(paragraph) {
   }
   for (const range of findSentenceRanges(text, 0, text.length)) {
     const head = text[range.start];
-    if (head && /[\p{P}\p{S}]/u.test(head) && !isSentenceOpeningPunctuation(head))
+    if (head && /[\p{P}\p{S}]/u.test(head) && !isSentenceOpeningPunctuation(head) && !isPairedEmphasisOpening(text, range.start, range.end))
       return { ok: false, text: paragraph };
   }
   let tail = text.length - 1;

@@ -7214,6 +7214,50 @@ test('cleans local grammar after an edit even when provider repair is off', asyn
   assert.equal(generationRequests.length, 0)
 })
 
+test('keeps paired emphasis markers when the universal checker repairs a sentence boundary', async () => {
+  const userId = 'emphasis-guard-user'
+  const chatId = 'emphasis-guard-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, '*Maeve waits.* It has been a long while. A second sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace second with third.',
+    operations: [
+      {
+        id: 'replace-second',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'second' },
+        text: 'third',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'emphasis-guard-interpret',
+      operationId: 'emphasis-guard-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace second with third.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    '*Maeve waits.* It has been a long while. A third sentence.',
+  )
+  assert.equal(generationRequests.length, 0)
+})
+
 test('preserves a provider-returned three-period ellipsis in an edit', async () => {
   const userId = 'insert-ellipsis-user'
   const chatId = 'insert-ellipsis-chat'

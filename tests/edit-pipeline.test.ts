@@ -6,7 +6,7 @@ import {
   createDraftSession,
   applyManualEdit,
 } from '../src/domain/draft-session'
-import { executeEditPlan, executeSequentialEditPlan, findAboutTargetCandidates, parseEditPlan, type EditPlan } from '../src/domain/edit-pipeline'
+import { executeEditPlan, executeSequentialEditPlan, findAboutTargetCandidates, parseEditPlan, validateSentenceBoundaries, type EditPlan } from '../src/domain/edit-pipeline'
 
 test('enumerates semantic sentence and punctuation-bounded phrase candidates', () => {
   const text = 'Erin unwinds herself, then stands?! She leaves.'
@@ -1413,6 +1413,48 @@ test('sentence-part deletion consumes adjacent terminal punctuation', () => {
     },
   )
   assert.equal(wordOnly.ok && wordOnly.afterText, 'Continue.')
+})
+
+test('keeps paired emphasis markers at sentence starts', () => {
+  for (const text of [
+    '*Maeve waits.*',
+    '**Maeve waits.**',
+    '***Maeve waits.***',
+    '*Emphasis matters.*',
+    '**Bold matters.**',
+    'A sentence. *Emphasis follows.*',
+    '**Bold starts.** A second sentence.',
+  ]) {
+    assert.deepEqual(validateSentenceBoundaries(text), { ok: true, text }, text)
+  }
+
+  // Only paired emphasis is protected. Stray or unbalanced opening markers are
+  // still treated as sentence-opening punctuation.
+  for (const [text, expected] of [
+    ['*Stray marker.', 'Stray marker.'],
+    ['*unpaired emphasis matters.', 'Unpaired emphasis matters.'],
+    ['****Not emphasis**** here.', 'Not emphasis**** here.'],
+  ] as const) {
+    assert.deepEqual(validateSentenceBoundaries(text), { ok: true, text: expected }, text)
+  }
+})
+
+test('keeps paired emphasis markers when an edit repairs sentence boundaries', () => {
+  const draft = '*Maeve waits.* It has been a long while. A second sentence.'
+  const result = executeEditPlan(
+    draft,
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text: draft }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'replace second with third',
+      operations: [
+        { id: 'replace-second', type: 'replace', target: { paragraphOrdinal: 1, exactText: 'second' }, text: 'third' },
+      ],
+    },
+  )
+  assert.equal(result.ok && result.afterText, '*Maeve waits.* It has been a long while. A third sentence.')
 })
 
 test('deleting a whole sentence without a flag removes its period, but not a word inside a sentence', () => {

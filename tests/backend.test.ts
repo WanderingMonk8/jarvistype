@@ -7218,7 +7218,7 @@ test('keeps paired emphasis markers when the universal checker repairs a sentenc
   const userId = 'emphasis-guard-user'
   const chatId = 'emphasis-guard-chat'
   activeChatId = chatId
-  await seedDraft(userId, chatId, '*Maeve waits.* It has been a long while. A second sentence.')
+  await seedDraft(userId, chatId, '*Maeve waits. It has been a long while.* A second sentence.')
   responses.length = 0
   generationRequests.length = 0
   editPlanResponse = {
@@ -7253,7 +7253,7 @@ test('keeps paired emphasis markers when the universal checker repairs a sentenc
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(
     proposal.proposal.afterText,
-    '*Maeve waits.* It has been a long while. A third sentence.',
+    '*Maeve waits. It has been a long while.* A third sentence.',
   )
   assert.equal(generationRequests.length, 0)
 })

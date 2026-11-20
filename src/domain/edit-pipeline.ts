@@ -1980,8 +1980,9 @@ function isSentenceOpeningPunctuation(character: string): boolean {
 
 /**
  * True when the sentence starts with a Markdown emphasis run (`*`) that is closed
- * by a matching run. Spacing inside the pair is tolerated because dictated
- * emphasis commands can leave spaces around the markers.
+ * by a matching run in the same paragraph. The pair may span sentence boundaries.
+ * Spacing inside the pair is tolerated because dictated emphasis commands insert
+ * spaces around the markers.
  */
 function isPairedEmphasisOpening(text: string, start: number, end: number): boolean {
   const opening = text.slice(start, end).match(/^\*+/u)?.[0]
@@ -1989,10 +1990,15 @@ function isPairedEmphasisOpening(text: string, start: number, end: number): bool
   const afterOpening = text.slice(start + opening.length).match(/^[ \t]*/u)?.[0] ?? ''
   const contentStart = start + opening.length + afterOpening.length
   if (contentStart >= end) return false
-  const closing = new RegExp(`[ \\t]*(?<!\\*)\\*{${opening.length}}(?!\\*)`, 'u')
-  const match = closing.exec(text.slice(contentStart, end))
-  if (!match) return false
-  return text.slice(contentStart, contentStart + match.index).trim().length > 0
+  const paragraphBreak = text.indexOf('\n\n', start)
+  const limit = paragraphBreak === -1 ? text.length : paragraphBreak
+  const closing = new RegExp(`[ \\t]*(?<!\\*)\\*{${opening.length}}(?!\\*)`, 'gu')
+  const segment = text.slice(contentStart, limit)
+  let match: RegExpExecArray | null
+  while ((match = closing.exec(segment))) {
+    if (segment.slice(0, match.index).trim().length > 0) return true
+  }
+  return false
 }
 
 function repairParagraphBoundaries(paragraph: string): { ok: boolean; text: string } {

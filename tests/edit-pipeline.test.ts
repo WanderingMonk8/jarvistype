@@ -1424,6 +1424,9 @@ test('keeps paired emphasis markers at sentence starts', () => {
     '**Bold matters.**',
     'A sentence. *Emphasis follows.*',
     '**Bold starts.** A second sentence.',
+    '*This is emphasized. It spans multiple sentences.*',
+    '**Bold spans. Two sentences.**',
+    '*First sentence. Second sentence.* Next.',
   ]) {
     assert.deepEqual(validateSentenceBoundaries(text), { ok: true, text }, text)
   }

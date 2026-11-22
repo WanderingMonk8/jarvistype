@@ -3788,8 +3788,8 @@ test('closes a quotation range at the end target when the sentence continues', a
   const cases: Array<[string, string, string]> = [
     ['Before. Alpha beta gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta” gamma. After.'],
     ['Before. Alpha beta, gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta,” gamma. After.'],
-    ['Before. Alpha beta; gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta;” gamma. After.'],
-    ['Before. Alpha beta: gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta:” gamma. After.'],
+    ['Before. Alpha beta; gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta”; gamma. After.'],
+    ['Before. Alpha beta: gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta”: gamma. After.'],
     ['Before. Alpha beta — gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta” — gamma. After.'],
     ['Before. Alpha beta. Gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta.” Gamma. After.'],
     ['Before. Alpha beta?! Gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta?!” Gamma. After.'],
@@ -3846,7 +3846,7 @@ test('closes every wrapper family at its attached punctuation', async () => {
   }
 })
 
-test('keeps a trailing separator with the range when nothing follows it', async () => {
+test('keeps a trailing comma with the range when nothing follows it', async () => {
   const userId = 'quotation-trailing-separator-user'
   const chatId = 'quotation-trailing-separator-chat'
   activeChatId = chatId

@@ -1552,15 +1552,18 @@ function extendThroughTerminalPunctuation(text: string, end: number, limit: numb
 /**
  * End offset for a wrapped range or quotation.
  *
- * Every punctuation mark attached directly to the end target travels inside the
- * wrapper, including separators that introduce the next clause (`,`, `;`, `:`)
- * and serial terminators (`?!`, `!?!`, `…?`, `...`). Only punctuation that is
- * separated from the target by whitespace is left outside, so a range never
- * extends past the words the speaker named.
+ * Punctuation attached directly to the end target travels inside the wrapper
+ * when it belongs to the quoted text: sentence terminators and their serial runs
+ * (`.`, `!`, `?`, `…`, `?!`, `...`), a comma, and any closing quote or bracket
+ * that keeps an enclosure balanced. Separators that mark the boundary between
+ * the quotation and the surrounding sentence (`;`, `:`, an em dash) stay
+ * outside, and a range never extends past the words the speaker named.
  */
 export function attachedRangeEnd(text: string, end: number, limit: number): number {
   const run = text.slice(end, limit).match(/^[\p{P}]+/u)?.[0] ?? ''
-  return end + run.length
+  if (!run) return end
+  const belongsInside = /(?:\.{3}|[.!?…,])/u.test(run) || /[”’"')\]}⟩»]/u.test(run)
+  return belongsInside ? end + run.length : end
 }
 
 function extendThroughSentenceEnd(text: string, end: number): number {

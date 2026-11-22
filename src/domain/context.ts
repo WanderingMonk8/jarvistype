@@ -173,8 +173,15 @@ export function extractConversationReferences(
     const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? []
     for (const term of terms) {
       if (/^\p{Ll}/u.test(term)) {
-        const key = referenceEvidenceKey(stripPossessiveSuffix(term))
-        if (!exemptLowercaseKeys.has(key)) lowercaseEvidence.add(key)
+        const key = referenceEvidenceKey(term)
+        const baseKey = referenceEvidenceKey(stripPossessiveSuffix(term))
+        if (!exemptLowercaseKeys.has(baseKey)) {
+          // Record both the full token and its possessive base so a capitalized
+          // possessive such as "She's" cannot slip past lowercase evidence for
+          // the ordinary word "she".
+          lowercaseEvidence.add(key)
+          lowercaseEvidence.add(baseKey)
+        }
       }
     }
   }
@@ -848,11 +855,18 @@ const COMMON_CAPITALIZED_WORDS = new Set([
 
 function isReferenceTerm(term: string): boolean {
   const key = term.toLocaleLowerCase()
+  // A possessive or contraction of an ordinary word is still that ordinary word:
+  // "She's" and "she'll" must not become casing authorities just because a
+  // sentence happened to start with them.
+  const baseKey = key.replace(/['’](?:s|ll|re|ve|d|m)$/u, '')
   if (
     term.length < 2 ||
     COMMON_CAPITALIZED_WORDS.has(key) ||
+    COMMON_CAPITALIZED_WORDS.has(baseKey) ||
     AUXILIARY_WORDS.has(key) ||
-    PARTICLE_WORDS.has(key)
+    AUXILIARY_WORDS.has(baseKey) ||
+    PARTICLE_WORDS.has(key) ||
+    PARTICLE_WORDS.has(baseKey)
   )
     return false
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1))

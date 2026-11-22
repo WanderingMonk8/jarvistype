@@ -2916,8 +2916,12 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
     const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
     for (const term of terms) {
       if (/^\p{Ll}/u.test(term)) {
-        const key = referenceEvidenceKey(stripPossessiveSuffix(term));
-        if (!exemptLowercaseKeys.has(key)) lowercaseEvidence.add(key);
+        const key = referenceEvidenceKey(term);
+        const baseKey = referenceEvidenceKey(stripPossessiveSuffix(term));
+        if (!exemptLowercaseKeys.has(baseKey)) {
+          lowercaseEvidence.add(key);
+          lowercaseEvidence.add(baseKey);
+        }
       }
     }
   }
@@ -3413,7 +3417,8 @@ var COMMON_CAPITALIZED_WORDS = /* @__PURE__ */ new Set([
 ]);
 function isReferenceTerm(term) {
   const key = term.toLocaleLowerCase();
-  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(key) || AUXILIARY_WORDS.has(key) || PARTICLE_WORDS.has(key))
+  const baseKey = key.replace(/['’](?:s|ll|re|ve|d|m)$/u, "");
+  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(key) || COMMON_CAPITALIZED_WORDS.has(baseKey) || AUXILIARY_WORDS.has(key) || AUXILIARY_WORDS.has(baseKey) || PARTICLE_WORDS.has(key) || PARTICLE_WORDS.has(baseKey))
     return false;
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1));
 }

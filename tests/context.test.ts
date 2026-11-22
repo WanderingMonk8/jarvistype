@@ -197,6 +197,46 @@ test('lowercase history rejects a casing reference unless the term is in the glo
   )
 })
 
+test('does not treat capitalized contractions of ordinary words as casing references', () => {
+  const messages = [
+    { role: 'assistant' as const, content: "She's waiting. She's not moving. Then she smiles." },
+  ]
+  assert.deepEqual(extractConversationReferences(messages), [])
+  assert.deepEqual(extractAuthoritativeCasingReferences(messages), [])
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences(messages, {
+      allowRepeatedWithinSource: true,
+      allowMidSentenceCapitalized: true,
+      allowRepeatedSentenceOpenings: false,
+    }),
+    [],
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant' as const, content: "She'll wait. She'll see. Then she leaves." },
+    ]),
+    [],
+  )
+  assert.equal(
+    canonicalizeExactConversationReferences(
+      "What do you think she's thinking right now?",
+      extractAuthoritativeCasingReferences(messages),
+    ).text,
+    "What do you think she's thinking right now?",
+  )
+})
+
+test('keeps possessive proper names authoritatively cased', () => {
+  const references = extractAuthoritativeCasingReferences([
+    { role: 'assistant' as const, content: "I saw Zorlin's coat by the door." },
+  ])
+  assert.deepEqual(references, ["Zorlin's"])
+  assert.equal(
+    canonicalizeExactConversationReferences('her zorlin coat', references).text,
+    'her Zorlin coat',
+  )
+})
+
 test('grants casing authority to multiword names and repeated sentence openings', () => {
   assert.deepEqual(
     extractAuthoritativeCasingReferences([

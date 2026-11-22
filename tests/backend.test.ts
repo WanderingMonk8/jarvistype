@@ -3787,9 +3787,9 @@ test('quotes a spoken range including its attached punctuation run', async () =>
 test('closes a quotation range at the end target when the sentence continues', async () => {
   const cases: Array<[string, string, string]> = [
     ['Before. Alpha beta gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta” gamma. After.'],
-    ['Before. Alpha beta, gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta”, gamma. After.'],
-    ['Before. Alpha beta; gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta”; gamma. After.'],
-    ['Before. Alpha beta: gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta”: gamma. After.'],
+    ['Before. Alpha beta, gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta,” gamma. After.'],
+    ['Before. Alpha beta; gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta;” gamma. After.'],
+    ['Before. Alpha beta: gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta:” gamma. After.'],
     ['Before. Alpha beta — gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta” — gamma. After.'],
     ['Before. Alpha beta. Gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta.” Gamma. After.'],
     ['Before. Alpha beta?! Gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta?!” Gamma. After.'],
@@ -3828,7 +3828,7 @@ test('closes every wrapper family at its attached punctuation', async () => {
     ['Put angle brackets from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. <Alpha beta> gamma. After.'],
     ['Put parens from alpha to beta.', 'Before. Alpha beta?! Gamma. After.', 'Before. (Alpha beta?!) Gamma. After.'],
     ['Put single quotes from alpha to beta.', 'Before. Alpha beta. Gamma. After.', 'Before. ‘Alpha beta.’ Gamma. After.'],
-    ['Put brackets from alpha to beta.', 'Before. Alpha beta, gamma. After.', 'Before. [Alpha beta], gamma. After.'],
+    ['Put brackets from alpha to beta.', 'Before. Alpha beta, gamma. After.', 'Before. [Alpha beta,] gamma. After.'],
   ]
   for (const [index, [instructionTranscript, draft, expected]] of cases.entries()) {
     const userId = `quotation-family-boundary-user-${index}`

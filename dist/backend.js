@@ -1848,12 +1848,7 @@ function extendThroughTerminalPunctuation(text, end, limit) {
 }
 function attachedRangeEnd(text, end, limit) {
   const run = text.slice(end, limit).match(/^[\p{P}]+/u)?.[0] ?? "";
-  if (!run) return end;
-  const terminatesSentence = /(?:\.{3}|[.!?…])/u.test(run);
-  const closesEnclosure = /[”’"')\]}⟩»]/u.test(run);
-  if (terminatesSentence || closesEnclosure) return end + run.length;
-  const nothingFollows = /^\s*$/u.test(text.slice(end + run.length, limit));
-  return nothingFollows ? end + run.length : end;
+  return end + run.length;
 }
 function extendThroughSentenceEnd(text, end) {
   if (/[.!?…][”’"')\]]*$/u.test(text.slice(0, end))) return end;

@@ -6,7 +6,7 @@ import {
   createDraftSession,
   applyManualEdit,
 } from '../src/domain/draft-session'
-import { executeEditPlan, executeSequentialEditPlan, findAboutTargetCandidates, parseEditPlan, type EditPlan } from '../src/domain/edit-pipeline'
+import { executeEditPlan, executeSequentialEditPlan, findAboutTargetCandidates, parseEditPlan, validateSentenceBoundaries, type EditPlan } from '../src/domain/edit-pipeline'
 
 test('enumerates semantic sentence and punctuation-bounded phrase candidates', () => {
   const text = 'Erin unwinds herself, then stands?! She leaves.'
@@ -1088,7 +1088,7 @@ test('deletes an inclusive range across paragraphs and joins the remaining text 
 test('deletion removes punctuation only with a whole sentence part or quotation', () => {
   const text = 'I say to him, “I warned you before.”'
   const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
-  for (const [target, expected] of [['I warned you before', 'I say to him,'], ['before', 'I say to him, “I warned you.”']] as const) {
+  for (const [target, expected] of [['I warned you before', 'I say to him.'], ['before', 'I say to him, “I warned you.”']] as const) {
     const result = executeEditPlan(text, paragraphs, 1, { schemaVersion: 2, draftVersion: 1, explanation: 'Delete text.', operations: [{ id: 'delete', type: 'delete', target: { exactText: target } }] })
     assert.equal(result.ok && result.afterText, expected)
   }
@@ -1413,6 +1413,75 @@ test('sentence-part deletion consumes adjacent terminal punctuation', () => {
     },
   )
   assert.equal(wordOnly.ok && wordOnly.afterText, 'Continue.')
+})
+
+test('keeps paired emphasis markers at sentence starts', () => {
+  for (const text of [
+    '*Maeve waits.*',
+    '**Maeve waits.**',
+    '***Maeve waits.***',
+    '*Emphasis matters.*',
+    '**Bold matters.**',
+    'A sentence. *Emphasis follows.*',
+    '**Bold starts.** A second sentence.',
+    '*This is emphasized. It spans multiple sentences.*',
+    '**Bold spans. Two sentences.**',
+    '*First sentence. Second sentence.* Next.',
+    'A sentence. *Emphasis starts. It spans.* Next.',
+    'A sentence. *Emphasis starts. It spans. * Next.',
+    'A sentence. *Emphasis starts. It spans. *',
+  ]) {
+    assert.deepEqual(validateSentenceBoundaries(text), { ok: true, text }, text)
+  }
+
+  // Only paired emphasis is protected. Stray or unbalanced opening markers are
+  // still treated as sentence-opening punctuation.
+  for (const [text, expected] of [
+    ['*Stray marker.', 'Stray marker.'],
+    ['*unpaired emphasis matters.', 'Unpaired emphasis matters.'],
+    ['****Not emphasis**** here.', 'Not emphasis**** here.'],
+  ] as const) {
+    assert.deepEqual(validateSentenceBoundaries(text), { ok: true, text: expected }, text)
+  }
+})
+
+test('keeps paired emphasis markers when an edit repairs sentence boundaries', () => {
+  const draft = '*Maeve waits.* It has been a long while. A second sentence.'
+  const result = executeEditPlan(
+    draft,
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text: draft }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'replace second with third',
+      operations: [
+        { id: 'replace-second', type: 'replace', target: { paragraphOrdinal: 1, exactText: 'second' }, text: 'third' },
+      ],
+    },
+  )
+  assert.equal(result.ok && result.afterText, '*Maeve waits.* It has been a long while. A third sentence.')
+})
+
+test('keeps paired emphasis markers when the closing marker starts a later sentence', () => {
+  const draft = 'Maeve waits. *It has been a long while. A second sentence. * A third sentence.'
+  const result = executeEditPlan(
+    draft,
+    [{ id: 'paragraph', ordinal: 1, lineIndex: 0, text: draft }],
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'replace second with third',
+      operations: [
+        { id: 'replace-second', type: 'replace', target: { paragraphOrdinal: 1, exactText: 'second' }, text: 'third' },
+      ],
+    },
+  )
+  assert.equal(
+    result.ok && result.afterText,
+    'Maeve waits. *It has been a long while. A third sentence. * A third sentence.',
+  )
 })
 
 test('deleting a whole sentence without a flag removes its period, but not a word inside a sentence', () => {
@@ -2064,7 +2133,7 @@ test('allows an insertion at the start of a replaced range but not two insertion
   assert.deepEqual(tied, { ok: false, reason: 'edit operations overlap' })
 })
 
-test('never leaves a quotation mark floating outside paragraph text', () => {
+test('never leaves a wrapping mark floating outside paragraph text', () => {
   const floating = executeEditPlan('Alpha beta gamma.', [], 1, {
     schemaVersion: 2,
     draftVersion: 1,
@@ -2080,7 +2149,7 @@ test('never leaves a quotation mark floating outside paragraph text', () => {
   })
   assert.deepEqual(floating, {
     ok: false,
-    reason: 'quotation mark would fall outside the paragraph',
+    reason: 'wrapping mark would fall outside the paragraph',
   })
 
   const attached = executeEditPlan('Alpha beta gamma.', [], 1, {
@@ -2484,4 +2553,369 @@ test('matches an expanded contraction against contracted draft text', () => {
     colloquial.ok && colloquial.afterText,
     'They are gonna wait until most of those are trapped in the funnel before they let loose the arrows.',
   )
+})
+
+test('Continue attaches a continuation to a matched source with a comma', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      {
+        id: 'continue',
+        type: 'continue',
+        target: { exactText: 'his left and turn' },
+        text: 'And then he begins to shout.',
+      },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'He looks to his left and turn, and then he begins to shout.')
+  assert.equal(result.ok && result.operations[0]?.afterText, 'and then he begins to shout.')
+})
+
+test('Continue lowers the first ordinary word of the continuation and keeps names', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const lowered = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'c1', type: 'continue', target: { exactText: 'his left and turn' }, text: 'Then he sits.' },
+    ],
+  })
+  assert.equal(lowered.ok && lowered.afterText, 'He looks to his left and turn, then he sits.')
+  const kept = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'c2', type: 'continue', target: { exactText: 'his left and turn' }, text: 'Then Erin shouts.' },
+    ],
+  })
+  assert.equal(kept.ok && kept.afterText, 'He looks to his left and turn, Then Erin shouts.')
+})
+
+test('Continue handles Continuation with proper first ordinals and I', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const pronoun = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'c3', type: 'continue', target: { exactText: 'his left and turn' }, text: 'I decide to wave.' },
+    ],
+  })
+  assert.equal(pronoun.ok && pronoun.afterText, 'He looks to his left and turn, I decide to wave.')
+})
+
+test('Continue replaces a closing wrapper that belongs to the source', () => {
+  const wrapped = 'She said, “He looks to his left and turn.”'
+  const paragraphsW = [{ id: 'p', ordinal: 1, lineIndex: 0, text: wrapped }]
+  const result = executeEditPlan(wrapped, paragraphsW, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      {
+        id: 'w1',
+        type: 'continue',
+        target: { exactText: 'his left and turn' },
+        text: 'and then he begins to shout.',
+      },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'She said, “He looks to his left and turn, and then he begins to shout.”')
+})
+
+test('Continue inherits question mark and paired punctuation from the source', () => {
+  const text = 'He looks to his left and turn?'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const questioned = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      {
+        id: 'q1',
+        type: 'continue',
+        target: { exactText: 'his left and turn' },
+        text: 'And then he begins to shout.',
+      },
+    ],
+  })
+  assert.equal(questioned.ok && questioned.afterText, 'He looks to his left and turn, and then he begins to shout?')
+  const exclaimed = executeEditPlan('He looks to his left and turn!', [{ id: 'p', ordinal: 1, lineIndex: 0, text: 'He looks to his left and turn!' }], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'e1', type: 'continue', target: { exactText: 'his left and turn' }, text: 'And then he begins to shout.' },
+    ],
+  })
+  assert.equal(exclaimed.ok && exclaimed.afterText, 'He looks to his left and turn, and then he begins to shout!')
+})
+
+test('Continue handles combinations of ? ! … at the end of X', () => {
+  const base = 'He looks to his left and turn'
+  const pass = (terminator: string, continuation: string, expected: string) => {
+    const text = base + terminator
+    const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'continue',
+      operations: [{ id: 'comb', type: 'continue', target: { exactText: 'his left and turn' }, text: continuation }],
+    })
+    assert.equal(result.ok && result.afterText, expected)
+  }
+  pass('!?', 'And then he begins to shout.', 'He looks to his left and turn, and then he begins to shout!?')
+  pass('?!', 'And then he begins to shout.', 'He looks to his left and turn, and then he begins to shout?!')
+  pass('!!', 'And then he begins to shout.', 'He looks to his left and turn, and then he begins to shout!!')
+  pass('…', 'And then he begins to shout.', 'He looks to his left and turn, and then he begins to shout…')
+})
+
+test('Continue replaces the closing terminator after X instead of appending to it', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'replace-end', type: 'continue', target: { exactText: 'his left and turn' }, text: 'And then he shouts.' },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'He looks to his left and turn, and then he shouts.')
+})
+
+test('Continue accepts trailing punctuation in X indistinguished from an ordinary target', () => {
+  const before = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: before }]
+  const result = executeEditPlan(before, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'period-included', type: 'continue', target: { exactText: 'his left and turn.' }, text: 'And then he shouts.' },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'He looks to his left and turn, and then he shouts.')
+})
+
+test('Continue surfaces target-not-found on miss', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [
+      { id: 'miss', type: 'continue', target: { exactText: 'totally unrelated text' }, text: 'And then he shouts.' },
+    ],
+  })
+  assert.equal(result.ok, false)
+  if (!result.ok) assert.match(result.reason, /target was not found|continue source/i)
+})
+
+test('Continue drops leading continuation filler words and attached punctuation', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const make = (id: string, payload: string) => executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id, type: 'continue', target: { exactText: 'his left and turn' }, text: payload }],
+  })
+  const withComma = make('filler-1', 'the phrase, and then he begins to shout.')
+  assert.equal(withComma.ok && withComma.afterText, 'He looks to his left and turn, and then he begins to shout.')
+  const withoutPunctuation = make('filler-2', 'this sentence and then he begins to shout.')
+  assert.equal(withoutPunctuation.ok && withoutPunctuation.afterText, 'He looks to his left and turn, and then he begins to shout.')
+  const sentenceHelper = make('filler-3', 'the word; no one believes him.')
+  assert.equal(sentenceHelper.ok && sentenceHelper.afterText, 'He looks to his left and turn, no one believes him.')
+})
+
+test('Continue rejects a continuation that is nothing but filler words', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id: 'filler-only', type: 'continue', target: { exactText: 'his left and turn' }, text: 'the phrase' }],
+  })
+  assert.equal(result.ok, false)
+  if (!result.ok) assert.match(result.reason, /target was not found/i)
+})
+
+test('Continue keeps wrapping quotes (and other enclosures) around the continuation verbatim', () => {
+  const text = 'He looks to his left and turn.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const make = (id: string, payload: string) => executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id, type: 'continue', target: { exactText: 'his left and turn' }, text: payload }],
+  })
+  const pretty = make('quote-1', '\'only then would you know.\'')
+  assert.equal(pretty.ok && pretty.afterText, 'He looks to his left and turn, \'only then would you know.\'')
+  const fillerThenQuote = make('quote-2', "the phrase 'only then would you know.'")
+  assert.equal(fillerThenQuote.ok && fillerThenQuote.afterText, 'He looks to his left and turn, \'only then would you know.\'')
+  const quoteFiller = make('quote-3', "'the phrase, only then would you know.'")
+  assert.equal(quoteFiller.ok && quoteFiller.afterText, 'He looks to his left and turn, \'the phrase, only then would you know.\'')
+  const curlyDouble = make('quote-4', '“Only then would you know.”')
+  assert.equal(curlyDouble.ok && curlyDouble.afterText, 'He looks to his left and turn, “Only then would you know.”')
+  const paren = make('quote-5', '(“Only then would you know.”)')
+  assert.equal(paren.ok && paren.afterText, 'He looks to his left and turn, (“Only then would you know.”)')
+  const bracket = make('quote-6', '[Only then would you know.]')
+  assert.equal(bracket.ok && bracket.afterText, 'He looks to his left and turn, [Only then would you know.]')
+})
+
+test('Continue keeps the casing of a quoted utterance and does not append an extra terminator', () => {
+  const text = 'The model yielded buried in his hair.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const run = (id: string, continuation: string) => executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id, type: 'continue', target: { exactText: 'buried in his hair' }, text: continuation }],
+  })
+  const straight = run('case-1', '"Oh my love, I love you so much."')
+  assert.equal(straight.ok && straight.afterText, 'The model yielded buried in his hair, "Oh my love, I love you so much."')
+  const openEnclosure = run('case-2', '“Oh my love, I love you so much.”')
+  assert.equal(openEnclosure.ok && openEnclosure.afterText, 'The model yielded buried in his hair, “Oh my love, I love you so much.”')
+  const dictatedLowercase = run('case-3', '“oh my love, I love you so much.”')
+  assert.equal(dictatedLowercase.ok && dictatedLowercase.afterText, 'The model yielded buried in his hair, “oh my love, I love you so much.”')
+  const curlySingle = run('case-4', '‘And then he shouts.’')
+  assert.equal(curlySingle.ok && curlySingle.afterText, 'The model yielded buried in his hair, ‘And then he shouts.’')
+})
+
+test('Continue inherits the source terminator INSIDE an enclosed continuation', () => {
+  const before = 'The model yielded buried in his hair?'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: before }]
+  const run = (id: string, continuation: string) => executeEditPlan(before, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id, type: 'continue', target: { exactText: 'buried in his hair' }, text: continuation }],
+  })
+  const withTerminator = run('both', '“I love you.”')
+  assert.equal(withTerminator.ok && withTerminator.afterText, 'The model yielded buried in his hair, “I love you?”')
+  const bare = run('bare-quote', '“Then I love you”')
+  assert.equal(bare.ok && bare.afterText, 'The model yielded buried in his hair, “Then I love you?”')
+  const paren = run('paren', '(“I love you.”)')
+  assert.equal(paren.ok && paren.afterText, 'The model yielded buried in his hair, (“I love you?”)')
+  const bracket = run('bracket', '[Then I love you.]')
+  assert.equal(bracket.ok && bracket.afterText, 'The model yielded buried in his hair, [Then I love you?]')
+  const single = run('single', '\'And then he shouts.\'')
+  assert.equal(single.ok && single.afterText, 'The model yielded buried in his hair, \'And then he shouts?\'')
+})
+
+test('Continue inherits ? ! … combinations inside an enclosed continuation', () => {
+  const base = 'The model yielded buried in his hair'
+  const run = (terminator: string, continuation: string) => executeEditPlan(base + terminator, [{ id: 'p', ordinal: 1, lineIndex: 0, text: base + terminator }], 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id: terminator, type: 'continue', target: { exactText: 'buried in his hair' }, text: continuation }],
+  })
+  const merged = (terminator: string, continuation: string) => {
+    const result = run(terminator, continuation)
+    return result.ok ? result.afterText : `ERROR ${result.reason}`
+  }
+  assert.equal(merged('!', '“I love you.”'), 'The model yielded buried in his hair, “I love you!”')
+  assert.equal(merged('?!', '“I love you.”'), 'The model yielded buried in his hair, “I love you?!”')
+  assert.equal(merged('!?', '“I love you.”'), 'The model yielded buried in his hair, “I love you!?”')
+  assert.equal(merged('!!', '“I love you.”'), 'The model yielded buried in his hair, “I love you!!”')
+  assert.equal(merged('…', '“I love you.”'), 'The model yielded buried in his hair, “I love you…”')
+  assert.equal(merged('!', '(“Then I love you”)'), 'The model yielded buried in his hair, (“Then I love you!”)')
+})
+
+test('Continue rewrites a terminal comma inside the enclosure to a period with no period outside', () => {
+  const before = 'The model yielded buried in his hair.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: before }]
+  const run = (id: string, continuation: string) => executeEditPlan(before, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id, type: 'continue', target: { exactText: 'buried in his hair' }, text: continuation }],
+  })
+  const withQuote = run('comma-1', '“I love you,”')
+  assert.equal(withQuote.ok && withQuote.afterText, 'The model yielded buried in his hair, “I love you.”')
+  const withParen = run('comma-2', '(“I love you,”)')
+  assert.equal(withParen.ok && withParen.afterText, 'The model yielded buried in his hair, (“I love you.”)')
+  const withStraightSingle = run('comma-3', '\'Then I love you,\'')
+  assert.equal(withStraightSingle.ok && withStraightSingle.afterText, 'The model yielded buried in his hair, \'Then I love you.\'')
+  const withStraightDouble = run('comma-4', '"Then I love you,"')
+  assert.equal(withStraightDouble.ok && withStraightDouble.afterText, 'The model yielded buried in his hair, "Then I love you."')
+})
+
+test('Continue switches a terminal comma inside the enclosure to the inherited source terminator', () => {
+  const before = 'The model yielded buried in his hair?'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: before }]
+  const run = (continuation: string) => executeEditPlan(before, paragraphs, 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'continue',
+    operations: [{ id: 'comma', type: 'continue', target: { exactText: 'buried in his hair' }, text: continuation }],
+  })
+  const withTerminator = run('“I love you,”')
+  assert.equal(withTerminator.ok && withTerminator.afterText, 'The model yielded buried in his hair, “I love you?”')
+  const withInheritedTerminator = run('“Then I love you,”')
+  assert.equal(withInheritedTerminator.ok && withInheritedTerminator.afterText, 'The model yielded buried in his hair, “Then I love you?”')
+})
+
+test('join_sentence merges adjacent sentences using Continue-style terminator rules', () => {
+  const paragraphs = (text: string) => [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const join = (before: string, source: object, destination: object) => executeEditPlan(before, paragraphs(before), 1, {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'join',
+    operations: [{ id: 'join-1', type: 'join_sentence', target: source, destination }],
+  })
+  const joinText = (before: string, source: object, destination: object) => {
+    const result = join(before, source, destination)
+    return result.ok ? result.afterText : `ERROR ${result.reason}`
+  }
+  assert.equal(joinText('She accepts. She runs.', { exactText: 'She accepts.' }, { exactText: 'She runs.' }), 'She accepts, she runs.')
+  assert.equal(joinText('She accepts? She runs.', { exactText: 'She accepts?' }, { exactText: 'She runs.' }), 'She accepts, she runs?')
+  assert.equal(joinText('She accepts! She runs.', { exactText: 'She accepts!' }, { exactText: 'She runs.' }), 'She accepts, she runs!')
+  assert.equal(joinText('She accepts… She runs.', { exactText: 'She accepts…' }, { exactText: 'She runs.' }), 'She accepts, she runs…')
+  assert.equal(joinText('Why bother?! What now? I wait.', { exactText: 'Why bother?!' }, { exactText: 'What now?' }), 'Why bother, what now?! I wait.')
+  assert.equal(joinText('She says "I love it." She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }), 'She says "I love it," she runs.')
+  assert.equal(joinText("She says 'I love it.' She runs.", { exactText: 'I love it.' }, { exactText: 'She runs.' }), "She says 'I love it,' she runs.")
+  assert.equal(joinText('She says (I love it.) She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }), 'She says (I love it,) she runs.')
+  assert.equal(joinText('She says [I love it.] She runs.', { exactText: 'I love it.' }, { exactText: 'She runs.' }), 'She says [I love it,] she runs.')
+  assert.equal(joinText('She looks left. Erin runs now.', { exactText: 'She looks left.' }, { exactText: 'Erin runs now.' }), 'She looks left, erin runs now.')
+  assert.equal(joinText('She looks left. I run now.', { exactText: 'She looks left.' }, { exactText: 'I run now.' }), 'She looks left, I run now.')
+})
+
+test('join_sentence requires operands to be directly next to each other', () => {
+  const paragraphs = (text: string) => [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const instruction = 'She accepts. He waits patiently. She runs.'
+  const text = instruction
+  const first = executeEditPlan(text, paragraphs(text), 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'join',
+    operations: [{ id: 'gap', type: 'join_sentence', target: { exactText: 'She accepts.' }, destination: { exactText: 'She runs.' } }],
+  })
+  assert.equal(first.ok, false)
+  if (!first.ok) assert.match(first.reason, /directly next to each other/i)
+  const reversed = executeEditPlan('She accepts. She runs.', paragraphs('She accepts. She runs.'), 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'join',
+    operations: [{ id: 'overlap', type: 'join_sentence', target: { exactText: 'She accepts. She runs.' }, destination: { exactText: 'She runs.' } }],
+  })
+  assert.equal(reversed.ok, false)
+  if (!reversed.ok) assert.match(reversed.reason, /overlap/i)
+})
+
+test('join_sentence works with sentenceOrdinal targeting', () => {
+  const text = 'I went there, and then I left. She told me not to go. He laughed.'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]
+  const result = executeEditPlan(text, paragraphs, 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'join',
+    operations: [{ id: 'ord', type: 'join_sentence', target: { sentenceOrdinal: 1 }, destination: { sentenceOrdinal: 2 } }],
+  })
+  assert.equal(result.ok && result.afterText, 'I went there, and then I left, she told me not to go. He laughed.')
 })

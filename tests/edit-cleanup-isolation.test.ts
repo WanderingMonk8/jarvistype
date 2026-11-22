@@ -42,6 +42,87 @@ function execute(
  * skips per-operation casing, boundary spacing, and separator trimming; the
  * universal column is what the deterministic cleanup can recover on its own.
  */
+test('fixes a saving with comma inside a quotation without touching dialogue capitalization', () => {
+  const draft = 'I pulled off from the kiss, still gazing into her eyes with the same soft tenderness. “Baby, taste me with the same hunger that I did for you.”'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: draft }]
+  const result = executeEditPlan(
+    draft,
+    paragraphs,
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'replace the period after tenderness with a comma',
+      operations: [
+        {
+          id: 'replace-period',
+          type: 'replace',
+          target: { exactText: 'tenderness. “Baby' },
+          text: 'tenderness, “Baby',
+        },
+      ],
+    },
+    [],
+    { skipSentenceRepair: false },
+  )
+  if (!result.ok) assert.fail(result.reason)
+  assert.equal(result.afterText, 'I pulled off from the kiss, still gazing into her eyes with the same soft tenderness, “Baby, taste me with the same hunger that I did for you.”')
+})
+
+test('fixes a quoted dialogue opening after a period-to-comma replacement', () => {
+  const draft = 'He grabbed her hand. “Listen to me.”'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: draft }]
+  const result = executeEditPlan(
+    draft,
+    paragraphs,
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'replace the period after hand with a comma',
+      operations: [
+        {
+          id: 'replace-period',
+          type: 'replace',
+          target: { exactText: 'hand.', occurrence: 1 },
+          text: 'hand,',
+        },
+      ],
+    },
+    [],
+    { skipSentenceRepair: false },
+  )
+  if (!result.ok) assert.fail(result.reason)
+  assert.equal(result.afterText, 'He grabbed her hand, “Listen to me.”')
+})
+
+test('fixes a straight-quoted dialogue opening after a period-to-comma replacement', () => {
+  const draft = 'He grabbed her hand. "Listen to me."'
+  const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: draft }]
+  const result = executeEditPlan(
+    draft,
+    paragraphs,
+    1,
+    {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'replace the period after hand with a comma',
+      operations: [
+        {
+          id: 'replace-period',
+          type: 'replace',
+          target: { exactText: 'hand.', occurrence: 1 },
+          text: 'hand,',
+        },
+      ],
+    },
+    [],
+    { skipSentenceRepair: false },
+  )
+  if (!result.ok) assert.fail(result.reason)
+  assert.equal(result.afterText, 'He grabbed her hand, "Listen to me."')
+})
+
 test('universal cleanup alone repairs text-level artifacts from raw edits', () => {
   const cases: Array<{ name: string; text: string; operation: unknown; expected: string }> = [
     {

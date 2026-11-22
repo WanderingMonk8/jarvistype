@@ -1,5 +1,6 @@
 import { MAX_DRAFT_CHARACTERS, reconcileParagraphs, type DraftParagraph } from './draft-session'
 import { speechPhoneticKey } from './phonetics'
+import { WRAPPER_FAMILIES, isWrapperOpener, isWrapperCloser, WRAPPER_OPENERS_REGEX, PUNCTUATION_CLOSERS_REGEX } from './wrapper-families'
 
 export const EDIT_SCHEMA_VERSION = 2 as const
 export const MAX_EDIT_OPERATIONS = 8
@@ -15,9 +16,12 @@ export type EditOperationType =
   | 'prepend'
   | 'case'
   | 'split'
+  | 'split_sentence'
   | 'join_next'
+  | 'join_sentence'
   | 'move_before'
   | 'move_after'
+  | 'continue'
 
 export type PunctuationTarget =
   | 'period'
@@ -53,6 +57,9 @@ export interface EditTarget {
   relativeToText?: string
   /** Internal intent: punctuation is ignored for identifying this text target. */
   ignorePunctuationForMatch?: boolean
+  /** Absolute draft span — used for deterministic, plan-time-resolved operation pairs. Never fuzzy-matched. */
+  absoluteStart?: number
+  absoluteEnd?: number
 }
 
 export interface EditOperation {
@@ -63,6 +70,8 @@ export interface EditOperation {
   caseMode?: 'capitalize' | 'uppercase' | 'lowercase'
   destination?: EditTarget
   includeTrailingPunctuation?: boolean
+  /** Split sentence: place the join at Y's start (`before`) or Y's end (`after`). */
+  direction?: 'before' | 'after'
 }
 
 export interface EditPlan {
@@ -127,7 +136,14 @@ export function executeSequentialEditPlan(
     const nextOperation = plan.operations[index + 1]
     const nextQuotePart = nextOperation?.id.match(/^(.*)deterministic-(open|close)-quotation-range$/u)
     if (quotePart && nextQuotePart && quotePart[1] === nextQuotePart[1] && quotePart[2] !== nextQuotePart[2]) {
-      const checked = executeEditPlan(text, currentParagraphs, currentVersion, { ...plan, operations: [operation, nextOperation!] }, protectedCasingTerms)
+      const checked = executeEditPlan(
+        text,
+        currentParagraphs,
+        currentVersion,
+        { ...plan, operations: [operation, nextOperation!] },
+        protectedCasingTerms,
+        { skipSentenceRepair: true },
+      )
       if (!checked.ok) {
         failedCommand = { index: index + 1, operationId: operation.id, reason: checked.reason }
         break
@@ -152,10 +168,11 @@ export function executeSequentialEditPlan(
       ...plan,
       operations: [currentOperation],
     }, protectedCasingTerms, {
-      quotationWrap: (operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))) ||
-        (operation.type === 'insert_before' && /^[“‘"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_after' && /^[”’"']$/u.test(candidate.text ?? ''))),
+      skipSentenceRepair: true,
+      quotationWrap: (operation.type === 'insert_after' && isWrapperCloser(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_before' && isWrapperOpener(candidate.text ?? ''))) ||
+        (operation.type === 'insert_before' && isWrapperOpener(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_after' && isWrapperCloser(candidate.text ?? ''))),
     })
     if (!result.ok) {
       failedCommand = { index: index + 1, operationId: operation.id, reason: result.reason }
@@ -177,6 +194,9 @@ export function executeSequentialEditPlan(
     }
     text = result.afterText
   }
+  const final = repairParagraphBoundaries(text)
+  if (!final.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+  text = final.text
   if (!operations.length || text === cleanText)
     return { ok: false, reason: failedCommand ? `Command ${failedCommand.index}: ${failedCommand.reason}` : 'edit would not change the draft' }
   return {
@@ -216,6 +236,12 @@ export interface EditExecutionOptions {
    * against the universal deterministic cleanup.
    */
   skipOperationFormatting?: boolean
+  /**
+   * Internal switch used by the sequential executor for intermediate steps:
+   * skip the end-of-plan sentence repair so later operations see the exact
+   * intermediate text; the executor applies the same repair once at the end.
+   */
+  skipSentenceRepair?: boolean
 }
 
 export function executeEditPlan(
@@ -230,6 +256,45 @@ export function executeEditPlan(
   if (plan.draftVersion !== currentVersion) return { ok: false, reason: 'stale draft version' }
   if (plan.operations.length === 1 && plan.operations[0]?.type === 'delete_range')
     return executeRangeDeletion(cleanText, paragraphs, plan.operations[0], protectedCasingTerms)
+  const inlineSplits = plan.operations.filter(isSplitSentenceOperation)
+  if (inlineSplits.length) {
+    if (inlineSplits.length !== plan.operations.length || inlineSplits.length > 1)
+      return { ok: false, reason: 'a split must be the only operation in its edit plan' }
+    return executeSplitSentence(
+      cleanText,
+      paragraphs,
+      inlineSplits[0]!,
+      protectedCasingTerms,
+      formatText,
+      options.skipSentenceRepair === true,
+    )
+  }
+  const inlineJoins = plan.operations.filter(isJoinSentenceOperation)
+  if (inlineJoins.length) {
+    if (inlineJoins.length !== plan.operations.length || inlineJoins.length > 1)
+      return { ok: false, reason: 'a join must be the only operation in its edit plan' }
+    return executeJoinSentence(
+      cleanText,
+      paragraphs,
+      inlineJoins[0]!,
+      protectedCasingTerms,
+      formatText,
+      options.skipSentenceRepair === true,
+    )
+  }
+  const inlineContinue = plan.operations.filter(isContinueSentenceOperation)
+  if (inlineContinue.length) {
+    if (inlineContinue.length !== plan.operations.length || inlineContinue.length > 1)
+      return { ok: false, reason: 'a continue must be the only operation in its edit plan' }
+    return executeContinueSentence(
+      cleanText,
+      paragraphs,
+      inlineContinue[0]!,
+      protectedCasingTerms,
+      formatText,
+      options.skipSentenceRepair === true,
+    )
+  }
   const inlineMoves = plan.operations.filter(isInlineMoveOperation)
   if (inlineMoves.length) {
     if (inlineMoves.length !== plan.operations.length || inlineMoves.length > 1)
@@ -240,6 +305,7 @@ export function executeEditPlan(
       inlineMoves[0]!,
       protectedCasingTerms,
       formatText,
+      options.skipSentenceRepair === true,
     )
   }
   const structural = plan.operations.filter(isStructuralOperation)
@@ -256,10 +322,10 @@ export function executeEditPlan(
       operation,
       protectedCasingTerms,
       formatText,
-      options.quotationWrap === true || (operation.type === 'insert_after' && /^[”’"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_before' && /^[“‘"']$/u.test(candidate.text ?? ''))) ||
-        (operation.type === 'insert_before' && /^[“‘"']$/u.test(operation.text ?? '') &&
-        plan.operations.some((candidate) => candidate.type === 'insert_after' && /^[”’"']$/u.test(candidate.text ?? ''))),
+      options.quotationWrap === true || (operation.type === 'insert_after' && isWrapperCloser(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_before' && isWrapperOpener(candidate.text ?? ''))) ||
+        (operation.type === 'insert_before' && isWrapperOpener(operation.text ?? '') &&
+        plan.operations.some((candidate) => candidate.type === 'insert_after' && isWrapperCloser(candidate.text ?? ''))),
     )
     if (typeof patch === 'string') return { ok: false, reason: patch }
     if (
@@ -307,8 +373,14 @@ export function executeEditPlan(
   }
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  }
+  if (formatText && options.skipSentenceRepair !== true) {
+    const repaired = repairParagraphBoundaries(afterText)
+    if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+    afterText = repaired.text
+  }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
   return {
     ok: true,
@@ -338,6 +410,7 @@ function parseOperation(value: unknown): EditOperation | null {
     'caseMode',
     'destination',
     'includeTrailingPunctuation',
+    'direction',
   ])
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null
   const type = value.type
@@ -351,9 +424,12 @@ function parseOperation(value: unknown): EditOperation | null {
     type !== 'prepend' &&
     type !== 'case' &&
     type !== 'split' &&
+    type !== 'split_sentence' &&
     type !== 'join_next' &&
+    type !== 'join_sentence' &&
     type !== 'move_before' &&
-    type !== 'move_after'
+    type !== 'move_after' &&
+    type !== 'continue'
   )
     return null
   const target = parseTarget(value.target)
@@ -374,6 +450,19 @@ function parseOperation(value: unknown): EditOperation | null {
       return null
     if (text !== undefined || destination !== undefined || includeTrailingPunctuation !== undefined)
       return null
+  } else if (type === 'join_sentence') {
+    if (text !== undefined || caseMode !== undefined) return null
+    if (destination === undefined || !destination) return null
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null
+    if (target.scope !== undefined || destination.scope !== undefined) return null
+    if (includeTrailingPunctuation !== undefined) return null
+  } else if (type === 'split_sentence') {
+    if (text !== undefined || caseMode !== undefined) return null
+    if (destination === undefined || !destination) return null
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null
+    if (target.scope !== undefined || destination.scope !== undefined) return null
+    if (includeTrailingPunctuation !== undefined) return null
+    if (value.direction !== 'before' && value.direction !== 'after') return null
   } else if (type === 'delete' || type === 'split' || type === 'join_next') {
     if (text !== undefined || caseMode !== undefined) return null
     if (destination !== undefined) return null
@@ -418,6 +507,7 @@ function parseOperation(value: unknown): EditOperation | null {
     ...(typeof caseMode === 'string' ? { caseMode } : {}),
     ...(destination ? { destination } : {}),
     ...(includeTrailingPunctuation === true ? { includeTrailingPunctuation: true } : {}),
+    ...(type === 'split_sentence' && (value.direction === 'before' || value.direction === 'after') ? { direction: value.direction } : {}),
   }
 }
 
@@ -444,12 +534,27 @@ function parseTarget(value: Record<string, unknown>): EditTarget | null {
     'relativePosition',
     'relativeToText',
     'ignorePunctuationForMatch',
+    'absoluteStart',
+    'absoluteEnd',
   ])
   if (Object.keys(value).some((key) => !allowed.has(key))) return null
   const target: EditTarget = {}
   if (value.ignorePunctuationForMatch !== undefined) {
     if (typeof value.ignorePunctuationForMatch !== 'boolean') return null
     target.ignorePunctuationForMatch = value.ignorePunctuationForMatch
+  }
+  if (value.absoluteStart !== undefined) {
+    if (!isNonNegativeInteger(value.absoluteStart)) return null
+    target.absoluteStart = value.absoluteStart
+  }
+  if (value.absoluteEnd !== undefined) {
+    if (!isNonNegativeInteger(value.absoluteEnd)) return null
+    target.absoluteEnd = value.absoluteEnd
+    }
+  if (target.absoluteStart !== undefined || target.absoluteEnd !== undefined) {
+    if (target.absoluteStart === undefined || target.absoluteEnd === undefined) return null
+    if (target.absoluteStart >= target.absoluteEnd) return null
+    if (target.paragraphId !== undefined || target.paragraphOrdinal !== undefined || target.sentenceOrdinal !== undefined || target.sentenceFromEnd !== undefined || target.punctuation !== undefined || target.relativeToText !== undefined || target.relativePosition !== undefined || target.exactText !== undefined || target.approximateText !== undefined) return null
   }
   if (value.paragraphId !== undefined) {
     if (!isIdentifier(value.paragraphId)) return null
@@ -643,6 +748,12 @@ function resolveOperation(
     if (typeof match === 'string') return match
     start = match.start
     end = match.end
+  } else if (operation.target.absoluteStart !== undefined) {
+    const absoluteStart = operation.target.absoluteStart
+    const absoluteEnd = operation.target.absoluteEnd!
+    if (absoluteStart >= absoluteEnd || absoluteEnd > cleanText.length) return `${operation.type} absolute span was not found`
+    start = absoluteStart
+    end = absoluteEnd
   } else if (operation.target.approximateText !== undefined) {
     const match = findApproximateMatch(
       cleanText,
@@ -723,7 +834,7 @@ function resolveOperation(
   }
   const insertionText = operation.text ?? ''
   if (operation.type === 'insert_before') {
-    if (formatText && quotationWrap && /^[“‘"']$/u.test(insertionText)) {
+    if (formatText && quotationWrap && isWrapperOpener(insertionText)) {
       const attachedOpening = cleanText.slice(range.start, start).match(/[\p{P}]+$/u)?.[0] ?? ''
       const boundary = start - attachedOpening.length
       if (attachedOpening && (boundary === range.start || /\s/u.test(cleanText[boundary - 1] ?? '')))
@@ -777,11 +888,12 @@ function resolveOperation(
     if (following) {
       const wordStart = end + following[1]!.length + following[2]!.length
       const terminal = /[.!?…][”’"')\]]*\s*$/u.test(replacement)
-      const isPriorOpening = isSentenceOpeningAt(cleanText, wordStart)
+      const OpensWithQuotation = /[“‘"']/u.test(following[2]!)
+      const isPriorOpening = !OpensWithQuotation && isSentenceOpeningAt(cleanText, wordStart)
       const lower = !terminal && isPriorOpening
         ? lowercaseOrdinarySentenceOpening(cleanText, wordStart, cleanText, wordStart, protectedCasingTerms)
         : null
-      if (terminal && /\p{Ll}/u.test(following[3]!)) {
+      if (terminal && /\p{Ll}/u.test(following[3]!) && !OpensWithQuotation) {
         const prefix = cleanText.slice(end, wordStart)
         const letter = cleanText[wordStart]!
         return { operation, start, end: wordStart + 1, replacement: `${replacement}${prefix}${letter.toLocaleUpperCase()}`, paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset(cleanText, start) }
@@ -859,7 +971,8 @@ function hasInlineSelector(target: EditTarget): boolean {
     target.approximateText !== undefined ||
     target.punctuation !== undefined ||
     target.sentenceOrdinal !== undefined ||
-    target.sentenceFromEnd !== undefined
+    target.sentenceFromEnd !== undefined ||
+    target.absoluteStart !== undefined
   )
 }
 
@@ -909,15 +1022,18 @@ function executeRangeDeletion(
   let right = text.slice(deletionEnd).replace(/^\s+/u, '')
   if (/[.!?…][”’"')\]]*$/u.test(left)) right = right.replace(/^[.!?…]+\s*/u, '')
   else if (/[,;:—–-]$/u.test(left)) right = right.replace(/^[,;:—–-]+\s*/u, '')
-  if (right && /[.!?…][”’"')\]]*$/u.test(left))
+  if (right && (!left || /[.!?…][”’"')\]]*$/u.test(left)))
     right = capitalizeReplacementAtSentenceOpening(left, left.length, right)
   else if (right && /[,;:—–-][”’"')\]]*$/u.test(left))
     right = formatInsertionCasing(left, left.length, right, protectedCasingTerms)
   const spacing = left && right && !/^[,.;:!?…)}\]”’]/u.test(right) ? ' ' : ''
-  const afterText = `${left}${spacing}${right}`
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(text))
+  const after = `${left}${spacing}${right}`
+  if (countFloatingWrapperMarks(after) > countFloatingWrapperMarks(text))
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
-  if (afterText === text) return { ok: false, reason: 'edit would not change the draft' }
+  if (after === text) return { ok: false, reason: 'edit would not change the draft' }
+  const repaired = repairParagraphBoundaries(after)
+  if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+  const afterText = repaired.text
   return {
     ok: true,
     afterText,
@@ -933,6 +1049,7 @@ function executeInlineMove(
   operation: InlineMoveOperation,
   protectedCasingTerms: readonly string[],
   formatText: boolean,
+  skipSentenceRepair = false,
 ): EditPipelineResult {
   const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'move source')
   if (typeof source === 'string') return { ok: false, reason: source }
@@ -987,7 +1104,7 @@ function executeInlineMove(
   // sentence's punctuation, not on the far side of its separating space.
   if (formatText && operation.type === 'move_before' &&
       (operation.destination.sentenceOrdinal !== undefined || operation.destination.sentenceFromEnd !== undefined) &&
-      operation.target.punctuation === 'quote' && /^[”"]$/u.test(movedText) &&
+      operation.target.punctuation === 'quote' && isWrapperCloser(movedText) &&
       source.start > destination.start) {
     while (originalInsertionPoint > destination.scopeStart && /[ \t]/u.test(cleanText[originalInsertionPoint - 1] ?? ''))
       originalInsertionPoint -= 1
@@ -1003,6 +1120,7 @@ function executeInlineMove(
     formatText &&
     operation.type === 'move_before' &&
     isSentenceOpeningAt(withoutSource, insertionPoint) &&
+    isContinuingInsertion(formattedMovedText) &&
     /\p{L}/u.test(formattedMovedText)
       ? lowercaseOrdinarySentenceOpening(
           withoutSource,
@@ -1017,11 +1135,17 @@ function executeInlineMove(
   const insertion = formatText
     ? addBoundarySpacing(withoutSource, insertionPoint, formattedMovedText)
     : formattedMovedText
-  const afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`
+  let afterText = `${withoutSource.slice(0, insertionPoint)}${insertion}${withoutSource.slice(insertionPoint)}`
   if (afterText.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  }
+  if (formatText && !skipSentenceRepair) {
+    const repaired = repairParagraphBoundaries(afterText)
+    if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+    afterText = repaired.text
+  }
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
 
   return {
@@ -1041,6 +1165,327 @@ function executeInlineMove(
       ...new Set([source.paragraphOrdinal, destination.paragraphOrdinal]),
     ].sort((left, right) => left - right),
   }
+}
+
+const CONTINUATION_QUOTE_OPENERS = new Set(['“', '‘', '„', '‚', '‟', '«', '‹', '"', "'"])
+const CONTINUATION_OPENERS = new Set(['(', '[', '{', '《', '「', '『', '（', '［', '｛'])
+
+/** A continuation that begins with an enclosed utterance keeps its dictated casing: the
+ * first word inside the enclosure opens a new sentence, it is not a mid-sentence continuation. */
+function startsWithQuotedUtterance(text: string): boolean {
+  for (const character of text) {
+    if (/\s/u.test(character)) continue
+    return CONTINUATION_QUOTE_OPENERS.has(character) || CONTINUATION_OPENERS.has(character)
+  }
+  return false
+}
+
+const CONTINUATION_HELPER = /^(?:the|this|that|a|an)\s+(?:phrases?|sentences?|words?|clauses?|parts?|fragments?)(?=$|\s|[,.:;–—-])(?:\s*[,.:;–—-]\s*|\s+)?/iu
+
+/**
+ * Drop the filler words that may introduce a spoken continuation, along with any
+ * attached punctuation — "the phrase, only then …" → "only then …". These words
+ * are part of the command grammar, not of the continuation text the user wants.
+ */
+export function stripContinuationHelper(text: string): string {
+  let current = text.trim()
+  for (let pass = 0; pass < 4; pass += 1) {
+    const match = CONTINUATION_HELPER.exec(current)
+    if (!match) return current
+    current = current.slice(match[0].length).trim()
+  }
+  return current
+}
+
+/**
+ * Continue (`"Continue X with Y"`) — join a phrase to a continuation inline.
+ * The matched source is kept verbatim, the sentence-ending punctuation at the
+ * end of the source is replaced with `, continuation`, and the continuation's
+ * first ordinary word is lowered (names and "I" stay in their original casing).
+ * Closing wrappers (quotes, parens, brackets) are re-attached after the
+ * continuation.
+ */
+/**
+ * Capitalise/lower a continuation the way an inline rewrite would: an enclosed
+ * utterance keeps its dictated casing and pairing (quoted speech is a fresh
+ * sentence boundary), names and "I" stay, evidence decides the rest. The merged
+ * sentence inherits the source's exact `! ? …` terminator when one is supplied.
+ */
+function buildContinuation(
+  text: string,
+  protectedCasingTerms: readonly string[],
+  formatText: boolean,
+  inheritedTermination: string,
+): string {
+  const continuationCore = formatText
+    ? (() => {
+        if (startsWithQuotedUtterance(text)) return text
+        const lower = lowercaseOrdinarySentenceOpening(text, 0, text, 0, protectedCasingTerms)
+        return lower ? `${lower.text}${text.slice(lower.end)}` : text
+      })()
+    : text
+  // A terminal comma immediately before the closing marks is the British-quotation
+  // convention for closing the quoted sentence — it becomes a period, and the merged
+  // utterance must not grow a stray period outside the closing wrappers.
+  const normalizedCore = continuationCore.replace(/[,，](['"‘’“”)\]}»›`」』】》〉]+)$/u, '.$1')
+  // If the original source ended with ?, !, or …, the merged sentence keeps
+  // that exact terminator instead of adopting Y's: X? -> X, Y?   and   X! -> X, Y!
+  //   and   X… -> X, Y…. When Y itself is enclosed (quotes, parens, brackets,
+  // braces, …), the inherited run lands INSIDE the enclosure — X! -> X, "Y!" —
+  // replacing or supplying the final mark of the enclosed utterance.
+  const terminatorInsideClosers = /[\p{P}]['"‘’“”)\]}»›`」』】》〉]+$/u
+  if (inheritedTermination) {
+    const enclosed = /^([\s\S]*?)([.!?…]*)(['"‘’”)\]}»›`」』】》〉]+)$/u.exec(normalizedCore)
+    if (enclosed?.[1] && /[\p{L}\p{N}]/u.test(enclosed[1])) {
+      // "I love you." + X! -> "I love you!"      and      "Then I love you" + X! -> "Then I love you!"
+      return `${enclosed[1]}${inheritedTermination}${enclosed[3]}`
+    }
+    const stripped = normalizedCore.replace(/[\p{P}]+$/u, '')
+    return `${stripped}${inheritedTermination}`
+  }
+  if (terminatorInsideClosers.test(normalizedCore) || /[\p{P}]$/u.test(normalizedCore))
+    return normalizedCore
+  return `${normalizedCore}.`
+}
+
+function executeContinueSentence(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  operation: EditOperation & { type: 'continue' },
+  protectedCasingTerms: readonly string[],
+  formatText: boolean,
+  skipSentenceRepair = false,
+): EditPipelineResult {
+  const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'continue source')
+  if (typeof source === 'string') return { ok: false, reason: source }
+  const start = source.start
+  let end = source.end
+  // Trim trailing punctuation inside the matched span so X stops at the last word character.
+  while (end > start && /[.,;:!?…—–-]/u.test(cleanText[end - 1]!)) end -= 1
+  const text = stripContinuationHelper(operation.text ?? '')
+  if (!/[\p{L}\p{N}]/u.test(text)) return { ok: false, reason: 'continue target was not found' }
+  // Consume the terminal punctuation run and any closing wrapper that belongs
+  // to it; the merged sentence inherits the exact run.
+  const after = cleanText.slice(end)
+  const closeMatch = after.match(/^([.!?…—–-]+)([”’"')\]}]*)/u)
+  const raw = closeMatch?.[1] ?? ''
+  const closers = closeMatch?.[2] ?? ''
+  const consumed = (closeMatch?.[0].length ?? 0)
+  const inheritedTermination = /[!?…]/u.test(raw) ? raw : ''
+  const continuation = buildContinuation(text, protectedCasingTerms, formatText, inheritedTermination)
+    const afterText = `${cleanText.slice(0, end)}, ${continuation}${closers}${after.slice(consumed)}`
+  if (afterText.length > MAX_DRAFT_CHARACTERS)
+    return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  }
+  if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
+  if (formatText && !skipSentenceRepair) {
+    const repaired = repairParagraphBoundaries(afterText)
+    if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+    return finishInlineOperation(repaired.text, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
+  }
+  return finishInlineOperation(afterText, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
+}
+
+type JoinSentenceOperation = EditOperation & { type: 'join_sentence' }
+
+function isJoinSentenceOperation(operation: EditOperation): operation is JoinSentenceOperation {
+  return (
+    operation.type === 'join_sentence' &&
+    operation.destination !== undefined &&
+    hasInlineSelector(operation.target) &&
+    hasInlineSelector(operation.destination)
+  )
+}
+
+/**
+ * Join ("Join the sentence X with the sentence Y") — merge two adjacent inline
+ * spans into one sentence. The first operand's first word is preserved, its
+ * terminal punctuation is replaced by a comma, and the second operand's first
+ * ordinary word is lowercased (names and "I" stay). The merged sentence inherits
+ * the first operand's exact `! ? …` run when it ends with one — mirroring the
+ * Continue semantics. Closing wrappers that belonged to the first operand are
+ * re-attached right after the joining comma ("X." + Y. -> "X," Y.).
+ */
+function executeJoinSentence(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  operation: EditOperation & { type: 'join_sentence' },
+  protectedCasingTerms: readonly string[],
+  formatText: boolean,
+  skipSentenceRepair = false,
+): EditPipelineResult {
+  const destination = operation.destination
+  if (!destination) return { ok: false, reason: 'join destination was not provided' }
+  const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'join source')
+  if (typeof source === 'string') return { ok: false, reason: source }
+  const destinationResult = resolveTextTarget(cleanText, paragraphs, destination, 'join destination')
+  if (typeof destinationResult === 'string') return { ok: false, reason: destinationResult }
+  if (destinationResult.start >= destinationResult.end)
+    return { ok: false, reason: 'join destination was not found' }
+  // Carry any wrappers that belong to the destination backwards/forwards so the
+  // merged sentence keeps them in order (e.g. “Y.” stays wrapped as one unit).
+  let destinationStart = destinationResult.start
+  let destinationEnd = destinationResult.end
+  while (destinationStart > source.end && WRAPPER_OPENERS_REGEX.test(cleanText[destinationStart - 1]!)) destinationStart -= 1
+  while (destinationEnd < cleanText.length && /[)\]}”’]/u.test(cleanText[destinationEnd]!)) destinationEnd += 1
+  const start = source.start
+  let end = source.end
+  // Trim trailing non-word characters of X so it stops at the last letter/digit.
+  while (end > start && !/[\p{L}\p{N}’'‘-]/u.test(cleanText[end - 1]!)) end -= 1
+  if (end === start) return { ok: false, reason: 'join source was not found' }
+  if (end >= destinationStart) return { ok: false, reason: 'join operands overlap' }
+  const boundary = cleanText.slice(end, destinationStart)
+  // The boundary sits between X and Y and may include X's terminator followed by
+  // any closing wrappers on X; those belong to the first part, not to Y.
+  // Reject anything else — X and Y must be directly next to each other.
+  if (/[\p{L}\p{N}]/u.test(boundary))
+    return { ok: false, reason: 'join operands are not directly next to each other' }
+  const match = boundary.match(/^([,.!?;:…—–-]*)(["”’')\]}»›`」』】》〉]*)[ \t]*$/u)
+  const terminators = match?.[1] ?? ''
+  const closers = match?.[2] ?? ''
+  const continuation = buildContinuation(
+    cleanText.slice(destinationStart, destinationEnd),
+    protectedCasingTerms,
+    formatText,
+    /[!?…]/u.test(terminators) ? terminators : '',
+  )
+  const after = cleanText.slice(destinationEnd)
+  const afterText = `${cleanText.slice(0, end)},${closers} ${continuation}${after}`
+  if (afterText.length > MAX_DRAFT_CHARACTERS)
+    return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  }
+  if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
+  if (formatText && !skipSentenceRepair) {
+    const repaired = repairParagraphBoundaries(afterText)
+    if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+    return finishInlineOperation(repaired.text, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
+  }
+  return finishInlineOperation(afterText, paragraphs, operation, start, end, start, source.paragraphOrdinal, continuation)
+}
+
+type SplitSentenceOperation = EditOperation & { type: 'split_sentence'; direction: 'before' | 'after' }
+
+function isSplitSentenceOperation(operation: EditOperation): operation is SplitSentenceOperation {
+  return (
+    operation.type === 'split_sentence' &&
+    operation.destination !== undefined &&
+    operation.direction !== undefined
+  )
+}
+
+/**
+ * Split ("Split the sentence X before/after the word/phrase Y") — wrap a sentence in
+ * two sentences at the Y boundary. The first part keeps any closing wrapper attached to
+ * itself, the comma/semicolon at the joint turn into a period (other terminators are
+ * kept), the second part starts capitalized, and the sentence-end punctuation from the
+ * original X stays attached to the second part.
+ */
+function executeSplitSentence(
+  cleanText: string,
+  paragraphs: readonly DraftParagraph[],
+  operation: EditOperation & { type: 'split_sentence'; direction: 'before' | 'after' },
+  protectedCasingTerms: readonly string[],
+  formatText: boolean,
+  skipSentenceRepair = false,
+): EditPipelineResult {
+  const source = resolveTextTarget(cleanText, paragraphs, operation.target, 'split source')
+  if (typeof source === 'string') return { ok: false, reason: source }
+  const destination = operation.destination
+  if (!destination) return { ok: false, reason: 'split anchor was not provided' }
+  const destinationResult = resolveTextTarget(cleanText, paragraphs, destination, 'split anchor')
+  if (typeof destinationResult === 'string') return { ok: false, reason: destinationResult }
+  if (destinationResult.start >= destinationResult.end)
+    return { ok: false, reason: 'split anchor was not found' }
+  if (destinationResult.start < source.start || destinationResult.end > source.end)
+    return { ok: false, reason: 'split anchor is not part of the source sentence' }
+  const before = operation.direction === 'before'
+  const boundary = before ? destinationResult.start : destinationResult.end
+  const boundaryEdge = new Set(' .,;:!?…—–-”’"\'()]}»›`」』】》〉\t-')
+  const isBoundaryEdge = (index: number) => boundaryEdge.has(cleanText[index]!)
+  let end: number
+  let splitAt: number
+  if (before) {
+    end = boundary
+    while (end > source.start && isBoundaryEdge(end - 1)) end -= 1
+    splitAt = boundary
+  } else {
+    end = boundary
+    while (end > source.start && isBoundaryEdge(end - 1)) end -= 1
+    splitAt = boundary
+    while (splitAt < source.end && isBoundaryEdge(splitAt)) splitAt += 1
+  }
+  const joint = cleanText.slice(Math.min(end, splitAt), Math.max(end, splitAt))
+  const rest = cleanText.slice(splitAt, source.end).replace(/^\s+/u, '')
+  const jointMatch = joint.match(/^([,;.!?…—–-]+[ \t]*)?([”’"')\]}»›`」』】》〉]*)[ \t]*$/u)
+  const jointPunctuation = (jointMatch?.[1] ?? '').trim()
+  const jointTerminatorsSource = jointPunctuation.replace(/[,;]/gu, '.').replace(/[.]{2,}/u, '.')
+  const jointTerminators = jointTerminatorsSource.length ? jointTerminatorsSource : '.'
+  const jointClosers = jointMatch?.[2] ?? ''
+  const beforePart = cleanText.slice(0, end)
+  const restartOffset = beforePart.length + jointTerminators.length + jointClosers.length + 1
+  const afterPartRaw = `${beforePart}${jointTerminators}${jointClosers} ${rest}${cleanText.slice(source.end)}`
+  const afterText = formatText ? capitalizeExistingSentenceOpening(afterPartRaw, restartOffset) : afterPartRaw
+  if (afterText.length > MAX_DRAFT_CHARACTERS)
+    return { ok: false, reason: 'edited draft is too large' }
+  if (countFloatingWrapperMarks(afterText) > countFloatingWrapperMarks(cleanText)) {
+    return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  }
+  if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
+  const paragraphOrdinal = source.paragraphOrdinal
+  let repairedText = afterText
+  if (formatText && !skipSentenceRepair) {
+    const repaired = repairParagraphBoundaries(afterText)
+    if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+    repairedText = repaired.text
+  }
+  return {
+    ok: true,
+    afterText: repairedText,
+    operations: [
+      { ...operation, startOffset: source.start, endOffset: source.end, beforeText: cleanText.slice(source.start, source.end), afterText: repairedText, paragraphOrdinal },
+    ],
+    affectedParagraphOrdinals: [paragraphOrdinal],
+  }
+}
+
+function finishInlineOperation(
+  afterText: string,
+  paragraphs: readonly DraftParagraph[],
+  operation: EditOperation,
+  paragraphStart: number,
+  paragraphEnd: number,
+  startOffset: number,
+  paragraphOrdinal: number,
+  replacementText: string,
+): EditPipelineResult {
+  const affected = new Set<number>()
+  affected.add(paragraphOrdinal)
+  return {
+    ok: true,
+    afterText,
+    operations: [
+      {
+        ...operation,
+        startOffset,
+        endOffset: paragraphEnd,
+        beforeText: afterText.slice(paragraphStart, paragraphEnd),
+        afterText: replacementText,
+        paragraphOrdinal,
+      },
+    ],
+    affectedParagraphOrdinals: [...affected].sort((left, right) => left - right),
+  }
+}
+
+
+type ContinueSentenceOperation = EditOperation & { type: 'continue' }
+
+function isContinueSentenceOperation(operation: EditOperation): operation is ContinueSentenceOperation {
+  return operation.type === 'continue'
 }
 
 /** Sentence-part punctuation that becomes orphaned when the entire part is removed. */
@@ -1125,7 +1570,7 @@ function resolveSentenceTarget(
   return sentences[index] ?? 'sentence position was not found'
 }
 
-function findSentenceRanges(
+export function findSentenceRanges(
   text: string,
   rangeStart: number,
   rangeEnd: number,
@@ -1277,7 +1722,13 @@ function resolveTextTarget(
 
   let start: number
   let end: number
-  if (target.sentenceOrdinal !== undefined || target.sentenceFromEnd !== undefined) {
+  if (target.absoluteStart !== undefined) {
+    const absoluteStart = target.absoluteStart
+    const absoluteEnd = target.absoluteEnd!
+    if (absoluteStart >= absoluteEnd || absoluteEnd > cleanText.length) return `${label} absolute span was not found`
+    start = absoluteStart
+    end = absoluteEnd
+  } else if (target.sentenceOrdinal !== undefined || target.sentenceFromEnd !== undefined) {
     const match = resolveSentenceTarget(cleanText, range.start, range.end, target)
     if (typeof match === 'string') return `${label}: ${match}`
     start = match.start
@@ -1463,17 +1914,17 @@ function addBoundarySpacing(text: string, point: number, insertion: string): str
   if (
     left &&
     !/\s/.test(left) &&
-    (!/[([{“‘"']/.test(left) || leftIsClosingAsciiQuote) &&
+    (!WRAPPER_OPENERS_REGEX.test(left) || leftIsClosingAsciiQuote) &&
     !/^\s/.test(result) &&
-    !/^[,.;:!?)}\]”’"']/.test(result)
+    !PUNCTUATION_CLOSERS_REGEX.test(result.charAt(0))
   )
     result = ` ${result}`
   if (
     right &&
     !/\s/.test(right) &&
-    !/^[,.;:!?)}\]”’"']/.test(right) &&
+    !PUNCTUATION_CLOSERS_REGEX.test(right.charAt(0)) &&
     !/\s$/.test(result) &&
-    !/[([{“‘"']$/.test(result)
+    !WRAPPER_OPENERS_REGEX.test(result.charAt(result.length - 1))
   )
     result = `${result} `
   return result
@@ -1503,7 +1954,6 @@ function formatInsertionCasing(
 ): string {
   if (isSentenceOpeningAt(text, point))
     return capitalizeReplacementAtSentenceOpening(text, point, insertion)
-  if (!/[,;:—–-][ \t]*$/u.test(text.slice(0, point))) return insertion
   // Quoted speech can legitimately start a new sentence after a dialogue tag.
   if (/^[ \t]*[“‘"'([{]/u.test(insertion)) return insertion
   const first = insertion.match(/^[ \t]*(\p{Lu}[\p{L}\p{M}'’-]*)/u)?.[1]
@@ -1516,6 +1966,107 @@ function formatInsertionCasing(
     protectedCasingTerms,
   )
   return lowered ? `${lowered.text}${insertion.slice(lowered.end)}` : insertion
+}
+
+const OPENING_PUNCTUATION = new Set([
+  '(', '[', '{', '<',
+  '“', '‘', '‛', '„', '‚', '«', '‹', '„', '‚',
+  '\u0022', '\u0027', '`', '<',
+])
+
+function isSentenceOpeningPunctuation(character: string): boolean {
+  return OPENING_PUNCTUATION.has(character)
+}
+
+/**
+ * True when the sentence starts with a Markdown emphasis run (`*`, `**`, or `***`)
+ * that is paired with another run of the same length in the same paragraph. The
+ * pair may span sentence boundaries, and the marker may be either the opening or
+ * the closing run. Spacing inside the pair is tolerated because dictated emphasis
+ * commands insert spaces around the markers.
+ */
+function isPairedEmphasisMarker(text: string, start: number, end: number): boolean {
+  const sentence = text.slice(start, end)
+  const leading = sentence.match(/^[ \t]*/u)?.[0] ?? ''
+  const marker = sentence.slice(leading.length).match(/^\*+/u)?.[0]
+  if (!marker || marker.length > 3) return false
+  const markerStart = start + leading.length
+  const paragraphBreakBefore = text.lastIndexOf('\n\n', start)
+  const paragraphStart = paragraphBreakBefore === -1 ? 0 : paragraphBreakBefore + 2
+  const paragraphEnd = text.indexOf('\n\n', start)
+  const limit = paragraphEnd === -1 ? text.length : paragraphEnd
+  const paragraph = text.slice(paragraphStart, limit)
+  const pattern = new RegExp(`(?<!\\*)\\*{${marker.length}}(?!\\*)`, 'gu')
+  const runs: number[] = []
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(paragraph))) runs.push(paragraphStart + match.index)
+  const index = runs.indexOf(markerStart)
+  if (index === -1) return false
+  if (index % 2 === 1) return true
+  return index + 1 < runs.length
+}
+
+function repairParagraphBoundaries(paragraph: string): { ok: boolean; text: string } {
+  let text = paragraph
+  // Strip disallowed punctuation from the start of every sentence, then repair
+  // the capitalisation of whatever sentence remains.
+  for (let pass = 0; pass < 16; pass += 1) {
+    const ranges = findSentenceRanges(text, 0, text.length)
+    let mutated = false
+    for (const range of ranges) {
+      if (range.start >= text.length) continue
+      const slice = text.slice(range.start, range.end)
+      if (
+        !/[\p{L}\p{N}]/u.test(slice) &&
+        !isPairedEmphasisMarker(text, range.start, range.end)
+      ) {
+        // A sentence with no letters or digits at all is never a sentence;
+        // refuse to drop its characters.
+        return { ok: false, text: paragraph }
+      }
+      if (
+        /[\p{P}\p{S}]/u.test(text[range.start]!) &&
+        !isSentenceOpeningPunctuation(text[range.start]!) &&
+        !isPairedEmphasisMarker(text, range.start, range.end)
+      ) {
+        let cut = range.start
+        while (
+          cut < text.length &&
+          /[\p{P}\p{S}]/u.test(text[cut]!) &&
+          !isSentenceOpeningPunctuation(text[cut]!)
+        )
+          cut += 1
+        text = text.slice(0, range.start) + text.slice(cut)
+        text = capitalizeExistingSentenceOpening(text, range.start)
+        mutated = true
+        break
+      }
+    }
+    if (!mutated) break
+  }
+  // A sentence must not start with disallowed punctuation now.
+  for (const range of findSentenceRanges(text, 0, text.length)) {
+    const head = text[range.start]
+    if (
+      head &&
+      /[\p{P}\p{S}]/u.test(head) &&
+      !isSentenceOpeningPunctuation(head) &&
+      !isPairedEmphasisMarker(text, range.start, range.end)
+    )
+      return { ok: false, text: paragraph }
+  }
+  // A sentence may not end in a comma. Replace a trailing comma with a period
+  // at the end of the paragraph.
+  let tail = text.length - 1
+  while (tail >= 0 && /\s/u.test(text[tail]!)) tail -= 1
+  if (tail >= 0 && text[tail] === ',') {
+    text = text.slice(0, tail) + '.' + text.slice(tail + 1)
+  }
+  return { ok: true, text }
+}
+
+export function validateSentenceBoundaries(text: string): { ok: boolean; text: string } {
+  return repairParagraphBoundaries(text)
 }
 
 function isContinuingInsertion(value: string): boolean {
@@ -1743,11 +2294,14 @@ function executeStructuralPlan(
     })
   }
 
-  const afterText = working.map((paragraph) => paragraph.text).join('\n\n')
-  if (afterText.length > MAX_DRAFT_CHARACTERS)
+  const joined = working.map((paragraph) => paragraph.text).join('\n\n')
+  if (joined.length > MAX_DRAFT_CHARACTERS)
     return { ok: false, reason: 'edited draft is too large' }
-  if (countFloatingQuotationMarks(afterText) > countFloatingQuotationMarks(cleanText))
+  if (countFloatingWrapperMarks(joined) > countFloatingWrapperMarks(cleanText))
     return { ok: false, reason: QUOTATION_OUTSIDE_PARAGRAPH_REASON }
+  const repaired = repairParagraphBoundaries(joined)
+  if (!repaired.ok) return { ok: false, reason: 'edit would break a sentence boundary' }
+  const afterText = repaired.text
   if (afterText === cleanText) return { ok: false, reason: 'edit would not change the draft' }
   return {
     ok: true,
@@ -1776,25 +2330,32 @@ function resolveStructuralParagraph(
   return matches[0]!
 }
 
-function paragraphRange(text: string, paragraph: DraftParagraph): { start: number; end: number } {
+export function paragraphRange(text: string, paragraph: DraftParagraph): { start: number; end: number } {
   const lines = text.split('\n')
   let start = 0
   for (let index = 0; index < paragraph.lineIndex; index += 1) start += lines[index]!.length + 1
   return { start, end: start + lines[paragraph.lineIndex]!.length }
 }
 
-const QUOTATION_OUTSIDE_PARAGRAPH_REASON = 'quotation mark would fall outside the paragraph'
+const WRAPPER_OUTSIDE_PARAGRAPH_REASON = 'wrapping mark would fall outside the paragraph'
 
-function countFloatingQuotationMarks(text: string): number {
+function countFloatingWrapperMarks(text: string): number {
   let count = 0
-  for (const match of text.matchAll(/[“”‘’"]/gu)) {
+  const openerSet = new Set(WRAPPER_FAMILIES.map((family) => family.open))
+  const closerSet = new Set(WRAPPER_FAMILIES.map((family) => family.close))
+  for (const match of text.matchAll(/[\s\S]/gu)) {
+    const character = match[0]!
+    if (!openerSet.has(character) && !closerSet.has(character)) continue
     const index = match.index
     const before = text[index - 1] ?? ''
     const after = text[index + 1] ?? ''
+    // console.error('floating check', index, JSON.stringify(character), 'before', JSON.stringify(before), 'after', JSON.stringify(after), 'isFloat', !/\S/u.test(before) && !/\S/u.test(after))
     if (!/\S/u.test(before) && !/\S/u.test(after)) count += 1
   }
   return count
 }
+
+const QUOTATION_OUTSIDE_PARAGRAPH_REASON = WRAPPER_OUTSIDE_PARAGRAPH_REASON
 
 function findAll(text: string, search: string, start: number, end: number): number[] {
   const matches: number[] = []

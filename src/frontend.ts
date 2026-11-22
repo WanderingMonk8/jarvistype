@@ -77,11 +77,11 @@ export const COMMAND_GROUPS = [
     examples: [
       [
         'Spoken punctuation',
-        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “asterisk,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “begin bracket” and “end bracket” for angle brackets, “new line,” or “new paragraph.”',
+        'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” “ellipsis,” “apostrophe,” “asterisk,” “hyphen,” “dash,” “en dash,” “em dash,” “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” “close bracket,” “begin bracket” and “end bracket” for angle brackets (or “open angle bracket,” “close angle bracket,” “begin angle bracket,” and “end angle bracket”), “open brace” or “open curly brace” for “{”, “close brace” or “close curly brace” for “}”, “open curly bracket” and “close curly bracket” for curly braces, “new line,” or “new paragraph.”',
       ],
       [
         'Quotations',
-        'Say “quote” or “quotation” at both ends of a quotation; use “begin speech” (or “again speech”) and “end speech,” “beginning speech” and “ending speech,” or “begins speech” and “ends speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”',
+        'Say “quote” or “quotation” at both ends of a quotation; use “begin speech” (or “again speech”) and “end speech,” “beginning speech” and “ending speech,” or “begins speech” and “ends speech.” For single quotations, say “single quote” or “single quotation” at both ends, or “begin single” and “end single.” You can also speak any literal marker phrase: “open quote … close quote,” “open quotation mark … close quotation mark,” “open double quotation mark … close double quotation mark,” “open single quote … close single quote,” or “open single quotation mark … close single quotation mark.”',
       ],
       ['Explicit punctuation', 'Say “insert period,” “punctuation colon,” or “command new line.”'],
       [
@@ -97,11 +97,23 @@ export const COMMAND_GROUPS = [
         'Replace',
         'Replace, change, swap, or substitute a target—for example, “Change ‘pending’ to ‘approved’ in paragraph 2.”',
       ],
-      ['Insert before', 'Insert, add, place, or put “Urgent:” before the first sentence.'],
+      [
+        'Open or close a wrapper pair in place',
+        'Say “open quote the first sentence,” “close quote the first sentence,” “open single quote the last sentence,” “open bracket the first paragraph,” or “close angle bracket the last paragraph” to insert one marker without wrapping: open inserts the opening mark before a sentence or paragraph; close inserts the closing mark after. The same works for every wrapper family — “open parenthesis,” “close parenthesis,” “open brace,” “close brace,” “open angle bracket,” “close angle bracket,” “open single quote,” “close bracket,” and “open double quotation mark.”',
+      ],
+      [
+        'Wrap with quote marks or brackets',
+        'Say “put quotation marks around the first paragraph,” “put single quotes around the first paragraph,” or “put angle brackets around the second sentence” to wrap a span in a pair of marks. The same range commands also work from point to point: “Put single quotes from Start here to end there.” or “Put angle brackets between X and Y.” Supported pairs are double and single quote marks, parentheses, square and curly brackets, curly braces, and angle brackets; bare forms like “Quote the first paragraph.,” “Put the first paragraph in quotes,” and “Add single quotes to the first paragraph.” work too.',
+      ],
+      [
+        'Insert before',
+        'Insert, add, place, or put “Urgent:” before the first sentence.',
+      ],
       [
         'Insert after',
         'Insert, add, place, or put a new paragraph after paragraph 2 that says “The route is approved.”',
       ],
+      ['Continue', 'Continue the sentence “I look at the man from across the room” with “And I decide to wave.” — the sentence becomes “I look at the man from across the room, and I decide to wave.” The continuation attaches to the end of the matched sentence or fragment: the sentence-ending punctuation is replaced with a comma, the continuation starts with a lowercase first ordinary word (proper nouns and “I” keep their capitalization), and a wrapping pair (quote, paren, bracket, etc) stays around the whole joined text. Spell the sentence/phrase to locate, then the continuation after “with” (or “and”); words like “from,” “after,” “this phrase,” “this sentence,” or “this word” are optional fillers. You can also continue from a fragment: “Continue the sentence ‘his left and turn’ with ‘And then he begins to shout.’” If X ends with ?, !, …, or combinations like !? or !! or ?! the merged sentence inherits X’s exact terminator instead of Y’s: “his left and turn?” + continuation → “his left and turn, and then he begins to shout?” A leading “the phrase,” “the sentence,” “the word,” “this sentence,” etc. in the continuation (with or without attached punctuation) are optional fillers and are dropped: “…with the phrase, only then would you know” attaches just “only then would you know.”'],
       [
         'Append',
         'Append, add to the end, place at the end, put at the end, or tack onto the end of paragraph 1.',
@@ -120,7 +132,7 @@ export const COMMAND_GROUPS = [
         'Say “delete,” “remove,” “take off,” “take out,” “erase,” or “cut,” followed by the target—for example, “Take off the second sentence in paragraph 1.”',
       ],
       ['Delete a range', 'Remove the passage from “I remember the time” to “nearly in an instant.” Both endpoint phrases and the text between them are removed.'],
-      ['About a sentence or part', 'Say “delete the sentence about Erin unwinding,” “replace the part about Erin unwinding with she rests,” or “move the part about Erin unwinding to the end of the paragraph.” You can also move a phrase before or after the sentence about a long war, or to its beginning or end. Near-threshold matches and overlapping high-confidence spans are flagged for review; unrelated ambiguous matches stop. Quote a literal target containing “about” to keep it exact.'],
+      ['About a sentence or part', 'Say “delete the sentence about Erin unwinding,” “replace the part about Erin unwinding with she rests,” or “move the part about Erin unwinding to the end of the paragraph.” You can also move a phrase before or after the sentence about a long war, or to its beginning or end, or “continue the sentence about Erin unwinding with and then she rests.” Join the described sentence with the one next to it: “join the sentence about Erin relaxing with the next” or “join the sentence about Maeve waiting with the previous” — the literal source accepts the same form: “join the sentence ‘Maeve waits.’ with the next.” You can also join adjacent inline sentences by description: “join the sentence about Erin relaxing with the sentence about Maeve waiting” — literal quotations work too, in either operand. Near-threshold matches and overlapping high-confidence spans are flagged for review; unrelated ambiguous matches stop. Quote a literal target containing “about” to keep it exact.'],
       ['Move', 'Move, relocate, or shift “approved” before “pending” in paragraph 1.'],
       ['Move before', 'Move paragraph 3 before paragraph 1.'],
       ['Move after', 'Move paragraph 1 after paragraph 2.'],
@@ -129,8 +141,8 @@ export const COMMAND_GROUPS = [
   {
     title: 'Paragraphs',
     examples: [
-      ['Split', 'Split, break, or divide paragraph 1 after “The launch checklist is ready.”'],
-      ['Join', 'Join, merge, or combine paragraph 1 with the following paragraph.'],
+      ['Split', 'Split, break, or divide paragraph 1 after “The launch checklist is ready.” To split a sentence in place: “Split the sentence ‘To err is human; to forgive is divine’ before ‘to forgive.’” Either operand can be a fragment of its sentence: “Split the sentence ‘it’s been a long while’ after ‘Maeve waits’” locates the sentence containing ‘it’s been a long while’ and splits it at ‘Maeve waits.’ The split pieces become two independent sentences with sentence-end punctuation; comma or semicolon at the joint become a period (other terminators keep their character); the start of the second part is capitalized; “Split the sentence about X before/after the word/phrase Y” works the same with description-based targets; if more than one sentence pair matches (or the anchor occurs more than once in the sentence), you’ll be asked to choose.'],
+      ['Join', 'Join, merge, or combine paragraph 1 with the following paragraph. Or the adjacent sentences or fragments: “Join the sentence ‘I look at the man from across the room’ with the sentence ‘And I decide to wave.’” Either operand can also be a fragment of its sentence: “Join the sentence ‘Maeve waits’ with the sentence ‘Until it’s no longer.’” — the fragments may occur anywhere in their sentences; the matching sentences must be back to back in the same paragraph, and more than one matching pair opens a choose-the-target list. You can also name the neighbour directly instead of restating it: “Join the sentence about Erin relaxing with the next” or “Join the sentence ‘Maeve waits.’ with the previous” (the neighbour is the sentence immediately before or after the resolved source, in the same paragraph). The first operand stays verbatim — its terminal punctuation becomes a comma, the second operand starts with a lowercased ordinary word (proper nouns and “I” keep capitalization), and the merged sentence inherits the source’s ?, !, …, or combinations. The two operands must be directly next to each other. Wrapped operands keep their enclosure around the source only: “he came late” + “she left” produces “he came late,” she left.”'],
     ],
   },
   {

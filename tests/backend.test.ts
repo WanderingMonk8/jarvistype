@@ -3062,6 +3062,368 @@ test('deletes one positional sentence without a provider interpretation', async 
   )
 })
 
+test('resolves join sentence about A with the next|previous forms', async () => {
+  const testTriple = [
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Erin relaxing with the next.',
+      expected: 'Erin unwinds herself, maeve waits. Sam sleeps.',
+      scores: [0.99, 0.01, 0.01],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Erin relaxing with the following sentence.',
+      expected: 'Erin unwinds herself, maeve waits. Sam sleeps.',
+      scores: [0.99, 0.01, 0.01],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Maeve waiting, with the next.',
+      expected: 'Erin unwinds herself. Maeve waits, sam sleeps.',
+      scores: [0.01, 0.99, 0.01],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Maeve waiting with the previous.',
+      expected: 'Erin unwinds herself, maeve waits. Sam sleeps.',
+      scores: [0.01, 0.99, 0.01],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Sam sleeping with the previous sentence.',
+      expected: 'Erin unwinds herself. Maeve waits, sam sleeps.',
+      scores: [0.01, 0.01, 0.99],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: 'Join the sentence about Erin relaxing with the previous.',
+      expectedError: true,
+      scores: [0.99, 0.01, 0.01],
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: "Join the sentence 'Maeve waits.' with the next.",
+      expected: 'Erin unwinds herself. Maeve waits, sam sleeps.',
+      scores: null,
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: "Join the sentence 'Maeve waits.' with the previous.",
+      expected: 'Erin unwinds herself, maeve waits. Sam sleeps.',
+      scores: null,
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: "Join the sentence 'Sam sleeps.' with the next.",
+      expectedError: true,
+      scores: null,
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits. Sam sleeps.',
+      instruction: "Join the sentence 'Erin unwinds herself.' with the previous.",
+      expectedError: true,
+      scores: null,
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits.',
+      instruction: "Join the sentence 'Erin unwinds herself.' with the next.",
+      expected: 'Erin unwinds herself, maeve waits.',
+      scores: null,
+    },
+    {
+      draft: 'Erin unwinds herself. Maeve waits.',
+      instruction: "Join the sentence 'Maeve waits.' with the previous.",
+      expected: 'Erin unwinds herself, maeve waits.',
+      scores: null,
+    },
+    {
+      draft: 'I pulled off from the kiss, still gazing into her eyes with the same soft tenderness. “Baby, taste me with the same hunger that I did for you. Show me how much you need me.”',
+      instruction: 'Join the sentence, soft tenderness, and baby taste me.',
+      expected: 'I pulled off from the kiss, still gazing into her eyes with the same soft tenderness, “Baby, taste me with the same hunger that I did for you. Show me how much you need me.”',
+      scores: null,
+    },
+  ] as const
+  for (const [index, testCase] of testTriple.entries()) {
+    const userId = `about-join-adjacent-user-${index}`
+    const chatId = `about-join-adjacent-chat-${index}`
+    activeChatId = chatId
+    const scores = 'scores' in testCase ? testCase.scores : null
+    decisionsEnabled = scores !== null
+    if (scores !== null) {
+      let aboutCallIndex = 0
+      aboutDecision = () => {
+        aboutCallIndex += 1
+        return scores?.[aboutCallIndex - 1] ?? 0.01
+      }
+    }
+    await seedDraft(userId, chatId, testCase.draft)
+    responses.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-join-adjacent-${index}`, operationId: `about-join-adjacent-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: testCase.instruction }, userId)
+    const response = responses.at(-1)?.payload
+    if ('expectedError' in testCase && testCase.expectedError) {
+      assert.equal(response?.type, 'app.error', testCase.instruction)
+      continue
+    }
+    assert.equal(response?.type, 'edit.proposal.response', testCase.instruction)
+    if (response?.type === 'edit.proposal.response') {
+      if ('expected' in testCase) assert.equal(response.proposal.afterText, testCase.expected, testCase.instruction)
+    }
+  }
+})
+
+test('joins sentence fragments whose containing sentences are back to back', async () => {
+  const examples: ReadonlyArray<readonly [string, string, string | null]> = [
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'Maeve waits' with the sentence 'Until it’s no longer'.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'long while that Maeve waits' with the sentence 'Until it’s no longer'.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'Maeve waits' with the sentence 'it’s no longer'.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'waits' with the sentence 'no longer'.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['Erin unwinds herself. Maeve waits.', "Join the sentence 'Erin unwinds herself.' with the sentence 'Maeve waits.'", 'Erin unwinds herself, maeve waits.'],
+    ['Erin unwinds herself. Maeve waits. Sam sleeps.', "Join the sentence 'Erin unwinds herself.' with the sentence 'Sam sleeps.'", null],
+    ['It’s been a long while that Maeve waits until it’s no longer possible to do so.', "Join the sentence 'Maeve waits' with the sentence 'until it’s no longer'.", null],
+    ['It’s been a long while that Maeve waits.\n\nUntil it’s no longer possible to do so.', "Join the sentence 'Maeve waits' with the sentence 'Until it’s no longer'.", null],
+    ['She ran. Sam sleeps. He waited. Sam sleeps. He waited.', "Join the sentence 'She ran' with the sentence 'He waited'.", null],
+  ]
+  for (const [index, [draft, instruction, expected]] of examples.entries()) {
+    const userId = `fragment-join-user-${index}`
+    const chatId = `fragment-join-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `fragment-join-${index}`, operationId: `fragment-join-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    if (expected === null) {
+      assert.equal(response?.type, 'app.error', instruction)
+      continue
+    }
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+  }
+})
+
+test('joins literal fragments with the next|previous neighbour', async () => {
+  const examples: ReadonlyArray<readonly [string, string, string | null]> = [
+    ['Erin unwinds herself. Maeve waits.', "Join the sentence 'Erin unwinds herself.' with the next.", 'Erin unwinds herself, maeve waits.'],
+    ['Erin unwinds herself. Maeve waits.', "Join the sentence 'Erin' with the next.", 'Erin unwinds herself, maeve waits.'],
+    ['Erin unwinds herself. Maeve waits.', "Join the sentence 'Maeve waits.' with the previous.", 'Erin unwinds herself, maeve waits.'],
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'Maeve waits' with the next.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['It’s been a long while that Maeve waits. Until it’s no longer possible to do so.', "Join the sentence 'no longer' with the previous.", 'It’s been a long while that Maeve waits, until it’s no longer possible to do so.'],
+    ['Erin unwinds herself. Maeve waits. Sam sleeps.', "Join the sentence 'Erin unwinds herself.' with the previous.", null],
+    ['Erin unwinds herself. Maeve waits. Sam sleeps.', "Join the sentence 'Sam sleeps.' with the next.", null],
+    ['Erin unwinds herself. Maeve waits.', "Join the sentence 'Erin unwinds herself.' with the following sentence.", 'Erin unwinds herself, maeve waits.'],
+  ]
+  for (const [index, [draft, instruction, expected]] of examples.entries()) {
+    const userId = `adjacent-fragment-join-user-${index}`
+    const chatId = `adjacent-fragment-join-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `adjacent-fragment-join-${index}`, operationId: `adjacent-fragment-join-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    if (expected === null) {
+      assert.equal(response?.type, 'app.error', instruction)
+      continue
+    }
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+  }
+})
+
+test('offers a chooser when more than one sentence pair matches', async () => {
+  const userId = 'ambiguous-pair-join-user'
+  const chatId = 'ambiguous-pair-join-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She ran to the store. He waited. She ran to the store. He waited.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'ambiguous-pair-join', operationId: 'ambiguous-pair-join-op', chatId, expectedVersion: 1, instructionTranscript: "Join the sentence 'She ran to the store' with the sentence 'He waited.'" }, userId)
+  const choices = responses.at(-1)?.payload
+  assert.equal(choices?.type, 'edit.candidates.response')
+  if (choices?.type !== 'edit.candidates.response') return
+  assert.equal(choices.candidateSet.candidates.length, 2)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.candidate.select.request', requestId: 'ambiguous-pair-join-select', operationId: 'ambiguous-pair-join-op', chatId, expectedVersion: 1, candidateId: choices.candidateSet.candidates[1]!.id }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'She ran to the store. He waited. She ran to the store, he waited.')
+  }
+})
+
+test('offers a chooser for fragment joins with the next when the anchor occurs multiple times', async () => {
+  const userId = 'ambiguous-adjacent-fragment-user'
+  const chatId = 'ambiguous-adjacent-fragment-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'She ran to the store. He waited. She ran to the store. He waited.')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'ambiguous-adjacent-fragment', operationId: 'ambiguous-adjacent-fragment-op', chatId, expectedVersion: 1, instructionTranscript: "Join the sentence 'She ran to the store' with the next." }, userId)
+  const choices = responses.at(-1)?.payload
+  assert.equal(choices?.type, 'edit.candidates.response')
+  if (choices?.type !== 'edit.candidates.response') return
+  assert.equal(choices.candidateSet.candidates.length, 2)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.candidate.select.request', requestId: 'ambiguous-adjacent-fragment-select', operationId: 'ambiguous-adjacent-fragment-op', chatId, expectedVersion: 1, candidateId: choices.candidateSet.candidates[1]!.id }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'She ran to the store. He waited. She ran to the store, he waited.')
+  }
+})
+
+test('splits a sentence with literal fragment source and anchor', async () => {
+  const draft = 'It’s been a long while that Maeve waits until it’s no longer possible to do so.'
+  const expected = 'It’s been a long while that Maeve waits. Until it’s no longer possible to do so.'
+  const examples: ReadonlyArray<readonly [string, string | null]> = [
+    ["Split the sentence 'it’s been a long while' after 'Maeve waits'.", expected],
+    ["Split the sentence 'long while' after 'Maeve waits'.", expected],
+    ["Split the sentence 'Maeve waits' after 'waits'.", expected],
+    ["Split the sentence 'while that Maeve waits' before 'Maeve waits'.", 'It’s been a long while that. Maeve waits until it’s no longer possible to do so.'],
+    ["Split the sentence 'it’s been a long while' before 'until it’s no longer'.", expected],
+    ["Split the sentence 'long while' after 'Sam sleeps'.", null],
+    ["Split the sentence 'it is not here' after 'Maeve waits'.", null],
+    ["Split the sentence 'while that' after 'Maeve waits'.", expected],
+  ]
+  for (const [index, [instruction, expected]] of examples.entries()) {
+    const userId = `fragment-split-user-${index}`
+    const chatId = `fragment-split-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `fragment-split-${index}`, operationId: `fragment-split-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    if (expected === null) {
+      assert.equal(response?.type, 'app.error', instruction)
+      continue
+    }
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+  }
+})
+
+test('splits a sentence source located by the about-description flow', async () => {
+  const userId = 'about-split-fragment-user'
+  const chatId = 'about-split-fragment-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  aboutDecision = (id) => id === 'about_0' ? 0.99 : 0.01
+  const draft = 'It’s been a long while that Maeve waits until it’s no longer possible to do so.'
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'about-split-fragment', operationId: 'about-split-fragment-op', chatId, expectedVersion: 1, instructionTranscript: "Split the sentence about the long wait after 'Maeve waits'." }, userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'edit.proposal.response')
+  if (response?.type === 'edit.proposal.response') {
+    assert.equal(response.proposal.afterText, 'It’s been a long while that Maeve waits. Until it’s no longer possible to do so.')
+  }
+})
+
+test('offers a chooser when more than one split position matches', async () => {
+  const userId = 'ambiguous-split-fragment-user'
+  const chatId = 'ambiguous-split-fragment-chat'
+  activeChatId = chatId
+  const draft = 'Maeve waits here. Sam stays. Maeve waits here. Sam stays.'
+  await seedDraft(userId, chatId, draft)
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'ambiguous-split-fragment', operationId: 'ambiguous-split-fragment-op', chatId, expectedVersion: 1, instructionTranscript: "Split the sentence 'Maeve waits' after 'waits'." }, userId)
+  const choices = responses.at(-1)?.payload
+  assert.equal(choices?.type, 'edit.candidates.response')
+  if (choices?.type !== 'edit.candidates.response') return
+  assert.equal(choices.candidateSet.candidates.length, 2)
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.candidate.select.request', requestId: 'ambiguous-split-fragment-select', operationId: 'ambiguous-split-fragment-op', chatId, expectedVersion: 1, candidateId: choices.candidateSet.candidates[0]!.id }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response') {
+    assert.equal(proposal.proposal.afterText, 'Maeve waits. Here. Sam stays. Maeve waits here. Sam stays.')
+  }
+})
+
+test('inserts bare open and close wrapper markers for every family', async () => {
+  const userId = 'bare-wrapper-user'
+  const chatId = 'bare-wrapper-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First sentence. Last sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ['Open quote the first sentence.', '“First sentence. Last sentence.'],
+    ['Close quote the first sentence.', 'First sentence.” Last sentence.'],
+    ['Open single quote the last sentence.', 'First sentence. ‘Last sentence.'],
+    ['Close single quote the last sentence.', 'First sentence. Last sentence.’'],
+    ['Open bracket the last sentence.', 'First sentence. [Last sentence.'],
+    ['Close bracket the last sentence.', 'First sentence. Last sentence.]'],
+    ['Open angle bracket the last sentence.', 'First sentence. <Last sentence.'],
+    ['Close angle bracket the last sentence.', 'First sentence. Last sentence.>'],
+    ['Open parenthesis the last sentence.', 'First sentence. (Last sentence.'],
+    ['Close parenthesis the last sentence.', 'First sentence. Last sentence.)'],
+    ['Open brace the first sentence.', '{First sentence. Last sentence.'],
+    ['Close brace the first sentence.', 'First sentence.} Last sentence.'],
+  ]
+  for (const [index, [instructionTranscript, afterText]] of cases.entries()) {
+    responses.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `bare-wrapper-${index}`, operationId: 'bare-wrapper-op', chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instructionTranscript)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, afterText, instructionTranscript)
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('resolves about join commands and executes inline sentence merges', async () => {
+  const examples = [
+    ['Erin unwinds herself. Maeve waits.', 'Join the sentence about Erin relaxing with the sentence about Maeve waiting.', 'Erin unwinds herself, maeve waits.', [0.99, 0.01, 0.01, 0.99]],
+    ['Erin unwinds herself. Maeve waits.', 'Join the sentence about Erin relaxing with the sentence "Maeve waits."', 'Erin unwinds herself, maeve waits.', [0.99, 0.01]],
+    ['Erin unwinds herself. Maeve waits.', 'Join the sentence "Erin unwinds herself." with the sentence about Maeve waiting.', 'Erin unwinds herself, maeve waits.', [0.01, 0.99]],
+  ] as const
+  for (const [index, [draft, instruction, expected, scores]] of examples.entries()) {
+    const userId = `about-join-user-${index}`
+    const chatId = `about-join-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = true
+    let aboutCallIndex = 0
+    aboutDecision = () => {
+      aboutCallIndex += 1
+      return scores[aboutCallIndex - 1] ?? 0.01
+    }
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-join-${index}`, operationId: `about-join-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+  }
+})
+
+test('resolves about sentence and phrase continue commands with descriptive about targets', async () => {
+  const examples = [
+    ['Erin unwinds herself. Maeve waits.', 'Continue the sentence about Erin relaxing with and then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],
+    ['Erin unwinds herself. Maeve waits.', 'Continue the phrase about Erin relaxing with and then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],
+    ['Erin unwinds herself. Maeve waits.', 'Continue from the sentence about Erin relaxing with And then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],
+    ['Erin unwinds herself. Maeve waits.', 'Continue the sentence about Erin relaxing with I mean seriously.', 0, 'Erin unwinds herself, I mean seriously. Maeve waits.'],
+    ['Erin unwinds herself. Maeve waits.', 'Continue the sentence about Erin relaxing with the phrase, and then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],
+    ['Erin unwinds herself. Maeve waits.', 'Continue the sentence about Erin with a groan with the phrase, and then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],
+    ['She doesn’t elaborate on that. She wipes her hands on her thighs.', 'Continue the sentence about Xu not elaborating with the phrase, only then would you know.', 0, 'She doesn’t elaborate on that, only then would you know. She wipes her hands on her thighs.'],
+  ] as const
+  for (const [index, [draft, instruction, selected, expected]] of examples.entries()) {
+    const userId = `about-continue-user-${index}`
+    const chatId = `about-continue-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = true
+    aboutDecision = (id) => id === `about_${selected}` ? 0.99 : 0.01
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-continue-${index}`, operationId: `about-continue-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') assert.equal(response.proposal.afterText, expected, instruction)
+    const questionSets = decisionRequests.map((request) => (request as { questions?: Record<string, { instructions?: string }> }).questions ?? {})
+    assert.ok(questionSets.some((questions) => questions[`about_${selected}`]?.instructions?.includes(`about_${selected}`)))
+  }
+})
+
 test('resolves about sentence and phrase edits and move destinations with guarded decisions', async () => {
   const examples = [
     ["The kitchen tap shuts off. The kettle’s going now, that low building rattle. Maeve hasn’t turned around.", 'Delete the sentence about the kitchen tap shutting off.', 0, "The kettle’s going now, that low building rattle. Maeve hasn’t turned around."],
@@ -4931,6 +5293,89 @@ test('puts one pair of quotations around a numbered paragraph instead of each se
   assert.equal(generationRequests.length, 0)
 })
 
+test('wraps the draft in each wrapper family via paragraph commands', async () => {
+  const userId = 'paragraph-wrapper-user'
+  const chatId = 'paragraph-wrapper-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'First paragraph text.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ['Put single quotes around the first paragraph.', '‘First paragraph text.’'],
+    ['Put single quotation marks around the first paragraph.', '‘First paragraph text.’'],
+    ['Put parens around the first paragraph.', '(First paragraph text.)'],
+    ['Put parentheses around the first paragraph.', '(First paragraph text.)'],
+    ['Put brackets around the first paragraph.', '[First paragraph text.]'],
+    ['Put square brackets around the first paragraph.', '[First paragraph text.]'],
+    ['Put curly braces around the first paragraph.', '{First paragraph text.}'],
+    ['Put curly brackets around the first paragraph.', '{First paragraph text.}'],
+    ['Put braces around the first paragraph.', '{First paragraph text.}'],
+    ['Put angle brackets around the first paragraph.', '<First paragraph text.>'],
+    ['Put angle brackets around the last paragraph.', '<First paragraph text.>'],
+  ]
+  for (const [index, [instructionTranscript, afterText]] of cases.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `paragraph-wrapper-interpret-${index}`,
+        operationId: `paragraph-wrapper-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instructionTranscript)
+    if (response?.type === 'edit.proposal.response') {
+      assert.equal(response.proposal.afterText, afterText, instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
+test('wraps a range of text in each wrapper family', async () => {
+  const userId = 'range-wrapper-user'
+  const chatId = 'range-wrapper-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Hello there. Start here and end there. End of story.')
+  responses.length = 0
+  generationRequests.length = 0
+
+  const cases: Array<readonly [string, string]> = [
+    ['Put single quotes from Start here to end there.', 'Hello there. ‘Start here and end there.’ End of story.'],
+    ['Put parens from Start here to end there.', 'Hello there. (Start here and end there.) End of story.'],
+    ['Put brackets from Start here to end there.', 'Hello there. [Start here and end there.] End of story.'],
+    ['Put curly braces from Start here to end there.', 'Hello there. {Start here and end there.} End of story.'],
+    ['Put angle brackets from Start here to end there.', 'Hello there. <Start here and end there.> End of story.'],
+    ['Put braces between Start here and end there.', 'Hello there. {Start here and end there.} End of story.'],
+  ]
+  for (const [index, [instructionTranscript, afterText]] of cases.entries()) {
+    responses.length = 0
+    await dispatch(
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'edit.interpret.request',
+        requestId: `range-wrapper-interpret-${index}`,
+        operationId: `range-wrapper-operation-${index}`,
+        chatId,
+        expectedVersion: 1,
+        instructionTranscript,
+      },
+      userId,
+    )
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instructionTranscript)
+    if (response?.type === 'edit.proposal.response') {
+      assert.equal(response.proposal.afterText, afterText, instructionTranscript)
+    }
+  }
+  assert.equal(generationRequests.length, 0)
+})
+
 test('supports every alias and word order of the paragraph quotation command', async () => {
   const userId = 'paragraph-quotation-alias-user'
   const chatId = 'paragraph-quotation-alias-chat'
@@ -6766,6 +7211,50 @@ test('cleans local grammar after an edit even when provider repair is off', asyn
   if (proposal?.type !== 'edit.proposal.response') return
   assert.equal(proposal.proposal.afterText, 'Earlier. This is an accessible entrance.')
   assert.equal(proposal.proposal.grammarRepairChanges, undefined)
+  assert.equal(generationRequests.length, 0)
+})
+
+test('keeps paired emphasis markers when the universal checker repairs a sentence boundary', async () => {
+  const userId = 'emphasis-guard-user'
+  const chatId = 'emphasis-guard-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, '*Maeve waits. It has been a long while.* A second sentence.')
+  responses.length = 0
+  generationRequests.length = 0
+  editPlanResponse = {
+    schemaVersion: 2,
+    draftVersion: 1,
+    explanation: 'Replace second with third.',
+    operations: [
+      {
+        id: 'replace-second',
+        type: 'replace',
+        target: { paragraphOrdinal: 1, exactText: 'second' },
+        text: 'third',
+      },
+    ],
+  }
+
+  await dispatch(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'edit.interpret.request',
+      requestId: 'emphasis-guard-interpret',
+      operationId: 'emphasis-guard-operation',
+      chatId,
+      expectedVersion: 1,
+      instructionTranscript: 'Replace second with third.',
+    },
+    userId,
+  )
+
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type !== 'edit.proposal.response') return
+  assert.equal(
+    proposal.proposal.afterText,
+    '*Maeve waits. It has been a long while.* A third sentence.',
+  )
   assert.equal(generationRequests.length, 0)
 })
 

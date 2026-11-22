@@ -63,7 +63,7 @@ var RequestRegistry = class {
 
 // src/protocol/messages.ts
 var PROTOCOL_VERSION = 7;
-var APP_VERSION = "1.6.26";
+var APP_VERSION = "1.6.30";
 var REQUEST_TIMEOUT_MS = 15e3;
 var NORMALIZATION_TIMEOUT_MS = 12e4;
 var DEFAULT_NORMALIZATION_MODEL_TIMEOUT_SECONDS = 120;
@@ -80,6 +80,95 @@ var PHASE_FOUR_PERMISSIONS = [
 function createRequestId(prefix = "request") {
   return `${prefix}-${Date.now().toString(36)}-${createId()}`;
 }
+
+// src/domain/wrapper-families.ts
+var WRAPPER_FAMILIES = [
+  {
+    id: "double-quote",
+    open: "\u201C",
+    close: "\u201D",
+    name: "quotation marks",
+    explanatoryName: "quotation marks",
+    tokenPattern: String.raw`(?:(?:double\s+)?(?:quotation\s+marks?|quote\s+marks?|quotations?|quotes?|double\s+quotes?))`,
+    openPattern: /^[“"]$/u,
+    closePattern: /^[”"]$/u
+  },
+  {
+    id: "single-quote",
+    open: "\u2018",
+    close: "\u2019",
+    name: "single quotation marks",
+    explanatoryName: "single quotation marks",
+    tokenPattern: String.raw`(?:(?:single\s+)?(?:single\s+(?:quotation|quote|quotations|quotes|mark)(?:\s+marks?)?|singles?|single))`,
+    openPattern: /^[‘']$/u,
+    closePattern: /^[’']$/u
+  },
+  {
+    id: "parentheses",
+    open: "(",
+    close: ")",
+    name: "parentheses",
+    explanatoryName: "parentheses",
+    tokenPattern: String.raw`(?:parens?|parentheses|parenthesis|round\s+brackets?|round\s+bracket)`,
+    openPattern: /^\($/u,
+    closePattern: /^\)$/u
+  },
+  {
+    id: "brackets",
+    open: "[",
+    close: "]",
+    name: "brackets",
+    explanatoryName: "brackets",
+    tokenPattern: String.raw`(?:square\s+brackets?|square\s+bracket|brackets?|bracket)`,
+    openPattern: /^\[$/u,
+    closePattern: /^\]$/u
+  },
+  {
+    id: "braces",
+    open: "{",
+    close: "}",
+    name: "braces",
+    explanatoryName: "braces",
+    tokenPattern: String.raw`(?:curly\s+(?:braces?|brackets?)|curly\s+ones?|braces?|brace|curly\s+bracket)`,
+    openPattern: /^\{$/u,
+    closePattern: /^\}$/u
+  },
+  {
+    id: "angle-brackets",
+    open: "<",
+    close: ">",
+    name: "angle brackets",
+    explanatoryName: "angle brackets",
+    tokenPattern: String.raw`(?:angle\s+brackets?|angle\s+bracket|less\s+than\s+greater\s+than|greater\s+than\s+less\s+than|greater\s+and\s+less\s+than|less\s+and\s+greater\s+than|greater\s+less\s+than|less\s+greater\s+than|less\s+than\s+(?:and\s+)?more\s+than|chevrons?|chevron)`,
+    openPattern: /^<$/u,
+    closePattern: /^>$/u
+  }
+];
+var OPEN_TO_FAMILY = new Map(WRAPPER_FAMILIES.map((family) => [family.open, family]));
+var CLOSE_TO_FAMILY = new Map(WRAPPER_FAMILIES.map((family) => [family.close, family]));
+var OPENERS_GROUP = `(?:${WRAPPER_FAMILIES.map((family) => [family.open]).flat().map((character) => character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|")}|"|')`;
+var CLOSERS_GROUP = `(?:${WRAPPER_FAMILIES.map((family) => [family.close]).flat().map((character) => character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|")}|"|')`;
+var CLOSERS_LITERALS = [
+  ...WRAPPER_FAMILIES.map((family) => family.close),
+  ",",
+  ";",
+  ":",
+  "!",
+  "?",
+  ".",
+  ")",
+  "}",
+  "]",
+  '"',
+  `'`
+];
+var PUNCTUATION_CLOSERS_REGEX = new RegExp(
+  `[${CLOSERS_LITERALS.map((character) => character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("")}]`,
+  "u"
+);
+var WRAPPER_OPENERS_REGEX = new RegExp(OPENERS_GROUP, "u");
+var WRAPPER_CLOSERS_REGEX = new RegExp(CLOSERS_GROUP, "u");
+var WRAPPER_TOKEN_PATTERN = WRAPPER_FAMILIES.map((family) => family.tokenPattern).join("|");
 
 // src/domain/edit-pipeline.ts
 var EDIT_SCHEMA_VERSION = 2;
@@ -112,11 +201,12 @@ function parseOperation(value) {
     "text",
     "caseMode",
     "destination",
-    "includeTrailingPunctuation"
+    "includeTrailingPunctuation",
+    "direction"
   ]);
   if (Object.keys(value).some((key) => !allowedOperationKeys.has(key))) return null;
   const type = value.type;
-  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "delete_range" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "join_next" && type !== "move_before" && type !== "move_after")
+  if (type !== "replace" && type !== "insert_before" && type !== "insert_after" && type !== "delete" && type !== "delete_range" && type !== "append" && type !== "prepend" && type !== "case" && type !== "split" && type !== "split_sentence" && type !== "join_next" && type !== "join_sentence" && type !== "move_before" && type !== "move_after" && type !== "continue")
     return null;
   const target = parseTarget(value.target);
   if (!target) return null;
@@ -131,6 +221,19 @@ function parseOperation(value) {
       return null;
     if (text !== void 0 || destination !== void 0 || includeTrailingPunctuation !== void 0)
       return null;
+  } else if (type === "join_sentence") {
+    if (text !== void 0 || caseMode !== void 0) return null;
+    if (destination === void 0 || !destination) return null;
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null;
+    if (target.scope !== void 0 || destination.scope !== void 0) return null;
+    if (includeTrailingPunctuation !== void 0) return null;
+  } else if (type === "split_sentence") {
+    if (text !== void 0 || caseMode !== void 0) return null;
+    if (destination === void 0 || !destination) return null;
+    if (!hasInlineSelector(target) || !hasInlineSelector(destination)) return null;
+    if (target.scope !== void 0 || destination.scope !== void 0) return null;
+    if (includeTrailingPunctuation !== void 0) return null;
+    if (value.direction !== "before" && value.direction !== "after") return null;
   } else if (type === "delete" || type === "split" || type === "join_next") {
     if (text !== void 0 || caseMode !== void 0) return null;
     if (destination !== void 0) return null;
@@ -158,7 +261,8 @@ function parseOperation(value) {
     ...typeof text === "string" ? { text } : {},
     ...typeof caseMode === "string" ? { caseMode } : {},
     ...destination ? { destination } : {},
-    ...includeTrailingPunctuation === true ? { includeTrailingPunctuation: true } : {}
+    ...includeTrailingPunctuation === true ? { includeTrailingPunctuation: true } : {},
+    ...type === "split_sentence" && (value.direction === "before" || value.direction === "after") ? { direction: value.direction } : {}
   };
 }
 function trimTargetBoundary(text) {
@@ -178,13 +282,28 @@ function parseTarget(value) {
     "sentenceFromEnd",
     "relativePosition",
     "relativeToText",
-    "ignorePunctuationForMatch"
+    "ignorePunctuationForMatch",
+    "absoluteStart",
+    "absoluteEnd"
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return null;
   const target = {};
   if (value.ignorePunctuationForMatch !== void 0) {
     if (typeof value.ignorePunctuationForMatch !== "boolean") return null;
     target.ignorePunctuationForMatch = value.ignorePunctuationForMatch;
+  }
+  if (value.absoluteStart !== void 0) {
+    if (!isNonNegativeInteger(value.absoluteStart)) return null;
+    target.absoluteStart = value.absoluteStart;
+  }
+  if (value.absoluteEnd !== void 0) {
+    if (!isNonNegativeInteger(value.absoluteEnd)) return null;
+    target.absoluteEnd = value.absoluteEnd;
+  }
+  if (target.absoluteStart !== void 0 || target.absoluteEnd !== void 0) {
+    if (target.absoluteStart === void 0 || target.absoluteEnd === void 0) return null;
+    if (target.absoluteStart >= target.absoluteEnd) return null;
+    if (target.paragraphId !== void 0 || target.paragraphOrdinal !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0 || target.punctuation !== void 0 || target.relativeToText !== void 0 || target.relativePosition !== void 0 || target.exactText !== void 0 || target.approximateText !== void 0) return null;
   }
   if (value.paragraphId !== void 0) {
     if (!isIdentifier(value.paragraphId)) return null;
@@ -258,7 +377,7 @@ function parseTarget(value) {
   return Object.keys(target).some((key) => key !== "ignorePunctuationForMatch") ? target : null;
 }
 function hasInlineSelector(target) {
-  return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0;
+  return target.exactText !== void 0 || target.approximateText !== void 0 || target.punctuation !== void 0 || target.sentenceOrdinal !== void 0 || target.sentenceFromEnd !== void 0 || target.absoluteStart !== void 0;
 }
 function isPunctuationTarget(value) {
   return value === "period" || value === "comma" || value === "colon" || value === "semicolon" || value === "question_mark" || value === "exclamation_mark" || value === "ellipsis" || value === "quote" || value === "single_quote" || value === "apostrophe" || value === "hyphen" || value === "en_dash" || value === "em_dash" || value === "open_parenthesis" || value === "close_parenthesis" || value === "open_bracket" || value === "close_bracket";
@@ -446,11 +565,11 @@ var COMMAND_GROUPS = [
     examples: [
       [
         "Spoken punctuation",
-        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Casterisk,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen parenthesis\u201D or \u201Copen paren,\u201D \u201Cclose parenthesis\u201D or \u201Cclose paren,\u201D \u201Copen bracket,\u201D \u201Cclose bracket,\u201D \u201Cbegin bracket\u201D and \u201Cend bracket\u201D for angle brackets, \u201Cnew line,\u201D or \u201Cnew paragraph.\u201D"
+        "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D \u201Cellipsis,\u201D \u201Capostrophe,\u201D \u201Casterisk,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D \u201Cem dash,\u201D \u201Copen parenthesis\u201D or \u201Copen paren,\u201D \u201Cclose parenthesis\u201D or \u201Cclose paren,\u201D \u201Copen bracket,\u201D \u201Cclose bracket,\u201D \u201Cbegin bracket\u201D and \u201Cend bracket\u201D for angle brackets (or \u201Copen angle bracket,\u201D \u201Cclose angle bracket,\u201D \u201Cbegin angle bracket,\u201D and \u201Cend angle bracket\u201D), \u201Copen brace\u201D or \u201Copen curly brace\u201D for \u201C{\u201D, \u201Cclose brace\u201D or \u201Cclose curly brace\u201D for \u201C}\u201D, \u201Copen curly bracket\u201D and \u201Cclose curly bracket\u201D for curly braces, \u201Cnew line,\u201D or \u201Cnew paragraph.\u201D"
       ],
       [
         "Quotations",
-        "Say \u201Cquote\u201D or \u201Cquotation\u201D at both ends of a quotation; use \u201Cbegin speech\u201D (or \u201Cagain speech\u201D) and \u201Cend speech,\u201D \u201Cbeginning speech\u201D and \u201Cending speech,\u201D or \u201Cbegins speech\u201D and \u201Cends speech.\u201D For single quotations, say \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D"
+        "Say \u201Cquote\u201D or \u201Cquotation\u201D at both ends of a quotation; use \u201Cbegin speech\u201D (or \u201Cagain speech\u201D) and \u201Cend speech,\u201D \u201Cbeginning speech\u201D and \u201Cending speech,\u201D or \u201Cbegins speech\u201D and \u201Cends speech.\u201D For single quotations, say \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D You can also speak any literal marker phrase: \u201Copen quote \u2026 close quote,\u201D \u201Copen quotation mark \u2026 close quotation mark,\u201D \u201Copen double quotation mark \u2026 close double quotation mark,\u201D \u201Copen single quote \u2026 close single quote,\u201D or \u201Copen single quotation mark \u2026 close single quotation mark.\u201D"
       ],
       ["Explicit punctuation", "Say \u201Cinsert period,\u201D \u201Cpunctuation colon,\u201D or \u201Ccommand new line.\u201D"],
       [
@@ -466,11 +585,23 @@ var COMMAND_GROUPS = [
         "Replace",
         "Replace, change, swap, or substitute a target\u2014for example, \u201CChange \u2018pending\u2019 to \u2018approved\u2019 in paragraph 2.\u201D"
       ],
-      ["Insert before", "Insert, add, place, or put \u201CUrgent:\u201D before the first sentence."],
+      [
+        "Open or close a wrapper pair in place",
+        "Say \u201Copen quote the first sentence,\u201D \u201Cclose quote the first sentence,\u201D \u201Copen single quote the last sentence,\u201D \u201Copen bracket the first paragraph,\u201D or \u201Cclose angle bracket the last paragraph\u201D to insert one marker without wrapping: open inserts the opening mark before a sentence or paragraph; close inserts the closing mark after. The same works for every wrapper family \u2014 \u201Copen parenthesis,\u201D \u201Cclose parenthesis,\u201D \u201Copen brace,\u201D \u201Cclose brace,\u201D \u201Copen angle bracket,\u201D \u201Cclose angle bracket,\u201D \u201Copen single quote,\u201D \u201Cclose bracket,\u201D and \u201Copen double quotation mark.\u201D"
+      ],
+      [
+        "Wrap with quote marks or brackets",
+        "Say \u201Cput quotation marks around the first paragraph,\u201D \u201Cput single quotes around the first paragraph,\u201D or \u201Cput angle brackets around the second sentence\u201D to wrap a span in a pair of marks. The same range commands also work from point to point: \u201CPut single quotes from Start here to end there.\u201D or \u201CPut angle brackets between X and Y.\u201D Supported pairs are double and single quote marks, parentheses, square and curly brackets, curly braces, and angle brackets; bare forms like \u201CQuote the first paragraph.,\u201D \u201CPut the first paragraph in quotes,\u201D and \u201CAdd single quotes to the first paragraph.\u201D work too."
+      ],
+      [
+        "Insert before",
+        "Insert, add, place, or put \u201CUrgent:\u201D before the first sentence."
+      ],
       [
         "Insert after",
         "Insert, add, place, or put a new paragraph after paragraph 2 that says \u201CThe route is approved.\u201D"
       ],
+      ["Continue", "Continue the sentence \u201CI look at the man from across the room\u201D with \u201CAnd I decide to wave.\u201D \u2014 the sentence becomes \u201CI look at the man from across the room, and I decide to wave.\u201D The continuation attaches to the end of the matched sentence or fragment: the sentence-ending punctuation is replaced with a comma, the continuation starts with a lowercase first ordinary word (proper nouns and \u201CI\u201D keep their capitalization), and a wrapping pair (quote, paren, bracket, etc) stays around the whole joined text. Spell the sentence/phrase to locate, then the continuation after \u201Cwith\u201D (or \u201Cand\u201D); words like \u201Cfrom,\u201D \u201Cafter,\u201D \u201Cthis phrase,\u201D \u201Cthis sentence,\u201D or \u201Cthis word\u201D are optional fillers. You can also continue from a fragment: \u201CContinue the sentence \u2018his left and turn\u2019 with \u2018And then he begins to shout.\u2019\u201D If X ends with ?, !, \u2026, or combinations like !? or !! or ?! the merged sentence inherits X\u2019s exact terminator instead of Y\u2019s: \u201Chis left and turn?\u201D + continuation \u2192 \u201Chis left and turn, and then he begins to shout?\u201D A leading \u201Cthe phrase,\u201D \u201Cthe sentence,\u201D \u201Cthe word,\u201D \u201Cthis sentence,\u201D etc. in the continuation (with or without attached punctuation) are optional fillers and are dropped: \u201C\u2026with the phrase, only then would you know\u201D attaches just \u201Conly then would you know.\u201D"],
       [
         "Append",
         "Append, add to the end, place at the end, put at the end, or tack onto the end of paragraph 1."
@@ -489,7 +620,7 @@ var COMMAND_GROUPS = [
         "Say \u201Cdelete,\u201D \u201Cremove,\u201D \u201Ctake off,\u201D \u201Ctake out,\u201D \u201Cerase,\u201D or \u201Ccut,\u201D followed by the target\u2014for example, \u201CTake off the second sentence in paragraph 1.\u201D"
       ],
       ["Delete a range", "Remove the passage from \u201CI remember the time\u201D to \u201Cnearly in an instant.\u201D Both endpoint phrases and the text between them are removed."],
-      ["About a sentence or part", "Say \u201Cdelete the sentence about Erin unwinding,\u201D \u201Creplace the part about Erin unwinding with she rests,\u201D or \u201Cmove the part about Erin unwinding to the end of the paragraph.\u201D You can also move a phrase before or after the sentence about a long war, or to its beginning or end. Near-threshold matches and overlapping high-confidence spans are flagged for review; unrelated ambiguous matches stop. Quote a literal target containing \u201Cabout\u201D to keep it exact."],
+      ["About a sentence or part", "Say \u201Cdelete the sentence about Erin unwinding,\u201D \u201Creplace the part about Erin unwinding with she rests,\u201D or \u201Cmove the part about Erin unwinding to the end of the paragraph.\u201D You can also move a phrase before or after the sentence about a long war, or to its beginning or end, or \u201Ccontinue the sentence about Erin unwinding with and then she rests.\u201D Join the described sentence with the one next to it: \u201Cjoin the sentence about Erin relaxing with the next\u201D or \u201Cjoin the sentence about Maeve waiting with the previous\u201D \u2014 the literal source accepts the same form: \u201Cjoin the sentence \u2018Maeve waits.\u2019 with the next.\u201D You can also join adjacent inline sentences by description: \u201Cjoin the sentence about Erin relaxing with the sentence about Maeve waiting\u201D \u2014 literal quotations work too, in either operand. Near-threshold matches and overlapping high-confidence spans are flagged for review; unrelated ambiguous matches stop. Quote a literal target containing \u201Cabout\u201D to keep it exact."],
       ["Move", "Move, relocate, or shift \u201Capproved\u201D before \u201Cpending\u201D in paragraph 1."],
       ["Move before", "Move paragraph 3 before paragraph 1."],
       ["Move after", "Move paragraph 1 after paragraph 2."]
@@ -498,8 +629,8 @@ var COMMAND_GROUPS = [
   {
     title: "Paragraphs",
     examples: [
-      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D"],
-      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph."]
+      ["Split", "Split, break, or divide paragraph 1 after \u201CThe launch checklist is ready.\u201D To split a sentence in place: \u201CSplit the sentence \u2018To err is human; to forgive is divine\u2019 before \u2018to forgive.\u2019\u201D Either operand can be a fragment of its sentence: \u201CSplit the sentence \u2018it\u2019s been a long while\u2019 after \u2018Maeve waits\u2019\u201D locates the sentence containing \u2018it\u2019s been a long while\u2019 and splits it at \u2018Maeve waits.\u2019 The split pieces become two independent sentences with sentence-end punctuation; comma or semicolon at the joint become a period (other terminators keep their character); the start of the second part is capitalized; \u201CSplit the sentence about X before/after the word/phrase Y\u201D works the same with description-based targets; if more than one sentence pair matches (or the anchor occurs more than once in the sentence), you\u2019ll be asked to choose."],
+      ["Join", "Join, merge, or combine paragraph 1 with the following paragraph. Or the adjacent sentences or fragments: \u201CJoin the sentence \u2018I look at the man from across the room\u2019 with the sentence \u2018And I decide to wave.\u2019\u201D Either operand can also be a fragment of its sentence: \u201CJoin the sentence \u2018Maeve waits\u2019 with the sentence \u2018Until it\u2019s no longer.\u2019\u201D \u2014 the fragments may occur anywhere in their sentences; the matching sentences must be back to back in the same paragraph, and more than one matching pair opens a choose-the-target list. You can also name the neighbour directly instead of restating it: \u201CJoin the sentence about Erin relaxing with the next\u201D or \u201CJoin the sentence \u2018Maeve waits.\u2019 with the previous\u201D (the neighbour is the sentence immediately before or after the resolved source, in the same paragraph). The first operand stays verbatim \u2014 its terminal punctuation becomes a comma, the second operand starts with a lowercased ordinary word (proper nouns and \u201CI\u201D keep capitalization), and the merged sentence inherits the source\u2019s ?, !, \u2026, or combinations. The two operands must be directly next to each other. Wrapped operands keep their enclosure around the source only: \u201Che came late\u201D + \u201Cshe left\u201D produces \u201Che came late,\u201D she left.\u201D"]
     ]
   },
   {

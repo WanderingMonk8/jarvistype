@@ -452,8 +452,18 @@ test('splices punctuation-ending replacements with the following sentence', () =
   }
 })
 
-test('wrapping text includes all immediately attached punctuation', () => {
-  for (const punctuation of [',', ':', ';', '?!', '...', '—', '!?;']) {
+test('wrapping text includes terminating punctuation but leaves joining separators outside', () => {
+  for (const [punctuation, expected] of [[':', 'She said “hello”: then left.'], [';', 'She said “hello”; then left.'], [',', 'She said “hello”, then left.'], ['—', 'She said “hello” — then left.']] as const) {
+    const original = `She said hello${punctuation} then left.`
+    const plan = { schemaVersion: 2 as const, draftVersion: 1, explanation: 'Quote.', operations: [
+      { id: 'open', type: 'insert_before' as const, target: { exactText: 'hello' }, text: '“' },
+      { id: 'close', type: 'insert_after' as const, target: { exactText: 'hello' }, text: '”' },
+    ] }
+    const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text: original }]
+    for (const result of [executeEditPlan(original, paragraphs, 1, plan), executeSequentialEditPlan(original, paragraphs, 1, plan)])
+      assert.equal(result.ok && result.afterText, expected, punctuation)
+  }
+  for (const punctuation of ['?!', '...', '!?;']) {
     const original = `She said hello${punctuation} then left.`
     const plan = { schemaVersion: 2 as const, draftVersion: 1, explanation: 'Quote.', operations: [
       { id: 'open', type: 'insert_before' as const, target: { exactText: 'hello' }, text: '“' },
@@ -993,8 +1003,8 @@ test('attaches inserted quotation marks directly to an exact sentence target', (
   }
 })
 
-test('quotation wraps close after punctuation attached to a phrase target', () => {
-  for (const punctuation of [',', '?!', '...', '—']) {
+test('quotation wraps close after terminating punctuation attached to a phrase target', () => {
+  for (const punctuation of ['?!', '...']) {
     const text = `She said hello${punctuation} then left.`
     const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
       schemaVersion: 2, draftVersion: 1, explanation: 'Quote the phrase.', operations: [
@@ -1004,10 +1014,38 @@ test('quotation wraps close after punctuation attached to a phrase target', () =
     })
     assert.equal(result.ok && result.afterText, `She said “hello${punctuation}” then left.`)
   }
+  for (const [punctuation, expected] of [['?!', 'She said “hello?!” then left.'], ['...', 'She said “hello...” then left.']] as const) {
+    const text = `She said hello${punctuation} then left.`
+    const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Quote the phrase.', operations: [
+        { id: 'open', type: 'insert_before', target: { exactText: 'hello' }, text: '“' },
+        { id: 'close', type: 'insert_after', target: { exactText: 'hello' }, text: '”' },
+      ],
+    })
+    assert.equal(result.ok && result.afterText, expected)
+  }
+  for (const [punctuation, expected] of [['—', 'She said “hello” — then left.']] as const) {
+    const text = `She said hello${punctuation} then left.`
+    const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2, draftVersion: 1, explanation: 'Quote the phrase.', operations: [
+        { id: 'open', type: 'insert_before', target: { exactText: 'hello' }, text: '“' },
+        { id: 'close', type: 'insert_after', target: { exactText: 'hello' }, text: '”' },
+      ],
+    })
+    assert.equal(result.ok && result.afterText, expected)
+  }
+  const commaText = 'She said hello, then left.'
+  const commaResult = executeEditPlan(commaText, [{ id: 'p', ordinal: 1, lineIndex: 0, text: commaText }], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'Quote the phrase.', operations: [
+      { id: 'open', type: 'insert_before', target: { exactText: 'hello' }, text: '“' },
+      { id: 'close', type: 'insert_after', target: { exactText: 'hello' }, text: '”' },
+    ],
+  })
+  assert.equal(commaResult.ok && commaResult.afterText, 'She said “hello”, then left.')
 })
 
 test('quotation wraps include opening and closing punctuation attached to a target', () => {
-  for (const [prefix, suffix] of [['(', ')?!'], ['[', '],'], ['((', '))...'], ['…', '?!'], ['—', ',']] as const) {
+  for (const [prefix, suffix] of [['(', ')?!'], ['[', '],'], ['((', '))...'], ['…', '?!']] as const) {
     const text = `She said ${prefix}hello${suffix} then left.`
     const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
       schemaVersion: 2, draftVersion: 1, explanation: 'Quote the phrase.', operations: [
@@ -1017,6 +1055,14 @@ test('quotation wraps include opening and closing punctuation attached to a targ
     })
     assert.equal(result.ok && result.afterText, `She said “${prefix}hello${suffix}” then left.`)
   }
+  const text = 'She said —hello, then left.'
+  const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
+    schemaVersion: 2, draftVersion: 1, explanation: 'Quote the phrase.', operations: [
+      { id: 'open', type: 'insert_before', target: { exactText: 'hello' }, text: '“' },
+      { id: 'close', type: 'insert_after', target: { exactText: 'hello' }, text: '”' },
+    ],
+  })
+  assert.equal(result.ok && result.afterText, 'She said “—hello”, then left.')
 })
 
 test('deletes an inclusive range across paragraphs and joins the remaining text safely', () => {

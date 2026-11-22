@@ -26,6 +26,7 @@ import {
   setDebugEnabled,
 } from './domain/debug'
 import {
+  attachedRangeEnd,
   executeEditPlan,
   executeSequentialEditPlan,
   findPunctuationInsensitiveMatch,
@@ -4173,10 +4174,14 @@ function parseDeterministicQuotationRange(
       }
     }
     if (endIndex < startIndex) return null
-    const endTerminal = session.cleanText
-      .slice(endIndex + endText.length)
-      .match(/^[\p{P}]+/u)?.[0]
-    const effectiveEndText = endTerminal ? `${endText}${endTerminal}` : endText
+    const paragraphBreak = session.cleanText.indexOf('\n\n', endIndex)
+    const paragraphEnd = paragraphBreak === -1 ? session.cleanText.length : paragraphBreak
+    const enclosedEnd = attachedRangeEnd(
+      session.cleanText,
+      endIndex + endText.length,
+      paragraphEnd,
+    )
+    const effectiveEndText = session.cleanText.slice(endIndex, enclosedEnd)
     const endOccurrence =
       countExactOccurrences(session.cleanText.slice(0, endIndex), effectiveEndText) + 1
     closeOperation = {

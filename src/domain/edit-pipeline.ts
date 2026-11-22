@@ -860,7 +860,7 @@ function resolveOperation(
   const insertAfterPoint =
     formatText && operation.type === 'insert_after'
       ? quotationWrap
-        ? end + (cleanText.slice(end, range.end).match(/^[\p{P}]+/u)?.[0].length ?? 0)
+        ? attachedRangeEnd(cleanText, end, range.end)
         : advancePastAdjacentSentenceEnding(cleanText, end, range.end, insertionText)
       : end
   const replacement =
@@ -1547,6 +1547,27 @@ function escapeRegExp(value: string): string {
 function extendThroughTerminalPunctuation(text: string, end: number, limit: number): number {
   const punctuation = text.slice(end, limit).match(/^(?:\.{3}|[.!?…])/u)?.[0]
   return punctuation ? end + punctuation.length : end
+}
+
+/**
+ * End offset for a wrapped range or quotation.
+ *
+ * Punctuation that terminates the sentence containing the range belongs inside
+ * the wrapper, including serial runs (`?!`, `!?!`, `…?`) and any closing quote or
+ * bracket attached to the terminator, because a closing enclosure must stay
+ * balanced. A separator that only joins the range to text that follows (`,`,
+ * `;`, `:`, `—`) stays outside, because the range does not end there. A
+ * separator is kept when nothing but whitespace follows it inside the scope, so
+ * a trailing comma at the end of a paragraph still travels with the range.
+ */
+export function attachedRangeEnd(text: string, end: number, limit: number): number {
+  const run = text.slice(end, limit).match(/^[\p{P}]+/u)?.[0] ?? ''
+  if (!run) return end
+  const terminatesSentence = /(?:\.{3}|[.!?…])/u.test(run)
+  const closesEnclosure = /[”’"')\]}⟩»]/u.test(run)
+  if (terminatesSentence || closesEnclosure) return end + run.length
+  const nothingFollows = /^\s*$/u.test(text.slice(end + run.length, limit))
+  return nothingFollows ? end + run.length : end
 }
 
 function extendThroughSentenceEnd(text: string, end: number): number {

@@ -3784,6 +3784,83 @@ test('quotes a spoken range including its attached punctuation run', async () =>
   if (proposal?.type === 'edit.proposal.response') assert.equal(proposal.proposal.afterText, 'She says “hello, then goodbye?!” Next.')
 })
 
+test('closes a quotation range at the end target when the sentence continues', async () => {
+  const cases: Array<[string, string, string]> = [
+    ['Before. Alpha beta gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta” gamma. After.'],
+    ['Before. Alpha beta, gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta”, gamma. After.'],
+    ['Before. Alpha beta; gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta”; gamma. After.'],
+    ['Before. Alpha beta: gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta”: gamma. After.'],
+    ['Before. Alpha beta — gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta” — gamma. After.'],
+    ['Before. Alpha beta. Gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta.” Gamma. After.'],
+    ['Before. Alpha beta?! Gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta?!” Gamma. After.'],
+    ['Before. Alpha beta!? Gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta!?” Gamma. After.'],
+    ['Before. Alpha beta…? Gamma. After.', 'Put quotations from alpha to beta.', 'Before. “Alpha beta…?” Gamma. After.'],
+    ['Alpha beta gamma.', 'Put quotations from alpha to beta.', '“Alpha beta” gamma.'],
+  ]
+  for (const [index, [draft, instructionTranscript, expected]] of cases.entries()) {
+    const userId = `quotation-range-boundary-user-${index}`
+    const chatId = `quotation-range-boundary-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `quotation-range-boundary-${index}`, operationId: `quotation-range-boundary-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify({ draft, instructionTranscript, proposal }))
+    if (proposal?.type === 'edit.proposal.response')
+      assert.equal(proposal.proposal.afterText, expected, `${draft} / ${instructionTranscript}`)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
+test('closes every wrapper family at its attached punctuation', async () => {
+  const cases: Array<[string, string, string]> = [
+    ['Put quotations from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. “Alpha beta” gamma. After.'],
+    ['Put quotation marks from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. “Alpha beta” gamma. After.'],
+    ['Put double quotes from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. “Alpha beta” gamma. After.'],
+    ['Put single quotes from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. ‘Alpha beta’ gamma. After.'],
+    ['Put single quotation marks from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. ‘Alpha beta’ gamma. After.'],
+    ['Put parens from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. (Alpha beta) gamma. After.'],
+    ['Put parentheses from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. (Alpha beta) gamma. After.'],
+    ['Put brackets from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. [Alpha beta] gamma. After.'],
+    ['Put square brackets from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. [Alpha beta] gamma. After.'],
+    ['Put curly braces from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. {Alpha beta} gamma. After.'],
+    ['Put angle brackets from alpha to beta.', 'Before. Alpha beta gamma. After.', 'Before. <Alpha beta> gamma. After.'],
+    ['Put parens from alpha to beta.', 'Before. Alpha beta?! Gamma. After.', 'Before. (Alpha beta?!) Gamma. After.'],
+    ['Put single quotes from alpha to beta.', 'Before. Alpha beta. Gamma. After.', 'Before. ‘Alpha beta.’ Gamma. After.'],
+    ['Put brackets from alpha to beta.', 'Before. Alpha beta, gamma. After.', 'Before. [Alpha beta], gamma. After.'],
+  ]
+  for (const [index, [instructionTranscript, draft, expected]] of cases.entries()) {
+    const userId = `quotation-family-boundary-user-${index}`
+    const chatId = `quotation-family-boundary-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `quotation-family-boundary-${index}`, operationId: `quotation-family-boundary-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const proposal = responses.at(-1)?.payload
+    assert.equal(proposal?.type, 'edit.proposal.response', JSON.stringify({ draft, instructionTranscript, proposal }))
+    if (proposal?.type === 'edit.proposal.response')
+      assert.equal(proposal.proposal.afterText, expected, `${draft} / ${instructionTranscript}`)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
+test('keeps a trailing separator with the range when nothing follows it', async () => {
+  const userId = 'quotation-trailing-separator-user'
+  const chatId = 'quotation-trailing-separator-chat'
+  activeChatId = chatId
+  await seedDraft(userId, chatId, 'Before. Alpha beta,')
+  responses.length = 0
+  generationRequests.length = 0
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: 'quotation-trailing-separator', operationId: 'quotation-trailing-separator-op', chatId, expectedVersion: 1, instructionTranscript: 'Put quotations from alpha to beta.' }, userId)
+  const proposal = responses.at(-1)?.payload
+  assert.equal(proposal?.type, 'edit.proposal.response')
+  if (proposal?.type === 'edit.proposal.response')
+    assert.equal(proposal.proposal.afterText, 'Before. “Alpha beta,”')
+  assert.equal(generationRequests.length, 0)
+})
+
 test('wraps a multi-sentence quotation range once and includes attached punctuation', async () => {
   const instructions = ['Put quotations from alpha to omega.', 'Put quotations around alpha to omega.', 'Put quotations around alpha and omega.', 'Put quotations around everything from alpha through omega.', 'Put quotations around everything between alpha and omega.']
   for (const [index, instructionTranscript] of instructions.entries()) {

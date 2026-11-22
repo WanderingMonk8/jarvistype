@@ -1415,7 +1415,7 @@ ${formattedParagraph}`,
       paragraphOrdinal: paragraph?.ordinal ?? paragraphOrdinalAtOffset2(cleanText, start)
     };
   }
-  const insertAfterPoint = formatText && operation.type === "insert_after" ? quotationWrap ? end + (cleanText.slice(end, range.end).match(/^[\p{P}]+/u)?.[0].length ?? 0) : advancePastAdjacentSentenceEnding(cleanText, end, range.end, insertionText) : end;
+  const insertAfterPoint = formatText && operation.type === "insert_after" ? quotationWrap ? attachedRangeEnd(cleanText, end, range.end) : advancePastAdjacentSentenceEnding(cleanText, end, range.end, insertionText) : end;
   const replacement = operation.type === "replace" ? formatText ? alignReplacementInitialCasing(cleanText, start, end, insertionText, protectedCasingTerms) : insertionText : operation.type === "delete" ? "" : operation.type === "insert_after" ? formatText ? addBoundarySpacing(
     cleanText,
     insertAfterPoint,
@@ -1845,6 +1845,15 @@ function escapeRegExp(value) {
 function extendThroughTerminalPunctuation(text, end, limit) {
   const punctuation = text.slice(end, limit).match(/^(?:\.{3}|[.!?…])/u)?.[0];
   return punctuation ? end + punctuation.length : end;
+}
+function attachedRangeEnd(text, end, limit) {
+  const run = text.slice(end, limit).match(/^[\p{P}]+/u)?.[0] ?? "";
+  if (!run) return end;
+  const terminatesSentence = /(?:\.{3}|[.!?…])/u.test(run);
+  const closesEnclosure = /[”’"')\]}⟩»]/u.test(run);
+  if (terminatesSentence || closesEnclosure) return end + run.length;
+  const nothingFollows = /^\s*$/u.test(text.slice(end + run.length, limit));
+  return nothingFollows ? end + run.length : end;
 }
 function extendThroughSentenceEnd(text, end) {
   if (/[.!?…][”’"')\]]*$/u.test(text.slice(0, end))) return end;
@@ -8326,8 +8335,14 @@ function parseDeterministicQuotationRange(instructionTranscript, session) {
       }
     }
     if (endIndex < startIndex) return null;
-    const endTerminal = session.cleanText.slice(endIndex + endText.length).match(/^[\p{P}]+/u)?.[0];
-    const effectiveEndText = endTerminal ? `${endText}${endTerminal}` : endText;
+    const paragraphBreak = session.cleanText.indexOf("\n\n", endIndex);
+    const paragraphEnd = paragraphBreak === -1 ? session.cleanText.length : paragraphBreak;
+    const enclosedEnd = attachedRangeEnd(
+      session.cleanText,
+      endIndex + endText.length,
+      paragraphEnd
+    );
+    const effectiveEndText = session.cleanText.slice(endIndex, enclosedEnd);
     const endOccurrence = countExactOccurrences(session.cleanText.slice(0, endIndex), effectiveEndText) + 1;
     closeOperation = {
       id: "deterministic-close-quotation-range",

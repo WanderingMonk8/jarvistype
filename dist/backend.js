@@ -2916,11 +2916,9 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
     const terms = message.content.match(/[\p{L}\p{M}\d]+(?:[-'’][\p{L}\p{M}\d]+)*/gu) ?? [];
     for (const term of terms) {
       if (/^\p{Ll}/u.test(term)) {
-        const key = referenceEvidenceKey(term);
-        const baseKey = referenceEvidenceKey(stripPossessiveSuffix(term));
-        if (!exemptLowercaseKeys.has(baseKey)) {
-          lowercaseEvidence.add(key);
-          lowercaseEvidence.add(baseKey);
+        const stem = ordinaryWordStem(term);
+        if (!exemptLowercaseKeys.has(stem)) {
+          lowercaseEvidence.add(stem);
         }
       }
     }
@@ -2929,7 +2927,7 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
   const add = (value) => {
     const normalized = normalizeReferenceCasing(value.trim());
     const key = referenceEvidenceKey(normalized);
-    if (!/\s/u.test(normalized) && lowercaseEvidence.has(key)) return;
+    if (!/\s/u.test(normalized) && lowercaseEvidence.has(ordinaryWordStem(normalized))) return;
     if (!normalized || seen.has(key) || size + normalized.length > characterLimit) return;
     seen.add(key);
     references.push(normalized);
@@ -2941,7 +2939,7 @@ function extractConversationReferences(messages, characterLimit = MAX_CONVERSATI
       let sequence = [];
       const flushSequence = () => {
         const supported = sequence.filter(
-          (term) => !lowercaseEvidence.has(referenceEvidenceKey(term))
+          (term) => !lowercaseEvidence.has(ordinaryWordStem(term))
         );
         if (supported.length > 1) add(supported.slice(0, 4).join(" "));
         for (const term of supported) add(term);
@@ -2981,9 +2979,7 @@ function extractAuthoritativeCasingReferences(messages, options = {}) {
     );
     tokens.forEach((token, tokenIndex) => {
       if (!/^\p{Lu}/u.test(token.value)) return;
-      const possessive = token.value.match(/(['’]s)$/iu)?.[0] ?? "";
-      const base = possessive ? token.value.slice(0, -possessive.length) : token.value;
-      const key = referenceEvidenceKey(normalizeReferenceCasing(base));
+      const key = ordinaryWordStem(token.value);
       if (!candidateByKey.has(key)) return;
       const previous = tokens[tokenIndex - 1];
       const next = tokens[tokenIndex + 1];
@@ -3217,11 +3213,20 @@ function stripPossessiveSuffix(value) {
   const possessive = value.match(/(['’]s)$/iu)?.[0] ?? "";
   return possessive ? value.slice(0, -possessive.length) : value;
 }
+var IRREGULAR_CONTRACTIONS = {
+  "ain't": "be",
+  "can't": "can",
+  "shan't": "shall",
+  "won't": "will"
+};
+function ordinaryWordStem(value) {
+  const key = value.toLocaleLowerCase().replace(/\u2019/gu, "'");
+  const irregular = IRREGULAR_CONTRACTIONS[key];
+  if (irregular) return irregular;
+  return key.replace(/n't$/u, "").replace(/['’](?:s|ll|re|ve|d|m)$/u, "");
+}
 function referenceCanonicalKey(value) {
-  const possessive = value.match(/(['’]s)$/iu)?.[0] ?? "";
-  return referenceEvidenceKey(
-    normalizeReferenceCasing(possessive ? value.slice(0, -possessive.length) : value)
-  );
+  return ordinaryWordStem(value);
 }
 function escapeReferencePattern(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&").replace(/['’]/gu, "['\u2019]");
@@ -3368,57 +3373,222 @@ function isHidden(record) {
   );
 }
 var COMMON_CAPITALIZED_WORDS = /* @__PURE__ */ new Set([
+  // Articles, conjunctions, prepositions, and connectives.
   "a",
   "an",
+  "the",
   "and",
-  "as",
-  "at",
   "but",
-  "did",
-  "do",
-  "does",
-  "for",
-  "from",
-  "had",
-  "has",
-  "have",
-  "he",
-  "her",
-  "his",
-  "how",
-  "i",
+  "or",
+  "nor",
+  "yet",
+  "so",
+  "as",
   "if",
+  "because",
+  "while",
+  "though",
+  "although",
+  "unless",
+  "until",
+  "since",
+  "than",
+  "for",
+  "at",
+  "by",
+  "from",
   "in",
+  "into",
+  "of",
+  "off",
+  "on",
+  "onto",
+  "out",
+  "over",
+  "per",
+  "to",
+  "up",
+  "upon",
+  "with",
+  "within",
+  "without",
+  "through",
+  "throughout",
+  "under",
+  "underneath",
+  "about",
+  "above",
+  "across",
+  "after",
+  "against",
+  "along",
+  "among",
+  "around",
+  "before",
+  "behind",
+  "below",
+  "beneath",
+  "beside",
+  "between",
+  "beyond",
+  "during",
+  "except",
+  "inside",
+  "near",
+  "outside",
+  "past",
+  "toward",
+  "towards",
+  "via",
+  // Pronouns and possessives.
+  "i",
+  "me",
+  "my",
+  "mine",
+  "myself",
+  "you",
+  "your",
+  "yours",
+  "yourself",
+  "yourselves",
+  "he",
+  "him",
+  "his",
+  "himself",
+  "she",
+  "her",
+  "hers",
+  "herself",
   "it",
   "its",
-  "my",
-  "of",
-  "on",
-  "our",
-  "she",
-  "so",
-  "that",
-  "the",
-  "their",
-  "then",
-  "they",
-  "this",
-  "to",
+  "itself",
   "we",
+  "us",
+  "our",
+  "ours",
+  "ourselves",
+  "they",
+  "them",
+  "their",
+  "theirs",
+  "themselves",
+  "who",
+  "whom",
+  "whose",
+  "which",
   "what",
   "when",
   "where",
-  "which",
-  "who",
   "why",
-  "with",
-  "you",
-  "your"
+  "how",
+  "this",
+  "that",
+  "these",
+  "those",
+  "one",
+  "someone",
+  "anyone",
+  "everyone",
+  "nobody",
+  "something",
+  "anything",
+  "everything",
+  "nothing",
+  // Determiners and quantifiers.
+  "each",
+  "every",
+  "some",
+  "any",
+  "no",
+  "both",
+  "either",
+  "neither",
+  "all",
+  "many",
+  "much",
+  "more",
+  "most",
+  "few",
+  "little",
+  "several",
+  "such",
+  "other",
+  "another",
+  "same",
+  "own",
+  // Auxiliaries and copulas.
+  "am",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "do",
+  "does",
+  "did",
+  "have",
+  "has",
+  "had",
+  // Common sentence-opening adverbs and discourse markers.
+  "there",
+  "here",
+  "now",
+  "then",
+  "just",
+  "even",
+  "still",
+  "also",
+  "too",
+  "very",
+  "only",
+  "not",
+  "never",
+  "always",
+  "often",
+  "sometimes",
+  "again",
+  "already",
+  "almost",
+  "enough",
+  "perhaps",
+  "maybe",
+  "yes",
+  "oh",
+  "ah",
+  "well",
+  "ok",
+  "okay",
+  "please",
+  "thanks",
+  "sorry",
+  "hello",
+  "hi",
+  "hey",
+  "let",
+  "first",
+  "second",
+  "next",
+  "last",
+  "finally",
+  "however",
+  "therefore",
+  "otherwise",
+  "once",
+  "twice",
+  "ever",
+  "soon",
+  "later",
+  "today",
+  "tonight",
+  "tomorrow",
+  "yesterday"
 ]);
 function isReferenceTerm(term) {
   const key = term.toLocaleLowerCase();
-  const baseKey = key.replace(/['’](?:s|ll|re|ve|d|m)$/u, "");
-  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(key) || COMMON_CAPITALIZED_WORDS.has(baseKey) || AUXILIARY_WORDS.has(key) || AUXILIARY_WORDS.has(baseKey) || PARTICLE_WORDS.has(key) || PARTICLE_WORDS.has(baseKey))
+  const baseKey = ordinaryWordStem(term);
+  if (term.length < 2 || COMMON_CAPITALIZED_WORDS.has(key) || COMMON_CAPITALIZED_WORDS.has(baseKey) || AUXILIARY_WORDS.has(key) || AUXILIARY_WORDS.has(baseKey) || PARTICLE_WORDS.has(key) || PARTICLE_WORDS.has(baseKey) || key !== baseKey && MODAL_WORDS.has(baseKey))
     return false;
   return /\p{Lu}/u.test(term.charAt(0)) || /[\p{Lu}\d]/u.test(term.slice(1));
 }

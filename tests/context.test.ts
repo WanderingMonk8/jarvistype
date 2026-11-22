@@ -198,32 +198,64 @@ test('lowercase history rejects a casing reference unless the term is in the glo
 })
 
 test('does not treat capitalized contractions of ordinary words as casing references', () => {
-  const messages = [
-    { role: 'assistant' as const, content: "She's waiting. She's not moving. Then she smiles." },
+  const contractions = [
+    "She's waiting. She's not moving. Then she smiles.",
+    "She'll wait. She'll see. Then she leaves.",
+    "They're here. They're early. Then they leave.",
+    "We're late. We're sorry. Then we hurry.",
+    "You're right. You're certain. Then you nod.",
+    "It's fine. It's over. Then it ends.",
+    "That's enough. That's all. Then that stops.",
+    "There's nothing. There's no one. Then there is.",
+    "Don't move. Don't speak. Then do nothing.",
+    "Doesn't matter. Doesn't help. Then does nothing.",
+    "Can't see. Can't hear. Then can nothing.",
+    "Won't stop. Won't wait. Then will nothing.",
+    "Shouldn't stay. Shouldn't go. Then should nothing.",
+    "Let's begin. Let's finish. Then let nothing.",
   ]
-  assert.deepEqual(extractConversationReferences(messages), [])
-  assert.deepEqual(extractAuthoritativeCasingReferences(messages), [])
-  assert.deepEqual(
-    extractAuthoritativeCasingReferences(messages, {
-      allowRepeatedWithinSource: true,
-      allowMidSentenceCapitalized: true,
-      allowRepeatedSentenceOpenings: false,
-    }),
-    [],
-  )
-  assert.deepEqual(
-    extractAuthoritativeCasingReferences([
-      { role: 'assistant' as const, content: "She'll wait. She'll see. Then she leaves." },
-    ]),
-    [],
-  )
+  for (const content of contractions) {
+    const messages = [{ role: 'assistant' as const, content }]
+    assert.deepEqual(extractConversationReferences(messages), [], content)
+    assert.deepEqual(extractAuthoritativeCasingReferences(messages), [], content)
+    assert.deepEqual(
+      extractAuthoritativeCasingReferences(messages, {
+        allowRepeatedWithinSource: true,
+        allowMidSentenceCapitalized: true,
+        allowRepeatedSentenceOpenings: false,
+      }),
+      [],
+      content,
+    )
+  }
   assert.equal(
     canonicalizeExactConversationReferences(
       "What do you think she's thinking right now?",
-      extractAuthoritativeCasingReferences(messages),
+      extractAuthoritativeCasingReferences([
+        { role: 'assistant' as const, content: "She's waiting. She's not moving." },
+      ]),
     ).text,
     "What do you think she's thinking right now?",
   )
+})
+
+test('does not promote capitalized function words or discourse markers', () => {
+  for (const content of [
+    'There she waits. There she stays.',
+    'Here it comes. Here it goes.',
+    'Still no answer. Still no sound.',
+    'Just one more. Just one step.',
+    'Maybe later. Maybe never.',
+    'Because it hurts. Because it matters.',
+    'While she waits. While he sleeps.',
+    'However it ends. However it starts.',
+  ]) {
+    assert.deepEqual(
+      extractAuthoritativeCasingReferences([{ role: 'assistant' as const, content }]),
+      [],
+      content,
+    )
+  }
 })
 
 test('keeps possessive proper names authoritatively cased', () => {
@@ -234,6 +266,12 @@ test('keeps possessive proper names authoritatively cased', () => {
   assert.equal(
     canonicalizeExactConversationReferences('her zorlin coat', references).text,
     'her Zorlin coat',
+  )
+  assert.deepEqual(
+    extractAuthoritativeCasingReferences([
+      { role: 'assistant' as const, content: "O'Brien waited. O'Brien left." },
+    ]),
+    ["O'Brien"],
   )
 })
 

@@ -3009,6 +3009,36 @@ test('inserts quoted payloads before a target', async () => {
   }
 })
 
+test('appends and prepends quoted payloads to a paragraph', async () => {
+  const cases: Array<[string, string]> = [
+    ['Append to paragraph 1 the sentence "My name is Ken."', 'First paragraph. My name is Ken.\n\nSecond paragraph.'],
+    ['Append to the first paragraph the phrase "my name is Ken."', 'First paragraph. My name is Ken.\n\nSecond paragraph.'],
+    ['Append the sentence "My name is Ken." to paragraph 1', 'First paragraph. My name is Ken.\n\nSecond paragraph.'],
+    ['Add to the end of paragraph 1 the sentence "My name is Ken."', 'First paragraph. My name is Ken.\n\nSecond paragraph.'],
+    ['Tack onto the end of paragraph 1 the phrase "my name is Ken."', 'First paragraph. My name is Ken.\n\nSecond paragraph.'],
+    ['Prepend to paragraph 1 the sentence "My name is Ken."', 'My name is Ken. First paragraph.\n\nSecond paragraph.'],
+    ['Prepend to the first paragraph the phrase "my name is Ken."', 'My name is Ken. First paragraph.\n\nSecond paragraph.'],
+    ['Prepend the phrase "my name is Ken" to paragraph 1', 'My name is Ken first paragraph.\n\nSecond paragraph.'],
+    ['Add to the beginning of paragraph 1 the sentence "My name is Ken."', 'My name is Ken. First paragraph.\n\nSecond paragraph.'],
+    ['Prepend to paragraph 2 the sentence "open bracket hello close bracket"', 'First paragraph.\n\n[Hello] second paragraph.'],
+    ['Append to paragraph 2 the sentence "begin speech hello there end speech"', 'First paragraph.\n\nSecond paragraph. “Hello there”'],
+  ]
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    const userId = `paragraph-append-quoted-user-${index}`
+    const chatId = `paragraph-append-quoted-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, 'First paragraph.\n\nSecond paragraph.')
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `paragraph-append-quoted-${index}`, operationId: `paragraph-append-quoted-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', JSON.stringify({ instructionTranscript, response }))
+    if (response?.type === 'edit.proposal.response')
+      assert.equal(response.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
 test('quoted payloads run every paired enclosure command', async () => {
   const cases: Array<[string, string]> = [
     ['Insert after tolerable the sentence "open single quote hello close single quote"', 'It is tolerable ‘Hello’.'],

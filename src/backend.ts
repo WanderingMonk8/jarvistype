@@ -1771,6 +1771,12 @@ function parseDeterministicEditPlan(
   if (deterministicPlan) return finalizeInterpretedPlan(instructionTranscript, deterministicPlan)
   const inlineInsertion = parseDeterministicInlineInsertion(instructionTranscript, session)
   if (inlineInsertion) return finalizeInterpretedPlan(instructionTranscript, inlineInsertion)
+  const paragraphAppendPrepend = parseDeterministicParagraphAppendPrepend(
+    instructionTranscript,
+    session,
+  )
+  if (paragraphAppendPrepend)
+    return finalizeInterpretedPlan(instructionTranscript, paragraphAppendPrepend)
   const referentialPlan = parseDeterministicReferentialReplacement(instructionTranscript, session)
   if (referentialPlan) return referentialPlan
   const qualifiedReferencePlan = parseDeterministicQualifiedAsInReplacement(
@@ -3753,6 +3759,76 @@ function parseDeterministicInlineInsertion(
         type: match[1]!.toLocaleLowerCase() === 'before' ? 'insert_before' : 'insert_after',
         target: { exactText: targetText },
         text: insertion,
+      },
+    ],
+  })
+}
+
+function parseDeterministicParagraphAppendPrepend(
+  instructionTranscript: string,
+  session: PersistedDraftSession,
+): EditPlan | null {
+  if (/[\r\n;]/u.test(instructionTranscript) || /\bas\s+in\b/iu.test(instructionTranscript))
+    return null
+  const trimmed = instructionTranscript.trim().replace(/[.!?]+$/u, '').trim()
+  const ordinalToken =
+    '(?:\\d+(?:st|nd|rd|th)?|one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|seven|seventh|eight|eighth|nine|ninth|ten|tenth|last|final|penultimate|second[- ]to[- ]last)'
+  const paragraphTarget = `(?:paragraph(?:\\s+number)?\\s+(?<paragraphNumber>${ordinalToken})|(?:the\\s+)?(?<paragraphOrdinal>${ordinalToken})\\s+paragraph)`
+  const payloadLabel = `(?:(?:the|this|that)\\s+)?(?:sentences?|phrase|words?|text|part|fragment)\\s*[:,]?\\s*`
+  const says = `(?:that\\s+says\\s*[:,]?\\s*)?`
+  const explicitDirection = trimmed.match(
+    new RegExp(
+      `^(?:append|prepend|add|place|put|tack)\\s+(?:on\\s+)?(?:to|at|onto)\\s+(?:the\\s+)?(?<direction>end(?:ing)?|begin(?:ning)?|start)(?:\\s+of)?\\s+${paragraphTarget}\\s+${says}${payloadLabel}?(?<payload>[\\s\\S]+)$`,
+      'iu',
+    ),
+  )
+  const bareVerb = explicitDirection
+    ? null
+    : trimmed.match(
+        new RegExp(
+          `^(?<verb>append|prepend|tack)\\s+(?:on\\s+)?(?:to|at|onto)?\\s*(?:the\\s+)?(?<direction>end(?:ing)?|begin(?:ning)?|start)?(?:\\s+of)?\\s*${paragraphTarget}\\s+${says}${payloadLabel}?(?<payload>[\\s\\S]+)$`,
+          'iu',
+        ),
+      )
+  const payloadFirst = explicitDirection || bareVerb
+    ? null
+    : trimmed.match(
+        new RegExp(
+          `^(?<verb>append|prepend|add|place|put|tack)\\s+${payloadLabel}?(?<payload>[\\s\\S]+?)\\s+(?:to|at|onto)\\s+(?:the\\s+)?(?<direction>end(?:ing)?|begin(?:ning)?|start)?(?:\\s+of\\s+)?${paragraphTarget}$`,
+          'iu',
+        ),
+      )
+  const match = explicitDirection ?? bareVerb ?? payloadFirst
+  if (!match) return null
+  const paragraphOrdinal = parseParagraphOrdinalToken(
+    match.groups?.paragraphNumber ?? match.groups?.paragraphOrdinal,
+    session.paragraphs.length,
+  )
+  if (
+    paragraphOrdinal === null ||
+    paragraphOrdinal < 1 ||
+    paragraphOrdinal > session.paragraphs.length
+  )
+    return null
+  const payload = unwrapEditArgument(stripUnquotedEditArgumentLabel(
+    (match.groups?.payload ?? '').trim().replace(/^[,;:]?\s*/u, ''),
+  ))
+  if (!payload) return null
+  const direction = (match.groups?.direction ?? '').toLocaleLowerCase()
+  const verb = (match.groups?.verb ?? '').toLocaleLowerCase()
+  const append = direction
+    ? /^end(?:ing)?$/u.test(direction)
+    : !/^prepend$/u.test(verb)
+  return parseEditPlan({
+    schemaVersion: 2,
+    draftVersion: session.draftVersion,
+    explanation: `${append ? 'Append' : 'Prepend'} the dictated text to paragraph ${paragraphOrdinal}.`,
+    operations: [
+      {
+        id: 'deterministic-paragraph-append-prepend',
+        type: append ? 'append' : 'prepend',
+        target: { paragraphOrdinal },
+        text: payload,
       },
     ],
   })

@@ -2699,6 +2699,10 @@ async function interpretEditInstruction(
         },
         {
           role: 'system',
+          content: 'When the instruction quotes a new payload, as in “insert after X the sentence "Y"” or “replace X with the phrase "Y"”, the surrounding quotation marks delimit the payload and are not part of operation.text. Spoken enclosure and punctuation commands inside those marks, such as “begin speech … end speech” or “open single quote … close single quote”, still apply to the payload and must be preserved for the application to normalize; the quotes the speaker dictated around those commands remain the payload delimiters.',
+        },
+        {
+          role: 'system',
           content:
             'Recognize flexible edit vocabulary only when the instruction supplies the arguments required for that operation. Delete aliases: delete, remove, take off, take out, erase, cut. Replace aliases: replace X with Y; change X to or into Y; swap X with or for Y; substitute X with or for Y. Insert aliases: insert, add, place, or put X before or after Y. Append aliases: append, add to the end, place at the end, put at the end, or tack onto the end. Prepend aliases: prepend, add to the beginning or start, place at the beginning or start, or put at the beginning or start. Move aliases: move, relocate, or shift X before or after Y. Split aliases: split, break, or divide a paragraph after the identified target. OR, split a sentence at a word/phrase boundary: emit split_sentence with the source sentence as target, the anchor as destination, and direction “before” or “after” the anchor. The split produces two independently terminated sentences: comma/semicolon at the joint become period; other terminators stay; the start of the second part is capitalized (names and “I” keep casing). Join aliases: join, merge, or combine a paragraph with the following paragraph. Or, join two inline sentences/phrases/words/clauses that are directly next to each other: emit join_sentence with the first operand as target and the second operand as destination; the first operand’s terminal punctuation is replaced with a comma and the second operand’s first ordinary word is lowercased (names and “I” keep their casing), and the merged sentence inherits the first operand’s exact ! ? … run when one is present. Casing aliases: uppercase or make all caps; lowercase or make lowercase; capitalize or title case every word in the target phrase. Continue aliases: continue X with Y; continue from/after X with Y; continue X with this phrase Y (where the from/after/this/the/phrase/sentence/word/clause/part parts are optional fillers). When the continuation Y itself begins with words such as “the phrase,” “this sentence,” “the word,” “the clause,” “the part,” or “the fragment,” with optional attached punctuation, those words and the attached punctuation are fillers introducing the literal continuation and must be omitted from Y. If the spoken continuation itself contains quoted speech or an enclosed utterance (for example “begin speech … end speech”, a parenthesized parenthetical, or a bracketed aside), those enclosure marks are part of Y and must appear in the emitted operation text; the opening of the quoted utterance is a fresh sentence boundary whose casing must be kept — do not lowercase it. A continue operation attaches the spoken continuation to the end of the matched target, replacing any ending sentence punctuation with a comma and lowercasing the continuation’s first ordinary word. If the matched source ends with ?, !, …, or a combination such as !?, !!, or ?!, the merged sentence inherits that exact terminator instead of the continuation’s terminal punctuation. Isolated verbs without the required target, payload, or destination are not valid edit operations.',
         },
@@ -3730,9 +3734,9 @@ function parseDeterministicInlineInsertion(
   const match = instructionTranscript
     .trim()
     .match(
-      /^(?:insert|add|place|put)\s+(before|after)\s+(?:the\s+)?(?:sentence|phrase|words?|text)\s+(.+?)\s+(?:with|using)\s+([\s\S]+)$/iu,
+      /^(?:insert|add|place|put)\s+(before|after)\s+(?:the\s+)?(?:sentences?|phrase|words?|text)\s+(.+?)\s+(?:with|using)\s+([\s\S]+)$/iu,
     ) ?? instructionTranscript.trim().match(
-      /^(?:insert|add|place|put)\s+(before|after)\s+(.+?)\s+the\s+(?:phrase|words?|text)\b\s*[,;:]?\s+([\s\S]+)$/iu,
+      /^(?:insert|add|place|put)\s+(before|after)\s+(.+?)\s+the\s+(?:sentences?|phrase|words?|text)\b\s*[,;:]?\s+([\s\S]+)$/iu,
     )
   if (!match) return null
   const target = unwrapEditArgument(stripUnquotedEditArgumentLabel((match[2] ?? '').replace(/[,;:]\s*$/u, '')))
@@ -4477,7 +4481,10 @@ function isSentencePositionTarget(value: string): boolean {
 function stripUnquotedEditArgumentLabel(value: string): string {
   const trimmed = value.trim()
   if (/^["'“‘]/u.test(trimmed)) return trimmed
-  return trimmed.replace(/^(?:the\s+)?(?:word|words|phrase)\s*[:,]?\s+/iu, '')
+  return trimmed.replace(
+    /^(?:(?:the|this|that)\s+)?(?:sentences?|word|words|phrase|text|part|fragment)\s*[:,]?\s+/iu,
+    '',
+  )
 }
 
 function adoptUnambiguousDraftCasing(

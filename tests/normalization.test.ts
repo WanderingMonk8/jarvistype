@@ -528,7 +528,7 @@ test('formats voice-generated quotation openings without changing intentional le
   )
   assert.equal(
     normalizeDeterministically('open brace Alpha close brace beta.', []).text,
-    '{ Alpha } beta.',
+    '{Alpha} beta.',
   )
   assert.equal(
     normalizeDeterministically('open angle bracket Alpha close angle bracket beta.', []).text,
@@ -536,11 +536,11 @@ test('formats voice-generated quotation openings without changing intentional le
   )
   assert.equal(
     normalizeDeterministically('open curly brace Alpha close curly brace beta.', []).text,
-    '{ Alpha } beta.',
+    '{Alpha} beta.',
   )
   assert.equal(
     normalizeDeterministically('open curly bracket Alpha close curly bracket beta.', []).text,
-    '{ Alpha } beta.',
+    '{Alpha} beta.',
   )
   assert.equal(
     normalizeDeterministically('Alpha open parenthesis. aside period close parenthesis.', []).text,

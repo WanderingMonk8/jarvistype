@@ -2953,6 +2953,64 @@ test('deletes a dictated inclusive passage across paragraphs without provider in
   assert.equal(generationRequests.length, 0)
 })
 
+test('inserts and replaces with quoted sentence or phrase payloads', async () => {
+  const cases: Array<[string, string, string]> = [
+    ['It is tolerable.', 'Insert after tolerable the sentence "My name is Ken."', 'It is tolerable. My name is Ken.'],
+    ['It is tolerable.', 'Insert after tolerable the sentence, "My name is Ken."', 'It is tolerable. My name is Ken.'],
+    ['It is tolerable.', 'Insert after tolerable the phrase "my name is Ken."', 'It is tolerable. My name is Ken.'],
+    ['It is tolerable.', "Insert after tolerable the phrase 'hello there'", 'It is tolerable hello there.'],
+    ['It is tolerable.', 'Insert after tolerable the sentence "don\'t stop."', "It is tolerable. Don't stop."],
+    ['It is tolerable.', 'Insert after tolerable the sentence “hello there”', 'It is tolerable hello there.'],
+    ['It is tolerable.', 'Replace tolerable with the sentence "my name is Ken."', 'It is my name is Ken.'],
+    ['It is tolerable.', 'Replace the phrase tolerable with the sentence "my name is Ken."', 'It is my name is Ken.'],
+    ['It is tolerable.', 'Replace the sentence "It is tolerable." with the sentence "It is fine."', 'It is fine.'],
+    ['Before. It is tolerable. After.', 'Replace the second sentence with the sentence "It is fine."', 'Before. It is fine. After.'],
+  ]
+  for (const [index, [draft, instructionTranscript, expected]] of cases.entries()) {
+    const userId = `quoted-payload-user-${index}`
+    const chatId = `quoted-payload-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `quoted-payload-${index}`, operationId: `quoted-payload-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', JSON.stringify({ draft, instructionTranscript, response }))
+    if (response?.type === 'edit.proposal.response')
+      assert.equal(response.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
+test('quoted payloads run every paired enclosure command', async () => {
+  const cases: Array<[string, string]> = [
+    ['Insert after tolerable the sentence "open single quote hello close single quote"', 'It is tolerable ‘Hello’.'],
+    ['Insert after tolerable the sentence "open quotation mark hello close quotation mark"', 'It is tolerable “Hello”.'],
+    ['Insert after tolerable the sentence "begin speech hello there end speech"', 'It is tolerable “Hello there”.'],
+    ['Insert after tolerable the sentence "open parenthesis hello close parenthesis"', 'It is tolerable (hello).'],
+    ['Insert after tolerable the sentence "open bracket hello close bracket"', 'It is tolerable [hello].'],
+    ['Insert after tolerable the sentence "open brace hello close brace"', 'It is tolerable {hello}.'],
+    ['Insert after tolerable the sentence "open angle bracket hello close angle bracket"', 'It is tolerable <hello>.'],
+    ['Replace tolerable with the sentence "begin speech hello there end speech"', 'It is “hello there”.'],
+    ['Replace tolerable with the sentence open bracket hello close bracket', 'It is [hello].'],
+    ['Replace tolerable with the sentence open brace hello close brace', 'It is {hello}.'],
+  ]
+  for (const [index, [instructionTranscript, expected]] of cases.entries()) {
+    const userId = `quoted-payload-enclosure-user-${index}`
+    const chatId = `quoted-payload-enclosure-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, 'It is tolerable.')
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `quoted-payload-enclosure-${index}`, operationId: `quoted-payload-enclosure-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', JSON.stringify({ instructionTranscript, response }))
+    if (response?.type === 'edit.proposal.response')
+      assert.equal(response.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
 test('parses target-first insertion with a dictated phrase label', async () => {
   const examples = [
     ['It is tolerable.', 'Insert after tolerable the phrase, my name is Ken.', 'It is tolerable. My name is Ken.'],

@@ -1073,8 +1073,8 @@ export function applySpellingCasing(value: string, casing: string | undefined): 
 
 function cleanupPunctuationSpacing(value: string): string {
   return value
-    .replace(/[ \t]+([,.;:!?)\]>])/g, '$1')
-    .replace(/([(<[])\s+/g, '$1')
+    .replace(/[ \t]+([,.;:!?)\]>}])/g, '$1')
+    .replace(/([(<[{])\s+/g, '$1')
     .replace(/([“‘])[ \t]+/g, '$1')
     .replace(/[ \t]+([”’])/g, '$1')
     .replace(/[ \t]+…/g, '…')

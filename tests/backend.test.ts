@@ -2982,6 +2982,33 @@ test('inserts and replaces with quoted sentence or phrase payloads', async () =>
   }
 })
 
+test('inserts quoted payloads before a target', async () => {
+  const cases: Array<[string, string, string]> = [
+    ['It is tolerable.', 'Insert before tolerable the sentence "My name is Ken."', 'It is My name is Ken. Tolerable.'],
+    ['It is tolerable.', 'Insert before tolerable the phrase "my name is Ken."', 'It is my name is Ken. Tolerable.'],
+    ['It is tolerable.', 'Insert before tolerable the sentence "begin speech hello there end speech"', 'It is “Hello there” tolerable.'],
+    ['It is tolerable.', 'Insert before tolerable the sentence "open single quote hello close single quote"', 'It is ‘Hello’ tolerable.'],
+    ['It is tolerable.', 'Insert before the phrase tolerable using the phrase "my name is Ken."', 'It is my name is Ken. Tolerable.'],
+    ['It is tolerable.', 'Add before tolerable the sentence "My name is Ken."', 'It is My name is Ken. Tolerable.'],
+    ['It is tolerable.', 'Put before tolerable the sentence "My name is Ken."', 'It is My name is Ken. Tolerable.'],
+    ['She waits.', 'Insert before She the sentence "Before that,"', 'Before that, she waits.'],
+  ]
+  for (const [index, [draft, instructionTranscript, expected]] of cases.entries()) {
+    const userId = `insert-before-quoted-user-${index}`
+    const chatId = `insert-before-quoted-chat-${index}`
+    activeChatId = chatId
+    await seedDraft(userId, chatId, draft)
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `insert-before-quoted-${index}`, operationId: `insert-before-quoted-op-${index}`, chatId, expectedVersion: 1, instructionTranscript }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', JSON.stringify({ draft, instructionTranscript, response }))
+    if (response?.type === 'edit.proposal.response')
+      assert.equal(response.proposal.afterText, expected, instructionTranscript)
+    assert.equal(generationRequests.length, 0, instructionTranscript)
+  }
+})
+
 test('quoted payloads run every paired enclosure command', async () => {
   const cases: Array<[string, string]> = [
     ['Insert after tolerable the sentence "open single quote hello close single quote"', 'It is tolerable ‘Hello’.'],

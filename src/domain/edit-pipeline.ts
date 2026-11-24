@@ -1260,6 +1260,10 @@ function executeContinueSentence(
   if (typeof source === 'string') return { ok: false, reason: source }
   const start = source.start
   let end = source.end
+  // A sentence selector may include both its punctuation and closing wrappers.
+  // Put those back into the suffix examined below before finding the join point.
+  const includedClosers = cleanText.slice(start, end).match(/[,;:.!?…—–-]+([”’"')\]}]+)$/u)?.[1]
+  if (includedClosers) end -= includedClosers.length
   // Trim trailing punctuation inside the matched span so X stops at the last word character.
   while (end > start && /[.,;:!?…—–-]/u.test(cleanText[end - 1]!)) end -= 1
   const text = stripContinuationHelper(operation.text ?? '')
@@ -1267,7 +1271,7 @@ function executeContinueSentence(
   // Consume the terminal punctuation run and any closing wrapper that belongs
   // to it; the merged sentence inherits the exact run.
   const after = cleanText.slice(end)
-  const closeMatch = after.match(/^([.!?…—–-]+)([”’"')\]}]*)/u)
+  const closeMatch = after.match(/^([,;:.!?…—–-]+)([”’"')\]}]*)/u)
   const raw = closeMatch?.[1] ?? ''
   const closers = closeMatch?.[2] ?? ''
   const consumed = (closeMatch?.[0].length ?? 0)

@@ -2653,6 +2653,19 @@ test('Continue replaces a closing wrapper that belongs to the source', () => {
   assert.equal(result.ok && result.afterText, 'She said, “He looks to his left and turn, and then he begins to shout.”')
 })
 
+test('Continue places text inside a comma-terminated quotation for included and excluded punctuation', () => {
+  const text = 'She said, “She is too busy to worry about that,”'
+  for (const target of ['She is too busy to worry about that', 'She is too busy to worry about that,”']) {
+    const result = executeEditPlan(text, [{ id: 'p', ordinal: 1, lineIndex: 0, text }], 1, {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'continue',
+      operations: [{ id: 'quoted', type: 'continue', target: { exactText: target }, text: 'And she will return.' }],
+    })
+    assert.equal(result.ok && result.afterText, 'She said, “She is too busy to worry about that, and she will return.”')
+  }
+})
+
 test('Continue inherits question mark and paired punctuation from the source', () => {
   const text = 'He looks to his left and turn?'
   const paragraphs = [{ id: 'p', ordinal: 1, lineIndex: 0, text }]

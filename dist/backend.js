@@ -1662,11 +1662,13 @@ function executeContinueSentence(cleanText, paragraphs, operation, protectedCasi
   if (typeof source === "string") return { ok: false, reason: source };
   const start = source.start;
   let end = source.end;
+  const includedClosers = cleanText.slice(start, end).match(/[,;:.!?…—–-]+([”’"')\]}]+)$/u)?.[1];
+  if (includedClosers) end -= includedClosers.length;
   while (end > start && /[.,;:!?…—–-]/u.test(cleanText[end - 1])) end -= 1;
   const text = stripContinuationHelper(operation.text ?? "");
   if (!/[\p{L}\p{N}]/u.test(text)) return { ok: false, reason: "continue target was not found" };
   const after = cleanText.slice(end);
-  const closeMatch = after.match(/^([.!?…—–-]+)([”’"')\]}]*)/u);
+  const closeMatch = after.match(/^([,;:.!?…—–-]+)([”’"')\]}]*)/u);
   const raw = closeMatch?.[1] ?? "";
   const closers = closeMatch?.[2] ?? "";
   const consumed = closeMatch?.[0].length ?? 0;

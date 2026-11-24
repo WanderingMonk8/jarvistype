@@ -3576,6 +3576,7 @@ test('resolves about join commands and executes inline sentence merges', async (
 
 test('resolves about sentence and phrase continue commands with descriptive about targets', async () => {
   const examples = [
+    ['“She is too busy to worry about that,”', 'Continue the sentence about being too busy with and she will return.', 0, '“She is too busy to worry about that, and she will return.”'],
     ['Erin unwinds herself. Maeve waits.', 'Continue the sentence about Erin relaxing with and then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],
     ['Erin unwinds herself. Maeve waits.', 'Continue the phrase about Erin relaxing with and then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],
     ['Erin unwinds herself. Maeve waits.', 'Continue from the sentence about Erin relaxing with And then she slouches.', 0, 'Erin unwinds herself, and then she slouches. Maeve waits.'],

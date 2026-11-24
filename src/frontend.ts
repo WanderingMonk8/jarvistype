@@ -186,6 +186,77 @@ export const COMMAND_GROUPS = [
   },
 ] as const
 
+// Keep the complete catalog searchable while presenting long entries as
+// task-oriented sections.
+export const COMMAND_DETAILS: Readonly<Record<string, readonly { label: string; text: string }[]>> = {
+  'Spoken punctuation': [
+    { label: 'Sentence marks', text: 'Say “period,” “comma,” “colon,” “semicolon,” “question mark,” “exclamation mark,” or “ellipsis.”' },
+    { label: 'Other marks', text: 'Say “apostrophe,” “asterisk,” “hyphen,” “dash,” “en dash,” or “em dash.”' },
+    { label: 'Parentheses and square brackets', text: 'Say “open parenthesis” or “open paren,” “close parenthesis” or “close paren,” “open bracket,” or “close bracket.”' },
+    { label: 'Angle brackets', text: 'Say “begin bracket” and “end bracket,” or use “open,” “close,” “begin,” or “end angle bracket.”' },
+    { label: 'Curly braces', text: 'Say “open brace,” “open curly brace,” or “open curly bracket”; use the corresponding “close” form for the other side.' },
+    { label: 'Layout', text: 'Say “new line” or “new paragraph.”' },
+  ],
+  Quotations: [
+    { label: 'Double quotes', text: 'Say “quote” or “quotation” at both ends. You can also say “begin speech” (or “again speech”) and “end speech”; “beginning speech” / “ending speech” and “begins speech” / “ends speech” work too.' },
+    { label: 'Single quotes', text: 'Say “single quote” or “single quotation” at both ends, or “begin single” and “end single.”' },
+    { label: 'Explicit markers', text: 'Use “open quote … close quote,” “open quotation mark … close quotation mark,” “open double quotation mark … close double quotation mark,” “open single quote … close single quote,” or “open single quotation mark … close single quotation mark.”' },
+  ],
+  'Open or close a wrapper pair in place': [
+    { label: 'One marker', text: 'Say “open quote the first sentence” or “close quote the first sentence.” Open inserts before the target; close inserts after it.' },
+    { label: 'Other targets', text: 'Try “open single quote the last sentence,” “open bracket the first paragraph,” or “close angle bracket the last paragraph.”' },
+    { label: 'Other markers', text: 'The same pattern works with parentheses, brackets, braces, angle brackets, and single or double quotation marks.' },
+  ],
+  'Wrap with quote marks or brackets': [
+    { label: 'A sentence or paragraph', text: 'Say “put quotation marks around the first paragraph,” “put single quotes around the first paragraph,” or “put angle brackets around the second sentence.”' },
+    { label: 'A range', text: 'Say “put single quotes from Start here to end there,” “put angle brackets between X and Y,” or “put quotations around X and Y.”' },
+    { label: 'Other wording', text: 'Try “quote the first paragraph,” “put the first paragraph in quotes,” or “add single quotes to the first paragraph.”' },
+    { label: 'Supported pairs', text: 'Double and single quotes, parentheses, square brackets, curly braces, and angle brackets.' },
+  ],
+  'Quoted insert or replace text': [
+    { label: 'Insert', text: 'Say “Insert after tolerable the sentence ‘My name is Ken.’” or “Insert before tolerable the sentence ‘My name is Ken.’”' },
+    { label: 'Replace', text: 'Say “Replace tolerable with the phrase ‘my name is Ken.’” The outer quotation marks delimit the new text; they are not inserted.' },
+    { label: 'Spoken enclosures', text: 'Commands inside the new text still work: “begin speech hello there end speech” inserts quoted speech. Single quotes, parentheses, brackets, braces, and angle brackets work too.' },
+  ],
+  Continue: [
+    { label: 'Format', text: 'Say “Continue the sentence ‘I look at the man from across the room’ with ‘And I decide to wave.’” You can also name a fragment, or say “continue from” or “continue after.”' },
+    { label: 'Result', text: 'The continuation joins the target with a comma: “I look at the man from across the room, and I decide to wave.” Existing quotes or brackets remain around the combined text.' },
+    { label: 'Casing and punctuation', text: 'The first ordinary word is lowercased; proper names and “I” keep their casing. A source ending in ?, !, …, or a combination such as !? keeps that exact ending on the joined sentence.' },
+    { label: 'Optional wording', text: 'Words like “the sentence,” “this phrase,” or “the word” can introduce the target or the continuation; the introducing words are not inserted.' },
+  ],
+  'About a sentence or part': [
+    { label: 'Describe a target', text: 'Say “delete the sentence about Erin unwinding,” “replace the part about Erin unwinding with she rests,” or “move the part about Erin unwinding to the end of the paragraph.”' },
+    { label: 'Continue or move', text: 'Try “continue the sentence about Erin unwinding with and then she rests,” or move text before, after, to the beginning, or to the end of a described sentence.' },
+    { label: 'Join', text: 'Say “join the sentence about Erin relaxing with the next,” “join the sentence about Maeve waiting with the previous,” or join two adjacent described sentences. Literal targets can be used for either operand.' },
+    { label: 'Safety', text: 'Uncertain or overlapping matches are flagged for review; unrelated ambiguous matches stop. Quote a literal target containing “about” to keep it exact.' },
+  ],
+  Split: [
+    { label: 'Paragraph', text: 'Say “split,” “break,” or “divide paragraph 1 after ‘The launch checklist is ready.’”' },
+    { label: 'Sentence', text: 'Say “split the sentence ‘To err is human; to forgive is divine’ before ‘to forgive.’” A fragment can identify the sentence or split point; “the sentence about X before/after Y” works too.' },
+    { label: 'Result and ambiguity', text: 'The two parts become separate sentences; a comma or semicolon at the split becomes a period, and the second sentence starts with a capital. Other terminal marks are preserved. If multiple locations match, you are asked to choose.' },
+  ],
+  Join: [
+    { label: 'Paragraphs', text: 'Say “join,” “merge,” or “combine paragraph 1 with the following paragraph.”' },
+    { label: 'Adjacent sentences', text: 'Say “join the sentence ‘Maeve waits’ with the sentence ‘Until it’s no longer.’” Fragments and “about” descriptions can identify either sentence; both must be adjacent in the same paragraph.' },
+    { label: 'A neighboring sentence', text: 'Say “join the sentence about Erin relaxing with the next” or “join the sentence ‘Maeve waits’ with the previous.” Multiple matches prompt a choice.' },
+    { label: 'Result', text: 'The first ending becomes a comma and the next ordinary word is lowercased; proper names and “I” keep their casing. The first sentence’s ?, !, …, or combination is inherited. A source wrapper remains around the source, not both sentences.' },
+  ],
+  'Glossary hint': [
+    { label: 'Format', text: 'Say “hint” or “clue” and a description after the term, immediately or later in the same sentence. For example: “two-door army clue Midland’s enemy.”' },
+    { label: 'Matching', text: 'Commas are optional. Synonyms, plurals, and inflected forms can match the hint; the earlier term must be uniquely identifiable by spelling, sound, or a confident semantic match.' },
+    { label: 'Safety', text: 'Ambiguous terms or explanation endpoints are left for review.' },
+  ],
+  'As in reference': [
+    { label: 'Format', text: 'Repeat a dictated term or a clear inflection after “as in”: “Jenga is my favorite, as in Jenga the game.” The repeated term can appear earlier in the same clause.' },
+    { label: 'Safety', text: 'A unique target and clear boundary are required; otherwise the wording remains for review. Use “hint” or “clue” for glossary descriptions.' },
+  ],
+  'Punctuation targets': [
+    { label: 'Position', text: 'Use “the second quote in paragraph 1” or “the last period in paragraph 1” with move, replace, insert, or delete.' },
+    { label: 'Relative target', text: 'Refer to “the quote after the phrase ‘this is very good.’”' },
+    { label: 'Range endpoint', text: 'Say “put quotations from ‘well, I guess’ to the ellipsis” when the punctuation mark is unique.' },
+  ],
+}
+
 function describeEditDestination(destination: EditTarget | undefined): string {
   if (!destination) return ''
   if (destination.punctuation) {
@@ -3183,8 +3254,13 @@ function floatingMarkup(): string {
         <div class="jt-command-topics">
           ${group.examples
             .map(
-              ([activation, example]) =>
-                `<details class="jt-command-item" data-command-item><summary>${activation}</summary><p>${example}</p></details>`,
+              ([activation, example]) => {
+                const sections = COMMAND_DETAILS[activation]
+                const content = sections
+                  ? `<ul class="jt-command-explanations">${sections.map(({ label, text }) => `<li><strong>${label}</strong><span>${text}</span></li>`).join('')}</ul><span hidden>${example}</span>`
+                  : `<p>${example}</p>`
+                return `<details class="jt-command-item" data-command-item><summary>${activation}</summary>${content}</details>`
+              },
             )
             .join('')}
         </div>
@@ -3342,6 +3418,9 @@ function shellMarkup(): string {
       .jt-floating .jt-command-item { border-color: transparent; background: color-mix(in srgb, currentColor 5%, transparent); padding: .55rem .65rem; }
       .jt-command-item > summary { font-size: .9rem; }
       .jt-command-item > p { margin: .55rem 0 .1rem !important; line-height: 1.6; overflow-wrap: anywhere; }
+      .jt-command-explanations { display: grid; gap: .7rem; padding: 0; margin: .7rem 0 .15rem; list-style: none; }
+      .jt-command-explanations li { display: grid; gap: .2rem; line-height: 1.5; overflow-wrap: anywhere; }
+      .jt-command-explanations li strong { font-size: .82rem; }
       .jt-command-list summary:focus-visible { outline: 2px solid #d69e2e; outline-offset: 3px; }
       .jt-empty { opacity: .65; font-style: italic; }
       .jt-shell [hidden] { display: none !important; }

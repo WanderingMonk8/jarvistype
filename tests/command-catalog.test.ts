@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { COMMAND_GROUPS } from '../src/frontend'
+import { COMMAND_DETAILS, COMMAND_GROUPS } from '../src/frontend'
+
+test('structured explanations refer to real commands and have distinct, non-empty sections', () => {
+  const names = new Set<string>(COMMAND_GROUPS.flatMap((group) => group.examples.map(([name]) => name)))
+  for (const [name, sections] of Object.entries(COMMAND_DETAILS)) {
+    assert.ok(names.has(name), `unknown command: ${name}`)
+    assert.ok(sections.length >= 2, `${name} needs multiple sections`)
+    assert.equal(new Set(sections.map(({ label }) => label)).size, sections.length)
+    assert.ok(sections.every(({ label, text }) => label.trim() && text.trim()))
+  }
+})
 
 test('command catalog covers every supported editing operation and composition mode', () => {
   const examples: Array<readonly [string, string]> = []

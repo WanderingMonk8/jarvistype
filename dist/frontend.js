@@ -673,6 +673,74 @@ var COMMAND_GROUPS = [
     ]
   }
 ];
+var COMMAND_DETAILS = {
+  "Spoken punctuation": [
+    { label: "Sentence marks", text: "Say \u201Cperiod,\u201D \u201Ccomma,\u201D \u201Ccolon,\u201D \u201Csemicolon,\u201D \u201Cquestion mark,\u201D \u201Cexclamation mark,\u201D or \u201Cellipsis.\u201D" },
+    { label: "Other marks", text: "Say \u201Capostrophe,\u201D \u201Casterisk,\u201D \u201Chyphen,\u201D \u201Cdash,\u201D \u201Cen dash,\u201D or \u201Cem dash.\u201D" },
+    { label: "Parentheses and square brackets", text: "Say \u201Copen parenthesis\u201D or \u201Copen paren,\u201D \u201Cclose parenthesis\u201D or \u201Cclose paren,\u201D \u201Copen bracket,\u201D or \u201Cclose bracket.\u201D" },
+    { label: "Angle brackets", text: "Say \u201Cbegin bracket\u201D and \u201Cend bracket,\u201D or use \u201Copen,\u201D \u201Cclose,\u201D \u201Cbegin,\u201D or \u201Cend angle bracket.\u201D" },
+    { label: "Curly braces", text: "Say \u201Copen brace,\u201D \u201Copen curly brace,\u201D or \u201Copen curly bracket\u201D; use the corresponding \u201Cclose\u201D form for the other side." },
+    { label: "Layout", text: "Say \u201Cnew line\u201D or \u201Cnew paragraph.\u201D" }
+  ],
+  Quotations: [
+    { label: "Double quotes", text: "Say \u201Cquote\u201D or \u201Cquotation\u201D at both ends. You can also say \u201Cbegin speech\u201D (or \u201Cagain speech\u201D) and \u201Cend speech\u201D; \u201Cbeginning speech\u201D / \u201Cending speech\u201D and \u201Cbegins speech\u201D / \u201Cends speech\u201D work too." },
+    { label: "Single quotes", text: "Say \u201Csingle quote\u201D or \u201Csingle quotation\u201D at both ends, or \u201Cbegin single\u201D and \u201Cend single.\u201D" },
+    { label: "Explicit markers", text: "Use \u201Copen quote \u2026 close quote,\u201D \u201Copen quotation mark \u2026 close quotation mark,\u201D \u201Copen double quotation mark \u2026 close double quotation mark,\u201D \u201Copen single quote \u2026 close single quote,\u201D or \u201Copen single quotation mark \u2026 close single quotation mark.\u201D" }
+  ],
+  "Open or close a wrapper pair in place": [
+    { label: "One marker", text: "Say \u201Copen quote the first sentence\u201D or \u201Cclose quote the first sentence.\u201D Open inserts before the target; close inserts after it." },
+    { label: "Other targets", text: "Try \u201Copen single quote the last sentence,\u201D \u201Copen bracket the first paragraph,\u201D or \u201Cclose angle bracket the last paragraph.\u201D" },
+    { label: "Other markers", text: "The same pattern works with parentheses, brackets, braces, angle brackets, and single or double quotation marks." }
+  ],
+  "Wrap with quote marks or brackets": [
+    { label: "A sentence or paragraph", text: "Say \u201Cput quotation marks around the first paragraph,\u201D \u201Cput single quotes around the first paragraph,\u201D or \u201Cput angle brackets around the second sentence.\u201D" },
+    { label: "A range", text: "Say \u201Cput single quotes from Start here to end there,\u201D \u201Cput angle brackets between X and Y,\u201D or \u201Cput quotations around X and Y.\u201D" },
+    { label: "Other wording", text: "Try \u201Cquote the first paragraph,\u201D \u201Cput the first paragraph in quotes,\u201D or \u201Cadd single quotes to the first paragraph.\u201D" },
+    { label: "Supported pairs", text: "Double and single quotes, parentheses, square brackets, curly braces, and angle brackets." }
+  ],
+  "Quoted insert or replace text": [
+    { label: "Insert", text: "Say \u201CInsert after tolerable the sentence \u2018My name is Ken.\u2019\u201D or \u201CInsert before tolerable the sentence \u2018My name is Ken.\u2019\u201D" },
+    { label: "Replace", text: "Say \u201CReplace tolerable with the phrase \u2018my name is Ken.\u2019\u201D The outer quotation marks delimit the new text; they are not inserted." },
+    { label: "Spoken enclosures", text: "Commands inside the new text still work: \u201Cbegin speech hello there end speech\u201D inserts quoted speech. Single quotes, parentheses, brackets, braces, and angle brackets work too." }
+  ],
+  Continue: [
+    { label: "Format", text: "Say \u201CContinue the sentence \u2018I look at the man from across the room\u2019 with \u2018And I decide to wave.\u2019\u201D You can also name a fragment, or say \u201Ccontinue from\u201D or \u201Ccontinue after.\u201D" },
+    { label: "Result", text: "The continuation joins the target with a comma: \u201CI look at the man from across the room, and I decide to wave.\u201D Existing quotes or brackets remain around the combined text." },
+    { label: "Casing and punctuation", text: "The first ordinary word is lowercased; proper names and \u201CI\u201D keep their casing. A source ending in ?, !, \u2026, or a combination such as !? keeps that exact ending on the joined sentence." },
+    { label: "Optional wording", text: "Words like \u201Cthe sentence,\u201D \u201Cthis phrase,\u201D or \u201Cthe word\u201D can introduce the target or the continuation; the introducing words are not inserted." }
+  ],
+  "About a sentence or part": [
+    { label: "Describe a target", text: "Say \u201Cdelete the sentence about Erin unwinding,\u201D \u201Creplace the part about Erin unwinding with she rests,\u201D or \u201Cmove the part about Erin unwinding to the end of the paragraph.\u201D" },
+    { label: "Continue or move", text: "Try \u201Ccontinue the sentence about Erin unwinding with and then she rests,\u201D or move text before, after, to the beginning, or to the end of a described sentence." },
+    { label: "Join", text: "Say \u201Cjoin the sentence about Erin relaxing with the next,\u201D \u201Cjoin the sentence about Maeve waiting with the previous,\u201D or join two adjacent described sentences. Literal targets can be used for either operand." },
+    { label: "Safety", text: "Uncertain or overlapping matches are flagged for review; unrelated ambiguous matches stop. Quote a literal target containing \u201Cabout\u201D to keep it exact." }
+  ],
+  Split: [
+    { label: "Paragraph", text: "Say \u201Csplit,\u201D \u201Cbreak,\u201D or \u201Cdivide paragraph 1 after \u2018The launch checklist is ready.\u2019\u201D" },
+    { label: "Sentence", text: "Say \u201Csplit the sentence \u2018To err is human; to forgive is divine\u2019 before \u2018to forgive.\u2019\u201D A fragment can identify the sentence or split point; \u201Cthe sentence about X before/after Y\u201D works too." },
+    { label: "Result and ambiguity", text: "The two parts become separate sentences; a comma or semicolon at the split becomes a period, and the second sentence starts with a capital. Other terminal marks are preserved. If multiple locations match, you are asked to choose." }
+  ],
+  Join: [
+    { label: "Paragraphs", text: "Say \u201Cjoin,\u201D \u201Cmerge,\u201D or \u201Ccombine paragraph 1 with the following paragraph.\u201D" },
+    { label: "Adjacent sentences", text: "Say \u201Cjoin the sentence \u2018Maeve waits\u2019 with the sentence \u2018Until it\u2019s no longer.\u2019\u201D Fragments and \u201Cabout\u201D descriptions can identify either sentence; both must be adjacent in the same paragraph." },
+    { label: "A neighboring sentence", text: "Say \u201Cjoin the sentence about Erin relaxing with the next\u201D or \u201Cjoin the sentence \u2018Maeve waits\u2019 with the previous.\u201D Multiple matches prompt a choice." },
+    { label: "Result", text: "The first ending becomes a comma and the next ordinary word is lowercased; proper names and \u201CI\u201D keep their casing. The first sentence\u2019s ?, !, \u2026, or combination is inherited. A source wrapper remains around the source, not both sentences." }
+  ],
+  "Glossary hint": [
+    { label: "Format", text: "Say \u201Chint\u201D or \u201Cclue\u201D and a description after the term, immediately or later in the same sentence. For example: \u201Ctwo-door army clue Midland\u2019s enemy.\u201D" },
+    { label: "Matching", text: "Commas are optional. Synonyms, plurals, and inflected forms can match the hint; the earlier term must be uniquely identifiable by spelling, sound, or a confident semantic match." },
+    { label: "Safety", text: "Ambiguous terms or explanation endpoints are left for review." }
+  ],
+  "As in reference": [
+    { label: "Format", text: "Repeat a dictated term or a clear inflection after \u201Cas in\u201D: \u201CJenga is my favorite, as in Jenga the game.\u201D The repeated term can appear earlier in the same clause." },
+    { label: "Safety", text: "A unique target and clear boundary are required; otherwise the wording remains for review. Use \u201Chint\u201D or \u201Cclue\u201D for glossary descriptions." }
+  ],
+  "Punctuation targets": [
+    { label: "Position", text: "Use \u201Cthe second quote in paragraph 1\u201D or \u201Cthe last period in paragraph 1\u201D with move, replace, insert, or delete." },
+    { label: "Relative target", text: "Refer to \u201Cthe quote after the phrase \u2018this is very good.\u2019\u201D" },
+    { label: "Range endpoint", text: "Say \u201Cput quotations from \u2018well, I guess\u2019 to the ellipsis\u201D when the punctuation mark is unique." }
+  ]
+};
 function describeEditDestination(destination) {
   if (!destination) return "";
   if (destination.punctuation) {
@@ -3124,7 +3192,11 @@ function floatingMarkup() {
         <summary><span>${group.title}</span><span class="jt-command-count">${group.examples.length} topics</span></summary>
         <div class="jt-command-topics">
           ${group.examples.map(
-      ([activation, example]) => `<details class="jt-command-item" data-command-item><summary>${activation}</summary><p>${example}</p></details>`
+      ([activation, example]) => {
+        const sections = COMMAND_DETAILS[activation];
+        const content = sections ? `<ul class="jt-command-explanations">${sections.map(({ label, text }) => `<li><strong>${label}</strong><span>${text}</span></li>`).join("")}</ul><span hidden>${example}</span>` : `<p>${example}</p>`;
+        return `<details class="jt-command-item" data-command-item><summary>${activation}</summary>${content}</details>`;
+      }
     ).join("")}
         </div>
       </details>`
@@ -3280,6 +3352,9 @@ function shellMarkup() {
       .jt-floating .jt-command-item { border-color: transparent; background: color-mix(in srgb, currentColor 5%, transparent); padding: .55rem .65rem; }
       .jt-command-item > summary { font-size: .9rem; }
       .jt-command-item > p { margin: .55rem 0 .1rem !important; line-height: 1.6; overflow-wrap: anywhere; }
+      .jt-command-explanations { display: grid; gap: .7rem; padding: 0; margin: .7rem 0 .15rem; list-style: none; }
+      .jt-command-explanations li { display: grid; gap: .2rem; line-height: 1.5; overflow-wrap: anywhere; }
+      .jt-command-explanations li strong { font-size: .82rem; }
       .jt-command-list summary:focus-visible { outline: 2px solid #d69e2e; outline-offset: 3px; }
       .jt-empty { opacity: .65; font-style: italic; }
       .jt-shell [hidden] { display: none !important; }
@@ -3485,6 +3560,7 @@ function requireElement(root, selector) {
   return element;
 }
 export {
+  COMMAND_DETAILS,
   COMMAND_GROUPS,
   JARVISTYPE_ICON_SVG,
   setup

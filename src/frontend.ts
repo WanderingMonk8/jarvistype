@@ -2524,23 +2524,36 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     floatingCommandButton.setAttribute('aria-expanded', String(!expanded))
     floatingCommandPanel.hidden = expanded
   }
+  const commandOpenBeforeSearch = new Map<HTMLDetailsElement, boolean>()
   const handleCommandSearch = () => {
     const query = floatingCommandSearch.value.trim().toLocaleLowerCase()
     for (const item of floatingCommandPanel.querySelectorAll<HTMLElement>('[data-command-item]')) {
-      item.hidden = !!query && !item.textContent?.toLocaleLowerCase().includes(query)
+      const category = item.closest('[data-command-group]')?.querySelector('summary')?.textContent?.toLocaleLowerCase() ?? ''
+      item.hidden = !!query && !category.includes(query) && !item.textContent?.toLocaleLowerCase().includes(query)
     }
     for (const group of floatingCommandPanel.querySelectorAll<HTMLElement>(
       '[data-command-group]',
     )) {
       group.hidden = !group.querySelector('[data-command-item]:not([hidden])')
     }
+    for (const details of floatingCommandPanel.querySelectorAll<HTMLDetailsElement>('details')) {
+      if (query) {
+        if (!commandOpenBeforeSearch.has(details)) commandOpenBeforeSearch.set(details, details.open)
+        details.open = !details.hidden
+      } else if (commandOpenBeforeSearch.has(details)) {
+        details.open = commandOpenBeforeSearch.get(details)!
+        commandOpenBeforeSearch.delete(details)
+      }
+    }
+    const empty = floatingCommandPanel.querySelector<HTMLElement>('[data-command-empty]')
+    if (empty) empty.hidden = !!floatingCommandPanel.querySelector('[data-command-item]:not([hidden])')
   }
   const floatingFocusables = (): HTMLElement[] =>
     Array.from(
       floatingWidget.root.querySelectorAll<HTMLElement>(
-        'button, input, textarea, select, a[href], [tabindex]:not([tabindex="-1"])',
+        'button, input, textarea, select, summary, a[href], [tabindex]:not([tabindex="-1"])',
       ),
-    ).filter((element) => !element.hasAttribute('disabled') && !element.closest('[hidden]'))
+    ).filter((element) => !element.hasAttribute('disabled') && !element.closest('[hidden]') && !element.parentElement?.closest('details:not([open])'))
   const handleFloatingFocusTrap = (event: KeyboardEvent) => {
     if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return
     if (!floatingWidget.isVisible()) return
@@ -3165,17 +3178,17 @@ function clearDraftBackup(chatId: string): void {
 function floatingMarkup(): string {
   const commands = COMMAND_GROUPS.map(
     (group) => `
-      <section data-command-group>
-        <h4>${group.title}</h4>
-        <ul>
+      <details class="jt-command-group" data-command-group>
+        <summary><span>${group.title}</span><span class="jt-command-count">${group.examples.length} topics</span></summary>
+        <div class="jt-command-topics">
           ${group.examples
             .map(
               ([activation, example]) =>
-                `<li data-command-item><strong>${activation}</strong>: ${example}</li>`,
+                `<details class="jt-command-item" data-command-item><summary>${activation}</summary><p>${example}</p></details>`,
             )
             .join('')}
-        </ul>
-      </section>`,
+        </div>
+      </details>`,
   ).join('')
   return `
     <aside class="jt-shell jt-floating" aria-label="JarvisType floating composer">
@@ -3210,6 +3223,8 @@ function floatingMarkup(): string {
           </div>
           <section id="jt-command-panel" data-command-panel hidden aria-label="Available voice edit commands">
             <label class="jt-form-grid">Search commands<input type="search" placeholder="Search commands or examples" data-command-search></label>
+            <p class="jt-command-help">Choose a category, then a topic for examples and details. Search covers the full list.</p>
+            <p class="jt-empty" data-command-empty hidden>No commands match your search.</p>
             <div class="jt-command-list">${commands}</div>
           </section>
         </div>
@@ -3316,7 +3331,18 @@ function shellMarkup(): string {
       .jt-decision__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
       .jt-decision__actions [data-proposal-accept], .jt-decision__actions [data-edit-accept] { border-color: #d69e2e; background: color-mix(in srgb, #d69e2e 18%, transparent); }
       .jt-command-list { display: grid; gap: .75rem; margin-top: .65rem; }
-      .jt-command-list ul { display: grid; gap: .4rem; margin: .35rem 0 0; padding-left: 1.2rem; }
+      .jt-command-help { margin-top: .5rem !important; opacity: .75; font-size: .85rem; line-height: 1.45; }
+      .jt-floating .jt-command-group { padding: .7rem .8rem; }
+      .jt-command-group > summary { display: flex; align-items: center; justify-content: space-between; gap: .75rem; list-style: none; }
+      .jt-command-group > summary::-webkit-details-marker { display: none; }
+      .jt-command-group > summary > span:first-child::before { content: '▸ '; }
+      .jt-command-group[open] > summary > span:first-child::before { content: '▾ '; }
+      .jt-command-count { font-size: .75rem; font-weight: 400; opacity: .7; white-space: nowrap; }
+      .jt-command-topics { display: grid; gap: .4rem; margin-top: .65rem; }
+      .jt-floating .jt-command-item { border-color: transparent; background: color-mix(in srgb, currentColor 5%, transparent); padding: .55rem .65rem; }
+      .jt-command-item > summary { font-size: .9rem; }
+      .jt-command-item > p { margin: .55rem 0 .1rem !important; line-height: 1.6; overflow-wrap: anywhere; }
+      .jt-command-list summary:focus-visible { outline: 2px solid #d69e2e; outline-offset: 3px; }
       .jt-empty { opacity: .65; font-style: italic; }
       .jt-shell [hidden] { display: none !important; }
       [data-state="ready"] { color: #38a169; }

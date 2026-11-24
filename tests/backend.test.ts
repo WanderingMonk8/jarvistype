@@ -1876,6 +1876,37 @@ test('resolves short vowel-glide name errors only with a unique explicit hint', 
   }
 })
 
+test('prunes clearly bounded hints within prose and in separate sentences', async () => {
+  const userId = 'hint-boundary-prose-user'
+  const chatId = 'hint-boundary-prose-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'hint-boundary-prose-entry', canonical: 'Nao', variants: ['N-A-O'], hint: 'my sister', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = (id) => id.endsWith('_0') ? 0.973 : 0.67
+  hintBoundaryDecision = (id) => id.endsWith('_0') ? 0.83 : 0.221
+  hintCommandDecision = () => 0.649
+  for (const [index, raw, expected] of [
+    [0, 'I watch now rushing out the door, hint: my sister, before I even get a chance to say good morning.', 'I watch Nao rushing out the door before I even get a chance to say good morning.'],
+    [1, 'I watch now rushing out the door. Hint: my sister. Before I get a chance to say good morning.', 'I watch Nao rushing out the door. Before I get a chance to say good morning.'],
+    [2, 'I watch now rushing out the door (hint: my sister) before I get a chance to say good morning.', 'I watch Nao rushing out the door before I get a chance to say good morning.'],
+  ] as const) {
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `hint-boundary-prose-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+
+  hintBoundaryDecision = (id) => id.endsWith('_0') ? 0.83 : 0.76
+  const ambiguous = 'I watch now rushing out the door, hint: my sister, before I get a chance to say good morning.'
+  responses.length = 0
+  await dispatch(recordingAppendRequest(chatId, 'hint-boundary-prose-ambiguous', 1, ambiguous), userId)
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, ambiguous)
+})
+
 test('uses Jev to locate a semantically identified hint term when phonetic matching fails', async () => {
   const userId = 'semantic-hint-span-user'
   const chatId = 'semantic-hint-span-chat'

@@ -9583,7 +9583,15 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
         const confirmedCanonicalCommand = singleSentenceBoundary && alreadyCanonical && semanticScore >= 0.8 && commandScore >= 0.9;
         const combinedEvidence = singleSentenceBoundary && phonetic && semanticScore >= 0.9 && commandScore >= 0.55;
         const nearHint = hasNearIdenticalHintWording(candidate.explanation, candidate.hint);
-        const explicitHintMatch = explicitHint && singleSentenceBoundary && (semanticScore >= 0.9 || nearHint);
+        const competingBoundaries = candidates.filter((other) => other.matchIndex === mi && other.boundary !== candidate.boundary);
+        const competingBoundaryScore = Math.max(0, ...competingBoundaries.map((other) => {
+          const answer = result.answers[other.id];
+          return answer?.type === "noul" && Number.isFinite(answer.noul) ? answer.noul : 0;
+        }));
+        const commaBoundary = !parenthesizedHint && match[2][candidate.boundary] === "," && boundaryScore >= 0.8 && boundaryScore - competingBoundaryScore >= 0.15 && commandScore >= 0.55;
+        const completeParenthesis = parenthesizedHint && /^\)/u.test(afterMatch) && candidate.boundary === match[2].trimEnd().length;
+        const candidateBoundary = singleSentenceBoundary || commaBoundary || completeParenthesis;
+        const explicitHintMatch = explicitHint && candidateBoundary && (semanticScore >= 0.9 || nearHint);
         recordDebug(userId, "glossary.hint.candidate", `id=${candidate.id} semantic=${semanticScore.toFixed(3)} boundary=${boundaryScore.toFixed(3)} command=${commandScore.toFixed(3)} phonetic=${phonetic ? "yes" : "no"}`);
         return { candidate, boundaryScore, semanticScore, commandScore, phonetic, score: explicitHint ? explicitHintMatch ? nearHint ? 1 : semanticScore : 0 : boundaryScore >= 0.9 || strongHintWithSingleBoundary || confirmedCanonicalCommand || combinedEvidence ? Math.max(semanticScore, phonetic ? 1 : 0) : 0 };
       }).sort((a, b) => b.score - a.score);

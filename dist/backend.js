@@ -707,6 +707,20 @@ function areSpeechPhoneticNeighbors(left, right) {
   }
   return true;
 }
+function areSpeechVowelGlideNeighbors(left, right) {
+  const letters = (value) => {
+    const normalized = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase();
+    return /^[a-z'’-]+$/u.test(normalized) ? normalized.replace(/['’-]/gu, "") : "";
+  };
+  const leftLetters = letters(left);
+  const rightLetters = letters(right);
+  if (leftLetters.length < 3 || rightLetters.length < 3) return false;
+  const normalizeGlide = (value) => value.replace(/([aeiou])w(?=$|[^aeiou])/gu, "$1u");
+  const normalizedLeft = normalizeGlide(leftLetters);
+  const normalizedRight = normalizeGlide(rightLetters);
+  if (normalizedLeft === leftLetters && normalizedRight === rightLetters) return false;
+  return speechPhoneticKey(normalizedLeft) === speechPhoneticKey(normalizedRight);
+}
 function areSpeechLettersCompatible(left, right) {
   return speechSoundGroup(left.toLocaleLowerCase()) === speechSoundGroup(right.toLocaleLowerCase());
 }
@@ -9555,7 +9569,7 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
       const parenthesizedHint = explicitHint && /^\s*[,;:.!?]?\s*\((?:hint|clue)\b/iu.test(cueText);
       const priorSentenceEnding = explicitHint ? cueText.match(/^\s*([.!?])/u)?.[1] : void 0;
       const afterMatch = input.slice(match.index + match[0].length);
-      const singleSentenceBoundary = !match[2].includes(",") && (parenthesizedHint ? /^\)[.!?]/u.test(afterMatch) : /^[.!?]/u.test(afterMatch));
+      const singleSentenceBoundary = !match[2].includes(",") && (parenthesizedHint ? /^\)/u.test(afterMatch) : /^[.!?]/u.test(afterMatch));
       const scored = candidates.filter((candidate) => candidate.matchIndex === mi).map((candidate) => {
         const boundaryAnswer = result.answers[candidate.id];
         const semanticAnswer = result.answers[candidate.semanticId];
@@ -9583,14 +9597,14 @@ async function resolveGlossaryHintReferences(input, glossary, userId, connection
       const explanationStart = match.index + match[0].length - match[2].length;
       let end = explanationStart + best.candidate.boundary;
       if (input[end] === ",") end++;
-      if (parenthesizedHint && input[end] === ")") end++;
+      if (parenthesizedHint) end += input.slice(end).match(/^[ \t]*\)/u)?.[0].length ?? 0;
       if (priorSentenceEnding && /[.!?]/u.test(input[end] ?? "")) end++;
       const cueStart = match.index + match[1].length;
       {
         const preceding = input.slice(0, cueStart);
         const boundary = Math.max(preceding.lastIndexOf("."), preceding.lastIndexOf("!"), preceding.lastIndexOf("?"), preceding.lastIndexOf(";"), preceding.lastIndexOf("\n")) + 1;
         const terms = [best.candidate.canonical, ...best.candidate.variants];
-        const hits = [...input.slice(boundary, cueStart).matchAll(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu)].map((word) => ({ start: boundary + word.index, end: boundary + word.index + word[0].length, word: word[0] })).filter((word) => terms.some((term) => term.toLocaleLowerCase() === word.word.toLocaleLowerCase() || areSpeechPhoneticNeighbors(term, word.word)));
+        const hits = [...input.slice(boundary, cueStart).matchAll(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu)].map((word) => ({ start: boundary + word.index, end: boundary + word.index + word[0].length, word: word[0] })).filter((word) => terms.some((term) => term.toLocaleLowerCase() === word.word.toLocaleLowerCase() || areSpeechPhoneticNeighbors(term, word.word) || explicitHint && areSpeechVowelGlideNeighbors(term, word.word)));
         recordDebug(userId, "glossary.hint.resolve", `explicit=${explicitHint ? "yes" : "no"} localHits=${hits.length}`);
         if (hits.length > 1) {
           recordDebug(userId, "glossary.hint.resolve", "outcome=multiple-local-hits");

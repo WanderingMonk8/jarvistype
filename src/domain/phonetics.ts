@@ -79,6 +79,27 @@ export function areSpeechPhoneticNeighbors(left: string, right: string): boolean
 }
 
 /**
+ * An explicit hint can disambiguate short names whose written vowel sequence
+ * is transcribed with a final or pre-consonant W (Nao/now, Lau/law). Keep
+ * this separate from general phonetic matching: short common words can sound
+ * alike, so callers must supply context and enforce unique candidate matches.
+ */
+export function areSpeechVowelGlideNeighbors(left: string, right: string): boolean {
+  const letters = (value: string) => {
+    const normalized = value.normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase()
+    return /^[a-z'’-]+$/u.test(normalized) ? normalized.replace(/['’-]/gu, '') : ''
+  }
+  const leftLetters = letters(left)
+  const rightLetters = letters(right)
+  if (leftLetters.length < 3 || rightLetters.length < 3) return false
+  const normalizeGlide = (value: string) => value.replace(/([aeiou])w(?=$|[^aeiou])/gu, '$1u')
+  const normalizedLeft = normalizeGlide(leftLetters)
+  const normalizedRight = normalizeGlide(rightLetters)
+  if (normalizedLeft === leftLetters && normalizedRight === rightLetters) return false
+  return speechPhoneticKey(normalizedLeft) === speechPhoneticKey(normalizedRight)
+}
+
+/**
  * Whether swapping one letter for another is a plausible recognition variant.
  * Substitution is only allowed inside one sound family, so vowels replace
  * vowels and consonants replace consonants of the same family. Crossing from a

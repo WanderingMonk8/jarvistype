@@ -1845,6 +1845,37 @@ test('finds a unique delayed hinted term in the current clause', async () => {
   }
 })
 
+test('resolves short vowel-glide name errors only with a unique explicit hint', async () => {
+  const userId = 'glide-hint-user'
+  const chatId = 'glide-hint-chat'
+  activeChatId = chatId
+  decisionsEnabled = true
+  await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'glossary.upsert.request', requestId: 'glide-hint-entry', canonical: 'Nao', variants: ['N-A-O'], hint: 'my sister', scope: 'global' }, userId)
+  await seedDraft(userId, chatId, '')
+  hintSemanticDecision = () => 0.97
+  hintBoundaryDecision = () => 0.8
+  hintCommandDecision = () => 0.57
+  hintSpanDecision = () => 0.1
+  for (const [index, raw, expected] of [
+    [0, 'I watch now rushing out the door, hint, my sister.', 'I watch Nao rushing out the door.'],
+    [1, 'I watch now rushing out the door.', 'I watch now rushing out the door.'],
+    [2, 'I know now rushing out the door, hint, my sister.', 'I know now rushing out the door, hint, my sister.'],
+    [3, 'I watched now rushing out the door (hint: my sister) before I even get a chance to say good morning.', 'I watched Nao rushing out the door before I even get a chance to say good morning.'],
+    [4, 'I watched Nao rushing out the door (hint: my sister) before I even get a chance to say good morning.', 'I watched Nao rushing out the door before I even get a chance to say good morning.'],
+    [5, 'I watched now rushing out the door (hint: my sister ).', 'I watched Nao rushing out the door.'],
+    [6, 'I watched now rushing out the door (hint: my sister before I could speak.', 'I watched now rushing out the door (hint: my sister before I could speak.'],
+    [7, 'I know now rushing out the door (hint: my sister) before I could speak.', 'I know now rushing out the door (hint: my sister) before I could speak.'],
+    [8, 'I watched now rushing out the door (hint: my sister), before I could speak.', 'I watched Nao rushing out the door, before I could speak.'],
+    [9, 'I watched now rushing out the door (hint: my sister)', 'I watched Nao rushing out the door'],
+  ] as const) {
+    responses.length = 0
+    await dispatch(recordingAppendRequest(chatId, `glide-hint-${index}`, 1, raw), userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'transcript.normalization.response')
+    if (response?.type === 'transcript.normalization.response') assert.equal(response.proposal.candidateText, expected)
+  }
+})
+
 test('uses Jev to locate a semantically identified hint term when phonetic matching fails', async () => {
   const userId = 'semantic-hint-span-user'
   const chatId = 'semantic-hint-span-chat'

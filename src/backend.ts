@@ -74,7 +74,7 @@ import {
   type GlossaryState,
 } from './domain/glossary'
 import { opensInsideDoubleQuote, repairDeterministicGrammar } from './domain/grammar'
-import { areSpeechPhoneticNeighbors } from './domain/phonetics'
+import { areSpeechPhoneticNeighbors, areSpeechVowelGlideNeighbors } from './domain/phonetics'
 import { WRAPPER_FAMILIES, resolveWrapperFamily, WRAPPER_TOKEN_PATTERN } from './domain/wrapper-families'
 import type { DeterministicGrammarOptions } from './domain/grammar'
 import {
@@ -5700,7 +5700,9 @@ async function resolveGlossaryHintReferences(
       const parenthesizedHint = explicitHint && /^\s*[,;:.!?]?\s*\((?:hint|clue)\b/iu.test(cueText)
       const priorSentenceEnding = explicitHint ? cueText.match(/^\s*([.!?])/u)?.[1] : undefined
       const afterMatch = input.slice(match.index! + match[0].length)
-      const singleSentenceBoundary = !match[2]!.includes(',') && (parenthesizedHint ? /^\)[.!?]/u.test(afterMatch) : /^[.!?]/u.test(afterMatch))
+      // A closing parenthesis already bounds the clarification, even when the
+      // dictated sentence continues after it without terminal punctuation.
+      const singleSentenceBoundary = !match[2]!.includes(',') && (parenthesizedHint ? /^\)/u.test(afterMatch) : /^[.!?]/u.test(afterMatch))
       const scored = candidates.filter((candidate) => candidate.matchIndex === mi).map((candidate) => {
         const boundaryAnswer = result.answers[candidate.id]
         const semanticAnswer = result.answers[candidate.semanticId]
@@ -5727,7 +5729,7 @@ async function resolveGlossaryHintReferences(
       const explanationStart = match.index! + match[0].length - match[2]!.length
       let end = explanationStart + best.candidate.boundary
       if (input[end] === ',') end++
-      if (parenthesizedHint && input[end] === ')') end++
+      if (parenthesizedHint) end += input.slice(end).match(/^[ \t]*\)/u)?.[0].length ?? 0
       if (priorSentenceEnding && /[.!?]/u.test(input[end] ?? '')) end++
       const cueStart = match.index! + match[1]!.length
       {
@@ -5736,7 +5738,7 @@ async function resolveGlossaryHintReferences(
         const terms = [best.candidate.canonical, ...best.candidate.variants]
         const hits = [...input.slice(boundary, cueStart).matchAll(/[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu)]
           .map((word) => ({ start: boundary + word.index!, end: boundary + word.index! + word[0].length, word: word[0] }))
-          .filter((word) => terms.some((term) => term.toLocaleLowerCase() === word.word.toLocaleLowerCase() || areSpeechPhoneticNeighbors(term, word.word)))
+          .filter((word) => terms.some((term) => term.toLocaleLowerCase() === word.word.toLocaleLowerCase() || areSpeechPhoneticNeighbors(term, word.word) || (explicitHint && areSpeechVowelGlideNeighbors(term, word.word))))
         recordDebug(userId, 'glossary.hint.resolve', `explicit=${explicitHint ? 'yes' : 'no'} localHits=${hits.length}`)
         if (hits.length > 1) {
           recordDebug(userId, 'glossary.hint.resolve', 'outcome=multiple-local-hits')

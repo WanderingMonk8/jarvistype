@@ -754,6 +754,58 @@ test('uses an unambiguous recent-chat proper name when the model leaves the STT 
   }
 })
 
+test('does not restore a capitalized spelling of a word the approved draft uses lowercase', async () => {
+  decisionsEnabled = true
+  const userId = 'draft-lowercase-evidence-user'
+  const chatId = 'draft-lowercase-evidence-chat'
+  activeChatId = chatId
+  chatMessages = [
+    { role: 'assistant', content: 'Come Lie beside me for a while.' },
+  ]
+  await seedDraft(
+    userId,
+    chatId,
+    'I lean closer and whisper, “Lie down, my dear.” Later, as I lie beside her, she sleeps.',
+  )
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'draft-lowercase-evidence-segment', 1, "Let's lie down together."),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.candidateText, "Let's lie down together.")
+    assert.equal(
+      response.proposal.reasons.some((reason) => /lie/iu.test(reason)),
+      false,
+    )
+  }
+})
+
+test('still restores a capitalized spelling when only the chat uses it capitalized', async () => {
+  decisionsEnabled = true
+  const userId = 'draft-casing-restoration-user'
+  const chatId = 'draft-casing-restoration-chat'
+  activeChatId = chatId
+  chatMessages = [
+    { role: 'assistant', content: 'Come Lie beside me for a while. Lie here, please.' },
+  ]
+  await seedDraft(userId, chatId, 'I wait by the window.')
+
+  await dispatch(
+    recordingAppendRequest(chatId, 'draft-casing-restoration-segment', 1, "Let's lie down together."),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.candidateText, "Let's Lie down together.")
+  }
+})
+
 test('submits consecutive capitalized chat words as one deduplicated Jev candidate', async () => {
   decisionsEnabled = true
   const userId = 'capitalized-phrase-jev-user'

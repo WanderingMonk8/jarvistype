@@ -5247,6 +5247,10 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
     const lowercaseReferenceKeys = extractLowercaseReferenceKeys(messages).filter(
       (key) => !glossaryReferenceKeys.has(key)
     );
+    const draftLowercaseReferenceKeys = extractLowercaseReferenceKeys([
+      { role: "assistant", content: session2.cleanText }
+    ]).filter((key) => !glossaryReferenceKeys.has(key));
+    const draftOrdinaryKeys = new Set(draftLowercaseReferenceKeys);
     const approvedReferenceKeys = new Set(recentConversationReferences.map(referenceCacheKey));
     const admittedRecentReferences = rejectLowercaseReferences(
       strictRecentReferences.filter((reference) => approvedReferenceKeys.has(referenceCacheKey(reference))),
@@ -5259,13 +5263,16 @@ async function handleTranscriptNormalization(request, context, activeRequest) {
       lowercaseReferenceKeys,
       settings2.referenceCacheLimit
     );
+    const usableRollingReferences = draftOrdinaryKeys.size ? rejectLowercaseReferences(rollingReferences, draftLowercaseReferenceKeys) : rollingReferences;
+    const usableRecentReferences = draftOrdinaryKeys.size ? rejectLowercaseReferences(admittedRecentReferences, draftLowercaseReferenceKeys) : admittedRecentReferences;
+    const usableCardCasingReferences = draftOrdinaryKeys.size ? rejectLowercaseReferences(cardCasingReferences, draftLowercaseReferenceKeys) : cardCasingReferences;
     const conversationReferences2 = mergeConversationReferences(
       cardCharacterReferences2,
-      mergeConversationReferences(rollingReferences, recentConversationReferences)
+      mergeConversationReferences(usableRollingReferences, recentConversationReferences)
     );
     const authoritativeConversationReferences2 = mergeConversationReferences(
-      cardCasingReferences,
-      mergeConversationReferences(rollingReferences, admittedRecentReferences)
+      usableCardCasingReferences,
+      mergeConversationReferences(usableRollingReferences, usableRecentReferences)
     );
     const capitalizeOpening2 = shouldCapitalizeRecordingOpening(session2.cleanText);
     const recoveredBoundary2 = applyQuotationBoundaryHint(
@@ -5851,6 +5858,9 @@ async function handleEditInterpretation(request, context, activeRequest) {
       });
     const glossaryReferenceKeys = new Set(glossaryReferenceExemptions.map(referenceCacheKey));
     const lowercaseReferenceKeys = settings.contextualNormalizationEnabled ? extractLowercaseReferenceKeys(messages).filter((key) => !glossaryReferenceKeys.has(key)) : [];
+    const draftLowercaseReferenceKeys = extractLowercaseReferenceKeys([
+      { role: "assistant", content: session.cleanText }
+    ]).filter((key) => !glossaryReferenceKeys.has(key));
     const approvedReferenceKeys = new Set(recentConversationReferences.map(referenceCacheKey));
     const admittedRecentReferences = rejectLowercaseReferences(
       strictRecentReferences.filter((reference) => approvedReferenceKeys.has(referenceCacheKey(reference))),
@@ -5863,13 +5873,16 @@ async function handleEditInterpretation(request, context, activeRequest) {
       lowercaseReferenceKeys,
       settings.referenceCacheLimit
     );
+    const usableRollingReferences = draftLowercaseReferenceKeys.length ? rejectLowercaseReferences(rollingReferences, draftLowercaseReferenceKeys) : rollingReferences;
+    const usableRecentReferences = draftLowercaseReferenceKeys.length ? rejectLowercaseReferences(admittedRecentReferences, draftLowercaseReferenceKeys) : admittedRecentReferences;
+    const usableCardCasingReferences = draftLowercaseReferenceKeys.length ? rejectLowercaseReferences(cardCasingReferences, draftLowercaseReferenceKeys) : cardCasingReferences;
     const conversationReferences = mergeConversationReferences(
       cardCharacterReferences,
-      mergeConversationReferences(rollingReferences, recentConversationReferences)
+      mergeConversationReferences(usableRollingReferences, recentConversationReferences)
     );
     const authoritativeConversationReferences = mergeConversationReferences(
-      cardCasingReferences,
-      mergeConversationReferences(rollingReferences, admittedRecentReferences)
+      usableCardCasingReferences,
+      mergeConversationReferences(usableRollingReferences, usableRecentReferences)
     );
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries, {
       compactUppercaseSpelling: true

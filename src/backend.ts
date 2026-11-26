@@ -436,6 +436,14 @@ async function handleTranscriptNormalization(
     const lowercaseReferenceKeys = extractLowercaseReferenceKeys(messages).filter(
       (key) => !glossaryReferenceKeys.has(key),
     )
+    // The approved draft is evidence too, and it often contains an ordinary word
+    // lowercase that no chat message has used yet ("as I lie on top of her"). A
+    // cached or card-derived capitalized spelling of that word is a sentence
+    // opening or an imperative, not a name, so it must not restore its casing.
+    const draftLowercaseReferenceKeys = extractLowercaseReferenceKeys([
+      { role: 'assistant', content: session.cleanText },
+    ]).filter((key) => !glossaryReferenceKeys.has(key))
+    const draftOrdinaryKeys = new Set(draftLowercaseReferenceKeys)
     const approvedReferenceKeys = new Set(recentConversationReferences.map(referenceCacheKey))
     const admittedRecentReferences = rejectLowercaseReferences(
       strictRecentReferences.filter((reference) => approvedReferenceKeys.has(referenceCacheKey(reference))),
@@ -448,13 +456,24 @@ async function handleTranscriptNormalization(
       lowercaseReferenceKeys,
       settings.referenceCacheLimit,
     )
+    // Filter for this request only: the persistent cache keeps its entries so a
+    // draft that happens to use a name as an ordinary word cannot evict it.
+    const usableRollingReferences = draftOrdinaryKeys.size
+      ? rejectLowercaseReferences(rollingReferences, draftLowercaseReferenceKeys)
+      : rollingReferences
+    const usableRecentReferences = draftOrdinaryKeys.size
+      ? rejectLowercaseReferences(admittedRecentReferences, draftLowercaseReferenceKeys)
+      : admittedRecentReferences
+    const usableCardCasingReferences = draftOrdinaryKeys.size
+      ? rejectLowercaseReferences(cardCasingReferences, draftLowercaseReferenceKeys)
+      : cardCasingReferences
     const conversationReferences = mergeConversationReferences(
       cardCharacterReferences,
-      mergeConversationReferences(rollingReferences, recentConversationReferences),
+      mergeConversationReferences(usableRollingReferences, recentConversationReferences),
     )
     const authoritativeConversationReferences = mergeConversationReferences(
-      cardCasingReferences,
-      mergeConversationReferences(rollingReferences, admittedRecentReferences),
+      usableCardCasingReferences,
+      mergeConversationReferences(usableRollingReferences, usableRecentReferences),
     )
     const capitalizeOpening = shouldCapitalizeRecordingOpening(session.cleanText)
     const recoveredBoundary = applyQuotationBoundaryHint(
@@ -1147,6 +1166,11 @@ async function handleEditInterpretation(
     const lowercaseReferenceKeys = settings.contextualNormalizationEnabled
       ? extractLowercaseReferenceKeys(messages).filter((key) => !glossaryReferenceKeys.has(key))
       : []
+    // See the recording path: a lowercase ordinary word in the approved draft
+    // outranks a cached or card-derived capitalized spelling of the same word.
+    const draftLowercaseReferenceKeys = extractLowercaseReferenceKeys([
+      { role: 'assistant', content: session.cleanText },
+    ]).filter((key) => !glossaryReferenceKeys.has(key))
     const approvedReferenceKeys = new Set(recentConversationReferences.map(referenceCacheKey))
     const admittedRecentReferences = rejectLowercaseReferences(
       strictRecentReferences.filter((reference) => approvedReferenceKeys.has(referenceCacheKey(reference))),
@@ -1159,13 +1183,22 @@ async function handleEditInterpretation(
       lowercaseReferenceKeys,
       settings.referenceCacheLimit,
     )
+    const usableRollingReferences = draftLowercaseReferenceKeys.length
+      ? rejectLowercaseReferences(rollingReferences, draftLowercaseReferenceKeys)
+      : rollingReferences
+    const usableRecentReferences = draftLowercaseReferenceKeys.length
+      ? rejectLowercaseReferences(admittedRecentReferences, draftLowercaseReferenceKeys)
+      : admittedRecentReferences
+    const usableCardCasingReferences = draftLowercaseReferenceKeys.length
+      ? rejectLowercaseReferences(cardCasingReferences, draftLowercaseReferenceKeys)
+      : cardCasingReferences
     const conversationReferences = mergeConversationReferences(
       cardCharacterReferences,
-      mergeConversationReferences(rollingReferences, recentConversationReferences),
+      mergeConversationReferences(usableRollingReferences, recentConversationReferences),
     )
     const authoritativeConversationReferences = mergeConversationReferences(
-      cardCasingReferences,
-      mergeConversationReferences(rollingReferences, admittedRecentReferences),
+      usableCardCasingReferences,
+      mergeConversationReferences(usableRollingReferences, usableRecentReferences),
     )
     const spelling = normalizeDeterministically(request.instructionTranscript, glossary.entries, {
       compactUppercaseSpelling: true,

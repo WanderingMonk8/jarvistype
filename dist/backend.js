@@ -1411,7 +1411,7 @@ ${formattedParagraph}`,
         end += 1;
     }
   }
-  const insertionText = operation.text ?? "";
+  const insertionText = operation.type === "replace" ? `${operation.text ?? ""}${preservedSentenceTerminal(cleanText.slice(start, end), operation.text ?? "")}` : operation.text ?? "";
   if (operation.type === "insert_before") {
     if (formatText && quotationWrap && isWrapperOpener(insertionText)) {
       const attachedOpening = cleanText.slice(range.start, start).match(/[\p{P}]+$/u)?.[0] ?? "";
@@ -1820,6 +1820,32 @@ function finishInlineOperation(afterText, paragraphs, operation, paragraphStart,
 }
 function isContinueSentenceOperation(operation) {
   return operation.type === "continue";
+}
+var TRAILING_CLOSER_OPENERS = {
+  "\u201D": "\u201C",
+  "\u2019": "\u2018",
+  '"': '"',
+  "'": "'",
+  ")": "(",
+  "]": "[",
+  "}": "{",
+  "\xBB": "\xAB",
+  "\u203A": "\u2039",
+  "\u27E9": "\u27E8"
+};
+function preservedSentenceTerminal(span, replacement) {
+  if (!/[\p{L}\p{N}]$/u.test(replacement)) return "";
+  const trailing = /((?:\.{3}|[.!?…]+)([”’"')\]}»›⟩]*))$/u.exec(span);
+  const run = trailing?.[1];
+  if (!run) return "";
+  const body = span.slice(0, span.length - run.length);
+  if (!/[\p{L}\p{N}]/u.test(body)) return "";
+  const closers = trailing[2] ?? "";
+  const enclosed = [...closers].some((closer) => {
+    const opener = TRAILING_CLOSER_OPENERS[closer];
+    return opener !== void 0 && body.includes(opener);
+  });
+  return enclosed ? run.slice(0, run.length - closers.length) : run;
 }
 function attachedSentencePartPunctuation(text, end, limit) {
   return text.slice(end, limit).match(/^((?:\.{3}|[.,;:!?…—–-])+)(?=[”’"')\]}]*(?:\s|$))/u)?.[1] ?? "";

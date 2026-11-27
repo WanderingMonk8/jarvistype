@@ -3802,6 +3802,30 @@ test('about selection refuses tied candidates and preserves literal quoted about
   assert.equal(decisionRequests.some((request) => Object.keys((request as { questions?: Record<string, unknown> }).questions ?? {}).some((key) => key.startsWith('about_'))), false)
 })
 
+test('keeps the sentence-ending punctuation of an about phrase that is replaced', async () => {
+  for (const [index, instruction, selected] of [
+    ['Replace the phrase about a barista blowing me with I was just with someone.', 0],
+    ['Replace the sentence about a barista blowing me with I was just with someone.', 0],
+  ].map(([instruction, selected], index) => [index, instruction as string, selected as number] as const)) {
+    const userId = `about-replace-terminal-user-${index}`
+    const chatId = `about-replace-terminal-chat-${index}`
+    activeChatId = chatId
+    decisionsEnabled = true
+    aboutDecision = (id) => id === `about_${selected}` ? 0.99 : 0.01
+    await seedDraft(userId, chatId, 'I had the barista blow me in the back room. But I already told you that I have other people.')
+    responses.length = 0
+    generationRequests.length = 0
+    await dispatch({ protocolVersion: PROTOCOL_VERSION, type: 'edit.interpret.request', requestId: `about-replace-terminal-${index}`, operationId: `about-replace-terminal-op-${index}`, chatId, expectedVersion: 1, instructionTranscript: instruction }, userId)
+    const response = responses.at(-1)?.payload
+    assert.equal(response?.type, 'edit.proposal.response', instruction)
+    if (response?.type === 'edit.proposal.response') {
+      assert.equal(response.proposal.afterText, 'I was just with someone. But I already told you that I have other people.', instruction)
+      assert.deepEqual(response.proposal.operations[0]?.afterText, 'I was just with someone.')
+    }
+    assert.equal(generationRequests.length, 0)
+  }
+})
+
 test('moves the part about nodding to the end of its paragraph', async () => {
   const userId = 'about-nodding-paragraph-user'
   const chatId = 'about-nodding-paragraph-chat'

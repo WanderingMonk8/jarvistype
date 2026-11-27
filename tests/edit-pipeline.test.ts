@@ -452,6 +452,27 @@ test('splices punctuation-ending replacements with the following sentence', () =
   }
 })
 
+test('replacement keeps the sentence-ending punctuation it replaces', () => {
+  for (const [original, target, replacement, expected] of [
+    ['We stopped. Then rested.', 'stopped.', 'walked', 'We walked. Then rested.'],
+    ['We stopped! Then rested.', 'stopped!', 'walked', 'We walked! Then rested.'],
+    ['We stopped? Then rested.', 'stopped?', 'walked', 'We walked? Then rested.'],
+    ['We stopped… Then rested.', 'stopped…', 'walked', 'We walked… Then rested.'],
+    ['We stopped. Then rested.', 'stopped.', 'walked,', 'We walked, then rested.'],
+    ['We stopped. Then rested.', 'stopped', 'walked', 'We walked. Then rested.'],
+    ['We stopped here and rested.', 'stopped', 'paused', 'We paused here and rested.'],
+    ['She said, “I am tired.”', 'I am tired.', 'I am rested', 'She said, “I am rested.”'],
+  ] as const) {
+    const result = executeEditPlan(original, [{ id: 'p', ordinal: 1, lineIndex: 0, text: original }], 1, {
+      schemaVersion: 2,
+      draftVersion: 1,
+      explanation: 'Replace.',
+      operations: [{ id: 'replace', type: 'replace', target: { exactText: target }, text: replacement }],
+    })
+    assert.equal(result.ok && result.afterText, expected, `${target} → ${replacement}`)
+  }
+})
+
 test('wrapping text keeps quoted-text punctuation and leaves boundary separators outside', () => {
   for (const punctuation of [',', '?!', '...', '!?;']) {
     const original = `She said hello${punctuation} then left.`

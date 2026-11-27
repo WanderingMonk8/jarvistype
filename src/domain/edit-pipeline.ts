@@ -832,7 +832,10 @@ function resolveOperation(
         end += 1
     }
   }
-  const insertionText = operation.text ?? ''
+  const insertionText =
+    operation.type === 'replace'
+      ? `${operation.text ?? ''}${preservedSentenceTerminal(cleanText.slice(start, end), operation.text ?? '')}`
+      : (operation.text ?? '')
   if (operation.type === 'insert_before') {
     if (formatText && quotationWrap && isWrapperOpener(insertionText)) {
       const attachedOpening = cleanText.slice(range.start, start).match(/[\p{P}]+$/u)?.[0] ?? ''
@@ -1490,6 +1493,45 @@ type ContinueSentenceOperation = EditOperation & { type: 'continue' }
 
 function isContinueSentenceOperation(operation: EditOperation): operation is ContinueSentenceOperation {
   return operation.type === 'continue'
+}
+
+const TRAILING_CLOSER_OPENERS: Readonly<Record<string, string>> = {
+  '”': '“',
+  '’': '‘',
+  '"': '"',
+  "'": "'",
+  ')': '(',
+  ']': '[',
+  '}': '{',
+  '»': '«',
+  '›': '‹',
+  '⟩': '⟨',
+}
+
+/**
+ * Terminal punctuation that must survive a replacement.
+ *
+ * A phrase selected by description is a whole sentence part, so its span includes
+ * the sentence's own terminator. When the dictated replacement has no punctuation
+ * of its own (the trailing period of the spoken instruction was consumed as the
+ * command terminator), the replacement would otherwise fuse with the next
+ * sentence. Keep the replaced span's exact terminator run instead. A closing
+ * wrapper that closes an opener inside the span belongs to that enclosure and is
+ * never re-attached.
+ */
+function preservedSentenceTerminal(span: string, replacement: string): string {
+  if (!/[\p{L}\p{N}]$/u.test(replacement)) return ''
+  const trailing = /((?:\.{3}|[.!?…]+)([”’"')\]}»›⟩]*))$/u.exec(span)
+  const run = trailing?.[1]
+  if (!run) return ''
+  const body = span.slice(0, span.length - run.length)
+  if (!/[\p{L}\p{N}]/u.test(body)) return ''
+  const closers = trailing[2] ?? ''
+  const enclosed = [...closers].some((closer) => {
+    const opener = TRAILING_CLOSER_OPENERS[closer]
+    return opener !== undefined && body.includes(opener)
+  })
+  return enclosed ? run.slice(0, run.length - closers.length) : run
 }
 
 /** Sentence-part punctuation that becomes orphaned when the entire part is removed. */

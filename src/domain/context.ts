@@ -2,6 +2,7 @@ import {
   areSpeechLettersCompatible,
   areSpeechPhoneticNeighbors,
   speechPhoneticKey,
+  speechVoicingKey,
 } from './phonetics'
 
 export const DEFAULT_CONTEXT_MESSAGE_COUNT = 5
@@ -879,7 +880,15 @@ function isHighConfidenceReferenceMatch(heard: string, reference: string): boole
   const heardPhonetic = speechPhoneticKey(heard)
   const referencePhonetic = speechPhoneticKey(reference)
   if (Math.max(heard.length, reference.length) <= 5) {
-    return heardPhonetic.length >= 3 && heardPhonetic === referencePhonetic
+    // Short words need the whole coarse key, not one family substitution, and
+    // they also need the same voiced/unvoiced consonants. Otherwise ordinary
+    // short words collide with short names: "god" (/ɡɒd/) and "kat" (/kæt/)
+    // share the coarse key KAT even though both consonants differ in voicing.
+    return (
+      heardPhonetic.length >= 3 &&
+      heardPhonetic === referencePhonetic &&
+      speechVoicingKey(heard) === speechVoicingKey(reference)
+    )
   }
   if (heard.charAt(0) !== reference.charAt(0)) return false
   // The short-word path already compares whole phonetic keys. Apply the same

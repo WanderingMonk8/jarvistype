@@ -951,6 +951,34 @@ test('uses structured card names as casing authority', async () => {
     assert.equal(response.proposal.candidateText, 'I turn toward Aiko.')
 })
 
+test('keeps an ordinary voiced short word instead of the unvoiced name it resembles', async () => {
+  decisionsEnabled = true
+  const userId = 'voicing-guard-user'
+  const chatId = 'voicing-guard-chat'
+  activeChatId = chatId
+  chatMessages = [{ role: 'assistant', content: 'I grin at Kat beside the door.' }]
+
+  await dispatch(
+    recordingAppendRequest(
+      chatId,
+      'voicing-guard-segment',
+      0,
+      'God, your mouth is wonderful. Come closer.',
+    ),
+    userId,
+  )
+
+  const response = responses.at(-1)?.payload
+  assert.equal(response?.type, 'transcript.normalization.response')
+  if (response?.type === 'transcript.normalization.response') {
+    assert.equal(response.proposal.candidateText, 'God, your mouth is wonderful. Come closer.')
+    assert.equal(
+      response.proposal.reasons.some((reason) => /God\s*→\s*Kat/u.test(reason)),
+      false,
+    )
+  }
+})
+
 test('uses strong temporary active-draft names as casing authority', async () => {
   const userId = 'draft-casing-authority-user'
   const chatId = 'draft-casing-authority-chat'

@@ -601,6 +601,27 @@ test('uses grammatical context to protect ordinary words from one-syllable names
   )
 })
 
+test('does not conflate voiced and unvoiced consonants in short references', () => {
+  // "God" (/ɡɒd/) is an ordinary capitalized word whose consonants are both
+  // voiced. "Kat" (/kæt/), "Kate", and "Kit" are unvoiced in both positions, so
+  // the coarse phonetic key KAT is not enough to treat them as the same word.
+  assert.equal(
+    correctFromConversationReferences('God, your mouth is wonderful.', ['Kat']).text,
+    'God, your mouth is wonderful.',
+  )
+  assert.equal(
+    correctFromConversationReferences('God, your mouth is wonderful.', ['Kate']).text,
+    'God, your mouth is wonderful.',
+  )
+  assert.equal(
+    correctFromConversationReferences('God, your mouth is wonderful.', ['Kit']).text,
+    'God, your mouth is wonderful.',
+  )
+  assert.equal(correctEditTargetFromConversationReferences('God', ['Kat']).text, 'God')
+  // A genuine homophone still matches.
+  assert.equal(correctFromConversationReferences("Cat's coat.", ['Kat']).text, "Kat's coat.")
+})
+
 test('corrects a short phonetically equivalent card name', () => {
   assert.deepEqual(correctFromConversationReferences('ICO', ['Aiko']), {
     text: 'Aiko',

@@ -676,10 +676,19 @@ function clip(value, limit) {
 
 // src/domain/phonetics.ts
 function speechPhoneticKey(value) {
-  const prepared = value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/ph/gu, "f").replace(/th/gu, "D").replace(/sh/gu, "X").replace(/ch/gu, "J").replace(/ght/gu, "t").replace(/gh/gu, "").replace(/ck/gu, "k").replace(/kn/gu, "n").replace(/wr/gu, "r").replace(/qu/gu, "kw").replace(/c(?=[eiy])/gu, "s");
+  return buildSpeechKey(value, speechSoundGroup);
+}
+function speechVoicingKey(value) {
+  return buildSpeechKey(value, speechVoicedSoundGroup);
+}
+function prepareSpeechLetters(value) {
+  return value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/ph/gu, "f").replace(/th/gu, "D").replace(/sh/gu, "X").replace(/ch/gu, "J").replace(/ght/gu, "t").replace(/gh/gu, "").replace(/ck/gu, "k").replace(/kn/gu, "n").replace(/wr/gu, "r").replace(/qu/gu, "kw").replace(/c(?=[eiy])/gu, "s");
+}
+function buildSpeechKey(value, group) {
+  const prepared = prepareSpeechLetters(value);
   let key = "";
   for (const character of prepared) {
-    const sound = speechSoundGroup(character);
+    const sound = group(character);
     if (sound && sound !== key.at(-1)) key += sound;
   }
   return key.length >= 4 ? key.replace(/A$/u, "") : key;
@@ -746,6 +755,37 @@ function speechSoundGroup(character) {
   if (character === "h") return "";
   for (const [pattern, family] of CONSONANT_FAMILIES)
     if (pattern.test(character)) return family;
+  return /[\p{L}\p{N}]/u.test(character) ? character : "";
+}
+var VOICED_SOUND_GROUPS = {
+  b: "b",
+  v: "b",
+  p: "p",
+  f: "p",
+  d: "d",
+  t: "t",
+  g: "g",
+  k: "k",
+  c: "k",
+  q: "k",
+  z: "z",
+  s: "s",
+  x: "s",
+  j: "j",
+  J: "j",
+  l: "l",
+  m: "m",
+  n: "n",
+  r: "r",
+  w: "w",
+  D: "D",
+  X: "X"
+};
+function speechVoicedSoundGroup(character) {
+  if (/[aeiouy]/u.test(character)) return "A";
+  if (character === "h") return "";
+  const group = VOICED_SOUND_GROUPS[character];
+  if (group) return group;
   return /[\p{L}\p{N}]/u.test(character) ? character : "";
 }
 
@@ -3646,7 +3686,7 @@ function isHighConfidenceReferenceMatch(heard, reference) {
   const heardPhonetic = speechPhoneticKey(heard);
   const referencePhonetic = speechPhoneticKey(reference);
   if (Math.max(heard.length, reference.length) <= 5) {
-    return heardPhonetic.length >= 3 && heardPhonetic === referencePhonetic;
+    return heardPhonetic.length >= 3 && heardPhonetic === referencePhonetic && speechVoicingKey(heard) === speechVoicingKey(reference);
   }
   if (heard.charAt(0) !== reference.charAt(0)) return false;
   if (hasIncompatibleKeySubstitution(heardPhonetic, referencePhonetic)) return false;

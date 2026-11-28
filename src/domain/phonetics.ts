@@ -21,7 +21,28 @@
  * add or drop an unstressed final vowel.
  */
 export function speechPhoneticKey(value: string): string {
-  const prepared = value
+  return buildSpeechKey(value, speechSoundGroup)
+}
+
+/**
+ * Voicing-preserving companion key for very short words.
+ *
+ * The coarse key deliberately merges voiced/unvoiced pairs (`g`/`k`, `d`/`t`,
+ * `b`/`p`, `v`/`f`, `z`/`s`) and every vowel. That is useful for long names with
+ * a single wrong sound, but it also makes unrelated short words collide:
+ * "god" (/ɡɒd/) and "kat" (/kæt/) both reduce to `KAT`, and both consonants
+ * differ in voicing. Short-word matching therefore also compares this key,
+ * which keeps the same structure as `speechPhoneticKey` but distinguishes
+ * voicing: "god" → `gad`, "kat" → `kat`, while true homophones such as
+ * "cat"/"kat" and "can"/"ken" still agree.
+ */
+export function speechVoicingKey(value: string): string {
+  return buildSpeechKey(value, speechVoicedSoundGroup)
+}
+
+/** Shared spelling normalization: digraphs, silent letters, and soft "c". */
+function prepareSpeechLetters(value: string): string {
+  return value
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
     .toLocaleLowerCase()
@@ -37,9 +58,13 @@ export function speechPhoneticKey(value: string): string {
     .replace(/qu/gu, 'kw')
     // Soft "c" before a front vowel is /s/, not the hard velar /k/.
     .replace(/c(?=[eiy])/gu, 's')
+}
+
+function buildSpeechKey(value: string, group: (character: string) => string): string {
+  const prepared = prepareSpeechLetters(value)
   let key = ''
   for (const character of prepared) {
-    const sound = speechSoundGroup(character)
+    const sound = group(character)
     if (sound && sound !== key.at(-1)) key += sound
   }
   return key.length >= 4 ? key.replace(/A$/u, '') : key
@@ -141,5 +166,44 @@ function speechSoundGroup(character: string): string {
   if (character === 'h') return ''
   for (const [pattern, family] of CONSONANT_FAMILIES)
     if (pattern.test(character)) return family
+  return /[\p{L}\p{N}]/u.test(character) ? character : ''
+}
+
+/**
+ * One entry per voiced/unvoiced distinction inside a consonant family. Vowels
+ * keep the coarse `A` marker so both keys strip a trailing unstressed vowel the
+ * same way. `D`, `X`, and `J` are the digraph markers from the shared
+ * preparation; `D` (th) and `X` (sh) have no voicing pair in this scheme.
+ */
+const VOICED_SOUND_GROUPS: Readonly<Record<string, string>> = {
+  b: 'b',
+  v: 'b',
+  p: 'p',
+  f: 'p',
+  d: 'd',
+  t: 't',
+  g: 'g',
+  k: 'k',
+  c: 'k',
+  q: 'k',
+  z: 'z',
+  s: 's',
+  x: 's',
+  j: 'j',
+  J: 'j',
+  l: 'l',
+  m: 'm',
+  n: 'n',
+  r: 'r',
+  w: 'w',
+  D: 'D',
+  X: 'X',
+}
+
+function speechVoicedSoundGroup(character: string): string {
+  if (/[aeiouy]/u.test(character)) return 'A'
+  if (character === 'h') return ''
+  const group = VOICED_SOUND_GROUPS[character]
+  if (group) return group
   return /[\p{L}\p{N}]/u.test(character) ? character : ''
 }
